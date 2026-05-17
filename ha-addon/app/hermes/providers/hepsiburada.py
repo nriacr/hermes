@@ -16,6 +16,7 @@ MIN_PRICE = Decimal("50")
 MAX_PRICE = Decimal("1000000")
 PRICE_RE = re.compile(r"(?<![\d.,])\d{1,3}(?:\.\d{3})*(?:,\d{2})?\s*TL", re.IGNORECASE)
 PRODUCT_URL_RE = re.compile(r"/(?:[^\s'\"<>]+)-(?:p|pm)-[A-Z0-9]+", re.IGNORECASE)
+PRODUCT_ID_RE = re.compile(r"-(?:p|pm)-([A-Z0-9]+)", re.IGNORECASE)
 DETAIL_PRICE_SELECTORS = [
     "[data-test-id='price-current-price']",
     "[data-test-id='price-current-price'] span",
@@ -79,6 +80,11 @@ def _class_text(element) -> str:
     return " ".join(str(item) for item in (element.get("class") or []))
 
 
+def _product_id_from_url(url: str) -> str:
+    match = PRODUCT_ID_RE.search(url or "")
+    return match.group(1).upper() if match else ""
+
+
 def _valid_price(price: Decimal) -> bool:
     return MIN_PRICE <= price <= MAX_PRICE
 
@@ -139,6 +145,18 @@ def _valid_prices_from_text(text: str) -> list[Decimal]:
     return prices
 
 
+def _price_from_aria_label(card) -> Optional[Decimal]:
+    for element in card.select("[aria-label]"):
+        label = _clean_text(element.get("aria-label") or "")
+        match = re.search(r"fiyat\s*:\s*(?P<price>[^,]+(?:,\d{2})?\s*TL)", label, re.IGNORECASE)
+        if not match:
+            continue
+        price = _parse_price(match.group("price"))
+        if price is not None:
+            return price
+    return None
+
+
 def _cart_special_prices(text: str) -> list[Decimal]:
     clean = _clean_text(text)
     normalized = normalize_offer_text(clean)
@@ -150,7 +168,11 @@ def _cart_special_prices(text: str) -> list[Decimal]:
     return [price for price in (_parse_price(match.group(0)) for match in PRICE_RE.finditer(segment)) if price is not None]
 
 
-def _prices_from_text(text: str) -> list[Decimal]:
+def _prices_from_card(card) -> list[Decimal]:
+    aria_price = _price_from_aria_label(card)
+    if aria_price is not None:
+        return [aria_price]
+    text = card.get_text(" ", strip=True)
     special_prices = _cart_special_prices(text)
     if special_prices:
         return [min(special_prices)]
@@ -213,7 +235,7 @@ def _closest_product_card(link):
         class_text = normalize_offer_text(_class_text(current))
         text = _clean_text(current.get_text(" ", strip=True))
         text_length = len(text)
-        has_price = PRICE_RE.search(text) is not None
+        has_price = PRICE_RE.search(text) is not None or _price_from_aria_label(current) is not None
         if has_price and text_length <= 2600:
             if any(marker in class_text for marker in PRODUCT_CARD_CLASS_MARKERS):
                 return current
@@ -233,26 +255,43 @@ def _dedupe_candidates(candidates: Iterable[HepsiburadaCandidate]) -> list[Hepsi
     return sorted(deduped.values(), key=lambda item: item.price)
 
 
+def _seller_lookup_from_json(soup) -> dict[str, str]:
+    sellers: dict[str, str] = {}
+    for payload in _json_payloads(soup):
+        for mapping in _iter_json_values(payload):
+            url = _first_mapping_url(mapping)
+            listing = mapping.get("listing") if isinstance(mapping.get("listing"), dict) else {}
+            seller = _first_mapping_text(listing, ("merchantName", "merchant_name", "sellerName", "seller_name"))
+            seller = seller or _first_mapping_text(mapping, ("merchantName", "merchant_name", "sellerName", "seller_name"))
+            product_id = _product_id_from_url(url)
+            if product_id and seller:
+                sellers[product_id] = seller
+    return sellers
+
+
 def _search_candidates_from_dom(soup) -> list[HepsiburadaCandidate]:
     candidates = []
+    seller_lookup = _seller_lookup_from_json(soup)
     for link in soup.select("a[href]"):
         if not _is_product_link(link):
             continue
         card = _closest_product_card(link)
         if card is None:
             continue
-        prices = _prices_from_text(card.get_text(" ", strip=True))
+        prices = _prices_from_card(card)
         if not prices:
             continue
         title = _title_from_card(card, link)
         if not _is_good_title(title):
             continue
+        url = _absolute_url(str(link.get("href") or ""))
+        seller = seller_lookup.get(_product_id_from_url(url)) or _infer_seller_from_title(title)
         candidates.append(
             HepsiburadaCandidate(
                 title=title,
                 price=min(prices),
-                url=_absolute_url(str(link.get("href") or "")),
-                seller=_infer_seller_from_title(title),
+                url=url,
+                seller=seller,
             )
         )
     return _dedupe_candidates(candidates)
@@ -339,12 +378,15 @@ def _search_candidates_from_json(soup) -> list[HepsiburadaCandidate]:
             price = _first_mapping_price(mapping)
             if not title or not _is_good_title(title) or not url or price is None:
                 continue
+            product_id = _product_id_from_url(url)
+            seller_lookup = _seller_lookup_from_json(soup)
+            seller = seller_lookup.get(product_id) or _infer_seller_from_title(title)
             candidates.append(
                 HepsiburadaCandidate(
                     title=title,
                     price=price,
                     url=url,
-                    seller=_infer_seller_from_title(title),
+                    seller=seller,
                 )
             )
     return _dedupe_candidates(candidates)
@@ -379,7 +421,7 @@ def _detail_candidate(soup) -> Optional[HepsiburadaCandidate]:
     seller = _detail_seller(lines)
     price = extract_price_from_selectors(soup, DETAIL_PRICE_SELECTORS)
     if price is None:
-        line_prices = _prices_from_text("\n".join(lines[:120]))
+        line_prices = _valid_prices_from_text("\n".join(lines[:120]))
         price = min(line_prices) if line_prices else None
     if price is None:
         return None
