@@ -3,15 +3,17 @@ from ..errors import HermesError
 from ..models import OfferResult
 from . import amazon, hepsiburada, network, trendyol
 
+PROVIDERS = {
+    SITE_AMAZON: amazon.extract_offer,
+    SITE_HEPSIBURADA: hepsiburada.extract_offer,
+    SITE_TRENDYOL: trendyol.extract_offer,
+    SITE_NETWORK: network.extract_offer,
+}
+
 
 def extract_offer(site: str, html: str) -> OfferResult:
-    site_key = str(site or SITE_AMAZON).strip().lower()
-    if site_key == SITE_AMAZON:
-        return amazon.extract_offer(html)
-    if site_key == SITE_HEPSIBURADA:
-        return hepsiburada.extract_offer(html)
-    if site_key == SITE_TRENDYOL:
-        return trendyol.extract_offer(html)
-    if site_key == SITE_NETWORK:
-        return network.extract_offer(html)
-    raise HermesError(f"Desteklenmeyen site parseri: {site}")
+    site_key = str(site or "").strip().lower()
+    parser = PROVIDERS.get(site_key)
+    if parser is None:
+        raise HermesError(f"Desteklenmeyen site parserı: {site}")
+    return parser(html)
