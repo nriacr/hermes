@@ -3,9 +3,9 @@ from typing import Any, List, Optional
 
 from bs4 import BeautifulSoup
 
-from .constants import AMAZON_BASE_URL
 from .errors import HermesError
 from .models import SearchResultItem
+from .providers.amazon_common import extract_secondary_offer_price
 from .utils import canonical_amazon_product_url, normalize_offer_text, normalize_text, parse_decimal, repair_mojibake
 
 AMAZON_SEARCH_CARD_SELECTORS = [
@@ -28,18 +28,6 @@ AMAZON_CARD_PRICE_SELECTORS = [
     "span.a-price > span.a-offscreen",
     ".a-price-whole",
 ]
-
-AMAZON_SECONDARY_OFFER_SELECTORS = [
-    "[data-cy='secondary-offer-recipe']",
-    "[data-cy='secondary-offer']",
-    ".puis-secondary-offer",
-    ".puis-see-details-content",
-]
-
-AMAZON_SECONDARY_OFFER_PRICE_PATTERN = re.compile(
-    r"diger\s+satin\s+alma\s+secenekleri\s+"
-    r"(?P<price>\d{1,3}(?:\.\d{3})*,\d{2}|\d+(?:,\d{2})?)\s*tl"
-)
 
 AMAZON_SEARCH_STOP_SECTION_MARKERS = (
     "yardima mi ihtiyaciniz var",
@@ -64,30 +52,8 @@ def _extract_card_title(card: BeautifulSoup) -> Optional[str]:
     return None
 
 
-def _extract_price_after_secondary_offer_text(text: str):
-    normalized = normalize_offer_text(text)
-    if "diger satin alma secenekleri" not in normalized or "ikinci el" not in normalized:
-        return None
-    match = AMAZON_SECONDARY_OFFER_PRICE_PATTERN.search(normalized)
-    if not match:
-        return None
-    try:
-        return parse_decimal(match.group("price"))
-    except HermesError:
-        return None
-
-
-def _extract_secondary_offer_price(card: BeautifulSoup):
-    for selector in AMAZON_SECONDARY_OFFER_SELECTORS:
-        for element in card.select(selector):
-            price = _extract_price_after_secondary_offer_text(element.get_text(" ", strip=True))
-            if price is not None:
-                return price
-    return _extract_price_after_secondary_offer_text(card.get_text(" ", strip=True))
-
-
 def _extract_card_price(card: BeautifulSoup):
-    secondary = _extract_secondary_offer_price(card)
+    secondary = extract_secondary_offer_price(card)
     if secondary is not None:
         return secondary
     for selector in AMAZON_CARD_PRICE_SELECTORS:
@@ -170,7 +136,7 @@ def extract_results(html: str, max_items_to_scan: int) -> List[SearchResultItem]
         results.append(SearchResultItem(title=title, url=url, price=price))
 
     if not results:
-        raise HermesError("Amazon arama sonuc sayfasinda okunabilir urun bulunamadi.")
+        raise HermesError("Amazon arama sonuç sayfasında okunabilir ürün bulunamadı.")
     return results
 
 
