@@ -1,10 +1,11 @@
 import time
 from typing import Optional
+from urllib.parse import urlsplit, urlunsplit
 
 import requests
 
 from .constants import RETRY_DELAYS_SECONDS, RETRY_STATUS_CODES
-from .errors import HttpStatusHermesError
+from .errors import HermesError, HttpStatusHermesError
 from .logging_utils import log
 from .utils import build_headers, repair_mojibake
 
@@ -68,6 +69,18 @@ def hepsiburada_headers(url: str):
     return headers
 
 
+def _add_query(url: str, query: str) -> str:
+    parsed = urlsplit(url)
+    existing = parsed.query.strip("&")
+    new_query = "&".join(part for part in (existing, query) if part)
+    return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, new_query, parsed.fragment))
+
+
+def _looks_like_hepsiburada_product_url(url: str) -> bool:
+    path = urlsplit(url).path.lower()
+    return "-p-" in path or "-pm-" in path
+
+
 def hepsiburada_url_variants(url: str):
     variants = []
 
@@ -75,15 +88,44 @@ def hepsiburada_url_variants(url: str):
         if candidate and candidate not in variants:
             variants.append(candidate)
 
-    add(url)
-    if "?" in url:
-        add(url.split("?", 1)[0])
-    clean_url = variants[-1]
+    def add_product_candidates(candidate: str) -> None:
+        add(candidate)
+        if _looks_like_hepsiburada_product_url(candidate):
+            add(_add_query(candidate, "magaza=Hepsiburada"))
+
+    add_product_candidates(url)
+    clean_url = url.split("?", 1)[0]
+    if clean_url != url:
+        add_product_candidates(clean_url)
     if "-pm-" in clean_url:
-        add(clean_url.replace("-pm-", "-p-", 1))
+        add_product_candidates(clean_url.replace("-pm-", "-p-", 1))
     if "-p-" in clean_url:
-        add(clean_url.replace("-p-", "-pm-", 1))
+        add_product_candidates(clean_url.replace("-p-", "-pm-", 1))
     return variants
+
+
+def _is_usable_hepsiburada_product_response(response) -> bool:
+    final_url = getattr(response, "url", "") or ""
+    if not _looks_like_hepsiburada_product_url(final_url):
+        return False
+    text = decode_response_text(response)
+    lowered = text.lower()
+    return "sepete ekle" in lowered or "satıcı" in lowered or "satici" in lowered or "stok kodu" in lowered
+
+
+def _get_hepsiburada_response(session, candidate: str, timeout: int):
+    response = session.get(
+        candidate,
+        headers=hepsiburada_headers(candidate),
+        timeout=timeout,
+        allow_redirects=True,
+    )
+    if response.status_code == 403:
+        raise HttpStatusHermesError(403, candidate)
+    response.raise_for_status()
+    if not _is_usable_hepsiburada_product_response(response):
+        raise HermesError("Hepsiburada ürün linki ürün sayfası yerine farklı bir sayfaya yönlendi.")
+    return response
 
 
 def fetch_hepsiburada_page(session: requests.Session, url: str, timeout: int) -> requests.Response:
@@ -100,17 +142,7 @@ def fetch_hepsiburada_page(session: requests.Session, url: str, timeout: int) ->
     last_error: Optional[Exception] = None
     for candidate in hepsiburada_url_variants(url):
         try:
-            response = session.get(
-                candidate,
-                headers=hepsiburada_headers(candidate),
-                timeout=timeout,
-                allow_redirects=True,
-            )
-            if response.status_code == 403:
-                last_error = HttpStatusHermesError(403, candidate)
-                continue
-            response.raise_for_status()
-            return response
+            return _get_hepsiburada_response(session, candidate, timeout)
         except Exception as exc:
             last_error = exc
 
@@ -127,9 +159,10 @@ def fetch_hepsiburada_page(session: requests.Session, url: str, timeout: int) ->
                         impersonate="chrome124",
                     )
                     if response.status_code == 403:
-                        last_error = HttpStatusHermesError(403, candidate)
-                        continue
+                        raise HttpStatusHermesError(403, candidate)
                     response.raise_for_status()
+                    if not _is_usable_hepsiburada_product_response(response):
+                        raise HermesError("Hepsiburada ürün linki ürün sayfası yerine farklı bir sayfaya yönlendi.")
                     return response
                 except Exception as exc:
                     last_error = exc
