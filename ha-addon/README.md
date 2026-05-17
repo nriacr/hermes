@@ -5,6 +5,7 @@ Hermes, Home Assistant üzerinde çalışan çok siteli ürün takip add-on'udur
 ## Özellikler
 
 - Ürün bazlı takip: Amazon, Hepsiburada, Trendyol, Network
+- Hepsiburada arama linki takibi: arama sonuçlarındaki ürün kartlarından en düşük fiyatı seçer
 - Amazon arama sayfası takibi: birden fazla arama linki ve hedef kuralı
 - Pushover bildirimleri
 - 24 saat tekrar bildirimi kontrolü (`notify_once_in_24H`)
@@ -27,6 +28,12 @@ Ana alanlar:
 - `amazon_search_targets[]`
 
 Ürünlerde ayrıca site seçilmez. Hermes, ürün linkinden uygun siteyi otomatik algılar ve ilgili provider dosyasındaki fiyat okuma mantığını çalıştırır.
+
+Hepsiburada için ürün detay linki yerine arama linki kullanılması önerilir. Örnek:
+
+`https://www.hepsiburada.com/ara?q=Samsung+Galaxy+Tab+S11+Ultra+12GB+256GB`
+
+Bu yapıda Hermes, arama sonuçlarındaki ürün kartlarını okur; taksit ve kupon fiyatlarını eleyerek gerçek ürün fiyatlarını karşılaştırır ve en düşük fiyatı dikkate alır.
 
 ## Veri Dosyaları
 
