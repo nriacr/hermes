@@ -60,7 +60,7 @@ def parse_decimal(raw_value: str) -> Decimal:
     try:
         return Decimal(cleaned)
     except InvalidOperation as exc:
-        raise HermesError(f"Fiyat ayristirilamadi: {raw_value!r}") from exc
+        raise HermesError(f"Fiyat ayrıştırılamadı: {raw_value!r}") from exc
 
 
 def parse_bool(raw_value: Any, default: bool = False) -> bool:
@@ -152,7 +152,7 @@ def canonical_amazon_product_url(raw_url: str, fallback_asin: str = "") -> str:
     return absolute_url.split("?", 1)[0]
 
 
-def normalize_site(url: str = "") -> str:
+def detect_site_from_url(url: str) -> str:
     host = urlparse(url).netloc.casefold()
     if "hepsiburada" in host:
         return SITE_HEPSIBURADA
@@ -162,7 +162,7 @@ def normalize_site(url: str = "") -> str:
         return SITE_NETWORK
     if "amazon" in host:
         return SITE_AMAZON
-    raise HermesError(f"Desteklenmeyen site alan adi: {host or url}")
+    raise HermesError(f"Desteklenmeyen site alan adı: {host or url}")
 
 
 def site_label(site: str) -> str:
