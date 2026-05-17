@@ -9,12 +9,6 @@ SITE_AMAZON = "amazon"
 SITE_HEPSIBURADA = "hepsiburada"
 SITE_TRENDYOL = "trendyol"
 SITE_NETWORK = "network"
-SUPPORTED_PRODUCT_SITES = {
-    SITE_AMAZON,
-    SITE_HEPSIBURADA,
-    SITE_TRENDYOL,
-    SITE_NETWORK,
-}
 SITE_LABELS = {
     SITE_AMAZON: "Amazon",
     SITE_HEPSIBURADA: "Hepsiburada",
