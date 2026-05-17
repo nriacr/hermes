@@ -2,6 +2,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from .logging_utils import log
+
 
 def load_json(path: Path, default: Any) -> Any:
     try:
@@ -9,7 +11,11 @@ def load_json(path: Path, default: Any) -> Any:
             return default
         with path.open("r", encoding="utf-8") as handle:
             return json.load(handle)
-    except Exception:
+    except json.JSONDecodeError as exc:
+        log(f"JSON dosyası okunamadı, varsayılan değer kullanılacak: {path} | {exc}")
+        return default
+    except OSError as exc:
+        log(f"JSON dosyasına erişilemedi, varsayılan değer kullanılacak: {path} | {exc}")
         return default
 
 
