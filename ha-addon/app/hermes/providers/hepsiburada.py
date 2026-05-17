@@ -14,8 +14,8 @@ from .base import extract_price_from_selectors, extract_title, soup_from_html
 BASE_URL = "https://www.hepsiburada.com"
 MIN_PRICE = Decimal("50")
 MAX_PRICE = Decimal("1000000")
-PRICE_RE = re.compile(r"\d{1,3}(?:\.\d{3})*(?:,\d{2})?\s*TL", re.IGNORECASE)
-PRODUCT_URL_RE = re.compile(r"/(?:[^\s'\"]+)-(?:p|pm)-[A-Z0-9]+", re.IGNORECASE)
+PRICE_RE = re.compile(r"(?<![\d.,])\d{1,3}(?:\.\d{3})*(?:,\d{2})?\s*TL", re.IGNORECASE)
+PRODUCT_URL_RE = re.compile(r"/(?:[^\s'\"<>]+)-(?:p|pm)-[A-Z0-9]+", re.IGNORECASE)
 DETAIL_PRICE_SELECTORS = [
     "[data-test-id='price-current-price']",
     "[data-test-id='price-current-price'] span",
@@ -27,7 +27,16 @@ DETAIL_PRICE_SELECTORS = [
 ]
 DETAIL_STOP_MARKERS = ("urun bilgileri", "urun aciklamasi", "degerlendirmeler")
 INSTALLMENT_MARKERS = ("peşin fiyatına", "pesin fiyatina", "taksit", " x ")
-DISCOUNT_MARKERS = ("kupon", "hepsipara", "kazan", "indirim")
+COUPON_MARKERS = ("kupon", "hepsipara", "kazan")
+BAD_TITLE_MARKERS = (
+    "teslimat bilgisi",
+    "sepete ekle",
+    "kampanya",
+    "peşin fiyatına",
+    "pesin fiyatina",
+    "fiyat:",
+)
+PRODUCT_CARD_CLASS_MARKERS = ("productcard", "productlistcontent")
 
 
 @dataclass
@@ -44,6 +53,10 @@ def _absolute_url(url: str) -> str:
 
 def _clean_text(value: Any) -> str:
     return re.sub(r"\s+", " ", repair_mojibake(value)).strip()
+
+
+def _class_text(element) -> str:
+    return " ".join(str(item) for item in (element.get("class") or []))
 
 
 def _valid_price(price: Decimal) -> bool:
@@ -77,13 +90,13 @@ def _parse_price(raw_price: Any) -> Optional[Decimal]:
 
 
 def _is_noise_price(text: str, start: int, end: int) -> bool:
-    immediate_before = normalize_offer_text(text[max(0, start - 32) : start])
-    immediate_after = normalize_offer_text(text[end : end + 32])
-    close_context = f"{immediate_before} {immediate_after}"
-    discount_context = normalize_offer_text(text[max(0, start - 48) : end + 48])
+    before = normalize_offer_text(text[max(0, start - 40) : start])
+    after = normalize_offer_text(text[end : end + 24])
+    close_context = f"{before} {after}"
+    coupon_context = normalize_offer_text(text[max(0, start - 48) : end + 48])
     if any(marker in close_context for marker in INSTALLMENT_MARKERS):
         return True
-    if any(marker in discount_context for marker in DISCOUNT_MARKERS):
+    if any(marker in coupon_context for marker in COUPON_MARKERS):
         return True
     return False
 
@@ -100,35 +113,56 @@ def _prices_from_text(text: str) -> list[Decimal]:
     return prices
 
 
+def _is_good_title(title: str) -> bool:
+    normalized = normalize_offer_text(title)
+    if len(title.strip()) < 8 or title.strip().isdigit():
+        return False
+    return not any(marker in normalized for marker in BAD_TITLE_MARKERS)
+
+
+def _text_from_element(element) -> str:
+    if not element:
+        return ""
+    value = element.get("title") or element.get("aria-label") or element.get_text(" ", strip=True)
+    return _clean_text(value)
+
+
 def _title_from_card(card, link) -> str:
-    link_text = _clean_text(link.get_text(" ", strip=True))
-    if len(link_text) >= 8 and not link_text.isdigit():
-        return link_text
-    for selector in ("h1", "h2", "h3", "[title]", "[aria-label]"):
-        element = card.select_one(selector)
-        if not element:
-            continue
-        value = element.get("title") or element.get("aria-label") or element.get_text(" ", strip=True)
-        title = _clean_text(value)
-        if len(title) >= 8 and not title.isdigit():
+    candidates = [
+        _clean_text(link.get("title") or ""),
+        _text_from_element(card.select_one("[data-test-id^='title'] a")),
+        _text_from_element(card.select_one("[data-test-id^='title']")),
+        _text_from_element(card.select_one("a[class*='title']")),
+        _text_from_element(card.select_one("h2")),
+        _text_from_element(card.select_one("h3")),
+        _text_from_element(link),
+    ]
+    for title in candidates:
+        if _is_good_title(title):
             return title
-    return link_text or "Hepsiburada ürünü"
+    return "Hepsiburada ürünü"
 
 
-def _card_for_link(link):
+def _is_product_link(link) -> bool:
+    href = str(link.get("href") or "")
+    if not PRODUCT_URL_RE.search(href):
+        return False
+    return link.find_parent("footer") is None
+
+
+def _closest_product_card(link):
     current = link
-    best = link
     for _ in range(8):
-        if current.parent is None:
-            break
-        current = current.parent
-        text = _clean_text(current.get_text(" ", strip=True))
-        if len(text) > 2500:
-            break
-        best = current
-        if PRICE_RE.search(text) and len(text) > 40:
+        if current is None:
+            return None
+        class_text = normalize_offer_text(_class_text(current))
+        text_length = len(_clean_text(current.get_text(" ", strip=True)))
+        if any(marker in class_text for marker in PRODUCT_CARD_CLASS_MARKERS) and text_length <= 2600:
             return current
-    return best
+        if current.name == "article" and text_length <= 2600:
+            return current
+        current = current.parent
+    return None
 
 
 def _dedupe_candidates(candidates: Iterable[HepsiburadaCandidate]) -> list[HepsiburadaCandidate]:
@@ -144,20 +178,22 @@ def _dedupe_candidates(candidates: Iterable[HepsiburadaCandidate]) -> list[Hepsi
 def _search_candidates_from_dom(soup) -> list[HepsiburadaCandidate]:
     candidates = []
     for link in soup.select("a[href]"):
-        href = str(link.get("href") or "")
-        if not PRODUCT_URL_RE.search(href):
+        if not _is_product_link(link):
             continue
-        url = _absolute_url(href)
-        card = _card_for_link(link)
-        card_text = _clean_text(card.get_text(" ", strip=True))
-        prices = _prices_from_text(card_text)
+        card = _closest_product_card(link)
+        if card is None:
+            continue
+        prices = _prices_from_text(card.get_text(" ", strip=True))
         if not prices:
+            continue
+        title = _title_from_card(card, link)
+        if not _is_good_title(title):
             continue
         candidates.append(
             HepsiburadaCandidate(
-                title=_title_from_card(card, link),
+                title=title,
                 price=min(prices),
-                url=url,
+                url=_absolute_url(str(link.get("href") or "")),
             )
         )
     return _dedupe_candidates(candidates)
@@ -187,14 +223,13 @@ def _json_payloads(soup) -> list[Any]:
                 continue
             except json.JSONDecodeError:
                 pass
-        if "__" in text:
-            start = text.find("{")
-            end = text.rfind("}") + 1
-            if 0 <= start < end:
-                try:
-                    payloads.append(json.loads(text[start:end]))
-                except json.JSONDecodeError:
-                    continue
+        start = text.find("{")
+        end = text.rfind("}") + 1
+        if 0 <= start < end:
+            try:
+                payloads.append(json.loads(text[start:end]))
+            except json.JSONDecodeError:
+                continue
     return payloads
 
 
@@ -218,7 +253,6 @@ def _first_mapping_url(mapping: dict) -> str:
 
 def _first_mapping_price(mapping: dict) -> Optional[Decimal]:
     for key in (
-        "price",
         "finalPrice",
         "final_price",
         "salePrice",
@@ -226,10 +260,10 @@ def _first_mapping_price(mapping: dict) -> Optional[Decimal]:
         "currentPrice",
         "current_price",
         "discountedPrice",
-        "amount",
-        "value",
+        "price",
         "formattedPrice",
         "formatted_price",
+        "amount",
     ):
         price = _parse_price(mapping.get(key))
         if price is not None:
@@ -244,7 +278,7 @@ def _search_candidates_from_json(soup) -> list[HepsiburadaCandidate]:
             title = _first_mapping_text(mapping, ("name", "title", "productName", "product_name"))
             url = _first_mapping_url(mapping)
             price = _first_mapping_price(mapping)
-            if not title or not url or price is None:
+            if not title or not _is_good_title(title) or not url or price is None:
                 continue
             candidates.append(HepsiburadaCandidate(title=title, price=price, url=url))
     return _dedupe_candidates(candidates)
@@ -287,7 +321,7 @@ def _detail_candidate(soup) -> Optional[HepsiburadaCandidate]:
 
 
 def _log_candidates(candidates: list[HepsiburadaCandidate]) -> None:
-    preview = " | ".join(f"{item.title[:42]}={format_tl(item.price)}" for item in candidates[:8])
+    preview = " | ".join(f"{item.title[:48]}={format_tl(item.price)}" for item in candidates[:8])
     log(f"Hepsiburada teklifleri: {preview}")
 
 
