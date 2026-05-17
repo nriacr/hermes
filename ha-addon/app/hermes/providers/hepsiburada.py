@@ -157,16 +157,19 @@ def _is_product_link(link) -> bool:
 
 
 def _closest_product_card(link):
-    current = link
+    current = link.parent
     for _ in range(8):
         if current is None:
             return None
         class_text = normalize_offer_text(_class_text(current))
-        text_length = len(_clean_text(current.get_text(" ", strip=True)))
-        if any(marker in class_text for marker in PRODUCT_CARD_CLASS_MARKERS) and text_length <= 2600:
-            return current
-        if current.name == "article" and text_length <= 2600:
-            return current
+        text = _clean_text(current.get_text(" ", strip=True))
+        text_length = len(text)
+        has_price = PRICE_RE.search(text) is not None
+        if has_price and text_length <= 2600:
+            if any(marker in class_text for marker in PRODUCT_CARD_CLASS_MARKERS):
+                return current
+            if current.name in {"article", "li"}:
+                return current
         current = current.parent
     return None
 
