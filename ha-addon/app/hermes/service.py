@@ -246,11 +246,12 @@ def check_once(config: HermesConfig) -> None:
             wait_before_request(seller)
             offer = _fetch_product_offer(session, product.site, product.url, config.request_timeout_seconds)
             display_name = product.name or offer.title or product.url
+            matched_url = offer.url or product.url
             summary_rows.append(
                 PriceSummaryRow(
                     seller=seller,
                     product_title=offer.title or display_name,
-                    product_url=product.url,
+                    product_url=matched_url,
                     price=offer.price,
                     target_price=product.target_price,
                 )
@@ -275,7 +276,7 @@ def check_once(config: HermesConfig) -> None:
                     config.pushover_api_token,
                     f"{seller} fiyat alarmi",
                     message,
-                    product.url,
+                    matched_url,
                     config.request_timeout_seconds,
                 )
                 alert_sent = True
@@ -283,7 +284,7 @@ def check_once(config: HermesConfig) -> None:
             elif offer.price <= product.target_price and product.notify_once_in_24h:
                 log(
                     f"Bildirim atlandi, 24 saat dolmadi veya fiyat daha dusuk degil: "
-                    f"{seller} | {product.url}"
+                    f"{seller} | {matched_url}"
                 )
 
             state[product_key] = update_state_entry(
@@ -293,7 +294,8 @@ def check_once(config: HermesConfig) -> None:
                 alert_sent,
             )
             state[product_key]["title"] = offer.title
-            state[product_key]["url"] = product.url
+            state[product_key]["url"] = matched_url
+            state[product_key]["configured_url"] = product.url
             state[product_key]["site"] = product.site
             state[product_key]["last_error"] = None
             state[product_key]["last_error_status"] = None
