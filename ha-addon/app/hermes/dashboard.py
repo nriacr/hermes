@@ -1,4 +1,5 @@
 import os
+import re
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -54,6 +55,49 @@ def _addon_urls():
     return f"/config/app/{slug}/logs", f"/config/app/{slug}/config"
 
 
+def _extract_first_url(text):
+    if not text:
+        return ""
+    match = re.search(r"https?://\S+", str(text))
+    if not match:
+        return ""
+    return match.group(0).rstrip(".,;)]}")
+
+
+def _short_link(value, max_length=74):
+    text = str(value or "").strip()
+    if not text:
+        return "-"
+    if len(text) <= max_length:
+        return text
+    return text[: max_length - 3].rstrip() + "..."
+
+
+def _site_name(raw_site, is_search):
+    if is_search:
+        return "Amazon arama"
+    value = str(raw_site or "").strip().lower()
+    labels = {
+        "amazon": "Amazon",
+        "hepsiburada": "Hepsiburada",
+        "trendyol": "Trendyol",
+        "network": "Network",
+    }
+    return labels.get(value, "Ürün kontrolü")
+
+
+def _error_detail_line(state_entry):
+    is_search = isinstance(state_entry.get("targets"), dict)
+    site_text = _site_name(state_entry.get("site"), is_search)
+    error_text = repair_mojibake(state_entry.get("last_error") or "").strip()
+    url_text = str(state_entry.get("url") or "").strip() or _extract_first_url(error_text)
+    if url_text:
+        return f"{site_text}: {_short_link(url_text)}"
+    if error_text:
+        return f"{site_text}: {_short_link(error_text, 90)}"
+    return f"{site_text}: Hata ayrıntısı yok"
+
+
 def _collect_summary():
     options = load_json(OPTIONS_PATH, {})
     state = load_json(STATE_PATH, {})
@@ -67,6 +111,8 @@ def _collect_summary():
     now = datetime.now().astimezone()
     last_checks = []
     error_count = 0
+    error_details = []
+    seen_details = set()
     if isinstance(state, dict):
         for key, value in state.items():
             if key == "_meta" or not isinstance(value, dict):
@@ -76,6 +122,10 @@ def _collect_summary():
                 last_checks.append(checked_at.astimezone())
                 if value.get("last_error") and now - checked_at.astimezone() <= error_cutoff:
                     error_count += 1
+                    detail = _error_detail_line(value)
+                    if detail not in seen_details:
+                        seen_details.add(detail)
+                        error_details.append(detail)
             nested = value.get("targets")
             if isinstance(nested, dict):
                 for target_state in nested.values():
@@ -92,6 +142,7 @@ def _collect_summary():
         "amazon_targets": len(targets),
         "last_check": max(last_checks).strftime("%Y-%m-%d %H:%M:%S") if last_checks else "-",
         "errors": error_count,
+        "error_details": error_details[:4],
         "configured": bool(options),
     }
 
@@ -102,8 +153,8 @@ def _render_table():
     if not rows:
         return """
         <section class="summary-panel">
-          <div class="summary-head"><h2>Son Fiyat Ozeti</h2><span>Henuz tablo yok</span></div>
-          <p class="empty-table">Ilk kontrol dongusu tamamlandiginda son fiyat tablosu burada gorunecek.</p>
+          <div class="summary-head"><h2>Son Fiyat Özeti</h2><span>Henüz tablo yok</span></div>
+          <p class="empty-table">İlk kontrol döngüsü tamamlandığında son fiyat tablosu burada görünecek.</p>
         </section>
         """
 
@@ -133,10 +184,10 @@ def _render_table():
     row_count = escape(str(payload.get("row_count") or len(rows)))
     return f"""
     <section class="summary-panel">
-      <div class="summary-head"><h2>Son Fiyat Ozeti</h2><span>{checked_at} · {row_count} urun</span></div>
+      <div class="summary-head"><h2>Son Fiyat Özeti</h2><span>{checked_at} · {row_count} ürün</span></div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Satici</th><th>Urun Adi</th><th>Fiyat</th><th>Hedef</th><th>Fark</th></tr></thead>
+          <thead><tr><th>Satıcı</th><th>Ürün Adı</th><th>Fiyat</th><th>Hedef</th><th>Fark</th></tr></thead>
           <tbody>{''.join(row_html)}</tbody>
         </table>
       </div>
@@ -150,13 +201,13 @@ def _send_test_notification():
     api_token = str(options.get("pushover_api_token", "")).strip()
     timeout = int(options.get("request_timeout_seconds", 20) or 20)
     if not user_key or not api_token:
-        return False, "Pushover anahtarlari eksik. Config sekmesini kontrol et."
+        return False, "Pushover anahtarları eksik. Config sekmesini kontrol et."
     payload = urllib.parse.urlencode(
         {
             "token": api_token,
             "user": user_key,
             "title": "Hermes test",
-            "message": "Hermes test bildirimi. Ayarlar saglikli gorunuyor.",
+            "message": "Hermes test bildirimi. Ayarlar sağlıklı görünüyor.",
             "sound": "pushover",
             "priority": "0",
         }
@@ -166,12 +217,12 @@ def _send_test_notification():
             urllib.request.Request(PUSHOVER_URL, data=payload, method="POST"), timeout=timeout
         ) as response:
             response.read()
-        return True, "Pushover test bildirimi gonderildi."
+        return True, "Pushover test bildirimi gönderildi."
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace").strip()
         return False, f"Pushover hata verdi: {exc.code} {detail[:180]}"
     except Exception as exc:
-        return False, f"Pushover test bildirimi gonderilemedi: {exc}"
+        return False, f"Pushover test bildirimi gönderilemedi: {exc}"
 
 
 def _render_page(path: str = "/") -> bytes:
@@ -180,22 +231,33 @@ def _render_page(path: str = "/") -> bytes:
     params = urllib.parse.parse_qs(urllib.parse.urlparse(path).query)
     test_status = params.get("test", [""])[0]
     test_message = params.get("msg", [""])[0]
-    status = "Calisiyor" if summary["configured"] else "Ayar bekliyor"
+    status = "Çalışıyor" if summary["configured"] else "Ayar bekliyor"
     status_class = "status-ok" if summary["configured"] else "status-warn"
     error_class = "status-error" if int(summary["errors"]) > 0 else ""
+    error_details = summary.get("error_details") or []
+    if error_details:
+        error_details_html = "".join(f"<li>{escape(item)}</li>" for item in error_details)
+    else:
+        error_details_html = "<li>Son 24 saatte hata yok.</li>"
 
     cards = [
         ("Durum", status, status_class),
-        ("Kontrol araligi", f"{summary['interval']} dakika", ""),
-        ("Urun linkleri", summary["products"], ""),
-        ("Amazon arama sayfalari", summary["amazon_pages"], ""),
+        ("Kontrol aralığı", f"{summary['interval']} dakika", ""),
+        ("Ürün linkleri", summary["products"], ""),
+        ("Amazon arama sayfaları", summary["amazon_pages"], ""),
         ("Amazon arama hedefleri", summary["amazon_targets"], ""),
         ("Son kontrol", summary["last_check"], ""),
-        ("Hata sayisi", summary["errors"], error_class),
     ]
     card_html = "".join(
         f"<section class='card {escape(str(css))}'><span>{escape(str(label))}</span><strong>{escape(str(value))}</strong></section>"
         for label, value, css in cards
+    )
+    error_card_html = (
+        "<section class='card error-card "
+        + escape(str(error_class))
+        + "'><span>Hata sayısı (son 24 saat)</span>"
+        + f"<strong>{escape(str(summary['errors']))}</strong>"
+        + f"<ul>{error_details_html}</ul></section>"
     )
     notice_html = ""
     if test_status in {"ok", "fail"}:
@@ -205,20 +267,21 @@ def _render_page(path: str = "/") -> bytes:
     html = f"""<!doctype html>
 <html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta http-equiv="refresh" content="60"><title>Hermes</title>
 <style>
-:root {{ color-scheme: dark; --bg:#111827; --panel:#172033; --card:#1e293b; --line:#334155; --text:#f8fafc; --muted:#94a3b8; --accent:#ff9900; --accent2:#00a8e1; --ok:#22c55e; --warn:#facc15; --bad:#fb7185; --blue:#38bdf8; --blue2:#2563eb; }}
-* {{ box-sizing:border-box; }} body {{ margin:0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; background:radial-gradient(circle at top left,#19324d,var(--bg) 48%); color:var(--text); }}
-main {{ max-width:1060px; margin:0 auto; padding:28px 18px 44px; }} .hero {{ border:1px solid var(--line); border-radius:22px; padding:24px; background:rgba(23,32,51,.9); box-shadow:0 22px 60px rgba(0,0,0,.28); }}
+:root {{ color-scheme: light; --bg:#f7f4fb; --panel:#fff8f8; --card:#fffdfd; --line:#e6deef; --text:#473b57; --muted:#7a6e8d; --accent:#f6c7d0; --accent2:#bde5dc; --ok:#5f9f89; --warn:#c99755; --bad:#c56c8a; --blue:#a8c8ff; --blue2:#8eb6f3; --head:#f1ebf7; }}
+* {{ box-sizing:border-box; }} body {{ margin:0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; background:radial-gradient(circle at top left,#fef8fc,var(--bg) 56%); color:var(--text); }}
+main {{ max-width:1060px; margin:0 auto; padding:28px 18px 44px; }} .hero {{ border:1px solid var(--line); border-radius:22px; padding:24px; background:var(--panel); box-shadow:0 16px 40px rgba(109,86,136,.12); }}
 p {{ margin:0; color:var(--muted); line-height:1.55; }}
-.badge {{ display:inline-flex; margin-bottom:14px; color:#101827; background:linear-gradient(135deg,var(--accent),var(--accent2)); border-radius:18px; padding:10px 16px; font-size:clamp(26px,5vw,46px); line-height:1; letter-spacing:-.04em; font-weight:900; }}
+.badge {{ display:inline-flex; margin-bottom:14px; color:#4c3d5d; background:linear-gradient(135deg,var(--accent),var(--accent2)); border-radius:18px; padding:10px 16px; font-size:clamp(26px,5vw,46px); line-height:1; letter-spacing:-.04em; font-weight:900; }}
 .actions {{ display:flex; flex-wrap:wrap; gap:10px; margin-top:20px; align-items:center; }} .inline-form {{ margin:0; }} .button {{ display:inline-flex; align-items:center; justify-content:center; min-height:44px; padding:0 16px; border-radius:14px; border:1px solid transparent; text-decoration:none; font-weight:800; font:inherit; cursor:pointer; }}
-.button.primary {{ color:#101827; background:linear-gradient(135deg,var(--accent),var(--accent2)); }} .button.secondary {{ color:var(--text); background:#233047; border-color:var(--line); }} .button.test {{ color:#fff; background:linear-gradient(135deg,var(--blue),var(--blue2)); }}
-.notice {{ margin-top:16px; padding:12px 14px; border-radius:12px; font-weight:700; }} .notice-ok {{ color:#dcfce7; background:rgba(34,197,94,.16); border:1px solid rgba(74,222,128,.38); }} .notice-fail {{ color:#ffe4e6; background:rgba(244,63,94,.15); border:1px solid rgba(251,113,133,.42); }}
+.button.primary {{ color:#4b3b5b; background:linear-gradient(135deg,var(--accent),var(--accent2)); }} .button.secondary {{ color:var(--text); background:#ece3f5; border-color:var(--line); }} .button.test {{ color:#334058; background:linear-gradient(135deg,var(--blue),var(--blue2)); }}
+.notice {{ margin-top:16px; padding:12px 14px; border-radius:12px; font-weight:700; }} .notice-ok {{ color:#3c7a64; background:#eaf7f1; border:1px solid #cde9dc; }} .notice-fail {{ color:#8f3f5e; background:#fdeff4; border:1px solid #f7cedd; }}
 .grid {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:12px; margin-top:18px; }} .card {{ border:1px solid var(--line); border-radius:16px; padding:16px; background:var(--card); min-height:92px; }} .card span {{ display:block; color:var(--muted); font-size:13px; margin-bottom:10px; }} .card strong {{ display:block; font-size:22px; line-height:1.2; overflow-wrap:anywhere; }}
-.card.status-ok {{ border-color:rgba(34,197,94,.45); background:linear-gradient(135deg,rgba(34,197,94,.13),var(--card) 58%); }} .card.status-ok strong {{ color:var(--ok); }} .card.status-warn strong {{ color:var(--warn); }} .card.status-error strong {{ color:var(--bad); }}
+.card.status-ok {{ border-color:#bfdccf; background:linear-gradient(135deg,#edf8f3,var(--card) 60%); }} .card.status-ok strong {{ color:var(--ok); }} .card.status-warn strong {{ color:var(--warn); }} .card.status-error strong {{ color:var(--bad); }}
+.error-card {{ grid-column:1 / -1; }} .error-card ul {{ margin:10px 0 0; padding-left:18px; color:var(--text); }} .error-card li {{ margin:4px 0; font-size:13px; line-height:1.35; overflow-wrap:anywhere; }}
 .summary-panel {{ margin-top:18px; border:1px solid var(--line); border-radius:18px; padding:16px; background:var(--card); }} .summary-head {{ display:flex; align-items:flex-end; justify-content:space-between; gap:12px; margin-bottom:12px; }} .summary-head span {{ color:var(--muted); font-size:13px; white-space:nowrap; }}
-.table-wrap {{ overflow-x:auto; border:1px solid var(--line); border-radius:14px; }} table {{ width:100%; border-collapse:collapse; min-width:760px; }} th,td {{ padding:10px 9px; border-bottom:1px solid var(--line); text-align:right; white-space:nowrap; }} th {{ color:#e0f2fe; background:#233047; font-size:12px; text-transform:uppercase; letter-spacing:.04em; }} td {{ color:var(--text); font-variant-numeric:tabular-nums; }} tr:last-child td {{ border-bottom:none; }} th:nth-child(1),td:nth-child(1) {{ width:112px; }} th:nth-child(1),td:nth-child(1),th:nth-child(2),td:nth-child(2) {{ text-align:left; }} th:not(:nth-child(2)),td:not(:nth-child(2)) {{ width:108px; }}
-.product-cell {{ max-width:430px; white-space:normal; line-height:1.25; }} .product-cell a {{ color:#7dd3fc; text-decoration:none; }} .product-cell a:hover {{ color:#ffb84d; text-decoration:underline; }} .product-cell span {{ display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; text-overflow:ellipsis; }} .deal-row {{ background:rgba(34,197,94,.10); }} .deal-row td {{ color:#86efac; font-weight:800; }} .deal-row .product-cell a {{ color:#86efac; }} .note {{ margin-top:18px; border-left:4px solid var(--accent); padding:12px 14px; background:rgba(255,153,0,.10); border-radius:10px; }} .footer {{ margin-top:18px; font-size:13px; color:var(--muted); }}
-</style></head><body><main><div class="hero"><div class="badge">Hermes</div><p>Urun linkleri cok siteli calisir; Amazon arama sayfalari Amazon'a ozel mod olarak korunur.</p><div class="actions"><a class="button primary" href="{log_url}" target="_top">LOG</a><a class="button secondary" href="{app_url}" target="_top">Config</a><form class="inline-form" method="post" action="./test-pushover"><button class="button test" type="submit">Pushover</button></form></div>{notice_html}<div class="grid">{card_html}</div>{_render_table()}<p class="note">LOG butonu log sekmesini, Config butonu yapilandirma sekmesini acar. Pushover butonu test bildirimi gonderir.</p><p class="footer">Sayfa 60 saniyede bir otomatik yenilenir.</p></div></main></body></html>"""
+.table-wrap {{ overflow-x:auto; border:1px solid var(--line); border-radius:14px; }} table {{ width:100%; border-collapse:collapse; min-width:760px; }} th,td {{ padding:10px 9px; border-bottom:1px solid var(--line); text-align:right; white-space:nowrap; }} th {{ color:#5a4e6d; background:var(--head); font-size:12px; text-transform:uppercase; letter-spacing:.04em; }} td {{ color:var(--text); font-variant-numeric:tabular-nums; }} tr:last-child td {{ border-bottom:none; }} th:nth-child(1),td:nth-child(1) {{ width:112px; }} th:nth-child(1),td:nth-child(1),th:nth-child(2),td:nth-child(2) {{ text-align:left; }} th:not(:nth-child(2)),td:not(:nth-child(2)) {{ width:108px; }}
+.product-cell {{ max-width:430px; white-space:normal; line-height:1.25; }} .product-cell a {{ color:#5b7ec0; text-decoration:none; }} .product-cell a:hover {{ color:#8f5ab3; text-decoration:underline; }} .product-cell span {{ display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; text-overflow:ellipsis; }} .deal-row {{ background:#e8f6ee; }} .deal-row td {{ color:#3f7f67; font-weight:800; }} .deal-row .product-cell a {{ color:#3f7f67; }} .note {{ margin-top:18px; border-left:4px solid #d7bfdc; padding:12px 14px; background:#f8eef8; border-radius:10px; }} .footer {{ margin-top:18px; font-size:13px; color:var(--muted); }}
+</style></head><body><main><div class="hero"><div class="badge">Hermes</div><p>Ürün linkleri çok siteli çalışır; Amazon arama sayfaları Amazon'a özel mod olarak korunur.</p><div class="actions"><a class="button primary" href="{log_url}" target="_top">LOG</a><a class="button secondary" href="{app_url}" target="_top">Config</a><form class="inline-form" method="post" action="./test-pushover"><button class="button test" type="submit">Pushover</button></form></div>{notice_html}<div class="grid">{card_html}{error_card_html}</div>{_render_table()}<p class="note">LOG butonu log sekmesini, Config butonu yapılandırma sekmesini açar. Pushover butonu test bildirimi gönderir.</p><p class="footer">Sayfa 60 saniyede bir otomatik yenilenir.</p></div></main></body></html>"""
     return html.encode("utf-8")
 
 
