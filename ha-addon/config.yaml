@@ -1,0 +1,48 @@
+name: Hermes
+version: "1.0.0"
+slug: hermes
+description: Amazon, Hepsiburada, Trendyol ve Network ürün fiyatlarını izler; Amazon arama sayfalarını ayrıca takip eder.
+url: https://github.com/nriacr/hermes
+arch:
+  - aarch64
+  - armv7
+  - amd64
+startup: services
+boot: auto
+init: false
+ingress: true
+ingress_port: 8099
+panel_title: Hermes
+panel_icon: mdi:tag-heart
+options:
+  interval_minutes: 30
+  request_timeout_seconds: 20
+  pushover_user_key: ""
+  pushover_api_token: ""
+  products: []
+  amazon_search_pages: []
+  amazon_search_targets: []
+schema:
+  interval_minutes: "int(5,1440)"
+  request_timeout_seconds: "int(5,120)"
+  pushover_user_key: "str"
+  pushover_api_token: "str"
+  products:
+    - name: "str"
+      site: "list(amazon|hepsiburada|trendyol|network)?"
+      url: "str"
+      target_price: "float"
+      notify_once_in_24H: "bool?"
+      active: "bool?"
+  amazon_search_pages:
+    - name: "str"
+      search_url: "str"
+      search_url_2: "str?"
+      max_items_to_scan: "int(1,100)?"
+  amazon_search_targets:
+    - name: "str"
+      search_name: "str?"
+      product_name: "str"
+      target_price: "float"
+      notify_once_in_24H: "bool?"
+      active: "bool?"
