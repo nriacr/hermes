@@ -13,7 +13,6 @@ from .constants import (
     AMAZON_SEARCH_HTTP_COOLDOWN_SECONDS,
     NOTIFY_REPEAT_SECONDS,
     REQUEST_PRE_DELAY_SECONDS,
-    SITE_AMAZON,
     SITE_HEPSIBURADA,
     STATE_PATH,
     SUMMARY_PATH,
@@ -68,7 +67,7 @@ def save_price_summary(rows: List[PriceSummaryRow]) -> None:
 
 def log_price_summary(rows: List[PriceSummaryRow]) -> None:
     if not rows:
-        log("Ozet: eslesen=0")
+        log("Özet: eslesen=0")
         return
     no_width = 3
     seller_width = 12
@@ -76,8 +75,8 @@ def log_price_summary(rows: List[PriceSummaryRow]) -> None:
     price_width = 10
     header = (
         f"{'No':>{no_width}} | "
-        f"{log_cell('Satici', seller_width)} | "
-        f"{log_cell('Urun Adi', product_width)} | "
+        f"{log_cell('Satıcı', seller_width)} | "
+        f"{log_cell('Ürün Adı', product_width)} | "
         f"{'Fiyat':>{price_width}} | "
         f"{'Hedef':>{price_width}} | "
         f"{'Fark':>{price_width}}"
@@ -91,7 +90,7 @@ def log_price_summary(rows: List[PriceSummaryRow]) -> None:
         f"{'-' * price_width}"
     )
     sorted_rows = sorted_summary_rows(rows)
-    log(f"Ozet: eslesen={len(sorted_rows)}")
+    log(f"Özet: eslesen={len(sorted_rows)}")
     log(header)
     log(separator)
     for idx, row in enumerate(sorted_rows, start=1):
@@ -179,12 +178,9 @@ def wait_before_request(label: str) -> None:
     time.sleep(delay)
 
 
-def update_error_notification_state(
-    state_entry: Dict[str, Any], error_message: str, error_status: int | None
-) -> Dict[str, Any]:
+def update_error_notification_state(state_entry: Dict[str, Any]) -> Dict[str, Any]:
     updated = dict(state_entry)
     updated["last_error_notified_at"] = utc_now()
-    updated["last_error_notification_signature"] = f"{error_status or 'error'}:{error_message}"
     return updated
 
 
@@ -437,7 +433,6 @@ def check_once(config: HermesConfig) -> None:
                 "last_error": None if not failed_urls else "; ".join(failed_urls)[:900],
                 "last_error_status": None,
                 "last_error_notified_at": page_state.get("last_error_notified_at"),
-                "last_error_notification_signature": page_state.get("last_error_notification_signature"),
             }
         except Exception as exc:  # noqa: BLE001
             error_message = str(exc)
@@ -462,9 +457,7 @@ def check_once(config: HermesConfig) -> None:
                         page.search_urls[0],
                         config.request_timeout_seconds,
                     )
-                    updated_page_state = update_error_notification_state(
-                        updated_page_state, error_message, error_status
-                    )
+                    updated_page_state = update_error_notification_state(updated_page_state)
                     log(f"Amazon arama hata bildirimi gonderildi: {page.name}")
                 except Exception as notify_exc:  # noqa: BLE001
                     log(f"Amazon arama hata bildirimi gonderilemedi: {page.name} | {notify_exc}")
