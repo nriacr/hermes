@@ -28,6 +28,7 @@ DETAIL_PRICE_SELECTORS = [
 DETAIL_STOP_MARKERS = ("urun bilgileri", "urun aciklamasi", "degerlendirmeler")
 INSTALLMENT_MARKERS = ("peşin fiyatına", "pesin fiyatina", "taksit", " x ")
 COUPON_MARKERS = ("kupon", "hepsipara", "kazan")
+CART_SPECIAL_MARKERS = ("sepete özel", "sepete ozel")
 BAD_TITLE_MARKERS = (
     "teslimat bilgisi",
     "sepete ekle",
@@ -37,6 +38,25 @@ BAD_TITLE_MARKERS = (
     "fiyat:",
 )
 PRODUCT_CARD_CLASS_MARKERS = ("productcard", "productlistcontent")
+BRAND_ANCHORS = (
+    "apple",
+    "samsung",
+    "govee",
+    "philips",
+    "tapo",
+    "xiaomi",
+    "huawei",
+    "lenovo",
+    "asus",
+    "acer",
+    "lg",
+    "sony",
+    "anker",
+    "roborock",
+    "dyson",
+    "bosch",
+    "siemens",
+)
 
 
 @dataclass
@@ -107,7 +127,7 @@ def _is_noise_price(text: str, start: int, end: int) -> bool:
     return False
 
 
-def _prices_from_text(text: str) -> list[Decimal]:
+def _valid_prices_from_text(text: str) -> list[Decimal]:
     prices = []
     clean = _clean_text(text)
     for match in PRICE_RE.finditer(clean):
@@ -117,6 +137,24 @@ def _prices_from_text(text: str) -> list[Decimal]:
         if price is not None:
             prices.append(price)
     return prices
+
+
+def _cart_special_prices(text: str) -> list[Decimal]:
+    clean = _clean_text(text)
+    normalized = normalize_offer_text(clean)
+    marker_positions = [normalized.find(marker) for marker in CART_SPECIAL_MARKERS]
+    marker_positions = [position for position in marker_positions if position >= 0]
+    if not marker_positions:
+        return []
+    segment = clean[min(marker_positions) :]
+    return [price for price in (_parse_price(match.group(0)) for match in PRICE_RE.finditer(segment)) if price is not None]
+
+
+def _prices_from_text(text: str) -> list[Decimal]:
+    special_prices = _cart_special_prices(text)
+    if special_prices:
+        return [min(special_prices)]
+    return _valid_prices_from_text(text)
 
 
 def _is_good_title(title: str) -> bool:
@@ -147,6 +185,17 @@ def _title_from_card(card, link) -> str:
         if _is_good_title(title):
             return title
     return "Hepsiburada ürünü"
+
+
+def _infer_seller_from_title(title: str) -> str:
+    words = _clean_text(title).split()
+    normalized_words = [normalize_offer_text(word) for word in words]
+    for index, word in enumerate(normalized_words[:5]):
+        if word in BRAND_ANCHORS:
+            if index == 0:
+                return "Hepsiburada"
+            return " ".join(words[:index])
+    return "Hepsiburada"
 
 
 def _is_product_link(link) -> bool:
@@ -203,6 +252,7 @@ def _search_candidates_from_dom(soup) -> list[HepsiburadaCandidate]:
                 title=title,
                 price=min(prices),
                 url=_absolute_url(str(link.get("href") or "")),
+                seller=_infer_seller_from_title(title),
             )
         )
     return _dedupe_candidates(candidates)
@@ -289,7 +339,14 @@ def _search_candidates_from_json(soup) -> list[HepsiburadaCandidate]:
             price = _first_mapping_price(mapping)
             if not title or not _is_good_title(title) or not url or price is None:
                 continue
-            candidates.append(HepsiburadaCandidate(title=title, price=price, url=url))
+            candidates.append(
+                HepsiburadaCandidate(
+                    title=title,
+                    price=price,
+                    url=url,
+                    seller=_infer_seller_from_title(title),
+                )
+            )
     return _dedupe_candidates(candidates)
 
 
@@ -330,7 +387,7 @@ def _detail_candidate(soup) -> Optional[HepsiburadaCandidate]:
 
 
 def _log_candidates(candidates: list[HepsiburadaCandidate]) -> None:
-    preview = " | ".join(f"{item.title[:48]}={format_tl(item.price)}" for item in candidates[:8])
+    preview = " | ".join(f"{item.seller}={format_tl(item.price)}" for item in candidates[:8])
     log(f"Hepsiburada teklifleri: {preview}")
 
 
