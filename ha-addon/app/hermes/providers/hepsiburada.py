@@ -17,6 +17,12 @@ MAX_PRICE = Decimal("1000000")
 PRICE_RE = re.compile(r"(?<![\d.,])\d{1,3}(?:\.\d{3})*(?:,\d{2})?\s*TL", re.IGNORECASE)
 PRODUCT_URL_RE = re.compile(r"/(?:[^\s'\"<>]+)-(?:p|pm)-[A-Z0-9]+", re.IGNORECASE)
 PRODUCT_ID_RE = re.compile(r"-(?:p|pm)-([A-Z0-9]+)", re.IGNORECASE)
+EMBEDDED_VARIANT_RE = re.compile(
+    r'"sku":"(?P<sku>[^"]+)"[\s\S]{0,1800}?'
+    r'"url":"(?P<url>[^"]+)"[\s\S]{0,1800}?'
+    r'"merchantName":"(?P<seller>[^"]*)"',
+    re.IGNORECASE,
+)
 DETAIL_PRICE_SELECTORS = [
     "[data-test-id='price-current-price']",
     "[data-test-id='price-current-price'] span",
@@ -255,8 +261,24 @@ def _dedupe_candidates(candidates: Iterable[HepsiburadaCandidate]) -> list[Hepsi
     return sorted(deduped.values(), key=lambda item: item.price)
 
 
-def _seller_lookup_from_json(soup) -> dict[str, str]:
+def _remember_seller(sellers: dict[str, str], product_id: str, seller: str) -> None:
+    clean_seller = _clean_text(seller)
+    if product_id and clean_seller:
+        sellers[product_id.upper()] = clean_seller
+
+
+def _seller_lookup_from_embedded_text(soup) -> dict[str, str]:
     sellers: dict[str, str] = {}
+    html = repair_mojibake(str(soup)).replace('\\"', '"')
+    for match in EMBEDDED_VARIANT_RE.finditer(html):
+        seller = match.group("seller")
+        _remember_seller(sellers, match.group("sku"), seller)
+        _remember_seller(sellers, _product_id_from_url(match.group("url")), seller)
+    return sellers
+
+
+def _seller_lookup_from_json(soup) -> dict[str, str]:
+    sellers = _seller_lookup_from_embedded_text(soup)
     for payload in _json_payloads(soup):
         for mapping in _iter_json_values(payload):
             url = _first_mapping_url(mapping)
@@ -264,8 +286,7 @@ def _seller_lookup_from_json(soup) -> dict[str, str]:
             seller = _first_mapping_text(listing, ("merchantName", "merchant_name", "sellerName", "seller_name"))
             seller = seller or _first_mapping_text(mapping, ("merchantName", "merchant_name", "sellerName", "seller_name"))
             product_id = _product_id_from_url(url)
-            if product_id and seller:
-                sellers[product_id] = seller
+            _remember_seller(sellers, product_id, seller)
     return sellers
 
 
@@ -371,6 +392,7 @@ def _first_mapping_price(mapping: dict) -> Optional[Decimal]:
 
 def _search_candidates_from_json(soup) -> list[HepsiburadaCandidate]:
     candidates = []
+    seller_lookup = _seller_lookup_from_json(soup)
     for payload in _json_payloads(soup):
         for mapping in _iter_json_values(payload):
             title = _first_mapping_text(mapping, ("name", "title", "productName", "product_name"))
@@ -379,7 +401,6 @@ def _search_candidates_from_json(soup) -> list[HepsiburadaCandidate]:
             if not title or not _is_good_title(title) or not url or price is None:
                 continue
             product_id = _product_id_from_url(url)
-            seller_lookup = _seller_lookup_from_json(soup)
             seller = seller_lookup.get(product_id) or _infer_seller_from_title(title)
             candidates.append(
                 HepsiburadaCandidate(
