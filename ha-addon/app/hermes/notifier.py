@@ -18,7 +18,7 @@ def send_pushover(
         "title": title,
         "message": message,
         "url": url,
-        "url_title": "Urunu ac",
+        "url_title": "Ürünü aç",
         "priority": "0",
         "sound": "pushover",
     }
