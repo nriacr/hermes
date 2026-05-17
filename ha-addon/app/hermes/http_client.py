@@ -41,7 +41,7 @@ def fetch_with_retries(session: requests.Session, url: str, timeout: int) -> req
         last_status = response.status_code
         if attempt < len(RETRY_DELAYS_SECONDS):
             delay = RETRY_DELAYS_SECONDS[attempt]
-            log(f"Site gecici hata verdi ({response.status_code}); {delay} saniye sonra tekrar denenecek.")
+            log(f"Site geçici hata verdi ({response.status_code}); {delay} saniye sonra tekrar denenecek.")
             time.sleep(delay)
     raise HttpStatusHermesError(last_status or 0, url)
 
@@ -76,9 +76,14 @@ def _add_query(url: str, query: str) -> str:
     return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, new_query, parsed.fragment))
 
 
-def _looks_like_hepsiburada_product_url(url: str) -> bool:
+def _is_hepsiburada_product_url(url: str) -> bool:
     path = urlsplit(url).path.lower()
     return "-p-" in path or "-pm-" in path
+
+
+def _is_hepsiburada_search_url(url: str) -> bool:
+    parsed = urlsplit(url)
+    return parsed.path.rstrip("/").lower() == "/ara" or "q=" in parsed.query.lower()
 
 
 def hepsiburada_url_variants(url: str):
@@ -88,28 +93,30 @@ def hepsiburada_url_variants(url: str):
         if candidate and candidate not in variants:
             variants.append(candidate)
 
-    def add_product_candidates(candidate: str) -> None:
-        add(candidate)
-        if _looks_like_hepsiburada_product_url(candidate):
-            add(_add_query(candidate, "magaza=Hepsiburada"))
+    add(url)
+    if _is_hepsiburada_search_url(url):
+        return variants
 
-    add_product_candidates(url)
     clean_url = url.split("?", 1)[0]
     if clean_url != url:
-        add_product_candidates(clean_url)
+        add(clean_url)
+    if _is_hepsiburada_product_url(clean_url):
+        add(_add_query(clean_url, "magaza=Hepsiburada"))
     if "-pm-" in clean_url:
-        add_product_candidates(clean_url.replace("-pm-", "-p-", 1))
+        add(clean_url.replace("-pm-", "-p-", 1))
     if "-p-" in clean_url:
-        add_product_candidates(clean_url.replace("-p-", "-pm-", 1))
+        add(clean_url.replace("-p-", "-pm-", 1))
     return variants
 
 
-def _is_usable_hepsiburada_product_response(response) -> bool:
+def _is_usable_hepsiburada_response(response) -> bool:
     final_url = getattr(response, "url", "") or ""
-    if not _looks_like_hepsiburada_product_url(final_url):
-        return False
     text = decode_response_text(response)
     lowered = text.lower()
+    if _is_hepsiburada_search_url(final_url):
+        return "hepsiburada" in lowered and ("ara" in lowered or "ürün" in lowered or "urun" in lowered)
+    if not _is_hepsiburada_product_url(final_url):
+        return False
     return "sepete ekle" in lowered or "satıcı" in lowered or "satici" in lowered or "stok kodu" in lowered
 
 
@@ -123,8 +130,8 @@ def _get_hepsiburada_response(session, candidate: str, timeout: int):
     if response.status_code == 403:
         raise HttpStatusHermesError(403, candidate)
     response.raise_for_status()
-    if not _is_usable_hepsiburada_product_response(response):
-        raise HermesError("Hepsiburada ürün linki ürün sayfası yerine farklı bir sayfaya yönlendi.")
+    if not _is_usable_hepsiburada_response(response):
+        raise HermesError("Hepsiburada linki beklenen ürün veya arama sayfası yerine farklı bir sayfaya yönlendi.")
     return response
 
 
@@ -161,8 +168,8 @@ def fetch_hepsiburada_page(session: requests.Session, url: str, timeout: int) ->
                     if response.status_code == 403:
                         raise HttpStatusHermesError(403, candidate)
                     response.raise_for_status()
-                    if not _is_usable_hepsiburada_product_response(response):
-                        raise HermesError("Hepsiburada ürün linki ürün sayfası yerine farklı bir sayfaya yönlendi.")
+                    if not _is_usable_hepsiburada_response(response):
+                        raise HermesError("Hepsiburada linki beklenen ürün veya arama sayfası yerine farklı bir sayfaya yönlendi.")
                     return response
                 except Exception as exc:
                     last_error = exc
