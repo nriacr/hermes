@@ -1,5 +1,5 @@
 name: Hermes
-version: "1.0.2"
+version: "1.0.3"
 slug: hermes
 description: Amazon, Hepsiburada, Trendyol ve Network ürün fiyatlarını izler; Amazon arama sayfalarını ayrıca takip eder.
 url: https://github.com/nriacr/hermes
@@ -29,7 +29,7 @@ schema:
   pushover_api_token: "str"
   products:
     - name: "str"
-      site: "list(amazon|hepsiburada|trendyol|network)?"
+      site: "str?"
       url: "str"
       target_price: "float"
       notify_once_in_24H: "bool?"
