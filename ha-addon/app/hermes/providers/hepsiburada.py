@@ -89,8 +89,14 @@ def _parse_price(raw_price: Any) -> Optional[Decimal]:
     return price if _valid_price(price) else None
 
 
+def _context_before_price(text: str, start: int) -> str:
+    before = text[max(0, start - 56) : start]
+    after_previous_price = re.split(r"TL", before, flags=re.IGNORECASE)[-1]
+    return normalize_offer_text(after_previous_price)
+
+
 def _is_noise_price(text: str, start: int, end: int) -> bool:
-    before = normalize_offer_text(text[max(0, start - 40) : start])
+    before = _context_before_price(text, start)
     after = normalize_offer_text(text[end : end + 24])
     close_context = f"{before} {after}"
     coupon_context = normalize_offer_text(text[max(0, start - 48) : end + 48])
