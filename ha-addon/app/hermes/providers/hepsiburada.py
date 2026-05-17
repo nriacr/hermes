@@ -471,4 +471,5 @@ def extract_offer(html: str) -> OfferResult:
         title=repair_mojibake(best.title),
         price=best.price,
         seller=best.seller,
+        url=best.url or None,
     )
