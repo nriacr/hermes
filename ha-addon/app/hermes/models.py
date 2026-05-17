@@ -56,7 +56,6 @@ class OfferResult:
     title: str
     price: Decimal
     seller: Optional[str] = None
-    url: Optional[str] = None
 
 
 @dataclass
