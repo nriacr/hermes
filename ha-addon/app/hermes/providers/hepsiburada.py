@@ -3,7 +3,7 @@ import re
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any, Iterable, Optional
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import urljoin
 
 from ..errors import HermesError
 from ..logging_utils import log
@@ -50,18 +50,25 @@ def _valid_price(price: Decimal) -> bool:
     return MIN_PRICE <= price <= MAX_PRICE
 
 
+def _normalize_price_text(text: str) -> str:
+    cleaned = _clean_text(text)
+    match = PRICE_RE.search(cleaned)
+    if match:
+        cleaned = match.group(0)
+    if "," not in cleaned and "." in cleaned:
+        cleaned = cleaned.replace(".", "")
+    return cleaned
+
+
 def _parse_price(raw_price: Any) -> Optional[Decimal]:
     if raw_price in (None, ""):
         return None
     if isinstance(raw_price, (int, float)):
         price = parse_decimal(str(raw_price))
         return price if _valid_price(price) else None
-    text = _clean_text(raw_price)
+    text = _normalize_price_text(str(raw_price))
     if not text:
         return None
-    match = PRICE_RE.search(text)
-    if match:
-        text = match.group(0)
     try:
         price = parse_decimal(text)
     except HermesError:
