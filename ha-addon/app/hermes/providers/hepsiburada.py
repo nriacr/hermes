@@ -77,12 +77,13 @@ def _parse_price(raw_price: Any) -> Optional[Decimal]:
 
 
 def _is_noise_price(text: str, start: int, end: int) -> bool:
-    before = normalize_offer_text(text[max(0, start - 80) : start])
-    after = normalize_offer_text(text[end : end + 80])
-    around = f"{before} {after}"
-    if any(marker in around for marker in INSTALLMENT_MARKERS):
+    immediate_before = normalize_offer_text(text[max(0, start - 32) : start])
+    immediate_after = normalize_offer_text(text[end : end + 32])
+    close_context = f"{immediate_before} {immediate_after}"
+    discount_context = normalize_offer_text(text[max(0, start - 48) : end + 48])
+    if any(marker in close_context for marker in INSTALLMENT_MARKERS):
         return True
-    if any(marker in around for marker in DISCOUNT_MARKERS):
+    if any(marker in discount_context for marker in DISCOUNT_MARKERS):
         return True
     return False
 
