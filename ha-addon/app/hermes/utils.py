@@ -15,7 +15,6 @@ from .constants import (
     SITE_LABELS,
     SITE_NETWORK,
     SITE_TRENDYOL,
-    SUPPORTED_PRODUCT_SITES,
     USER_AGENTS,
 )
 from .errors import HermesError
@@ -153,31 +152,17 @@ def canonical_amazon_product_url(raw_url: str, fallback_asin: str = "") -> str:
     return absolute_url.split("?", 1)[0]
 
 
-def normalize_site(value: Any, url: str = "") -> str:
-    site = str(value or "").strip().casefold().replace(" ", "").replace("ı", "i")
-    if not site:
-        host = urlparse(url).netloc.casefold()
-        if "hepsiburada" in host:
-            return SITE_HEPSIBURADA
-        if "trendyol" in host:
-            return SITE_TRENDYOL
-        if "network" in host:
-            return SITE_NETWORK
+def normalize_site(url: str = "") -> str:
+    host = urlparse(url).netloc.casefold()
+    if "hepsiburada" in host:
+        return SITE_HEPSIBURADA
+    if "trendyol" in host:
+        return SITE_TRENDYOL
+    if "network" in host:
+        return SITE_NETWORK
+    if "amazon" in host:
         return SITE_AMAZON
-    aliases = {
-        "amazon.com.tr": SITE_AMAZON,
-        "amazon": SITE_AMAZON,
-        "hepsiburada.com": SITE_HEPSIBURADA,
-        "hepsiburada": SITE_HEPSIBURADA,
-        "trendyol.com": SITE_TRENDYOL,
-        "trendyol": SITE_TRENDYOL,
-        "network.com.tr": SITE_NETWORK,
-        "network": SITE_NETWORK,
-    }
-    site = aliases.get(site, site)
-    if site not in SUPPORTED_PRODUCT_SITES:
-        raise HermesError(f"Desteklenmeyen site secildi: {value}")
-    return site
+    raise HermesError(f"Desteklenmeyen site alan adi: {host or url}")
 
 
 def site_label(site: str) -> str:
