@@ -30,7 +30,7 @@ def _prepare_products(raw_products: object) -> List[ProductRule]:
         url = str(item.get("url") or "").strip()
         if not url:
             continue
-        site = normalize_site(item.get("site"), url)
+        site = normalize_site("", url)
         name = str(item.get("name") or url).strip()
         products.append(
             ProductRule(
