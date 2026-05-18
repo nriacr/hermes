@@ -119,6 +119,23 @@ def _filter_cards_before_stop(cards: List[Any], soup: BeautifulSoup):
     return [card for card in cards if id(card) not in after_marker_ids]
 
 
+def _keyword_words(keyword: str) -> List[str]:
+    normalized = normalize_text(keyword)
+    return [word for word in re.split(r"\s+", normalized) if word]
+
+
+def title_matches_keyword(title: str, keyword: str) -> bool:
+    words = _keyword_words(keyword)
+    if not words:
+        return False
+    normalized_title = normalize_text(title)
+    return all(word in normalized_title for word in words)
+
+
+def title_matches_any_keyword(title: str, keywords: List[str]) -> bool:
+    return any(title_matches_keyword(title, keyword) for keyword in keywords)
+
+
 def extract_result_candidates(html: str, max_items_to_scan: int) -> List[AmazonSearchCandidate]:
     soup = BeautifulSoup(html, "html.parser")
     cards: List[Any] = []
@@ -169,5 +186,4 @@ def dedupe_results(results: List[SearchResultItem]) -> List[SearchResultItem]:
 
 
 def filter_matching_results(results: List[SearchResultItem], product_name: str) -> List[SearchResultItem]:
-    needle = normalize_text(product_name)
-    return [item for item in results if needle in normalize_text(item.title)]
+    return [item for item in results if title_matches_keyword(item.title, product_name)]
