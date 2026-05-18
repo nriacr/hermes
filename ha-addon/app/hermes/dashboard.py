@@ -135,6 +135,39 @@ def _error_link_details(error_text):
     return details
 
 
+def _unique_text(values):
+    unique = []
+    seen = set()
+    for value in values:
+        text = repair_mojibake(value).strip()
+        if not text or text.casefold() in seen:
+            continue
+        seen.add(text.casefold())
+        unique.append(text)
+    return unique
+
+
+def _target_labels_for_page(page, targets, page_count):
+    page_name = str(page.get("name") or "").strip()
+    labels = []
+    for target in targets:
+        if not isinstance(target, dict):
+            continue
+        search_name = str(target.get("search_name") or "").strip()
+        if search_name == page_name or (not search_name and page_count == 1):
+            label = str(target.get("product_name") or target.get("name") or "").strip()
+            if label:
+                labels.append(label)
+    return _unique_text(labels)
+
+
+def _target_text(labels):
+    if not labels:
+        return "Aranan keyword belirtilmemiş"
+    prefix = "Aranan keyword" if len(labels) == 1 else "Aranan keywordler"
+    return f"{prefix}: {', '.join(labels)}"
+
+
 def _context_for_product(item):
     url = str(item.get("url") or "").strip()
     if not url:
@@ -151,6 +184,8 @@ def _context_for_product(item):
         "title": f"{seller}: {name}",
         "meta": "Ürün linki kontrol edilirken hata oluştu.",
         "url": url,
+        "urls": [url],
+        "keywords": [name],
     }
 
 
@@ -168,21 +203,14 @@ def _context_for_search_page(page, targets, page_count):
     urls = _search_urls_from_page(page)
     if not name or not urls:
         return None
-    target_names = []
-    for target in targets:
-        if not isinstance(target, dict):
-            continue
-        search_name = str(target.get("search_name") or "").strip()
-        if search_name == name or (not search_name and page_count == 1):
-            label = str(target.get("name") or target.get("product_name") or "").strip()
-            if label:
-                target_names.append(label)
-    target_text = ", ".join(target_names) if target_names else "Hedef ürün belirtilmemiş"
+    labels = _target_labels_for_page(page, targets, page_count)
     key = normalize_item_key("amazon_search", name, *urls)
     return key, {
         "title": f"Amazon arama: {name}",
-        "meta": f"Hedefler: {target_text}",
+        "meta": _target_text(labels),
         "url": urls[0],
+        "urls": urls,
+        "keywords": labels,
     }
 
 
@@ -208,20 +236,60 @@ def _error_contexts(options):
     return contexts
 
 
+def _state_target_keywords(state_entry):
+    targets = state_entry.get("targets")
+    if not isinstance(targets, dict):
+        return []
+    labels = []
+    for key in targets.keys():
+        label = str(key or "").replace("_", " ").strip()
+        if label:
+            labels.append(label)
+    return _unique_text(labels)
+
+
+def _urls_from_error_and_state(raw_error, state_entry):
+    urls = [item["url"] for item in _error_link_details(raw_error)]
+    for field in ("url", "configured_url"):
+        url = str(state_entry.get(field) or "").strip()
+        if url:
+            urls.append(url)
+    return _unique_text(urls)
+
+
+def _find_error_context(state_key, state_entry, raw_error, contexts):
+    if state_key in contexts:
+        return contexts[state_key]
+    failed_urls = _urls_from_error_and_state(raw_error, state_entry)
+    for context in contexts.values():
+        context_urls = context.get("urls") or [context.get("url")]
+        context_urls = [str(url or "").strip() for url in context_urls]
+        if any(url and url in context_urls for url in failed_urls):
+            return context
+    return {}
+
+
 def _error_detail(state_key, state_entry, contexts):
     raw_error = state_entry.get("last_error")
     is_search = isinstance(state_entry.get("targets"), dict)
-    context = contexts.get(state_key, {})
+    context = _find_error_context(state_key, state_entry, raw_error, contexts)
     failed_links = _error_link_details(raw_error)
+    keywords = context.get("keywords") or (_state_target_keywords(state_entry) if is_search else [])
+    keyword_text = _target_text(keywords) if is_search else ""
+    for failed_link in failed_links:
+        if keyword_text:
+            failed_link["keywords"] = keyword_text
     url_text = (
         (failed_links[0]["url"] if failed_links else "")
         or str(context.get("url") or state_entry.get("url") or "").strip()
         or _extract_first_url(raw_error)
     )
     title = context.get("title") or _site_name(state_entry.get("site"), is_search)
-    meta = context.get("meta")
+    meta = context.get("meta") or keyword_text
     if not meta:
         meta = "Amazon arama sayfası kontrol edilirken hata oluştu." if is_search else "Ürün kontrol edilirken hata oluştu."
+    elif is_search and "keyword" not in meta.casefold():
+        meta = f"{meta} · {keyword_text}" if keyword_text else meta
     return {
         "title": repair_mojibake(title),
         "meta": repair_mojibake(meta),
@@ -260,8 +328,9 @@ def _collect_summary():
                 continue
             checked_at = parse_iso_datetime(value.get("last_checked_at"))
             if checked_at:
-                last_checks.append(checked_at.astimezone())
-                if value.get("last_error") and now - checked_at.astimezone() <= error_cutoff:
+                checked_local = checked_at.astimezone()
+                last_checks.append(checked_local)
+                if value.get("last_error") and now - checked_local <= error_cutoff:
                     error_count += 1
                     detail = _error_detail(key, value, contexts)
                     detail_key = _error_detail_key(detail)
@@ -278,17 +347,14 @@ def _collect_summary():
                         last_checks.append(checked_at.astimezone())
 
     interval_minutes = int(options.get("interval_minutes", 30) or 30)
+    last_check = max(last_checks) if last_checks else None
     return {
         "interval": interval_minutes,
         "products": len(products),
         "amazon_pages": len(pages),
         "amazon_targets": len(targets),
-        "last_check": max(last_checks).strftime("%Y-%m-%d %H:%M:%S") if last_checks else "-",
-        "next_check": (
-            (max(last_checks) + timedelta(minutes=interval_minutes)).strftime("%Y-%m-%d %H:%M:%S")
-            if last_checks
-            else "-"
-        ),
+        "last_check": last_check.strftime("%Y-%m-%d %H:%M:%S") if last_check else "-",
+        "next_check": (last_check + timedelta(minutes=interval_minutes)).strftime("%Y-%m-%d %H:%M:%S") if last_check else "-",
         "errors": error_count,
         "error_details": error_details[:4],
         "configured": bool(options),
@@ -373,7 +439,7 @@ def _send_test_notification():
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace").strip()
         return False, f"Pushover hata verdi: {exc.code} {detail[:180]}"
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         return False, f"Pushover test bildirimi gönderilemedi: {exc}"
 
 
@@ -387,9 +453,12 @@ def _render_failed_links(detail):
         if not url:
             continue
         message = escape(str(item.get("message") or "Hata ayrıntısı yok."))
+        keywords = escape(str(item.get("keywords") or ""))
+        keyword_line = f"<strong>{keywords}</strong>" if keywords else ""
         rendered.append(
             "<div class='failed-link'>"
             f"<span>Hatalı link</span>"
+            f"{keyword_line}"
             f"<a href='{escape(url, quote=True)}' target='_blank' rel='noopener noreferrer'>{escape(_short_link(url, 96))}</a>"
             f"<em>{message}</em>"
             "</div>"
@@ -408,10 +477,7 @@ def _render_error_details(error_details):
         url = str(detail.get("url") or "").strip()
         link = ""
         if url:
-            link = (
-                f"<a href='{escape(url, quote=True)}' target='_blank' rel='noopener noreferrer'>"
-                f"Linki aç</a>"
-            )
+            link = f"<a href='{escape(url, quote=True)}' target='_blank' rel='noopener noreferrer'>Linki aç</a>"
         items.append(
             "<li>"
             f"<strong>{title}</strong>"
@@ -473,7 +539,7 @@ p {{ margin:0; color:var(--muted); line-height:1.55; }}
 .notice {{ margin-top:16px; padding:12px 14px; border-radius:12px; font-weight:700; }} .notice-ok {{ color:#c6f7e6; background:rgba(127,220,184,.14); border:1px solid rgba(127,220,184,.38); }} .notice-fail {{ color:#ffd8e3; background:rgba(255,156,181,.14); border:1px solid rgba(255,156,181,.38); }}
 .grid {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:12px; margin-top:18px; }} .card {{ border:1px solid var(--line); border-radius:16px; padding:16px; background:var(--card); min-height:92px; }} .card span {{ display:block; color:var(--muted); font-size:13px; margin-bottom:10px; }} .card strong {{ display:block; font-size:22px; line-height:1.2; overflow-wrap:anywhere; }}
 .card.status-ok {{ border-color:rgba(127,220,184,.38); background:linear-gradient(135deg,rgba(127,220,184,.12),var(--card) 62%); }} .card.status-ok strong {{ color:var(--ok); }} .card.status-warn strong {{ color:var(--warn); }} .card.status-error strong {{ color:var(--bad); }}
-.error-card {{ grid-column:1 / -1; }} .error-card ul {{ display:grid; gap:10px; margin:12px 0 0; padding:0; list-style:none; color:var(--text); }} .error-card li {{ display:grid; gap:6px; padding:10px 12px; border:1px solid rgba(255,156,181,.28); border-radius:12px; background:rgba(255,156,181,.08); font-size:13px; line-height:1.35; overflow-wrap:anywhere; }} .error-card li.empty-error {{ border-color:rgba(127,220,184,.26); background:rgba(127,220,184,.08); color:var(--muted); }} .error-card li strong {{ font-size:14px; color:var(--text); }} .error-card li span {{ margin:0; color:var(--muted); }} .error-card li em {{ color:#ffd8e3; font-style:normal; }} .error-card li a {{ color:#9ec0ff; font-weight:800; text-decoration:none; width:max-content; }} .error-card li a:hover {{ text-decoration:underline; }} .failed-link {{ display:grid; gap:3px; margin-top:4px; padding:8px 10px; border-radius:10px; background:rgba(143,185,255,.10); border:1px solid rgba(143,185,255,.22); }} .failed-link span {{ color:#c7d7ff; font-weight:800; font-size:12px; }} .failed-link em {{ color:#cfd6f6; font-size:12px; }}
+.error-card {{ grid-column:1 / -1; }} .error-card ul {{ display:grid; gap:10px; margin:12px 0 0; padding:0; list-style:none; color:var(--text); }} .error-card li {{ display:grid; gap:6px; padding:10px 12px; border:1px solid rgba(255,156,181,.28); border-radius:12px; background:rgba(255,156,181,.08); font-size:13px; line-height:1.35; overflow-wrap:anywhere; }} .error-card li.empty-error {{ border-color:rgba(127,220,184,.26); background:rgba(127,220,184,.08); color:var(--muted); }} .error-card li strong {{ font-size:14px; color:var(--text); }} .error-card li span {{ margin:0; color:var(--muted); }} .error-card li em {{ color:#ffd8e3; font-style:normal; }} .error-card li a {{ color:#9ec0ff; font-weight:800; text-decoration:none; width:max-content; }} .error-card li a:hover {{ text-decoration:underline; }} .failed-link {{ display:grid; gap:3px; margin-top:4px; padding:8px 10px; border-radius:10px; background:rgba(143,185,255,.10); border:1px solid rgba(143,185,255,.22); }} .failed-link span {{ color:#c7d7ff; font-weight:800; font-size:12px; }} .failed-link strong {{ color:#e8eaf8; font-size:13px; }} .failed-link em {{ color:#cfd6f6; font-size:12px; }}
 .summary-panel {{ margin-top:18px; border:1px solid var(--line); border-radius:18px; padding:16px; background:var(--card); }} .summary-head {{ display:flex; align-items:flex-end; justify-content:space-between; gap:12px; margin-bottom:12px; }} .summary-head span {{ color:var(--muted); font-size:13px; white-space:nowrap; }}
 .table-wrap {{ overflow-x:auto; border:1px solid var(--line); border-radius:14px; }} table {{ width:100%; border-collapse:collapse; min-width:760px; }} th,td {{ padding:10px 9px; border-bottom:1px solid var(--line); text-align:right; white-space:nowrap; }} th {{ color:#c8d0ff; background:var(--head); font-size:12px; text-transform:uppercase; letter-spacing:.04em; }} td {{ color:var(--text); font-variant-numeric:tabular-nums; }} tr:last-child td {{ border-bottom:none; }} th:nth-child(1),td:nth-child(1) {{ width:112px; }} th:nth-child(1),td:nth-child(1),th:nth-child(2),td:nth-child(2) {{ text-align:left; }} th:not(:nth-child(2)),td:not(:nth-child(2)) {{ width:108px; }}
 tbody tr.site-amazon {{ --site-bg:rgba(255,199,116,.10); --site-line:rgba(255,199,116,.48); --site-link:#ffd79a; }} tbody tr.site-hepsiburada {{ --site-bg:rgba(255,153,112,.10); --site-line:rgba(255,153,112,.48); --site-link:#ffc1a5; }} tbody tr.site-network {{ --site-bg:rgba(143,214,196,.10); --site-line:rgba(143,214,196,.48); --site-link:#aee7d8; }} tbody tr.site-trendyol {{ --site-bg:rgba(245,170,196,.10); --site-line:rgba(245,170,196,.48); --site-link:#f7c1d3; }} tbody tr.site-other {{ --site-bg:rgba(183,177,222,.10); --site-line:rgba(183,177,222,.42); --site-link:#cbc6ef; }} tbody tr[class*='site-'] td {{ background:linear-gradient(90deg,var(--site-bg),rgba(30,33,57,.28)); }} tbody tr[class*='site-'] td:first-child {{ border-left:4px solid var(--site-line); color:var(--site-link); font-weight:800; }} tbody tr[class*='site-'] .product-cell a {{ color:var(--site-link); }} tbody tr[class*='site-']:hover td {{ background:linear-gradient(90deg,rgba(255,255,255,.055),var(--site-bg)); }}
