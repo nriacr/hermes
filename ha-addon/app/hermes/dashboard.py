@@ -90,6 +90,19 @@ def _site_name(raw_site, is_search):
     return labels.get(str(raw_site or "").strip().lower(), "Ürün kontrolü")
 
 
+def _site_theme_class(seller):
+    normalized = repair_mojibake(seller).casefold()
+    if "amazon" in normalized:
+        return "site-amazon"
+    if "hepsiburada" in normalized:
+        return "site-hepsiburada"
+    if "network" in normalized:
+        return "site-network"
+    if "trendyol" in normalized:
+        return "site-trendyol"
+    return "site-other"
+
+
 def _clean_error_message(error_text):
     text = repair_mojibake(error_text or "").strip()
     if not text:
@@ -295,7 +308,8 @@ def _render_table():
 
     row_html = []
     for row in rows:
-        seller = escape(repair_mojibake(row.get("seller") or "-"))
+        seller_text = repair_mojibake(row.get("seller") or "-")
+        seller = escape(seller_text)
         product_title = escape(repair_mojibake(row.get("product_title") or "-"))
         product_url = str(row.get("product_url") or "").strip()
         if product_url:
@@ -308,7 +322,10 @@ def _render_table():
         price = escape(str(row.get("price", "-")))
         target = escape(str(row.get("target", "-")))
         difference = escape(str(row.get("difference", "-")))
-        row_class = ' class="deal-row"' if _is_target_hit(row) else ""
+        row_classes = [_site_theme_class(seller_text)]
+        if _is_target_hit(row):
+            row_classes.append("deal-row")
+        row_class = f' class="{" ".join(row_classes)}"'
         row_html.append(
             f"<tr{row_class}><td>{seller}</td>"
             f'<td class="product-cell" title="{product_title}">{label}</td>'
@@ -459,7 +476,8 @@ p {{ margin:0; color:var(--muted); line-height:1.55; }}
 .error-card {{ grid-column:1 / -1; }} .error-card ul {{ display:grid; gap:10px; margin:12px 0 0; padding:0; list-style:none; color:var(--text); }} .error-card li {{ display:grid; gap:6px; padding:10px 12px; border:1px solid rgba(255,156,181,.28); border-radius:12px; background:rgba(255,156,181,.08); font-size:13px; line-height:1.35; overflow-wrap:anywhere; }} .error-card li.empty-error {{ border-color:rgba(127,220,184,.26); background:rgba(127,220,184,.08); color:var(--muted); }} .error-card li strong {{ font-size:14px; color:var(--text); }} .error-card li span {{ margin:0; color:var(--muted); }} .error-card li em {{ color:#ffd8e3; font-style:normal; }} .error-card li a {{ color:#9ec0ff; font-weight:800; text-decoration:none; width:max-content; }} .error-card li a:hover {{ text-decoration:underline; }} .failed-link {{ display:grid; gap:3px; margin-top:4px; padding:8px 10px; border-radius:10px; background:rgba(143,185,255,.10); border:1px solid rgba(143,185,255,.22); }} .failed-link span {{ color:#c7d7ff; font-weight:800; font-size:12px; }} .failed-link em {{ color:#cfd6f6; font-size:12px; }}
 .summary-panel {{ margin-top:18px; border:1px solid var(--line); border-radius:18px; padding:16px; background:var(--card); }} .summary-head {{ display:flex; align-items:flex-end; justify-content:space-between; gap:12px; margin-bottom:12px; }} .summary-head span {{ color:var(--muted); font-size:13px; white-space:nowrap; }}
 .table-wrap {{ overflow-x:auto; border:1px solid var(--line); border-radius:14px; }} table {{ width:100%; border-collapse:collapse; min-width:760px; }} th,td {{ padding:10px 9px; border-bottom:1px solid var(--line); text-align:right; white-space:nowrap; }} th {{ color:#c8d0ff; background:var(--head); font-size:12px; text-transform:uppercase; letter-spacing:.04em; }} td {{ color:var(--text); font-variant-numeric:tabular-nums; }} tr:last-child td {{ border-bottom:none; }} th:nth-child(1),td:nth-child(1) {{ width:112px; }} th:nth-child(1),td:nth-child(1),th:nth-child(2),td:nth-child(2) {{ text-align:left; }} th:not(:nth-child(2)),td:not(:nth-child(2)) {{ width:108px; }}
-.product-cell {{ max-width:430px; white-space:normal; line-height:1.25; }} .product-cell a {{ color:#9ec0ff; text-decoration:none; }} .product-cell a:hover {{ color:#d1b3ff; text-decoration:underline; }} .product-cell span {{ display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; text-overflow:ellipsis; }} .deal-row {{ background:rgba(127,220,184,.14); }} .deal-row td {{ color:#b7f0dc; font-weight:800; }} .deal-row .product-cell a {{ color:#b7f0dc; }} .note {{ margin-top:18px; border-left:4px solid #b79ad6; padding:12px 14px; background:rgba(183,154,214,.15); border-radius:10px; }} .footer {{ margin-top:18px; font-size:13px; color:var(--muted); }}
+tbody tr.site-amazon {{ --site-bg:rgba(255,199,116,.10); --site-line:rgba(255,199,116,.48); --site-link:#ffd79a; }} tbody tr.site-hepsiburada {{ --site-bg:rgba(255,153,112,.10); --site-line:rgba(255,153,112,.48); --site-link:#ffc1a5; }} tbody tr.site-network {{ --site-bg:rgba(143,214,196,.10); --site-line:rgba(143,214,196,.48); --site-link:#aee7d8; }} tbody tr.site-trendyol {{ --site-bg:rgba(245,170,196,.10); --site-line:rgba(245,170,196,.48); --site-link:#f7c1d3; }} tbody tr.site-other {{ --site-bg:rgba(183,177,222,.10); --site-line:rgba(183,177,222,.42); --site-link:#cbc6ef; }} tbody tr[class*='site-'] td {{ background:linear-gradient(90deg,var(--site-bg),rgba(30,33,57,.28)); }} tbody tr[class*='site-'] td:first-child {{ border-left:4px solid var(--site-line); color:var(--site-link); font-weight:800; }} tbody tr[class*='site-'] .product-cell a {{ color:var(--site-link); }} tbody tr[class*='site-']:hover td {{ background:linear-gradient(90deg,rgba(255,255,255,.055),var(--site-bg)); }}
+.product-cell {{ max-width:430px; white-space:normal; line-height:1.25; }} .product-cell a {{ color:#9ec0ff; text-decoration:none; }} .product-cell a:hover {{ color:#d1b3ff; text-decoration:underline; }} .product-cell span {{ display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; text-overflow:ellipsis; }} .deal-row td {{ color:#b7f0dc; font-weight:800; }} .deal-row td:first-child {{ color:var(--site-link); }} .deal-row .product-cell a {{ color:#b7f0dc; }} .note {{ margin-top:18px; border-left:4px solid #b79ad6; padding:12px 14px; background:rgba(183,154,214,.15); border-radius:10px; }} .footer {{ margin-top:18px; font-size:13px; color:var(--muted); }}
 </style></head><body><main><div class="hero"><div class="badge">Hermes</div><p>Ürün linkleri çok siteli çalışır; Amazon arama sayfaları Amazon'a özel mod olarak korunur.</p><div class="actions"><a class="button primary" href="{log_url}" target="_top">LOG</a><a class="button secondary" href="{app_url}" target="_top">Config</a><form class="inline-form" method="post" action="./test-pushover"><button class="button test" type="submit">Pushover</button></form></div>{notice_html}<div class="grid">{card_html}{error_card_html}</div>{_render_table()}<p class="note">LOG butonu log sekmesini, Config butonu yapılandırma sekmesini açar. Pushover butonu test bildirimi gönderir.</p><p class="footer">Sayfa 60 saniyede bir otomatik yenilenir.</p></div></main></body></html>"""
     return html.encode("utf-8")
 
