@@ -6,7 +6,6 @@ from .amazon_common import extract_secondary_offer_price
 from .base import (
     extract_jsonld_product,
     extract_price_from_meta,
-    extract_price_from_scripts,
     extract_price_from_selectors,
     extract_title,
     soup_from_html,
@@ -17,8 +16,6 @@ AMAZON_PRODUCT_SELECTORS = [
     "#corePrice_feature_div .a-price .a-offscreen",
     "#tp_price_block_total_price_ww .a-offscreen",
     ".apexPriceToPay .a-offscreen",
-    ".a-price.aok-align-center .a-offscreen",
-    ".a-price .a-offscreen",
 ]
 
 
@@ -32,7 +29,6 @@ def extract_offer(html: str) -> OfferResult:
         jsonld_price,
         extract_price_from_meta(soup),
         extract_price_from_selectors(soup, AMAZON_PRODUCT_SELECTORS),
-        extract_price_from_scripts(html),
     ):
         if price is not None:
             return OfferResult(title=title, price=price, seller=None)
