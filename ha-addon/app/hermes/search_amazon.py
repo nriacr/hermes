@@ -1,4 +1,6 @@
 import re
+from dataclasses import dataclass
+from decimal import Decimal
 from typing import Any, List, Optional
 
 from bs4 import BeautifulSoup
@@ -34,6 +36,13 @@ AMAZON_SEARCH_STOP_SECTION_MARKERS = (
     "baktiginiz urunlere gore belirlenen urunler",
     "tarama gecmisinizdeki urunleri goruntuleyen musteriler ayrica sunlari da goruntuledi",
 )
+
+
+@dataclass
+class AmazonSearchCandidate:
+    title: str
+    url: str
+    price: Optional[Decimal] = None
 
 
 def _extract_card_title(card: BeautifulSoup) -> Optional[str]:
@@ -110,7 +119,7 @@ def _filter_cards_before_stop(cards: List[Any], soup: BeautifulSoup):
     return [card for card in cards if id(card) not in after_marker_ids]
 
 
-def extract_results(html: str, max_items_to_scan: int) -> List[SearchResultItem]:
+def extract_result_candidates(html: str, max_items_to_scan: int) -> List[AmazonSearchCandidate]:
     soup = BeautifulSoup(html, "html.parser")
     cards: List[Any] = []
     for selector in AMAZON_SEARCH_CARD_SELECTORS:
@@ -119,24 +128,34 @@ def extract_results(html: str, max_items_to_scan: int) -> List[SearchResultItem]
             cards = found
             break
 
-    results: List[SearchResultItem] = []
+    candidates: List[AmazonSearchCandidate] = []
     seen_urls = set()
     for card in cards:
         asin = str(card.get("data-asin", "")).strip() or ""
         if card.name == "div" and card.has_attr("data-asin") and not asin:
             continue
-        if len(results) >= max_items_to_scan:
+        if len(candidates) >= max_items_to_scan:
             break
         title = _extract_card_title(card)
-        price = _extract_card_price(card)
         url = _extract_card_url(card, asin)
-        if not title or price is None or not url or url in seen_urls:
+        if not title or not url or url in seen_urls:
             continue
         seen_urls.add(url)
-        results.append(SearchResultItem(title=title, url=url, price=price))
+        candidates.append(AmazonSearchCandidate(title=title, url=url, price=_extract_card_price(card)))
 
-    if not results:
+    if not candidates:
         raise HermesError("Amazon arama sonuç sayfasında okunabilir ürün bulunamadı.")
+    return candidates
+
+
+def extract_results(html: str, max_items_to_scan: int) -> List[SearchResultItem]:
+    results = [
+        SearchResultItem(title=item.title, url=item.url, price=item.price)
+        for item in extract_result_candidates(html, max_items_to_scan)
+        if item.price is not None
+    ]
+    if not results:
+        raise HermesError("Amazon arama sonuç sayfasında okunabilir fiyat bulunamadı.")
     return results
 
 
