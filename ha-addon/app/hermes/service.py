@@ -34,6 +34,7 @@ from .utils import (
     log_cell,
     normalize_item_key,
     normalize_key,
+    normalize_text,
     parse_iso_datetime,
     site_label,
     utc_now,
@@ -237,8 +238,17 @@ def _fetch_amazon_detail_result(session: requests.Session, candidate, timeout: i
     return SearchResultItem(title=title, url=url, price=offer.price)
 
 
+def _matches_any_target(title: str, target_keywords: List[str]) -> bool:
+    normalized_title = normalize_text(title)
+    return any(normalize_text(keyword) in normalized_title for keyword in target_keywords if keyword)
+
+
 def _fetch_amazon_search_results(
-    session: requests.Session, search_url: str, timeout: int, max_items_to_scan: int
+    session: requests.Session,
+    search_url: str,
+    timeout: int,
+    max_items_to_scan: int,
+    target_keywords: List[str],
 ):
     wait_before_request("Arama")
     response = fetch_with_retries(session, search_url, timeout)
@@ -248,15 +258,21 @@ def _fetch_amazon_search_results(
 
     candidates = extract_result_candidates(html, max_items_to_scan)
     results: List[SearchResultItem] = []
+    skipped_detail_count = 0
     for candidate in candidates:
         if candidate.price is not None:
             results.append(SearchResultItem(title=candidate.title, url=candidate.url, price=candidate.price))
+            continue
+        if not _matches_any_target(candidate.title, target_keywords):
+            skipped_detail_count += 1
             continue
         try:
             results.append(_fetch_amazon_detail_result(session, candidate, timeout))
         except Exception as exc:  # noqa: BLE001
             log(f"Amazon arama detay fiyatı okunamadı: {log_cell(candidate.title, 60)} | {exc}")
 
+    if skipped_detail_count:
+        log(f"Amazon detay fiyatı atlandı: eslesmeyen_urun={skipped_detail_count}")
     if not results:
         raise HermesError("Amazon arama sonuçlarında veya ürün detaylarında okunabilir fiyat bulunamadı.")
     return results
@@ -359,10 +375,15 @@ def check_once(config: HermesConfig) -> None:
         try:
             all_results = []
             failed_urls = []
+            target_keywords = [target.product_name for target in page.targets]
             for idx, search_url in enumerate(page.search_urls, start=1):
                 try:
                     url_results = _fetch_amazon_search_results(
-                        session, search_url, config.request_timeout_seconds, page.max_items_to_scan
+                        session,
+                        search_url,
+                        config.request_timeout_seconds,
+                        page.max_items_to_scan,
+                        target_keywords,
                     )
                     all_results.extend(url_results)
                     log(
