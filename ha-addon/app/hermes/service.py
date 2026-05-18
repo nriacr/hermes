@@ -24,7 +24,12 @@ from .logging_utils import log
 from .models import HermesConfig, PriceSummaryRow, SearchResultItem
 from .notifier import send_pushover
 from .providers.registry import extract_offer
-from .search_amazon import dedupe_results, extract_result_candidates, filter_matching_results
+from .search_amazon import (
+    dedupe_results,
+    extract_result_candidates,
+    filter_matching_results,
+    title_matches_any_keyword,
+)
 from .storage import load_json, save_json
 from .utils import (
     format_local_datetime,
@@ -34,7 +39,6 @@ from .utils import (
     log_cell,
     normalize_item_key,
     normalize_key,
-    normalize_text,
     parse_iso_datetime,
     site_label,
     utc_now,
@@ -238,11 +242,6 @@ def _fetch_amazon_detail_result(session: requests.Session, candidate, timeout: i
     return SearchResultItem(title=title, url=url, price=offer.price)
 
 
-def _matches_any_target(title: str, target_keywords: List[str]) -> bool:
-    normalized_title = normalize_text(title)
-    return any(normalize_text(keyword) in normalized_title for keyword in target_keywords if keyword)
-
-
 def _fetch_amazon_search_results(
     session: requests.Session,
     search_url: str,
@@ -263,7 +262,7 @@ def _fetch_amazon_search_results(
         if candidate.price is not None:
             results.append(SearchResultItem(title=candidate.title, url=candidate.url, price=candidate.price))
             continue
-        if not _matches_any_target(candidate.title, target_keywords):
+        if not title_matches_any_keyword(candidate.title, target_keywords):
             skipped_detail_count += 1
             continue
         try:
