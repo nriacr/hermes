@@ -46,7 +46,7 @@ from .utils import (
 
 
 def sorted_summary_rows(rows: List[PriceSummaryRow]) -> List[PriceSummaryRow]:
-    return sorted(rows, key=lambda row: row.difference, reverse=True)
+    return sorted(rows, key=lambda row: (row.seller.casefold(), abs(row.difference), row.price))
 
 
 def save_price_summary(rows: List[PriceSummaryRow]) -> None:
