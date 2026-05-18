@@ -13,6 +13,7 @@ from .constants import (
     AMAZON_SEARCH_HTTP_COOLDOWN_SECONDS,
     NOTIFY_REPEAT_SECONDS,
     REQUEST_PRE_DELAY_SECONDS,
+    SITE_AMAZON,
     SITE_HEPSIBURADA,
     STATE_PATH,
     SUMMARY_PATH,
@@ -20,10 +21,10 @@ from .constants import (
 from .errors import HermesError
 from .http_client import cleaned_html, fetch_hepsiburada_page, fetch_with_retries
 from .logging_utils import log
-from .models import HermesConfig, PriceSummaryRow
+from .models import HermesConfig, PriceSummaryRow, SearchResultItem
 from .notifier import send_pushover
 from .providers.registry import extract_offer
-from .search_amazon import dedupe_results, extract_results, filter_matching_results
+from .search_amazon import dedupe_results, extract_result_candidates, filter_matching_results
 from .storage import load_json, save_json
 from .utils import (
     format_local_datetime,
@@ -220,6 +221,22 @@ def _fetch_product_offer(session: requests.Session, site: str, url: str, timeout
     return extract_offer(site, html)
 
 
+def _fetch_amazon_detail_result(session: requests.Session, candidate, timeout: int) -> SearchResultItem:
+    wait_before_request("Amazon detay")
+    response = fetch_with_retries(session, candidate.url, timeout)
+    html = cleaned_html(response)
+    if "captcha" in html.lower() and "robot" in html.lower():
+        raise HermesError("Amazon bot korumasi nedeniyle captcha sayfasi dondu.")
+    offer = extract_offer(SITE_AMAZON, html)
+    title = offer.title or candidate.title
+    url = offer.url or candidate.url
+    log(
+        "Amazon arama fiyatı ürün detayından tamamlandı: "
+        f"{log_cell(title, 60)} | fiyat={offer.price} TL"
+    )
+    return SearchResultItem(title=title, url=url, price=offer.price)
+
+
 def _fetch_amazon_search_results(
     session: requests.Session, search_url: str, timeout: int, max_items_to_scan: int
 ):
@@ -228,7 +245,21 @@ def _fetch_amazon_search_results(
     html = cleaned_html(response)
     if "captcha" in html.lower() and "robot" in html.lower():
         raise HermesError("Amazon bot korumasi nedeniyle captcha sayfasi dondu.")
-    return extract_results(html, max_items_to_scan)
+
+    candidates = extract_result_candidates(html, max_items_to_scan)
+    results: List[SearchResultItem] = []
+    for candidate in candidates:
+        if candidate.price is not None:
+            results.append(SearchResultItem(title=candidate.title, url=candidate.url, price=candidate.price))
+            continue
+        try:
+            results.append(_fetch_amazon_detail_result(session, candidate, timeout))
+        except Exception as exc:  # noqa: BLE001
+            log(f"Amazon arama detay fiyatı okunamadı: {log_cell(candidate.title, 60)} | {exc}")
+
+    if not results:
+        raise HermesError("Amazon arama sonuçlarında veya ürün detaylarında okunabilir fiyat bulunamadı.")
+    return results
 
 
 def check_once(config: HermesConfig) -> None:
