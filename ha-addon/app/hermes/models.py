@@ -45,6 +45,8 @@ class PriceSummaryRow:
     product_url: str
     price: Decimal
     target_price: Decimal
+    min_price: Decimal
+    max_price: Decimal
 
     @property
     def difference(self) -> Decimal:
