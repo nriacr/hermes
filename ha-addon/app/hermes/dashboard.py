@@ -361,6 +361,51 @@ def _collect_summary():
     }
 
 
+def _render_table_row(row):
+    seller_text = repair_mojibake(row.get("seller") or "-")
+    seller = escape(seller_text)
+    product_title = escape(repair_mojibake(row.get("product_title") or "-"))
+    product_url = str(row.get("product_url") or "").strip()
+    if product_url:
+        label = (
+            f'<a href="{escape(product_url, quote=True)}" target="_blank" rel="noopener noreferrer">'
+            f"<span>{product_title}</span></a>"
+        )
+    else:
+        label = f"<span>{product_title}</span>"
+    price = escape(str(row.get("price", "-")))
+    target = escape(str(row.get("target", "-")))
+    difference = escape(str(row.get("difference", "-")))
+    price_range = escape(str(row.get("price_range") or f"{row.get('min_price', '-')} / {row.get('max_price', '-') }"))
+    row_classes = [_site_theme_class(seller_text)]
+    if _is_target_hit(row):
+        row_classes.append("deal-row")
+    row_class = f' class="{" ".join(row_classes)}"'
+    return (
+        f"<tr{row_class}><td>{seller}</td>"
+        f'<td class="product-cell" title="{product_title}">{label}</td>'
+        f"<td>{price}</td><td>{target}</td><td>{difference}</td><td>{price_range}</td></tr>"
+    )
+
+
+def _render_table_section(title, rows, empty_text, extra_class=""):
+    if rows:
+        body = "".join(_render_table_row(row) for row in rows)
+    else:
+        body = f"<tr class='empty-row'><td colspan='6'>{escape(empty_text)}</td></tr>"
+    return f"""
+      <div class="table-section {extra_class}">
+        <h3>{escape(title)}</h3>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Satıcı</th><th>Ürün Adı</th><th>Güncel</th><th>Hedef</th><th>Fark</th><th>Min / Maks</th></tr></thead>
+            <tbody>{body}</tbody>
+          </table>
+        </div>
+      </div>
+    """
+
+
 def _render_table():
     payload = load_json(SUMMARY_PATH, {})
     rows = payload.get("rows") if isinstance(payload.get("rows"), list) else []
@@ -372,43 +417,26 @@ def _render_table():
         </section>
         """
 
-    row_html = []
-    for row in rows:
-        seller_text = repair_mojibake(row.get("seller") or "-")
-        seller = escape(seller_text)
-        product_title = escape(repair_mojibake(row.get("product_title") or "-"))
-        product_url = str(row.get("product_url") or "").strip()
-        if product_url:
-            label = (
-                f'<a href="{escape(product_url, quote=True)}" target="_blank" rel="noopener noreferrer">'
-                f"<span>{product_title}</span></a>"
-            )
-        else:
-            label = f"<span>{product_title}</span>"
-        price = escape(str(row.get("price", "-")))
-        target = escape(str(row.get("target", "-")))
-        difference = escape(str(row.get("difference", "-")))
-        row_classes = [_site_theme_class(seller_text)]
-        if _is_target_hit(row):
-            row_classes.append("deal-row")
-        row_class = f' class="{" ".join(row_classes)}"'
-        row_html.append(
-            f"<tr{row_class}><td>{seller}</td>"
-            f'<td class="product-cell" title="{product_title}">{label}</td>'
-            f"<td>{price}</td><td>{target}</td><td>{difference}</td></tr>"
-        )
-
+    deal_rows = [row for row in rows if _is_target_hit(row)]
+    watch_rows = [row for row in rows if not _is_target_hit(row)]
     checked_at = escape(str(payload.get("checked_at") or "-"))
     row_count = escape(str(payload.get("row_count") or len(rows)))
+    deal_count = escape(str(len(deal_rows)))
+    sections = _render_table_section(
+        "Hedef Fiyat Altındaki Fırsatlar",
+        deal_rows,
+        "Şu anda hedef fiyatın altına düşen ürün yok.",
+        "deals-section",
+    )
+    sections += _render_table_section(
+        "Hedefin Üstünde Kalan Ürünler",
+        watch_rows,
+        "Hedef üstünde bekleyen ürün yok.",
+    )
     return f"""
     <section class="summary-panel">
-      <div class="summary-head"><h2>Son Fiyat Özeti</h2><span>{checked_at} · {row_count} ürün</span></div>
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>Satıcı</th><th>Ürün Adı</th><th>Fiyat</th><th>Hedef</th><th>Fark</th></tr></thead>
-          <tbody>{''.join(row_html)}</tbody>
-        </table>
-      </div>
+      <div class="summary-head"><h2>Son Fiyat Özeti</h2><span>{checked_at} · {row_count} ürün · {deal_count} fırsat</span></div>
+      {sections}
     </section>
     """
 
@@ -540,10 +568,10 @@ p {{ margin:0; color:var(--muted); line-height:1.55; }}
 .grid {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:12px; margin-top:18px; }} .card {{ border:1px solid var(--line); border-radius:16px; padding:16px; background:var(--card); min-height:92px; }} .card span {{ display:block; color:var(--muted); font-size:13px; margin-bottom:10px; }} .card strong {{ display:block; font-size:22px; line-height:1.2; overflow-wrap:anywhere; }}
 .card.status-ok {{ border-color:rgba(127,220,184,.38); background:linear-gradient(135deg,rgba(127,220,184,.12),var(--card) 62%); }} .card.status-ok strong {{ color:var(--ok); }} .card.status-warn strong {{ color:var(--warn); }} .card.status-error strong {{ color:var(--bad); }}
 .error-card {{ grid-column:1 / -1; }} .error-card ul {{ display:grid; gap:10px; margin:12px 0 0; padding:0; list-style:none; color:var(--text); }} .error-card li {{ display:grid; gap:6px; padding:10px 12px; border:1px solid rgba(255,156,181,.28); border-radius:12px; background:rgba(255,156,181,.08); font-size:13px; line-height:1.35; overflow-wrap:anywhere; }} .error-card li.empty-error {{ border-color:rgba(127,220,184,.26); background:rgba(127,220,184,.08); color:var(--muted); }} .error-card li strong {{ font-size:14px; color:var(--text); }} .error-card li span {{ margin:0; color:var(--muted); }} .error-card li em {{ color:#ffd8e3; font-style:normal; }} .error-card li a {{ color:#9ec0ff; font-weight:800; text-decoration:none; width:max-content; }} .error-card li a:hover {{ text-decoration:underline; }} .failed-link {{ display:grid; gap:3px; margin-top:4px; padding:8px 10px; border-radius:10px; background:rgba(143,185,255,.10); border:1px solid rgba(143,185,255,.22); }} .failed-link span {{ color:#c7d7ff; font-weight:800; font-size:12px; }} .failed-link strong {{ color:#e8eaf8; font-size:13px; }} .failed-link em {{ color:#cfd6f6; font-size:12px; }}
-.summary-panel {{ margin-top:18px; border:1px solid var(--line); border-radius:18px; padding:16px; background:var(--card); }} .summary-head {{ display:flex; align-items:flex-end; justify-content:space-between; gap:12px; margin-bottom:12px; }} .summary-head span {{ color:var(--muted); font-size:13px; white-space:nowrap; }}
-.table-wrap {{ overflow-x:auto; border:1px solid var(--line); border-radius:14px; }} table {{ width:100%; border-collapse:collapse; min-width:760px; }} th,td {{ padding:10px 9px; border-bottom:1px solid var(--line); text-align:right; white-space:nowrap; }} th {{ color:#c8d0ff; background:var(--head); font-size:12px; text-transform:uppercase; letter-spacing:.04em; }} td {{ color:var(--text); font-variant-numeric:tabular-nums; }} tr:last-child td {{ border-bottom:none; }} th:nth-child(1),td:nth-child(1) {{ width:112px; }} th:nth-child(1),td:nth-child(1),th:nth-child(2),td:nth-child(2) {{ text-align:left; }} th:not(:nth-child(2)),td:not(:nth-child(2)) {{ width:108px; }}
+.summary-panel {{ margin-top:18px; border:1px solid var(--line); border-radius:18px; padding:16px; background:var(--card); }} .summary-head {{ display:flex; align-items:flex-end; justify-content:space-between; gap:12px; margin-bottom:12px; }} .summary-head h2 {{ font-size:18px; }} .summary-head span {{ color:var(--muted); font-size:12px; white-space:nowrap; }} .table-section + .table-section {{ margin-top:18px; }} .table-section h3 {{ margin:0 0 9px; font-size:14px; color:#d8dcff; }} .deals-section h3 {{ color:#b7f0dc; }}
+.table-wrap {{ overflow-x:auto; border:1px solid var(--line); border-radius:14px; }} table {{ width:100%; border-collapse:collapse; min-width:860px; }} th,td {{ padding:8px 8px; border-bottom:1px solid var(--line); text-align:right; white-space:nowrap; }} th {{ color:#c8d0ff; background:var(--head); font-size:10px; text-transform:uppercase; letter-spacing:.035em; }} td {{ color:var(--text); font-size:12px; font-variant-numeric:tabular-nums; }} tr:last-child td {{ border-bottom:none; }} th:nth-child(1),td:nth-child(1) {{ width:104px; }} th:nth-child(1),td:nth-child(1),th:nth-child(2),td:nth-child(2) {{ text-align:left; }} th:not(:nth-child(2)),td:not(:nth-child(2)) {{ width:100px; }} th:nth-child(6),td:nth-child(6) {{ width:148px; }} .empty-row td {{ color:var(--muted); text-align:left; background:rgba(255,255,255,.025); }}
 tbody tr.site-amazon {{ --site-bg:rgba(255,199,116,.10); --site-line:rgba(255,199,116,.48); --site-link:#ffd79a; }} tbody tr.site-hepsiburada {{ --site-bg:rgba(255,153,112,.10); --site-line:rgba(255,153,112,.48); --site-link:#ffc1a5; }} tbody tr.site-network {{ --site-bg:rgba(143,214,196,.10); --site-line:rgba(143,214,196,.48); --site-link:#aee7d8; }} tbody tr.site-trendyol {{ --site-bg:rgba(245,170,196,.10); --site-line:rgba(245,170,196,.48); --site-link:#f7c1d3; }} tbody tr.site-other {{ --site-bg:rgba(183,177,222,.10); --site-line:rgba(183,177,222,.42); --site-link:#cbc6ef; }} tbody tr[class*='site-'] td {{ background:linear-gradient(90deg,var(--site-bg),rgba(30,33,57,.28)); }} tbody tr[class*='site-'] td:first-child {{ border-left:4px solid var(--site-line); color:var(--site-link); font-weight:800; }} tbody tr[class*='site-'] .product-cell a {{ color:var(--site-link); }} tbody tr[class*='site-']:hover td {{ background:linear-gradient(90deg,rgba(255,255,255,.055),var(--site-bg)); }}
-.product-cell {{ max-width:430px; white-space:normal; line-height:1.25; }} .product-cell a {{ color:#9ec0ff; text-decoration:none; }} .product-cell a:hover {{ color:#d1b3ff; text-decoration:underline; }} .product-cell span {{ display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; text-overflow:ellipsis; }} .deal-row td {{ color:#b7f0dc; font-weight:800; }} .deal-row td:first-child {{ color:var(--site-link); }} .deal-row .product-cell a {{ color:#b7f0dc; }} .note {{ margin-top:18px; border-left:4px solid #b79ad6; padding:12px 14px; background:rgba(183,154,214,.15); border-radius:10px; }} .footer {{ margin-top:18px; font-size:13px; color:var(--muted); }}
+.product-cell {{ max-width:360px; white-space:normal; line-height:1.22; }} .product-cell a {{ color:#9ec0ff; text-decoration:none; }} .product-cell a:hover {{ color:#d1b3ff; text-decoration:underline; }} .product-cell span {{ display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; text-overflow:ellipsis; }} .deal-row td {{ color:#b7f0dc; font-weight:800; }} .deal-row td:first-child {{ color:var(--site-link); }} .deal-row .product-cell a {{ color:#b7f0dc; }} .note {{ margin-top:18px; border-left:4px solid #b79ad6; padding:12px 14px; background:rgba(183,154,214,.15); border-radius:10px; }} .footer {{ margin-top:18px; font-size:13px; color:var(--muted); }}
 </style></head><body><main><div class="hero"><div class="badge">Hermes</div><p>Ürün linkleri çok siteli çalışır; Amazon arama sayfaları Amazon'a özel mod olarak korunur.</p><div class="actions"><a class="button primary" href="{log_url}" target="_top">LOG</a><a class="button secondary" href="{app_url}" target="_top">Config</a><form class="inline-form" method="post" action="./test-pushover"><button class="button test" type="submit">Pushover</button></form></div>{notice_html}<div class="grid">{card_html}{error_card_html}</div>{_render_table()}<p class="note">LOG butonu log sekmesini, Config butonu yapılandırma sekmesini açar. Pushover butonu test bildirimi gönderir.</p><p class="footer">Sayfa 60 saniyede bir otomatik yenilenir.</p></div></main></body></html>"""
     return html.encode("utf-8")
 
