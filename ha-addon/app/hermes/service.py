@@ -49,6 +49,25 @@ def sorted_summary_rows(rows: List[PriceSummaryRow]) -> List[PriceSummaryRow]:
     return sorted(rows, key=lambda row: (row.seller.casefold(), abs(row.difference), row.price))
 
 
+def _state_decimal(value: Any):
+    if value is None:
+        return None
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, ValueError):
+        return None
+
+
+def price_bounds(state_entry: Dict[str, Any], current_price: Decimal):
+    min_price = _state_decimal(state_entry.get("min_price"))
+    max_price = _state_decimal(state_entry.get("max_price"))
+    if min_price is None or current_price < min_price:
+        min_price = current_price
+    if max_price is None or current_price > max_price:
+        max_price = current_price
+    return min_price, max_price
+
+
 def save_price_summary(rows: List[PriceSummaryRow]) -> None:
     sorted_rows = sorted_summary_rows(rows)
     payload = {
@@ -63,6 +82,9 @@ def save_price_summary(rows: List[PriceSummaryRow]) -> None:
                 "price": format_tl(row.price),
                 "target": format_tl(row.target_price),
                 "difference": format_signed_tl(row.difference),
+                "min_price": format_tl(row.min_price),
+                "max_price": format_tl(row.max_price),
+                "price_range": f"{format_tl(row.min_price)} / {format_tl(row.max_price)}",
                 "is_target_hit": row.price <= row.target_price,
             }
             for idx, row in enumerate(sorted_rows, start=1)
@@ -146,8 +168,11 @@ def update_state_entry(
     target_price: Decimal,
     alert_sent: bool,
 ) -> Dict[str, Any]:
+    min_price, max_price = price_bounds(state_entry, current_price)
     updated = dict(state_entry)
     updated["last_price"] = str(current_price)
+    updated["min_price"] = str(min_price)
+    updated["max_price"] = str(max_price)
     updated["last_checked_at"] = utc_now()
     updated["was_below_target"] = current_price <= target_price
     if alert_sent:
@@ -293,6 +318,7 @@ def check_once(config: HermesConfig) -> None:
             offer = _fetch_product_offer(session, product.site, product.url, config.request_timeout_seconds)
             display_name = product.name or offer.title or product.url
             matched_url = offer.url or product.url
+            min_price, max_price = price_bounds(state_entry, offer.price)
             summary_rows.append(
                 PriceSummaryRow(
                     seller=seller,
@@ -300,6 +326,8 @@ def check_once(config: HermesConfig) -> None:
                     product_url=matched_url,
                     price=offer.price,
                     target_price=product.target_price,
+                    min_price=min_price,
+                    max_price=max_price,
                 )
             )
             log(
@@ -417,6 +445,10 @@ def check_once(config: HermesConfig) -> None:
                 )
 
                 for match in matches:
+                    item_key = normalize_key(match.url)
+                    seen_item_keys.add(item_key)
+                    item_state = dict(items_state.get(item_key, {}))
+                    min_price, max_price = price_bounds(item_state, match.price)
                     summary_rows.append(
                         PriceSummaryRow(
                             seller="Amazon",
@@ -424,11 +456,10 @@ def check_once(config: HermesConfig) -> None:
                             product_url=match.url,
                             price=match.price,
                             target_price=target.target_price,
+                            min_price=min_price,
+                            max_price=max_price,
                         )
                     )
-                    item_key = normalize_key(match.url)
-                    seen_item_keys.add(item_key)
-                    item_state = dict(items_state.get(item_key, {}))
                     alert_sent = False
 
                     if should_alert(
