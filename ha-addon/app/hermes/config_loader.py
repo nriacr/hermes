@@ -14,6 +14,16 @@ def _required_value(item: Dict[str, object], field_name: str, context: str) -> s
     return value
 
 
+def _bounded_integer(payload: Dict[str, object], field_name: str, default: int, minimum: int, maximum: int) -> int:
+    try:
+        value = int(payload.get(field_name, default))
+    except (TypeError, ValueError) as exc:
+        raise HermesError(f"{field_name} tam sayı olmalı.") from exc
+    if not minimum <= value <= maximum:
+        raise HermesError(f"{field_name} {minimum} ile {maximum} arasında olmalı.")
+    return value
+
+
 def _parse_search_urls(item: Dict[str, object]) -> List[str]:
     urls: List[str] = []
     for field_name in ("search_url", "search_url_2"):
@@ -111,8 +121,8 @@ def load_config() -> HermesConfig:
     if not isinstance(payload, dict):
         payload = {}
 
-    interval_minutes = int(payload.get("interval_minutes", 30))
-    request_timeout_seconds = int(payload.get("request_timeout_seconds", 20))
+    interval_minutes = _bounded_integer(payload, "interval_minutes", 30, 1, 1440)
+    request_timeout_seconds = _bounded_integer(payload, "request_timeout_seconds", 20, 5, 120)
     user_key = str(payload.get("pushover_user_key", "")).strip()
     api_token = str(payload.get("pushover_api_token", "")).strip()
 
