@@ -21,7 +21,7 @@ from .constants import (
 from .errors import HermesError
 from .http_client import cleaned_html, fetch_hepsiburada_page, fetch_with_retries
 from .logging_utils import log
-from .models import HermesConfig, PriceSummaryRow, SearchResultItem
+from .models import HermesConfig, PriceSummaryRow, ProductRule, SearchResultItem
 from .notifier import send_pushover
 from .providers.registry import extract_offer
 from .search_amazon import (
@@ -66,6 +66,32 @@ def price_bounds(state_entry: Dict[str, Any], current_price: Decimal):
     if max_price is None or current_price > max_price:
         max_price = current_price
     return min_price, max_price
+
+
+def product_check_due(product: ProductRule, state_entry: Dict[str, Any], global_interval_minutes: int) -> bool:
+    interval_minutes = product.check_interval_minutes or global_interval_minutes
+    last_checked = parse_iso_datetime(state_entry.get("last_checked_at"))
+    if not last_checked:
+        return True
+    elapsed_seconds = (local_now().astimezone(timezone.utc) - last_checked).total_seconds()
+    return elapsed_seconds >= interval_minutes * 60
+
+
+def summary_row_from_state(product: ProductRule, state_entry: Dict[str, Any], seller: str):
+    price = _state_decimal(state_entry.get("last_price"))
+    if price is None:
+        return None
+    min_price = _state_decimal(state_entry.get("min_price")) or price
+    max_price = _state_decimal(state_entry.get("max_price")) or price
+    return PriceSummaryRow(
+        seller=seller,
+        product_title=str(state_entry.get("title") or product.name or product.url),
+        product_url=str(state_entry.get("url") or state_entry.get("configured_url") or product.url),
+        price=price,
+        target_price=product.target_price,
+        min_price=min_price,
+        max_price=max_price,
+    )
 
 
 def save_price_summary(rows: List[PriceSummaryRow]) -> None:
@@ -313,6 +339,11 @@ def check_once(config: HermesConfig) -> None:
         product_key = normalize_item_key("product", product.site, product.url)
         state_entry = state.get(product_key, {})
         seller = site_label(product.site)
+        if not product_check_due(product, state_entry, config.interval_minutes):
+            cached_row = summary_row_from_state(product, state_entry, seller)
+            if cached_row:
+                summary_rows.append(cached_row)
+            continue
         try:
             wait_before_request(seller)
             offer = _fetch_product_offer(session, product.site, product.url, config.request_timeout_seconds)
