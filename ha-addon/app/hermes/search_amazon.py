@@ -8,7 +8,7 @@ from bs4 import BeautifulSoup
 from .errors import HermesError
 from .models import SearchResultItem
 from .providers.amazon_common import extract_secondary_offer_price
-from .utils import canonical_amazon_product_url, normalize_offer_text, normalize_text, parse_decimal, repair_mojibake
+from .utils import canonical_amazon_product_url, normalize_offer_text, parse_decimal, repair_mojibake
 
 AMAZON_SEARCH_CARD_SELECTORS = [
     "div[data-component-type='s-search-result']",
@@ -119,17 +119,18 @@ def _filter_cards_before_stop(cards: List[Any], soup: BeautifulSoup):
     return [card for card in cards if id(card) not in after_marker_ids]
 
 
-def _keyword_words(keyword: str) -> List[str]:
-    normalized = normalize_text(keyword)
-    return [word for word in re.split(r"\s+", normalized) if word]
+def _match_phrase(value: str) -> str:
+    normalized = normalize_offer_text(value)
+    normalized = re.sub(r"[^a-z0-9]+", " ", normalized)
+    return re.sub(r"\s+", " ", normalized).strip()
 
 
 def title_matches_keyword(title: str, keyword: str) -> bool:
-    words = _keyword_words(keyword)
-    if not words:
+    phrase = _match_phrase(keyword)
+    if not phrase:
         return False
-    normalized_title = normalize_text(title)
-    return all(word in normalized_title for word in words)
+    normalized_title = _match_phrase(title)
+    return f" {phrase} " in f" {normalized_title} "
 
 
 def title_matches_any_keyword(title: str, keywords: List[str]) -> bool:
