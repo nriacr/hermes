@@ -1,5 +1,5 @@
 name: Hermes
-version: "1.0.26"
+version: "1.0.27"
 slug: hermes
 description: Amazon, Hepsiburada, Trendyol ve Network ürün fiyatlarını izler; Amazon arama sayfalarını ayrıca takip eder.
 url: https://github.com/nriacr/hermes
@@ -31,6 +31,7 @@ schema:
     - name: "str"
       url: "str"
       target_price: "float"
+      check_interval_minutes: "int(1,1440)?"
       notify_once_in_24H: "bool?"
       active: "bool?"
   amazon_search_pages:
