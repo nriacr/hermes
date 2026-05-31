@@ -9,6 +9,7 @@ class ProductRule:
     site: str
     url: str
     target_price: Decimal
+    check_interval_minutes: Optional[int] = None
     notify_once_in_24h: bool = True
     active: bool = True
 
