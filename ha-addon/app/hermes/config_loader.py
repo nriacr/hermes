@@ -1,4 +1,4 @@
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from .constants import OPTIONS_PATH
 from .errors import HermesError
@@ -17,6 +17,21 @@ def _required_value(item: Dict[str, object], field_name: str, context: str) -> s
 def _bounded_integer(payload: Dict[str, object], field_name: str, default: int, minimum: int, maximum: int) -> int:
     try:
         value = int(payload.get(field_name, default))
+    except (TypeError, ValueError) as exc:
+        raise HermesError(f"{field_name} tam sayı olmalı.") from exc
+    if not minimum <= value <= maximum:
+        raise HermesError(f"{field_name} {minimum} ile {maximum} arasında olmalı.")
+    return value
+
+
+def _optional_bounded_integer(
+    item: Dict[str, object], field_name: str, minimum: int, maximum: int
+) -> Optional[int]:
+    raw_value = item.get(field_name)
+    if raw_value is None or str(raw_value).strip() == "":
+        return None
+    try:
+        value = int(raw_value)
     except (TypeError, ValueError) as exc:
         raise HermesError(f"{field_name} tam sayı olmalı.") from exc
     if not minimum <= value <= maximum:
@@ -54,6 +69,7 @@ def _prepare_products(raw_products: object) -> List[ProductRule]:
                 site=detect_site_from_url(url),
                 url=url,
                 target_price=parse_decimal(_required_value(item, "target_price", f"Ürün ({name})")),
+                check_interval_minutes=_optional_bounded_integer(item, "check_interval_minutes", 1, 1440),
                 notify_once_in_24h=parse_bool(item.get("notify_once_in_24H"), default=True),
                 active=True,
             )
