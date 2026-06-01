@@ -13,6 +13,7 @@ from .storage import load_json
 from .utils import (
     detect_site_from_url,
     normalize_item_key,
+    parse_bool,
     parse_iso_datetime,
     repair_mojibake,
     site_label,
@@ -20,6 +21,25 @@ from .utils import (
 
 WEB_PORT = 8099
 ADDON_SLUG = "hermes"
+
+DASHBOARD_CSS = """
+:root { color-scheme: dark; --bg:#0f1222; --panel:#171a30; --card:#1e2139; --line:#313658; --text:#e8eaf8; --muted:#a6abd1; --accent:#c7a6ff; --accent2:#8ed6d2; --ok:#7fdcb8; --warn:#ffd18a; --bad:#ff9cb5; --blue:#8fb9ff; --blue2:#6f93ff; --head:#262a45; }
+* { box-sizing:border-box; } body { margin:0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; background:radial-gradient(circle at top left,#1f2240,var(--bg) 56%); color:var(--text); font-size:14px; }
+main { max-width:1060px; margin:0 auto; padding:28px 18px 44px; } .hero { border:1px solid var(--line); border-radius:22px; padding:22px; background:var(--panel); box-shadow:0 18px 42px rgba(0,0,0,.35); }
+p { margin:0; color:var(--muted); line-height:1.5; font-size:13px; }
+.badge { display:inline-flex; margin-bottom:12px; color:#16192b; background:linear-gradient(135deg,var(--accent),var(--accent2)); border-radius:18px; padding:9px 15px; font-size:clamp(24px,5vw,42px); line-height:1; letter-spacing:-.04em; font-weight:900; }
+.actions { display:flex; flex-wrap:wrap; gap:10px; margin-top:18px; align-items:center; } .inline-form { margin:0; } .button { display:inline-flex; align-items:center; justify-content:center; min-height:40px; padding:0 14px; border-radius:13px; border:1px solid transparent; text-decoration:none; font-weight:800; font-size:13px; cursor:pointer; }
+.button.primary { color:#14172a; background:linear-gradient(135deg,var(--accent),var(--accent2)); } .button.secondary { color:var(--text); background:#2a2f4d; border-color:var(--line); } .button.test { color:#eaf0ff; background:linear-gradient(135deg,var(--blue),var(--blue2)); }
+.notice { margin-top:14px; padding:11px 13px; border-radius:12px; font-weight:700; font-size:13px; } .notice-ok { color:#c6f7e6; background:rgba(127,220,184,.14); border:1px solid rgba(127,220,184,.38); } .notice-fail { color:#ffd8e3; background:rgba(255,156,181,.14); border:1px solid rgba(255,156,181,.38); }
+.grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:11px; margin-top:16px; } .card { border:1px solid var(--line); border-radius:15px; padding:14px; background:var(--card); min-height:82px; } .card span { display:block; color:var(--muted); font-size:12px; margin-bottom:8px; } .card strong { display:block; font-size:19px; line-height:1.18; overflow-wrap:anywhere; }
+.card.status-ok { border-color:rgba(127,220,184,.38); background:linear-gradient(135deg,rgba(127,220,184,.12),var(--card) 62%); } .card.status-ok strong { color:var(--ok); } .card.status-warn strong { color:var(--warn); } .card.status-error strong { color:var(--bad); }
+.error-card { grid-column:1 / -1; } .error-card ul { display:grid; gap:9px; margin:10px 0 0; padding:0; list-style:none; color:var(--text); } .error-card li { display:grid; gap:6px; padding:10px 12px; border:1px solid rgba(255,156,181,.28); border-radius:12px; background:rgba(255,156,181,.08); font-size:12px; line-height:1.35; overflow-wrap:anywhere; } .error-card li.empty-error { border-color:rgba(127,220,184,.26); background:rgba(127,220,184,.08); color:var(--muted); } .error-card li strong { font-size:13px; color:var(--text); } .error-card li span { margin:0; color:var(--muted); } .error-card li em { color:#ffd8e3; font-style:normal; } .error-card li a { color:#9ec0ff; font-weight:800; text-decoration:none; width:max-content; } .error-card li a:hover { text-decoration:underline; } .failed-link { display:grid; gap:3px; margin-top:4px; padding:8px 10px; border-radius:10px; background:rgba(143,185,255,.10); border:1px solid rgba(143,185,255,.22); } .failed-link span { color:#c7d7ff; font-weight:800; font-size:11px; } .failed-link strong { color:#e8eaf8; font-size:12px; } .failed-link em { color:#cfd6f6; font-size:11px; }
+.summary-panel { margin-top:18px; border:1px solid var(--line); border-radius:18px; padding:16px; background:var(--card); } .summary-head { display:flex; align-items:flex-end; justify-content:space-between; gap:12px; margin-bottom:12px; } .summary-head h2 { font-size:18px; margin:0; } .summary-head span { color:var(--muted); font-size:12px; white-space:nowrap; } .table-section + .table-section { margin-top:18px; } .table-section h3 { margin:0 0 9px; font-size:14px; color:#d8dcff; } .deals-section h3 { color:#b7f0dc; }
+.table-wrap { overflow-x:auto; border:1px solid var(--line); border-radius:14px; } table { width:100%; border-collapse:collapse; min-width:860px; } th,td { padding:8px 8px; border-bottom:1px solid var(--line); text-align:right; white-space:nowrap; } th { color:#c8d0ff; background:var(--head); font-size:10px; text-transform:uppercase; letter-spacing:.035em; } td { color:var(--text); font-size:12px; font-variant-numeric:tabular-nums; } tr:last-child td { border-bottom:none; } th:nth-child(1),td:nth-child(1) { width:104px; } th:nth-child(1),td:nth-child(1),th:nth-child(2),td:nth-child(2) { text-align:left; } th:not(:nth-child(2)),td:not(:nth-child(2)) { width:100px; } th:nth-child(6),td:nth-child(6) { width:148px; } .empty-row td { color:var(--muted); text-align:left; background:rgba(255,255,255,.025); }
+tbody tr.site-amazon { --site-bg:rgba(255,199,116,.10); --site-line:rgba(255,199,116,.48); --site-link:#ffd79a; } tbody tr.site-hepsiburada { --site-bg:rgba(255,153,112,.10); --site-line:rgba(255,153,112,.48); --site-link:#ffc1a5; } tbody tr.site-network { --site-bg:rgba(143,214,196,.10); --site-line:rgba(143,214,196,.48); --site-link:#aee7d8; } tbody tr.site-trendyol { --site-bg:rgba(245,170,196,.10); --site-line:rgba(245,170,196,.48); --site-link:#f7c1d3; } tbody tr.site-other { --site-bg:rgba(183,177,222,.10); --site-line:rgba(183,177,222,.42); --site-link:#cbc6ef; } tbody tr[class*='site-'] td { background:linear-gradient(90deg,var(--site-bg),rgba(30,33,57,.28)); } tbody tr[class*='site-'] td:first-child { border-left:4px solid var(--site-line); color:var(--site-link); font-weight:800; } tbody tr[class*='site-'] .product-cell a { color:var(--site-link); } tbody tr[class*='site-']:hover td { background:linear-gradient(90deg,rgba(255,255,255,.055),var(--site-bg)); }
+.product-cell { max-width:360px; white-space:normal; line-height:1.22; } .product-cell a { color:#9ec0ff; text-decoration:none; } .product-cell a:hover { color:#d1b3ff; text-decoration:underline; } .product-cell span { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; text-overflow:ellipsis; } .deal-row td { color:#b7f0dc; } .deal-row td:first-child { color:var(--site-link); } .deal-row .product-cell a { color:#b7f0dc; } .note { margin-top:18px; border-left:4px solid #b79ad6; padding:12px 14px; background:rgba(183,154,214,.15); border-radius:10px; font-size:13px; } .footer { margin-top:18px; font-size:12px; color:var(--muted); }
+.public main { max-width:1180px; } .public .hero { padding:18px; } .public .badge { font-size:clamp(22px,4vw,36px); }
+"""
 
 
 def _parse_turkish_money(value):
@@ -555,33 +575,55 @@ def _render_page(path: str = "/") -> bytes:
         notice_html = f"<p class='notice {notice_class}'>{escape(test_message)}</p>"
 
     html = f"""<!doctype html>
-<html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta http-equiv="refresh" content="60"><title>Hermes</title>
-<style>
-:root {{ color-scheme: dark; --bg:#0f1222; --panel:#171a30; --card:#1e2139; --line:#313658; --text:#e8eaf8; --muted:#a6abd1; --accent:#c7a6ff; --accent2:#8ed6d2; --ok:#7fdcb8; --warn:#ffd18a; --bad:#ff9cb5; --blue:#8fb9ff; --blue2:#6f93ff; --head:#262a45; }}
-* {{ box-sizing:border-box; }} body {{ margin:0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; background:radial-gradient(circle at top left,#1f2240,var(--bg) 56%); color:var(--text); font-size:14px; }}
-main {{ max-width:1060px; margin:0 auto; padding:28px 18px 44px; }} .hero {{ border:1px solid var(--line); border-radius:22px; padding:22px; background:var(--panel); box-shadow:0 18px 42px rgba(0,0,0,.35); }}
-p {{ margin:0; color:var(--muted); line-height:1.5; font-size:13px; }}
-.badge {{ display:inline-flex; margin-bottom:12px; color:#16192b; background:linear-gradient(135deg,var(--accent),var(--accent2)); border-radius:18px; padding:9px 15px; font-size:clamp(24px,5vw,42px); line-height:1; letter-spacing:-.04em; font-weight:900; }}
-.actions {{ display:flex; flex-wrap:wrap; gap:10px; margin-top:18px; align-items:center; }} .inline-form {{ margin:0; }} .button {{ display:inline-flex; align-items:center; justify-content:center; min-height:40px; padding:0 14px; border-radius:13px; border:1px solid transparent; text-decoration:none; font-weight:800; font-size:13px; cursor:pointer; }}
-.button.primary {{ color:#14172a; background:linear-gradient(135deg,var(--accent),var(--accent2)); }} .button.secondary {{ color:var(--text); background:#2a2f4d; border-color:var(--line); }} .button.test {{ color:#eaf0ff; background:linear-gradient(135deg,var(--blue),var(--blue2)); }}
-.notice {{ margin-top:14px; padding:11px 13px; border-radius:12px; font-weight:700; font-size:13px; }} .notice-ok {{ color:#c6f7e6; background:rgba(127,220,184,.14); border:1px solid rgba(127,220,184,.38); }} .notice-fail {{ color:#ffd8e3; background:rgba(255,156,181,.14); border:1px solid rgba(255,156,181,.38); }}
-.grid {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:11px; margin-top:16px; }} .card {{ border:1px solid var(--line); border-radius:15px; padding:14px; background:var(--card); min-height:82px; }} .card span {{ display:block; color:var(--muted); font-size:12px; margin-bottom:8px; }} .card strong {{ display:block; font-size:19px; line-height:1.18; overflow-wrap:anywhere; }}
-.card.status-ok {{ border-color:rgba(127,220,184,.38); background:linear-gradient(135deg,rgba(127,220,184,.12),var(--card) 62%); }} .card.status-ok strong {{ color:var(--ok); }} .card.status-warn strong {{ color:var(--warn); }} .card.status-error strong {{ color:var(--bad); }}
-.error-card {{ grid-column:1 / -1; }} .error-card ul {{ display:grid; gap:9px; margin:10px 0 0; padding:0; list-style:none; color:var(--text); }} .error-card li {{ display:grid; gap:6px; padding:10px 12px; border:1px solid rgba(255,156,181,.28); border-radius:12px; background:rgba(255,156,181,.08); font-size:12px; line-height:1.35; overflow-wrap:anywhere; }} .error-card li.empty-error {{ border-color:rgba(127,220,184,.26); background:rgba(127,220,184,.08); color:var(--muted); }} .error-card li strong {{ font-size:13px; color:var(--text); }} .error-card li span {{ margin:0; color:var(--muted); }} .error-card li em {{ color:#ffd8e3; font-style:normal; }} .error-card li a {{ color:#9ec0ff; font-weight:800; text-decoration:none; width:max-content; }} .error-card li a:hover {{ text-decoration:underline; }} .failed-link {{ display:grid; gap:3px; margin-top:4px; padding:8px 10px; border-radius:10px; background:rgba(143,185,255,.10); border:1px solid rgba(143,185,255,.22); }} .failed-link span {{ color:#c7d7ff; font-weight:800; font-size:11px; }} .failed-link strong {{ color:#e8eaf8; font-size:12px; }} .failed-link em {{ color:#cfd6f6; font-size:11px; }}
-.summary-panel {{ margin-top:18px; border:1px solid var(--line); border-radius:18px; padding:16px; background:var(--card); }} .summary-head {{ display:flex; align-items:flex-end; justify-content:space-between; gap:12px; margin-bottom:12px; }} .summary-head h2 {{ font-size:18px; }} .summary-head span {{ color:var(--muted); font-size:12px; white-space:nowrap; }} .table-section + .table-section {{ margin-top:18px; }} .table-section h3 {{ margin:0 0 9px; font-size:14px; color:#d8dcff; }} .deals-section h3 {{ color:#b7f0dc; }}
-.table-wrap {{ overflow-x:auto; border:1px solid var(--line); border-radius:14px; }} table {{ width:100%; border-collapse:collapse; min-width:860px; }} th,td {{ padding:8px 8px; border-bottom:1px solid var(--line); text-align:right; white-space:nowrap; }} th {{ color:#c8d0ff; background:var(--head); font-size:10px; text-transform:uppercase; letter-spacing:.035em; }} td {{ color:var(--text); font-size:12px; font-variant-numeric:tabular-nums; }} tr:last-child td {{ border-bottom:none; }} th:nth-child(1),td:nth-child(1) {{ width:104px; }} th:nth-child(1),td:nth-child(1),th:nth-child(2),td:nth-child(2) {{ text-align:left; }} th:not(:nth-child(2)),td:not(:nth-child(2)) {{ width:100px; }} th:nth-child(6),td:nth-child(6) {{ width:148px; }} .empty-row td {{ color:var(--muted); text-align:left; background:rgba(255,255,255,.025); }}
-tbody tr.site-amazon {{ --site-bg:rgba(255,199,116,.10); --site-line:rgba(255,199,116,.48); --site-link:#ffd79a; }} tbody tr.site-hepsiburada {{ --site-bg:rgba(255,153,112,.10); --site-line:rgba(255,153,112,.48); --site-link:#ffc1a5; }} tbody tr.site-network {{ --site-bg:rgba(143,214,196,.10); --site-line:rgba(143,214,196,.48); --site-link:#aee7d8; }} tbody tr.site-trendyol {{ --site-bg:rgba(245,170,196,.10); --site-line:rgba(245,170,196,.48); --site-link:#f7c1d3; }} tbody tr.site-other {{ --site-bg:rgba(183,177,222,.10); --site-line:rgba(183,177,222,.42); --site-link:#cbc6ef; }} tbody tr[class*='site-'] td {{ background:linear-gradient(90deg,var(--site-bg),rgba(30,33,57,.28)); }} tbody tr[class*='site-'] td:first-child {{ border-left:4px solid var(--site-line); color:var(--site-link); font-weight:800; }} tbody tr[class*='site-'] .product-cell a {{ color:var(--site-link); }} tbody tr[class*='site-']:hover td {{ background:linear-gradient(90deg,rgba(255,255,255,.055),var(--site-bg)); }}
-.product-cell {{ max-width:360px; white-space:normal; line-height:1.22; }} .product-cell a {{ color:#9ec0ff; text-decoration:none; }} .product-cell a:hover {{ color:#d1b3ff; text-decoration:underline; }} .product-cell span {{ display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; text-overflow:ellipsis; }} .deal-row td {{ color:#b7f0dc; }} .deal-row td:first-child {{ color:var(--site-link); }} .deal-row .product-cell a {{ color:#b7f0dc; }} .note {{ margin-top:18px; border-left:4px solid #b79ad6; padding:12px 14px; background:rgba(183,154,214,.15); border-radius:10px; font-size:13px; }} .footer {{ margin-top:18px; font-size:12px; color:var(--muted); }}
-</style></head><body><main><div class="hero"><div class="badge">Hermes</div><p>Ürün linkleri çok siteli çalışır; Amazon arama sayfaları Amazon'a özel mod olarak korunur.</p><div class="actions"><a class="button primary" href="{log_url}" target="_top">LOG</a><a class="button secondary" href="{app_url}" target="_top">Config</a><form class="inline-form" method="post" action="./test-pushover"><button class="button test" type="submit">Pushover</button></form></div>{notice_html}<div class="grid">{card_html}{error_card_html}</div>{_render_table()}<p class="note">LOG butonu log sekmesini, Config butonu yapılandırma sekmesini açar. Pushover butonu test bildirimi gönderir.</p><p class="footer">Sayfa 60 saniyede bir otomatik yenilenir.</p></div></main></body></html>"""
+<html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta http-equiv="refresh" content="60"><title>Hermes</title><style>{DASHBOARD_CSS}</style></head><body><main><div class="hero"><div class="badge">Hermes</div><p>Ürün linkleri çok siteli çalışır; Amazon arama sayfaları Amazon'a özel mod olarak korunur.</p><div class="actions"><a class="button primary" href="{log_url}" target="_top">LOG</a><a class="button secondary" href="{app_url}" target="_top">Config</a><form class="inline-form" method="post" action="./test-pushover"><button class="button test" type="submit">Pushover</button></form></div>{notice_html}<div class="grid">{card_html}{error_card_html}</div>{_render_table()}<p class="note">LOG butonu log sekmesini, Config butonu yapılandırma sekmesini açar. Pushover butonu test bildirimi gönderir.</p><p class="footer">Sayfa 60 saniyede bir otomatik yenilenir.</p></div></main></body></html>"""
     return html.encode("utf-8")
+
+
+def _public_token_from_path(path: str) -> str:
+    parsed = urllib.parse.urlparse(path)
+    parts = [urllib.parse.unquote(part) for part in parsed.path.split("/") if part]
+    if len(parts) >= 2 and parts[0] == "public":
+        return parts[1]
+    params = urllib.parse.parse_qs(parsed.query)
+    return str(params.get("token", [""])[0]).strip()
+
+
+def _public_dashboard_allowed(path: str) -> bool:
+    options = load_json(OPTIONS_PATH, {})
+    if not isinstance(options, dict):
+        return False
+    if not parse_bool(options.get("public_dashboard_enabled"), default=False):
+        return False
+    expected_token = str(options.get("public_dashboard_token") or "").strip()
+    if len(expected_token) < 24:
+        return False
+    return _public_token_from_path(path) == expected_token
+
+
+def _render_public_page(path: str):
+    if not _public_dashboard_allowed(path):
+        return 404, b"not found\n"
+    payload = load_json(SUMMARY_PATH, {})
+    checked_at = escape(str(payload.get("checked_at") or "-")) if isinstance(payload, dict) else "-"
+    html = f"""<!doctype html>
+<html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta http-equiv="refresh" content="60"><title>Hermes Tablo</title><style>{DASHBOARD_CSS}</style></head><body class="public"><main><div class="hero"><div class="badge">Hermes</div><p>Salt okunur fiyat tablosu. Son güncelleme: {checked_at}</p>{_render_table()}<p class="footer">Sayfa 60 saniyede bir otomatik yenilenir.</p></div></main></body></html>"""
+    return 200, html.encode("utf-8")
 
 
 class _StatusHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         path = urllib.parse.urlparse(self.path).path.rstrip("/")
-        payload = b"ok\n" if path == "/health" else _render_page(self.path)
-        content_type = "text/plain; charset=utf-8" if path == "/health" else "text/html; charset=utf-8"
-        self.send_response(200)
+        status = 200
+        if path == "/health":
+            payload = b"ok\n"
+            content_type = "text/plain; charset=utf-8"
+        elif path == "/public" or path.startswith("/public/"):
+            status, payload = _render_public_page(self.path)
+            content_type = "text/html; charset=utf-8" if status == 200 else "text/plain; charset=utf-8"
+        else:
+            payload = _render_page(self.path)
+            content_type = "text/html; charset=utf-8"
+        self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Cache-Control", "no-store")
         self.send_header("Content-Length", str(len(payload)))
