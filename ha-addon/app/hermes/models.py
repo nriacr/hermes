@@ -66,6 +66,8 @@ class OfferResult:
 class HermesConfig:
     interval_minutes: int
     request_timeout_seconds: int
+    request_delay_min_seconds: int
+    request_delay_max_seconds: int
     pushover_user_key: str
     pushover_api_token: str
     products: List[ProductRule]
