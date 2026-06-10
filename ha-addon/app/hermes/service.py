@@ -12,7 +12,6 @@ from .constants import (
     AMAZON_SEARCH_ERROR_NOTIFICATION_HOUR,
     AMAZON_SEARCH_HTTP_COOLDOWN_SECONDS,
     NOTIFY_REPEAT_SECONDS,
-    REQUEST_PRE_DELAY_SECONDS,
     SITE_AMAZON,
     SITE_HEPSIBURADA,
     STATE_PATH,
@@ -229,10 +228,11 @@ def should_send_search_error_notification(state_entry: Dict[str, Any]) -> bool:
     return last_notified.astimezone().date() < now.date()
 
 
-def wait_before_request(label: str) -> None:
-    delay = random.randint(*REQUEST_PRE_DELAY_SECONDS)
+def wait_before_request(label: str, config: HermesConfig) -> None:
+    delay = random.randint(config.request_delay_min_seconds, config.request_delay_max_seconds)
     log(f"{label} istegi oncesi {delay} saniye bekleniyor.")
-    time.sleep(delay)
+    if delay > 0:
+        time.sleep(delay)
 
 
 def update_error_notification_state(state_entry: Dict[str, Any]) -> Dict[str, Any]:
@@ -277,9 +277,9 @@ def _fetch_product_offer(session: requests.Session, site: str, url: str, timeout
     return extract_offer(site, html)
 
 
-def _fetch_amazon_detail_result(session: requests.Session, candidate, timeout: int) -> SearchResultItem:
-    wait_before_request("Amazon detay")
-    response = fetch_with_retries(session, candidate.url, timeout)
+def _fetch_amazon_detail_result(session: requests.Session, candidate, config: HermesConfig) -> SearchResultItem:
+    wait_before_request("Amazon detay", config)
+    response = fetch_with_retries(session, candidate.url, config.request_timeout_seconds)
     html = cleaned_html(response)
     if "captcha" in html.lower() and "robot" in html.lower():
         raise HermesError("Amazon bot korumasi nedeniyle captcha sayfasi dondu.")
@@ -296,12 +296,12 @@ def _fetch_amazon_detail_result(session: requests.Session, candidate, timeout: i
 def _fetch_amazon_search_results(
     session: requests.Session,
     search_url: str,
-    timeout: int,
+    config: HermesConfig,
     max_items_to_scan: int,
     target_keywords: List[str],
 ):
-    wait_before_request("Arama")
-    response = fetch_with_retries(session, search_url, timeout)
+    wait_before_request("Arama", config)
+    response = fetch_with_retries(session, search_url, config.request_timeout_seconds)
     html = cleaned_html(response)
     if "captcha" in html.lower() and "robot" in html.lower():
         raise HermesError("Amazon bot korumasi nedeniyle captcha sayfasi dondu.")
@@ -317,7 +317,7 @@ def _fetch_amazon_search_results(
             skipped_detail_count += 1
             continue
         try:
-            results.append(_fetch_amazon_detail_result(session, candidate, timeout))
+            results.append(_fetch_amazon_detail_result(session, candidate, config))
         except Exception as exc:  # noqa: BLE001
             log(f"Amazon arama detay fiyatı okunamadı: {log_cell(candidate.title, 60)} | {exc}")
 
@@ -345,7 +345,7 @@ def check_once(config: HermesConfig) -> None:
                 summary_rows.append(cached_row)
             continue
         try:
-            wait_before_request(seller)
+            wait_before_request(seller, config)
             offer = _fetch_product_offer(session, product.site, product.url, config.request_timeout_seconds)
             display_name = product.name or offer.title or product.url
             matched_url = offer.url or product.url
@@ -439,7 +439,7 @@ def check_once(config: HermesConfig) -> None:
                     url_results = _fetch_amazon_search_results(
                         session,
                         search_url,
-                        config.request_timeout_seconds,
+                        config,
                         page.max_items_to_scan,
                         target_keywords,
                     )
