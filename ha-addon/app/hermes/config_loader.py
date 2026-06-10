@@ -1,6 +1,10 @@
 from typing import Dict, List, Optional
 
-from .constants import OPTIONS_PATH
+from .constants import (
+    DEFAULT_REQUEST_DELAY_MAX_SECONDS,
+    DEFAULT_REQUEST_DELAY_MIN_SECONDS,
+    OPTIONS_PATH,
+)
 from .errors import HermesError
 from .models import AmazonSearchPage, AmazonSearchTarget, HermesConfig, ProductRule
 from .storage import load_json
@@ -139,6 +143,23 @@ def load_config() -> HermesConfig:
 
     interval_minutes = _bounded_integer(payload, "interval_minutes", 30, 1, 1440)
     request_timeout_seconds = _bounded_integer(payload, "request_timeout_seconds", 20, 5, 120)
+    request_delay_min_seconds = _bounded_integer(
+        payload,
+        "request_delay_min_seconds",
+        DEFAULT_REQUEST_DELAY_MIN_SECONDS,
+        0,
+        120,
+    )
+    request_delay_max_seconds = _bounded_integer(
+        payload,
+        "request_delay_max_seconds",
+        DEFAULT_REQUEST_DELAY_MAX_SECONDS,
+        0,
+        120,
+    )
+    if request_delay_min_seconds > request_delay_max_seconds:
+        raise HermesError("request_delay_min_seconds, request_delay_max_seconds değerinden büyük olamaz.")
+
     user_key = str(payload.get("pushover_user_key", "")).strip()
     api_token = str(payload.get("pushover_api_token", "")).strip()
 
@@ -161,6 +182,8 @@ def load_config() -> HermesConfig:
     return HermesConfig(
         interval_minutes=interval_minutes,
         request_timeout_seconds=request_timeout_seconds,
+        request_delay_min_seconds=request_delay_min_seconds,
+        request_delay_max_seconds=request_delay_max_seconds,
         pushover_user_key=user_key,
         pushover_api_token=api_token,
         products=products,
