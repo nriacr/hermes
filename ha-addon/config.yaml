@@ -1,5 +1,5 @@
 name: Hermes
-version: "1.0.32"
+version: "1.0.33"
 slug: hermes
 description: Amazon, Hepsiburada, Trendyol ve Network ürün fiyatlarını izler; Amazon arama sayfalarını ayrıca takip eder.
 url: https://github.com/nriacr/hermes
@@ -12,6 +12,7 @@ boot: auto
 init: false
 ingress: true
 ingress_port: 8099
+hassio_api: true
 panel_title: Hermes
 panel_icon: mdi:tag-heart
 ports:
