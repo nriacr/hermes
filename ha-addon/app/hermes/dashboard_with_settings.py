@@ -1,11 +1,11 @@
 import urllib.parse
 from http.server import ThreadingHTTPServer
 
-from .dashboard import WEB_PORT, _render_page, _render_public_page, _send_test_notification
+from .dashboard import WEB_PORT, _StatusHandler, _render_page, _render_public_page, _send_test_notification
 from .settings_ui import handle_settings_save, render_settings_page
 
 
-class _SettingsDashboardHandler:
+class SettingsDashboardHandler(_StatusHandler):
     def do_GET(self) -> None:
         path = urllib.parse.urlparse(self.path).path.rstrip("/")
         status = 200
@@ -53,14 +53,6 @@ class _SettingsDashboardHandler:
             self.end_headers()
             return
         self.send_error(404)
-
-    def log_message(self, _format, *args) -> None:
-        _ = args
-        return
-
-
-class SettingsDashboardHandler(_SettingsDashboardHandler):
-    pass
 
 
 def run_dashboard() -> None:
