@@ -66,6 +66,13 @@ def _summary_name(item, fallback):
     return fallback
 
 
+def _search_target_title(item, fallback):
+    if isinstance(item, dict):
+        value = str(item.get("product_name") or item.get("name") or fallback).strip()
+        return value or fallback
+    return fallback
+
+
 def _details(title, prefix, inner, open_when_empty=False):
     open_attr = " open" if open_when_empty else ""
     return f"<details{open_attr}><summary>{escape(title)}</summary><div class='form-grid'>{inner}</div></details>"
@@ -105,12 +112,11 @@ def _search_page_form(item, index, is_new=False):
 
 def _search_target_form(item, index, is_new=False):
     prefix = f"amazon_search_targets_{index}_"
-    title = "Yeni Amazon arama hedefi ekle" if is_new else _summary_name(item, f"Amazon arama hedefi {index + 1}")
+    title = "Yeni Amazon arama hedefi ekle" if is_new else _search_target_title(item, f"Amazon arama hedefi {index + 1}")
     inner = "".join(
         [
-            _field(prefix, "name", "Name", item.get("name", ""), required=not is_new),
             _field(prefix, "search_name", "Search name", item.get("search_name", "")),
-            _field(prefix, "product_name", "Product name", item.get("product_name", ""), required=not is_new),
+            _field(prefix, "product_name", "Product name", item.get("product_name") or item.get("name", ""), required=not is_new),
             _field(prefix, "target_price", "Target price", item.get("target_price", ""), "number", required=not is_new),
             _checkbox(prefix, "notify_once_in_24H", "Notify once in 24H", item.get("notify_once_in_24H", True)),
             _checkbox(prefix, "active", "Aktif", item.get("active", True)),
@@ -194,16 +200,14 @@ def _build_search_targets(form):
         prefix = f"amazon_search_targets_{index}_"
         if _bool_from_form(form, prefix + "delete"):
             continue
-        name = _first(form, prefix + "name")
         search_name = _first(form, prefix + "search_name")
         product_name = _first(form, prefix + "product_name")
         target_price = _first(form, prefix + "target_price")
-        if not any([name, search_name, product_name, target_price]):
+        if not any([search_name, product_name, target_price]):
             continue
-        if not name or not product_name or not target_price:
-            raise ValueError("Amazon arama hedefi eklerken name, product_name ve target_price alanları dolu olmalı.")
+        if not product_name or not target_price:
+            raise ValueError("Amazon arama hedefi eklerken product_name ve target_price alanları dolu olmalı.")
         item = {
-            "name": name,
             "product_name": product_name,
             "target_price": _number(target_price),
             "notify_once_in_24H": _bool_from_form(form, prefix + "notify_once_in_24H"),
