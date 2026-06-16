@@ -7,20 +7,19 @@ from .settings_ui import SETTINGS_CSS, handle_settings_save, render_settings_pag
 
 
 def _render_restart_page(message: str) -> bytes:
-    safe_message = escape(message)
-    html = f"""<!doctype html>
+    html = """<!doctype html>
 <html lang="tr">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Hermes yeniden başlatılıyor</title>
-  <style>{SETTINGS_CSS}</style>
+  <style>__SETTINGS_CSS__</style>
 </head>
 <body>
   <main>
     <div class="hero">
       <h1>Hermes yeniden başlatılıyor</h1>
-      <p class="notice notice-ok">{safe_message}</p>
+      <p class="notice notice-ok">__MESSAGE__</p>
       <p>Değişiklikler Home Assistant config kaydına yazıldı. Hermes yeniden başlarken bu sayfa kısa süre bekleyecek; hazır olduğunda ayarlar ekranı otomatik yenilenecek.</p>
       <p class="footer-note" id="restart-status">Hazırlanıyor... Birkaç saniye içinde bağlantı kontrolü başlayacak.</p>
       <div class="actions"><a class="button secondary" href="../settings">Ayarlar ekranına dön</a></div>
@@ -48,6 +47,7 @@ def _render_restart_page(message: str) -> bytes:
   </script>
 </body>
 </html>"""
+    html = html.replace("__SETTINGS_CSS__", SETTINGS_CSS).replace("__MESSAGE__", escape(message))
     return html.encode("utf-8")
 
 
