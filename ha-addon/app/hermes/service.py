@@ -38,10 +38,25 @@ from .utils import (
     log_cell,
     normalize_item_key,
     normalize_key,
+    normalize_offer_text,
     parse_iso_datetime,
     site_label,
     utc_now,
 )
+
+
+AGE_VERIFICATION_MARKERS = (
+    "yas dogrulamasi",
+    "yaş doğrulaması",
+    "18 yasindan buyuk musunuz",
+    "18 yaşından büyük müsünüz",
+)
+
+
+def raise_if_age_verification(html: str) -> None:
+    normalized = normalize_offer_text(html)
+    if any(marker in normalized for marker in AGE_VERIFICATION_MARKERS):
+        raise HermesError("Yaş doğrulaması gerekiyor. Bu sayfa otomatik takip edilemiyor.")
 
 
 def sorted_summary_rows(rows: List[PriceSummaryRow]) -> List[PriceSummaryRow]:
@@ -271,6 +286,7 @@ def _fetch_product_offer(session: requests.Session, site: str, url: str, timeout
     else:
         response = fetch_with_retries(session, url, timeout)
     html = cleaned_html(response)
+    raise_if_age_verification(html)
     lowered = html.lower()
     if "captcha" in lowered and "robot" in lowered:
         raise HermesError(f"{site_label(site)} bot korumasi nedeniyle captcha sayfasi dondu.")
@@ -281,6 +297,7 @@ def _fetch_amazon_detail_result(session: requests.Session, candidate, config: He
     wait_before_request("Amazon detay", config)
     response = fetch_with_retries(session, candidate.url, config.request_timeout_seconds)
     html = cleaned_html(response)
+    raise_if_age_verification(html)
     if "captcha" in html.lower() and "robot" in html.lower():
         raise HermesError("Amazon bot korumasi nedeniyle captcha sayfasi dondu.")
     offer = extract_offer(SITE_AMAZON, html)
@@ -303,6 +320,7 @@ def _fetch_amazon_search_results(
     wait_before_request("Arama", config)
     response = fetch_with_retries(session, search_url, config.request_timeout_seconds)
     html = cleaned_html(response)
+    raise_if_age_verification(html)
     if "captcha" in html.lower() and "robot" in html.lower():
         raise HermesError("Amazon bot korumasi nedeniyle captcha sayfasi dondu.")
 
