@@ -90,9 +90,9 @@ class SettingsDashboardHandler(_StatusHandler):
         if path == "/settings/save":
             ok, message = handle_settings_save(body)
             if ok:
-                location = f"./settings/restarting?msg={urllib.parse.quote(message)}"
+                location = f"../settings/restarting?msg={urllib.parse.quote(message)}"
             else:
-                location = f"./settings?saved=fail&msg={urllib.parse.quote(message)}"
+                location = f"../settings?saved=fail&msg={urllib.parse.quote(message)}"
             self.send_response(303)
             self.send_header("Location", location)
             self.send_header("Cache-Control", "no-store")
