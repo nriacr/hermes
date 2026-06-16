@@ -120,16 +120,15 @@ def _attach_search_targets(pages: Dict[str, AmazonSearchPage], raw_targets: obje
                 f"amazon_search_targets içinde tanımlanan arama sayfası bulunamadı: {search_name}"
             )
 
-        target_name = str(item.get("name") or "").strip()
-        if not target_name:
+        product_name = str(item.get("product_name") or item.get("name") or "").strip()
+        if not product_name:
             continue
-        product_name = str(item.get("product_name") or target_name).strip()
         pages[search_name].targets.append(
             AmazonSearchTarget(
-                name=target_name,
+                name=product_name,
                 search_name=search_name,
                 product_name=product_name,
-                target_price=parse_decimal(_required_value(item, "target_price", f"Amazon hedefi ({target_name})")),
+                target_price=parse_decimal(_required_value(item, "target_price", f"Amazon hedefi ({product_name})")),
                 notify_once_in_24h=parse_bool(item.get("notify_once_in_24H"), default=True),
                 active=True,
             )
