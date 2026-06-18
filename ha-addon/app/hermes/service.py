@@ -59,6 +59,11 @@ PRODUCT_MISSING_PRICE_MARKERS = (
     "fiyat yakalanamadi",
     "fiyat yakalanamadı",
 )
+SUMMARY_DROP_MIN_DELTA = 4
+SUMMARY_DROP_RATIO_DIVISOR = 4
+SUMMARY_DROP_ALERT_COOLDOWN_SECONDS = 60 * 60
+SUMMARY_DROP_QUIET_START_HOUR = 22
+SUMMARY_DROP_QUIET_END_HOUR = 8
 
 
 def raise_if_age_verification(html: str) -> None:
@@ -304,6 +309,106 @@ def reset_product_alert_after_missing(
     updated["last_missing_at"] = utc_now()
     log(f"Ürün stok/fiyat kayboldu, tekrar bildirim için hazırlandı: {seller} | {product_name}")
     return updated
+
+
+def summary_config_signature(config: HermesConfig) -> str:
+    product_part = ",".join(
+        f"{product.site}:{product.url}:{product.target_price}:{product.active}"
+        for product in config.products
+    )
+    search_part = ",".join(
+        f"{page.name}:{len(page.search_urls)}:"
+        + ",".join(f"{target.name}:{target.target_price}:{target.active}" for target in page.targets)
+        for page in config.amazon_search_pages
+    )
+    return f"products={product_part}|search={search_part}"
+
+
+def summary_drop_threshold(expected_count: int) -> int:
+    ratio_threshold = (expected_count + SUMMARY_DROP_RATIO_DIVISOR - 1) // SUMMARY_DROP_RATIO_DIVISOR
+    return max(SUMMARY_DROP_MIN_DELTA, ratio_threshold)
+
+
+def summary_drop_quiet_hours(now) -> bool:
+    return now.hour >= SUMMARY_DROP_QUIET_START_HOUR or now.hour < SUMMARY_DROP_QUIET_END_HOUR
+
+
+def summary_drop_cooldown_passed(meta: Dict[str, Any], now) -> bool:
+    last_alerted = parse_iso_datetime(meta.get("last_summary_drop_alert_at"))
+    if not last_alerted:
+        return True
+    elapsed = (now.astimezone(timezone.utc) - last_alerted).total_seconds()
+    return elapsed >= SUMMARY_DROP_ALERT_COOLDOWN_SECONDS
+
+
+def maybe_alert_summary_drop(
+    state: Dict[str, Any], rows: List[PriceSummaryRow], config: HermesConfig, session: requests.Session
+) -> None:
+    meta = dict(state.get("_meta", {})) if isinstance(state.get("_meta"), dict) else {}
+    current_count = len(rows)
+    signature = summary_config_signature(config)
+    if meta.get("summary_config_signature") != signature:
+        meta["summary_config_signature"] = signature
+        meta["summary_expected_row_count"] = current_count
+        meta["summary_last_row_count"] = current_count
+        state["_meta"] = meta
+        log(f"Özet takip referansı güncellendi: beklenen_urun={current_count}")
+        return
+
+    expected_count = int(meta.get("summary_expected_row_count") or current_count)
+    threshold = summary_drop_threshold(expected_count)
+    drop_count = expected_count - current_count
+    is_unexpected_drop = expected_count > 0 and drop_count >= threshold
+    now = local_now()
+
+    if is_unexpected_drop:
+        if summary_drop_quiet_hours(now):
+            log(
+                "Özet ürün sayısı beklenenden düşük, sessiz saat nedeniyle bildirim atlandı: "
+                f"beklenen={expected_count} | bu_tur={current_count} | fark={drop_count}"
+            )
+        elif not summary_drop_cooldown_passed(meta, now):
+            log(
+                "Özet ürün sayısı beklenenden düşük, 1 saatlik sınır nedeniyle bildirim atlandı: "
+                f"beklenen={expected_count} | bu_tur={current_count} | fark={drop_count}"
+            )
+        elif config.pushover_user_key and config.pushover_api_token:
+            message = (
+                "Özet tablodaki ürün sayısı beklenenden fazla düştü.\n"
+                f"Beklenen ürün sayısı: {expected_count}\n"
+                f"Bu tur bulunan ürün sayısı: {current_count}\n"
+                f"Fark: -{drop_count}\n"
+                "Config'i, özellikle Amazon arama linklerini kontrol etmeni öneririm. "
+                "Amazon arama sayfaları geçici olarak boş veya eksik dönmüş olabilir."
+            )
+            try:
+                send_pushover(
+                    session,
+                    config.pushover_user_key,
+                    config.pushover_api_token,
+                    "Hermes özet uyarısı",
+                    message,
+                    "",
+                    config.request_timeout_seconds,
+                )
+                meta["last_summary_drop_alert_at"] = utc_now()
+                log(
+                    "Özet ürün sayısı uyarısı gönderildi: "
+                    f"beklenen={expected_count} | bu_tur={current_count} | fark={drop_count}"
+                )
+            except Exception as exc:  # noqa: BLE001
+                log(f"Özet ürün sayısı uyarısı gönderilemedi: {exc}")
+        else:
+            log("Özet ürün sayısı uyarısı atlandı: Pushover ayarları eksik.")
+    else:
+        expected_count = current_count
+
+    if current_count > expected_count:
+        expected_count = current_count
+    meta["summary_expected_row_count"] = expected_count
+    meta["summary_last_row_count"] = current_count
+    meta["summary_config_signature"] = signature
+    state["_meta"] = meta
 
 
 def _fetch_product_offer(session: requests.Session, site: str, url: str, timeout: int):
@@ -630,6 +735,7 @@ def check_once(config: HermesConfig) -> None:
 
     if config.products or config.amazon_search_pages:
         publish_price_summary(summary_rows)
+        maybe_alert_summary_drop(state, summary_rows, config, session)
     save_json(STATE_PATH, state)
 
 
