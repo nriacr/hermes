@@ -3,6 +3,7 @@ from typing import Dict, List, Optional
 from .constants import (
     DEFAULT_REQUEST_DELAY_MAX_SECONDS,
     DEFAULT_REQUEST_DELAY_MIN_SECONDS,
+    DEFAULT_REQUEST_TIMEOUT_SECONDS,
     OPTIONS_PATH,
 )
 from .errors import HermesError
@@ -141,7 +142,7 @@ def load_config() -> HermesConfig:
         payload = {}
 
     interval_minutes = _bounded_integer(payload, "interval_minutes", 30, 1, 1440)
-    request_timeout_seconds = _bounded_integer(payload, "request_timeout_seconds", 20, 5, 120)
+    request_timeout_seconds = DEFAULT_REQUEST_TIMEOUT_SECONDS
     request_delay_min_seconds = _bounded_integer(
         payload,
         "request_delay_min_seconds",
