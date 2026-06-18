@@ -20,12 +20,15 @@ Hermes, Home Assistant üzerinde çalışan çok siteli ürün takip add-on'udur
 Ana alanlar:
 
 - `interval_minutes`
-- `request_timeout_seconds`
+- `request_delay_min_seconds`
+- `request_delay_max_seconds`
 - `pushover_user_key`
 - `pushover_api_token`
 - `products[]`
 - `amazon_search_pages[]`
 - `amazon_search_targets[]`
+
+Teknik istek zaman aşımı Hermes içinde yönetilir ve günlük kullanımda config ekranında görünmez.
 
 Ürünlerde ayrıca site seçilmez. Hermes, ürün linkinden uygun siteyi otomatik algılar ve ilgili provider dosyasındaki fiyat okuma mantığını çalıştırır.
 
