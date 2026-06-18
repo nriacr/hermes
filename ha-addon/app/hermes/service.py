@@ -51,6 +51,14 @@ AGE_VERIFICATION_MARKERS = (
     "18 yasindan buyuk musunuz",
     "18 yaşından büyük müsünüz",
 )
+PRODUCT_MISSING_PRICE_MARKERS = (
+    "fiyat bulunamadi",
+    "fiyat bulunamadı",
+    "okunabilir fiyat bulunamadi",
+    "okunabilir fiyat bulunamadı",
+    "fiyat yakalanamadi",
+    "fiyat yakalanamadı",
+)
 
 
 def raise_if_age_verification(html: str) -> None:
@@ -280,6 +288,24 @@ def reset_missing_alerts(
         )
 
 
+def should_reset_product_alert_on_error(exc: Exception) -> bool:
+    normalized = normalize_offer_text(str(exc))
+    return any(marker in normalized for marker in PRODUCT_MISSING_PRICE_MARKERS)
+
+
+def reset_product_alert_after_missing(
+    state_entry: Dict[str, Any], seller: str, product_name: str
+) -> Dict[str, Any]:
+    updated = dict(state_entry)
+    if updated.get("last_alerted_price") is None and updated.get("last_alerted_at") is None:
+        return updated
+    updated.pop("last_alerted_price", None)
+    updated.pop("last_alerted_at", None)
+    updated["last_missing_at"] = utc_now()
+    log(f"Ürün stok/fiyat kayboldu, tekrar bildirim için hazırlandı: {seller} | {product_name}")
+    return updated
+
+
 def _fetch_product_offer(session: requests.Session, site: str, url: str, timeout: int):
     if site == SITE_HEPSIBURADA:
         response = fetch_hepsiburada_page(session, url, timeout)
@@ -425,6 +451,8 @@ def check_once(config: HermesConfig) -> None:
         except Exception as exc:  # noqa: BLE001
             log(f"Hata: {seller} | {product.url} | {exc}")
             failed = dict(state_entry)
+            if should_reset_product_alert_on_error(exc):
+                failed = reset_product_alert_after_missing(failed, seller, product.name or product.url)
             failed["site"] = product.site
             failed["last_error"] = str(exc)
             failed["last_error_status"] = getattr(exc, "status_code", None)
