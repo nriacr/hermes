@@ -64,6 +64,8 @@ SUMMARY_DROP_RATIO_DIVISOR = 4
 SUMMARY_DROP_ALERT_COOLDOWN_SECONDS = 60 * 60
 SUMMARY_DROP_QUIET_START_HOUR = 22
 SUMMARY_DROP_QUIET_END_HOUR = 8
+AMAZON_EMPTY_ALERT_MIN_PAGES = 2
+AMAZON_EMPTY_ALERT_MIN_FAILED_LINKS = 3
 
 
 def raise_if_age_verification(html: str) -> None:
@@ -388,6 +390,14 @@ def summary_drop_cooldown_passed(meta: Dict[str, Any], now) -> bool:
     return elapsed >= SUMMARY_DROP_ALERT_COOLDOWN_SECONDS
 
 
+def amazon_empty_alert_cooldown_passed(meta: Dict[str, Any], now) -> bool:
+    last_alerted = parse_iso_datetime(meta.get("last_amazon_empty_search_alert_at"))
+    if not last_alerted:
+        return True
+    elapsed = (now.astimezone(timezone.utc) - last_alerted).total_seconds()
+    return elapsed >= SUMMARY_DROP_ALERT_COOLDOWN_SECONDS
+
+
 def maybe_alert_summary_drop(
     state: Dict[str, Any], rows: List[PriceSummaryRow], config: HermesConfig, session: requests.Session
 ) -> None:
@@ -455,6 +465,82 @@ def maybe_alert_summary_drop(
     meta["summary_expected_row_count"] = expected_count
     meta["summary_last_row_count"] = current_count
     meta["summary_config_signature"] = signature
+    state["_meta"] = meta
+
+
+def maybe_alert_amazon_empty_searches(
+    state: Dict[str, Any],
+    events: List[Dict[str, Any]],
+    config: HermesConfig,
+    session: requests.Session,
+) -> None:
+    if not events:
+        return
+
+    affected_pages = sorted({str(event.get("page") or "") for event in events if event.get("page")})
+    failed_link_count = sum(int(event.get("failed_links") or 0) for event in events)
+    if len(affected_pages) < AMAZON_EMPTY_ALERT_MIN_PAGES and failed_link_count < AMAZON_EMPTY_ALERT_MIN_FAILED_LINKS:
+        log(
+            "Amazon bos arama uyarisi atlandi, esik altinda: "
+            f"sayfa={len(affected_pages)} | link={failed_link_count}"
+        )
+        return
+
+    meta = dict(state.get("_meta", {})) if isinstance(state.get("_meta"), dict) else {}
+    now = local_now()
+    if summary_drop_quiet_hours(now):
+        log(
+            "Amazon bos arama uyarisi sessiz saat nedeniyle atlandi: "
+            f"sayfa={len(affected_pages)} | link={failed_link_count}"
+        )
+        state["_meta"] = meta
+        return
+    if not amazon_empty_alert_cooldown_passed(meta, now):
+        log(
+            "Amazon bos arama uyarisi 1 saatlik sinir nedeniyle atlandi: "
+            f"sayfa={len(affected_pages)} | link={failed_link_count}"
+        )
+        state["_meta"] = meta
+        return
+    if not config.pushover_user_key or not config.pushover_api_token:
+        log("Amazon bos arama uyarisi atlandi: Pushover ayarlari eksik.")
+        state["_meta"] = meta
+        return
+
+    event_lines = []
+    for event in events[:8]:
+        page_name = str(event.get("page") or "-")
+        failed_links = int(event.get("failed_links") or 0)
+        cached_count = int(event.get("cached_count") or 0)
+        mode = "tamamen bos" if event.get("full_empty") else "kismi bos"
+        event_lines.append(f"- {page_name}: {mode}, bos link={failed_links}, korunan urun={cached_count}")
+    if len(events) > 8:
+        event_lines.append(f"- +{len(events) - 8} ek Amazon arama kaydi")
+
+    message = (
+        "Amazon arama sayfalarinda anlamli sayida bos donus yakalandi.\n"
+        f"Etkilenen arama sayfasi: {len(affected_pages)}\n"
+        f"Bos donen link sayisi: {failed_link_count}\n"
+        "Hermes tabloyu son basarili verilerle korudu; yine de config/Amazon linklerini kontrol etmeni oneririm.\n"
+        + "\n".join(event_lines)
+    )
+    try:
+        send_pushover(
+            session,
+            config.pushover_user_key,
+            config.pushover_api_token,
+            "Hermes Amazon arama uyarısı",
+            message[:900],
+            "",
+            config.request_timeout_seconds,
+        )
+        meta["last_amazon_empty_search_alert_at"] = utc_now()
+        log(
+            "Amazon bos arama uyarisi gonderildi: "
+            f"sayfa={len(affected_pages)} | link={failed_link_count}"
+        )
+    except Exception as exc:  # noqa: BLE001
+        log(f"Amazon bos arama uyarisi gonderilemedi: {exc}")
     state["_meta"] = meta
 
 
@@ -532,6 +618,7 @@ def check_once(config: HermesConfig) -> None:
         state = {}
     session = requests.Session()
     summary_rows: List[PriceSummaryRow] = []
+    amazon_empty_events: List[Dict[str, Any]] = []
 
     for product in config.products:
         product_key = normalize_item_key("product", product.site, product.url)
@@ -655,6 +742,14 @@ def check_once(config: HermesConfig) -> None:
             if not all_results:
                 cached_count = append_cached_search_page_rows(summary_rows, page_state, page)
                 if cached_count:
+                    amazon_empty_events.append(
+                        {
+                            "page": page.name,
+                            "failed_links": len(failed_urls),
+                            "cached_count": cached_count,
+                            "full_empty": True,
+                        }
+                    )
                     retained_page_state = dict(page_state)
                     retained_page_state["last_checked_at"] = utc_now()
                     retained_page_state["last_error"] = None
@@ -669,6 +764,16 @@ def check_once(config: HermesConfig) -> None:
                     )
                     continue
                 raise HermesError("Amazon arama sayfasindaki linklerin hicbirinde okunabilir urun bulunamadi.")
+
+            if failed_urls:
+                amazon_empty_events.append(
+                    {
+                        "page": page.name,
+                        "failed_links": len(failed_urls),
+                        "cached_count": 0,
+                        "full_empty": False,
+                    }
+                )
 
             results = dedupe_results(all_results)
             log(
@@ -816,6 +921,7 @@ def check_once(config: HermesConfig) -> None:
     if config.products or config.amazon_search_pages:
         publish_price_summary(summary_rows)
         maybe_alert_summary_drop(state, summary_rows, config, session)
+        maybe_alert_amazon_empty_searches(state, amazon_empty_events, config, session)
     save_json(STATE_PATH, state)
 
 
