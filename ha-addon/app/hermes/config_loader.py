@@ -29,6 +29,16 @@ def _bounded_integer(payload: Dict[str, object], field_name: str, default: int, 
     return value
 
 
+def _legacy_interval_seconds(payload: Dict[str, object]) -> int:
+    raw_minutes = payload.get("interval_minutes")
+    if raw_minutes is None or str(raw_minutes).strip() == "":
+        return 60
+    try:
+        return int(raw_minutes) * 60
+    except (TypeError, ValueError):
+        return 60
+
+
 def _optional_bounded_integer(
     item: Dict[str, object], field_name: str, minimum: int, maximum: int
 ) -> Optional[int]:
@@ -141,7 +151,13 @@ def load_config() -> HermesConfig:
     if not isinstance(payload, dict):
         payload = {}
 
-    interval_minutes = _bounded_integer(payload, "interval_minutes", 30, 1, 1440)
+    interval_seconds = _bounded_integer(
+        payload,
+        "interval_seconds",
+        _legacy_interval_seconds(payload),
+        10,
+        86400,
+    )
     request_timeout_seconds = DEFAULT_REQUEST_TIMEOUT_SECONDS
     request_delay_min_seconds = _bounded_integer(
         payload,
@@ -180,7 +196,7 @@ def load_config() -> HermesConfig:
         raise HermesError("En az bir amazon_search_targets kaydı tanımlanmalı.")
 
     return HermesConfig(
-        interval_minutes=interval_minutes,
+        interval_seconds=interval_seconds,
         request_timeout_seconds=request_timeout_seconds,
         request_delay_min_seconds=request_delay_min_seconds,
         request_delay_max_seconds=request_delay_max_seconds,
