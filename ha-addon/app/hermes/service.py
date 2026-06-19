@@ -18,7 +18,7 @@ from .constants import (
     SUMMARY_PATH,
 )
 from .errors import HermesError
-from .http_client import cleaned_html, fetch_hepsiburada_page, fetch_with_retries
+from .http_client import cleaned_html, fetch_amazon_page, fetch_hepsiburada_page, fetch_with_retries
 from .logging_utils import log
 from .models import HermesConfig, PriceSummaryRow, ProductRule, SearchResultItem
 from .notifier import send_pushover
@@ -414,6 +414,8 @@ def maybe_alert_summary_drop(
 def _fetch_product_offer(session: requests.Session, site: str, url: str, timeout: int):
     if site == SITE_HEPSIBURADA:
         response = fetch_hepsiburada_page(session, url, timeout)
+    elif site == SITE_AMAZON:
+        response = fetch_amazon_page(session, url, timeout)
     else:
         response = fetch_with_retries(session, url, timeout)
     html = cleaned_html(response)
@@ -426,7 +428,7 @@ def _fetch_product_offer(session: requests.Session, site: str, url: str, timeout
 
 def _fetch_amazon_detail_result(session: requests.Session, candidate, config: HermesConfig) -> SearchResultItem:
     wait_before_request("Amazon detay", config)
-    response = fetch_with_retries(session, candidate.url, config.request_timeout_seconds)
+    response = fetch_amazon_page(session, candidate.url, config.request_timeout_seconds)
     html = cleaned_html(response)
     raise_if_age_verification(html)
     if "captcha" in html.lower() and "robot" in html.lower():
@@ -449,7 +451,7 @@ def _fetch_amazon_search_results(
     target_keywords: List[str],
 ):
     wait_before_request("Arama", config)
-    response = fetch_with_retries(session, search_url, config.request_timeout_seconds)
+    response = fetch_amazon_page(session, search_url, config.request_timeout_seconds, expect_search=True)
     html = cleaned_html(response)
     raise_if_age_verification(html)
     if "captcha" in html.lower() and "robot" in html.lower():
