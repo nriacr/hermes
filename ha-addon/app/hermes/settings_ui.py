@@ -314,6 +314,9 @@ def handle_settings_save(body):
         options = load_json(OPTIONS_PATH, {})
         if not isinstance(options, dict):
             options = {}
+        if "interval_seconds" not in options and options.get("interval_minutes"):
+            options["interval_seconds"] = int(options.get("interval_minutes", 1) or 1) * 60
+        options.pop("interval_minutes", None)
         options.pop("request_timeout_seconds", None)
         options["products"] = _build_products(form)
         options["amazon_search_pages"] = _build_search_pages(form)

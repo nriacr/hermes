@@ -52,15 +52,15 @@ def _collect_summary_all_errors():
                     if checked_at:
                         last_checks.append(checked_at.astimezone())
 
-    interval_minutes = int(options.get("interval_minutes", 30) or 30)
+    interval_seconds = int(options.get("interval_seconds") or int(options.get("interval_minutes", 1) or 1) * 60)
     last_check = max(last_checks) if last_checks else None
     return {
-        "interval": interval_minutes,
+        "interval": interval_seconds,
         "products": len(products),
         "amazon_pages": len(pages),
         "amazon_targets": len(targets),
         "last_check": last_check.strftime("%Y-%m-%d %H:%M:%S") if last_check else "-",
-        "next_check": (last_check + timedelta(minutes=interval_minutes)).strftime("%Y-%m-%d %H:%M:%S") if last_check else "-",
+        "next_check": (last_check + timedelta(seconds=interval_seconds)).strftime("%Y-%m-%d %H:%M:%S") if last_check else "-",
         "errors": error_count,
         "error_details": error_details,
         "configured": bool(options),

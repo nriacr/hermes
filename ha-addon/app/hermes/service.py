@@ -95,13 +95,13 @@ def price_bounds(state_entry: Dict[str, Any], current_price: Decimal):
     return min_price, max_price
 
 
-def product_check_due(product: ProductRule, state_entry: Dict[str, Any], global_interval_minutes: int) -> bool:
-    interval_minutes = product.check_interval_minutes or global_interval_minutes
+def product_check_due(product: ProductRule, state_entry: Dict[str, Any], global_interval_seconds: int) -> bool:
+    interval_seconds = product.check_interval_minutes * 60 if product.check_interval_minutes else global_interval_seconds
     last_checked = parse_iso_datetime(state_entry.get("last_checked_at"))
     if not last_checked:
         return True
     elapsed_seconds = (local_now().astimezone(timezone.utc) - last_checked).total_seconds()
-    return elapsed_seconds >= interval_minutes * 60
+    return elapsed_seconds >= interval_seconds
 
 
 def summary_row_from_state(product: ProductRule, state_entry: Dict[str, Any], seller: str):
@@ -490,7 +490,7 @@ def check_once(config: HermesConfig) -> None:
         product_key = normalize_item_key("product", product.site, product.url)
         state_entry = state.get(product_key, {})
         seller = site_label(product.site)
-        if not product_check_due(product, state_entry, config.interval_minutes):
+        if not product_check_due(product, state_entry, config.interval_seconds):
             cached_row = summary_row_from_state(product, state_entry, seller)
             if cached_row:
                 summary_rows.append(cached_row)
@@ -753,9 +753,9 @@ def run_service() -> int:
         check_once(config)
         return 0
 
-    log(f"Servis basladi. Kontrol araligi: {config.interval_minutes} dakika")
+    log(f"Servis basladi. Kontrol araligi: {config.interval_seconds} saniye")
     while True:
         check_once(config)
-        next_check = local_now() + timedelta(minutes=config.interval_minutes)
+        next_check = local_now() + timedelta(seconds=config.interval_seconds)
         log(f"Sonraki kontrol: {format_local_datetime(next_check)}")
-        time.sleep(config.interval_minutes * 60)
+        time.sleep(config.interval_seconds)

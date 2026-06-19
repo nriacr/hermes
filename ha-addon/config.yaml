@@ -1,5 +1,5 @@
 name: Hermes
-version: "1.0.43"
+version: "1.0.44"
 slug: hermes
 description: Amazon, Hepsiburada, Trendyol ve Network ürün fiyatlarını izler; Amazon arama sayfalarını ayrıca takip eder.
 url: https://github.com/nriacr/hermes
@@ -17,7 +17,7 @@ hassio_role: manager
 panel_title: Hermes
 panel_icon: mdi:tag-heart
 options:
-  interval_minutes: 30
+  interval_seconds: 60
   request_delay_min_seconds: 3
   request_delay_max_seconds: 8
   pushover_user_key: ""
@@ -28,7 +28,7 @@ options:
   amazon_search_pages: []
   amazon_search_targets: []
 schema:
-  interval_minutes: "int(1,1440)"
+  interval_seconds: "int(10,86400)"
   request_delay_min_seconds: "int(0,120)"
   request_delay_max_seconds: "int(0,120)"
   pushover_user_key: "str"
