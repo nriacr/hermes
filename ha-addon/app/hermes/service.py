@@ -121,6 +121,53 @@ def summary_row_from_state(product: ProductRule, state_entry: Dict[str, Any], se
     )
 
 
+def append_cached_search_target_rows(
+    summary_rows: List[PriceSummaryRow],
+    target_state: Dict[str, Any],
+    target,
+) -> int:
+    items_state = target_state.get("items", {}) if isinstance(target_state, dict) else {}
+    if not isinstance(items_state, dict):
+        return 0
+    added_count = 0
+    for item_state in items_state.values():
+        if not isinstance(item_state, dict):
+            continue
+        price = _state_decimal(item_state.get("last_price"))
+        if price is None:
+            continue
+        min_price = _state_decimal(item_state.get("min_price")) or price
+        max_price = _state_decimal(item_state.get("max_price")) or price
+        summary_rows.append(
+            PriceSummaryRow(
+                seller="Amazon",
+                product_title=str(item_state.get("title") or target.name),
+                product_url=str(item_state.get("url") or ""),
+                price=price,
+                target_price=target.target_price,
+                min_price=min_price,
+                max_price=max_price,
+            )
+        )
+        added_count += 1
+    return added_count
+
+
+def append_cached_search_page_rows(
+    summary_rows: List[PriceSummaryRow],
+    page_state: Dict[str, Any],
+    page,
+) -> int:
+    targets_state = page_state.get("targets", {}) if isinstance(page_state, dict) else {}
+    if not isinstance(targets_state, dict):
+        return 0
+    added_count = 0
+    for target in page.targets:
+        target_state = targets_state.get(normalize_key(target.name), {})
+        added_count += append_cached_search_target_rows(summary_rows, target_state, target)
+    return added_count
+
+
 def save_price_summary(rows: List[PriceSummaryRow]) -> None:
     sorted_rows = sorted_summary_rows(rows)
     payload = {
@@ -606,6 +653,21 @@ def check_once(config: HermesConfig) -> None:
                     log(f"Arama linki hatasi: {page.name} | link={idx}/{len(page.search_urls)} | {exc}")
 
             if not all_results:
+                cached_count = append_cached_search_page_rows(summary_rows, page_state, page)
+                if cached_count:
+                    retained_page_state = dict(page_state)
+                    retained_page_state["last_checked_at"] = utc_now()
+                    retained_page_state["last_error"] = None
+                    retained_page_state["last_error_status"] = None
+                    retained_page_state["last_warning"] = (
+                        "Amazon arama bu tur okunamadı; son başarılı sonuçlar özet tabloda korundu."
+                    )
+                    state[page_key] = retained_page_state
+                    log(
+                        f"Amazon arama gecici bos dondu, son basarili veriler korundu: "
+                        f"{page.name} | cached_urun={cached_count}"
+                    )
+                    continue
                 raise HermesError("Amazon arama sayfasindaki linklerin hicbirinde okunabilir urun bulunamadi.")
 
             results = dedupe_results(all_results)
@@ -627,6 +689,22 @@ def check_once(config: HermesConfig) -> None:
                     f"Arama hedefi kontrol edildi: {page.name} / {target.name} | "
                     f"eslesen_urun={len(matches)} | hedef={target.target_price} TL"
                 )
+
+                if failed_urls and not matches:
+                    cached_count = append_cached_search_target_rows(summary_rows, target_state, target)
+                    if cached_count:
+                        log(
+                            f"Amazon arama hedefi bu tur eslesmedi ama link hatasi oldugu icin "
+                            f"son basarili veriler korundu: {page.name} / {target.name} | "
+                            f"cached_urun={cached_count}"
+                        )
+                        targets_state[target_key] = {
+                            "items": updated_items_state,
+                            "last_match_count": target_state.get("last_match_count", cached_count),
+                            "last_checked_at": utc_now(),
+                            "last_warning": "Link hatası nedeniyle son başarılı sonuçlar korundu.",
+                        }
+                        continue
 
                 for match in matches:
                     item_key = normalize_key(match.url)
