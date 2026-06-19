@@ -64,7 +64,7 @@ class OfferResult:
 
 @dataclass
 class HermesConfig:
-    interval_minutes: int
+    interval_seconds: int
     request_timeout_seconds: int
     request_delay_min_seconds: int
     request_delay_max_seconds: int
