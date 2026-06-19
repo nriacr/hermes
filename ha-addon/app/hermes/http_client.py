@@ -83,7 +83,7 @@ def amazon_headers(url: str):
 
 def _clean_amazon_search_url(url: str) -> str:
     parsed = urlsplit(url)
-    if "amazon." not in parsed.netloc.lower() or parsed.path.rstrip("/") != "/s":
+    if "amazon." not in parsed.netloc.lower() or parsed.path.rstrip("/") not in {"/s", "/-/tr/s"}:
         return url
     kept_params = [
         (key, value)
@@ -95,6 +95,18 @@ def _clean_amazon_search_url(url: str) -> str:
     return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, urlencode(kept_params), parsed.fragment))
 
 
+def _with_amazon_locale_path(url: str) -> str:
+    parsed = urlsplit(url)
+    if "amazon." not in parsed.netloc.lower():
+        return url
+    path = parsed.path.rstrip("/")
+    if path == "/s":
+        return urlunsplit((parsed.scheme, parsed.netloc, "/-/tr/s", parsed.query, parsed.fragment))
+    if path == "/-/tr/s":
+        return urlunsplit((parsed.scheme, parsed.netloc, "/s", parsed.query, parsed.fragment))
+    return url
+
+
 def amazon_url_variants(url: str):
     variants = []
 
@@ -103,7 +115,10 @@ def amazon_url_variants(url: str):
             variants.append(candidate)
 
     add(url)
-    add(_clean_amazon_search_url(url))
+    add(_with_amazon_locale_path(url))
+    cleaned_url = _clean_amazon_search_url(url)
+    add(cleaned_url)
+    add(_with_amazon_locale_path(cleaned_url))
     return variants
 
 
@@ -176,11 +191,47 @@ def _get_amazon_response_with_curl(candidate: str, timeout: int, expect_search: 
     return response
 
 
+def _seed_amazon_session(session: requests.Session) -> None:
+    if getattr(session, "_hermes_amazon_seeded", False):
+        return
+    session.cookies.set("i18n-prefs", "TRY", domain=".amazon.com.tr")
+    session.cookies.set("lc-acbtr", "tr_TR", domain=".amazon.com.tr")
+    setattr(session, "_hermes_amazon_seeded", True)
+
+
+def _prime_amazon_session(session: requests.Session, timeout: int) -> None:
+    if getattr(session, "_hermes_amazon_primed", False):
+        return
+    _seed_amazon_session(session)
+    response = session.get(
+        "https://www.amazon.com.tr/",
+        headers=amazon_headers("https://www.amazon.com.tr/"),
+        timeout=timeout,
+        allow_redirects=True,
+    )
+    response.raise_for_status()
+    if _is_amazon_protection_page(decode_response_text(response)):
+        raise HermesError("Amazon bot korumasi nedeniyle captcha/koruma sayfasi dondu.")
+    setattr(session, "_hermes_amazon_primed", True)
+
+
 def fetch_amazon_page(session: requests.Session, url: str, timeout: int, expect_search: bool = False):
     last_error: Optional[Exception] = None
+    _seed_amazon_session(session)
     for candidate in amazon_url_variants(url):
         try:
             return _get_amazon_response(session, candidate, timeout, expect_search)
+        except Exception as exc:  # noqa: BLE001
+            last_error = exc
+
+    if expect_search:
+        try:
+            _prime_amazon_session(session, timeout)
+            for candidate in amazon_url_variants(url):
+                try:
+                    return _get_amazon_response(session, candidate, timeout, expect_search)
+                except Exception as exc:  # noqa: BLE001
+                    last_error = exc
         except Exception as exc:  # noqa: BLE001
             last_error = exc
 
