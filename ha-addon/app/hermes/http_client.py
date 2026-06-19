@@ -109,11 +109,16 @@ def amazon_url_variants(url: str):
 
 def _is_amazon_protection_page(html: str) -> bool:
     normalized = normalize_offer_text(html)
-    return (
-        "captcha" in normalized
-        or "automated access" in normalized
-        or "robot" in normalized
-        or "enter the characters you see below" in normalized
+    return any(
+        marker in normalized
+        for marker in (
+            "captcha",
+            "automated access",
+            "robot check",
+            "not a robot",
+            "robot olmadiginizi",
+            "enter the characters you see below",
+        )
     )
 
 
@@ -132,9 +137,11 @@ def _is_usable_amazon_response(response, expect_search: bool) -> bool:
             "data-component-type=\"s-search-result\"",
             "data-component-type='s-search-result'",
             "s-search-result",
-            "data-asin=\"",
-            "data-asin='",
+            "data-cy=\"title-recipe\"",
+            "data-cy='title-recipe'",
             "puis-card-container",
+            "/dp/",
+            "/gp/product/",
         )
     )
 
