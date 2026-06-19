@@ -4,7 +4,6 @@ import time
 from datetime import timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, List
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import requests
 
@@ -25,7 +24,6 @@ from .models import HermesConfig, PriceSummaryRow, ProductRule, SearchResultItem
 from .notifier import send_pushover
 from .providers.registry import extract_offer
 from .search_amazon import (
-    AmazonSearchCandidate,
     dedupe_results,
     extract_result_candidates,
     filter_matching_results,
@@ -614,89 +612,6 @@ def _fetch_amazon_search_results(
     return results
 
 
-def _amazon_search_urls_for_page(search_url: str, page_name: str) -> List[str]:
-    urls = [search_url]
-    parsed = urlsplit(search_url)
-    if "amazon." not in parsed.netloc.lower() or parsed.path.rstrip("/") not in {"/s", "/-/tr/s"}:
-        return urls
-
-    params = parse_qsl(parsed.query, keep_blank_values=True)
-    has_keyword = any(key in {"k", "field-keywords"} and value.strip() for key, value in params)
-    if has_keyword or not page_name.strip():
-        return urls
-
-    keyword_url = urlunsplit(
-        (
-            parsed.scheme,
-            parsed.netloc,
-            parsed.path,
-            urlencode([("k", page_name.strip()), *params]),
-            parsed.fragment,
-        )
-    )
-    if keyword_url not in urls:
-        urls.append(keyword_url)
-    return urls
-
-
-def _refresh_cached_amazon_target_results(
-    session: requests.Session,
-    target_state: Dict[str, Any],
-    target,
-    config: HermesConfig,
-) -> List[SearchResultItem]:
-    items_state = target_state.get("items", {}) if isinstance(target_state, dict) else {}
-    if not isinstance(items_state, dict):
-        return []
-
-    refreshed: List[SearchResultItem] = []
-    seen_urls = set()
-    for item_state in items_state.values():
-        if not isinstance(item_state, dict):
-            continue
-        url = str(item_state.get("url") or "").strip()
-        title = str(item_state.get("title") or target.product_name).strip()
-        if not url or url in seen_urls:
-            continue
-        if not title_matches_any_keyword(title, [target.product_name]):
-            continue
-        seen_urls.add(url)
-        try:
-            refreshed.append(
-                _fetch_amazon_detail_result(
-                    session,
-                    AmazonSearchCandidate(title=title, url=url, price=None),
-                    config,
-                )
-            )
-        except Exception as exc:  # noqa: BLE001
-            log(f"Amazon onceki urun detay fiyatı okunamadı: {log_cell(title, 60)} | {exc}")
-
-    if refreshed:
-        log(
-            f"Amazon onceki urun detaylarindan guncel fiyat alindi: "
-            f"{target.product_name} | adet={len(refreshed)}"
-        )
-    return refreshed
-
-
-def _refresh_cached_amazon_page_results(
-    session: requests.Session,
-    page_state: Dict[str, Any],
-    page,
-    config: HermesConfig,
-) -> List[SearchResultItem]:
-    targets_state = page_state.get("targets", {}) if isinstance(page_state, dict) else {}
-    if not isinstance(targets_state, dict):
-        return []
-
-    refreshed: List[SearchResultItem] = []
-    for target in page.targets:
-        target_state = targets_state.get(normalize_key(target.name), {})
-        refreshed.extend(_refresh_cached_amazon_target_results(session, target_state, target, config))
-    return dedupe_results(refreshed) if refreshed else []
-
-
 def check_once(config: HermesConfig) -> None:
     state = load_json(STATE_PATH, {})
     if not isinstance(state, dict):
@@ -807,23 +722,14 @@ def check_once(config: HermesConfig) -> None:
             failed_urls = []
             target_keywords = [target.product_name for target in page.targets]
             for idx, search_url in enumerate(page.search_urls, start=1):
-                last_link_error = None
                 try:
-                    url_results = []
-                    for effective_url in _amazon_search_urls_for_page(search_url, page.name):
-                        try:
-                            url_results = _fetch_amazon_search_results(
-                                session,
-                                effective_url,
-                                config,
-                                page.max_items_to_scan,
-                                target_keywords,
-                            )
-                            break
-                        except Exception as exc:  # noqa: BLE001
-                            last_link_error = exc
-                    if not url_results and last_link_error:
-                        raise last_link_error
+                    url_results = _fetch_amazon_search_results(
+                        session,
+                        search_url,
+                        config,
+                        page.max_items_to_scan,
+                        target_keywords,
+                    )
                     all_results.extend(url_results)
                     log(
                         f"Arama linki kontrol edildi: {page.name} | "
@@ -834,66 +740,33 @@ def check_once(config: HermesConfig) -> None:
                     log(f"Arama linki hatasi: {page.name} | link={idx}/{len(page.search_urls)} | {exc}")
 
             if not all_results:
-                refreshed_results = _refresh_cached_amazon_page_results(session, page_state, page, config)
-                if refreshed_results:
-                    all_results.extend(refreshed_results)
+                cached_count = append_cached_search_page_rows(summary_rows, page_state, page)
+                if cached_count:
                     amazon_empty_events.append(
                         {
                             "page": page.name,
                             "failed_links": len(failed_urls),
-                            "cached_count": len(refreshed_results),
+                            "cached_count": cached_count,
                             "full_empty": True,
                         }
                     )
-                    log(
-                        f"Amazon arama sayfasi bos dondu, onceki urun detaylarindan guncel fiyat alindi: "
-                        f"{page.name} | adet={len(refreshed_results)}"
+                    retained_page_state = dict(page_state)
+                    retained_page_state["last_checked_at"] = utc_now()
+                    retained_page_state["last_error"] = None
+                    retained_page_state["last_error_status"] = None
+                    retained_page_state["last_warning"] = (
+                        "Amazon arama bu tur okunamadı; son başarılı sonuçlar özet tabloda korundu."
                     )
-                else:
-                    cached_count = append_cached_search_page_rows(summary_rows, page_state, page)
-                    if cached_count:
-                        amazon_empty_events.append(
-                            {
-                                "page": page.name,
-                                "failed_links": len(failed_urls),
-                                "cached_count": cached_count,
-                                "full_empty": True,
-                            }
-                        )
-                        retained_page_state = dict(page_state)
-                        retained_page_state["last_checked_at"] = utc_now()
-                        retained_page_state["last_error"] = None
-                        retained_page_state["last_error_status"] = None
-                        retained_page_state["last_warning"] = (
-                            "Amazon arama bu tur okunamadı; son başarılı sonuçlar özet tabloda korundu."
-                        )
-                        state[page_key] = retained_page_state
-                        log(
-                            f"Amazon arama gecici bos dondu, son basarili veriler korundu: "
-                            f"{page.name} | cached_urun={cached_count}"
-                        )
-                        continue
-                    raise HermesError("Amazon arama sayfasindaki linklerin hicbirinde okunabilir urun bulunamadi.")
+                    state[page_key] = retained_page_state
+                    log(
+                        f"Amazon arama gecici bos dondu, son basarili veriler korundu: "
+                        f"{page.name} | cached_urun={cached_count}"
+                    )
+                    continue
+                raise HermesError("Amazon arama sayfasindaki linklerin hicbirinde okunabilir urun bulunamadi.")
 
             results = dedupe_results(all_results)
             targets_state = dict(page_state.get("targets", {}))
-
-            if failed_urls:
-                refreshed_missing_results: List[SearchResultItem] = []
-                for target in page.targets:
-                    if filter_matching_results(results, target.product_name):
-                        continue
-                    target_state = targets_state.get(normalize_key(target.name), {})
-                    refreshed_missing_results.extend(
-                        _refresh_cached_amazon_target_results(session, target_state, target, config)
-                    )
-                if refreshed_missing_results:
-                    all_results.extend(refreshed_missing_results)
-                    results = dedupe_results(all_results)
-                    log(
-                        "Amazon kismi arama hatasinda eksik hedefler detaydan guncellendi: "
-                        f"{page.name} | adet={len(refreshed_missing_results)}"
-                    )
 
             if not results:
                 cached_count = append_cached_search_page_rows(summary_rows, page_state, page)
@@ -948,22 +821,6 @@ def check_once(config: HermesConfig) -> None:
                     f"Arama hedefi kontrol edildi: {page.name} / {target.name} | "
                     f"eslesen_urun={len(matches)} | hedef={target.target_price} TL"
                 )
-
-                if failed_urls and not matches:
-                    cached_count = append_cached_search_target_rows(summary_rows, target_state, target)
-                    if cached_count:
-                        log(
-                            f"Amazon arama hedefi bu tur eslesmedi ama link hatasi oldugu icin "
-                            f"son basarili veriler korundu: {page.name} / {target.name} | "
-                            f"cached_urun={cached_count}"
-                        )
-                        targets_state[target_key] = {
-                            "items": updated_items_state,
-                            "last_match_count": target_state.get("last_match_count", cached_count),
-                            "last_checked_at": utc_now(),
-                            "last_warning": "Link hatası nedeniyle son başarılı sonuçlar korundu.",
-                        }
-                        continue
 
                 for match in matches:
                     item_key = normalize_key(match.url)

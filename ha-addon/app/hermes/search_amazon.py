@@ -11,10 +11,9 @@ from .providers.amazon_common import extract_secondary_offer_price
 from .utils import canonical_amazon_product_url, normalize_offer_text, parse_decimal, repair_mojibake
 
 AMAZON_SEARCH_CARD_SELECTORS = [
-    "div[data-component-type='s-search-result']",
-    "div[data-asin][data-component-type]",
-    "div[data-asin]",
-    ".s-result-item",
+    "div.s-main-slot div[data-component-type='s-search-result'][data-asin]",
+    "div.s-main-slot div[data-cel-widget^='search_result_'][data-asin]",
+    "div[data-component-type='s-search-result'][data-asin]",
 ]
 
 AMAZON_CARD_TITLE_SELECTORS = [
@@ -99,6 +98,22 @@ def _extract_card_url(card: BeautifulSoup, fallback_asin: str = ""):
     return canonical_amazon_product_url(href, fallback_asin)
 
 
+def _is_hidden_element(element: Any) -> bool:
+    current = element
+    while current is not None and getattr(current, "name", None):
+        classes = set(current.get("class", []) or [])
+        style = str(current.get("style", "")).casefold()
+        if (
+            current.get("aria-hidden") == "true"
+            or "aok-hidden" in classes
+            or "display:none" in style.replace(" ", "")
+            or "visibility:hidden" in style.replace(" ", "")
+        ):
+            return True
+        current = current.parent
+    return False
+
+
 def _is_stop_section_text(value: str) -> bool:
     normalized = normalize_offer_text(value)
     return any(marker in normalized for marker in AMAZON_SEARCH_STOP_SECTION_MARKERS)
@@ -150,7 +165,7 @@ def extract_result_candidates(html: str, max_items_to_scan: int) -> List[AmazonS
     seen_urls = set()
     for card in cards:
         asin = str(card.get("data-asin", "")).strip() or ""
-        if card.name == "div" and card.has_attr("data-asin") and not asin:
+        if not asin or _is_hidden_element(card):
             continue
         if len(candidates) >= max_items_to_scan:
             break
