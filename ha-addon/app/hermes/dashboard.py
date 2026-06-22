@@ -367,7 +367,7 @@ def _collect_summary():
                     if checked_at:
                         last_checks.append(checked_at.astimezone())
 
-    interval_seconds = int(options.get("interval_seconds") or int(options.get("interval_minutes", 1) or 1) * 60)
+    interval_seconds = int(options.get("interval_seconds") or 60)
     last_check = max(last_checks) if last_checks else None
     return {
         "interval": interval_seconds,

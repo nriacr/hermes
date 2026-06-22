@@ -29,16 +29,6 @@ def _bounded_integer(payload: Dict[str, object], field_name: str, default: int, 
     return value
 
 
-def _legacy_interval_seconds(payload: Dict[str, object]) -> int:
-    raw_minutes = payload.get("interval_minutes")
-    if raw_minutes is None or str(raw_minutes).strip() == "":
-        return 60
-    try:
-        return int(raw_minutes) * 60
-    except (TypeError, ValueError):
-        return 60
-
-
 def _optional_bounded_integer(
     item: Dict[str, object], field_name: str, minimum: int, maximum: int
 ) -> Optional[int]:
@@ -207,7 +197,7 @@ def load_config() -> HermesConfig:
     interval_seconds = _bounded_integer(
         payload,
         "interval_seconds",
-        _legacy_interval_seconds(payload),
+        60,
         10,
         86400,
     )
