@@ -64,6 +64,7 @@ def _collect_summary_all_errors():
         "errors": error_count,
         "error_details": error_details,
         "configured": bool(options),
+        "telegram": dashboard_module._collect_telegram_summary(options if isinstance(options, dict) else {}),
     }
 
 

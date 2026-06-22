@@ -1,6 +1,6 @@
 # Hermes
 
-Hermes, Home Assistant üzerinde çalışan çok siteli ürün takip add-on'udur.
+Hermes, Home Assistant üzerinde çalışan çok siteli ürün ve Telegram fırsat takip add-on'udur.
 
 ## Özellikler
 
@@ -8,6 +8,8 @@ Hermes, Home Assistant üzerinde çalışan çok siteli ürün takip add-on'udur
 - Hepsiburada arama linki takibi: arama sonuçlarındaki ürün kartlarından en düşük fiyatı seçer
 - Amazon arama sayfası takibi: birden fazla arama linki ve hedef kuralı
 - Pushover bildirimleri
+- Telegram fırsat/indirim kanalı dinleme
+- Telegram keyword, exclude keyword ve aynı gün aynı keyword+fiyat tekrar engelleme
 - 24 saat tekrar bildirimi kontrolü (`notify_once_in_24H`)
 - Aktif/pasif kural yönetimi (`active`)
 - Log tablosu ve özet dosyası (`/data/latest_price_summary.json`)
@@ -27,6 +29,15 @@ Ana alanlar:
 - `products[]`
 - `amazon_search_pages[]`
 - `amazon_search_targets[]`
+- `telegram_enabled`
+- `api_id`
+- `api_hash`
+- `phone_number`
+- `verification_code`
+- `session_name`
+- `channels[]`
+- `keywords[]`
+- `exclude_keywords[]`
 
 Teknik istek zaman aşımı Hermes içinde yönetilir ve günlük kullanımda config ekranında görünmez.
 
@@ -38,19 +49,28 @@ Hepsiburada için ürün detay linki yerine arama linki kullanılması önerilir
 
 Bu yapıda Hermes, arama sonuçlarındaki ürün kartlarını okur; taksit ve kupon fiyatlarını eleyerek gerçek ürün fiyatlarını karşılaştırır ve en düşük fiyatı dikkate alır.
 
+Telegram dinleme varsayılan olarak kapalıdır. Aktif edildiğinde Hermes yalnızca config'teki kanalları dinler; mesajda keyword geçer ve exclude keyword'e takılmazsa Pushover bildirimi gönderir. İlk Telegram girişinde kod telefona gönderilir; gelen kod `verification_code` alanına yazılıp Hermes yeniden başlatıldığında session `/data/telegram_keyword_alert` altında kalıcı hale gelir.
+
 ## Veri Dosyaları
 
 - `/data/options.json`: Home Assistant tarafından yazılan ayarlar
 - `/data/state.json`: son kontrol, hata ve bildirim durumu
 - `/data/latest_price_summary.json`: son döngü fiyat özeti
+- `/data/telegram_keyword_alert`: Telegram session
+- `/data/login_state.json`: Telegram giriş kodu durumu
+- `/data/seen_messages.json`: işlenen Telegram mesajları
+- `/data/seen_deals.json`: günlük keyword+fiyat tekrar kayıtları
+- `/data/status.json`: Telegram dashboard sayaçları
+- `/data/error_events.json`: son 24 saatlik Telegram hata kayıtları
 
 ## Çalışma Akışı
 
 1. Config yüklenir ve doğrulanır.
 2. Ürün kuralları kontrol edilir.
 3. Amazon arama sayfası kuralları kontrol edilir.
-4. Gerekirse Pushover bildirimi gönderilir.
-5. State ve özet dosyaları güncellenir.
+4. Telegram aktifse ayrı arka plan worker içinde kanal mesajları dinlenir.
+5. Gerekirse Pushover bildirimi gönderilir.
+6. State ve özet dosyaları güncellenir.
 
 ## Geliştirme Notu
 

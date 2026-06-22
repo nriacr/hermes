@@ -8,7 +8,7 @@ from decimal import Decimal, InvalidOperation
 from html import escape
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from .constants import OPTIONS_PATH, PUSHOVER_URL, STATE_PATH, SUMMARY_PATH
+from .constants import OPTIONS_PATH, PUSHOVER_URL, STATE_PATH, SUMMARY_PATH, TELEGRAM_ERROR_EVENTS_PATH, TELEGRAM_STATUS_PATH
 from .storage import load_json
 from .utils import (
     detect_site_from_url,
@@ -378,6 +378,47 @@ def _collect_summary():
         "errors": error_count,
         "error_details": error_details[:4],
         "configured": bool(options),
+        "telegram": _collect_telegram_summary(options if isinstance(options, dict) else {}),
+    }
+
+
+def _telegram_error_count_24h():
+    payload = load_json(TELEGRAM_ERROR_EVENTS_PATH, [])
+    if not isinstance(payload, list):
+        return 0
+    cutoff = datetime.now().astimezone() - timedelta(hours=24)
+    count = 0
+    for item in payload:
+        if not isinstance(item, dict):
+            continue
+        try:
+            created_at = datetime.fromisoformat(str(item.get("created_at")))
+            if created_at.tzinfo is None:
+                created_at = created_at.astimezone()
+        except ValueError:
+            continue
+        if created_at.astimezone() >= cutoff:
+            count += 1
+    return count
+
+
+def _collect_telegram_summary(options):
+    status = load_json(TELEGRAM_STATUS_PATH, {})
+    if not isinstance(status, dict):
+        status = {}
+    channels = options.get("channels") if isinstance(options.get("channels"), list) else []
+    keywords = options.get("keywords") if isinstance(options.get("keywords"), list) else []
+    enabled = parse_bool(options.get("telegram_enabled"), default=False)
+    return {
+        "enabled": enabled,
+        "state": status.get("telegram_state") or ("Pasif" if not enabled else "Bekleniyor"),
+        "channels": status.get("telegram_channels") or len(channels),
+        "keywords": status.get("telegram_keywords") or len(keywords),
+        "notifications": status.get("notifications_sent", 0),
+        "duplicates": status.get("duplicates_suppressed", 0),
+        "last_check": status.get("last_check") or "-",
+        "last_notification": status.get("last_notification") or "-",
+        "errors": _telegram_error_count_24h(),
     }
 
 
@@ -457,6 +498,32 @@ def _render_table():
     <section class="summary-panel">
       <div class="summary-head"><h2>Özet Tablo</h2><span>{checked_at} · {row_count} ürün · {deal_count} fırsat</span></div>
       {sections}
+    </section>
+    """
+
+
+def _render_telegram_panel(summary):
+    telegram = summary.get("telegram") or {}
+    state = str(telegram.get("state") or "Pasif")
+    state_class = "status-ok" if state == "Dinleniyor" else ("status-warn" if state in {"Pasif", "Kod bekleniyor"} else "status-error")
+    cards = [
+        ("Telegram durumu", state, state_class),
+        ("Telegram kanalları", telegram.get("channels", 0), ""),
+        ("Keyword sayısı", telegram.get("keywords", 0), ""),
+        ("Gönderilen bildirim", telegram.get("notifications", 0), ""),
+        ("Susturulan tekrar", telegram.get("duplicates", 0), ""),
+        ("Son Telegram kontrolü", telegram.get("last_check", "-"), ""),
+        ("Son Telegram bildirimi", telegram.get("last_notification", "-"), ""),
+        ("Telegram hata sayısı (24s)", telegram.get("errors", 0), "status-error" if int(telegram.get("errors", 0) or 0) else ""),
+    ]
+    card_html = "".join(
+        f"<section class='card {escape(str(css))}'><span>{escape(str(label))}</span><strong>{escape(str(value))}</strong></section>"
+        for label, value, css in cards
+    )
+    return f"""
+    <section class="summary-panel">
+      <div class="summary-head"><h2>Telegram Dinleme</h2><span>Keyword bildirimleri</span></div>
+      <div class="grid">{card_html}</div>
     </section>
     """
 
@@ -575,7 +642,7 @@ def _render_page(path: str = "/") -> bytes:
         notice_html = f"<p class='notice {notice_class}'>{escape(test_message)}</p>"
 
     html = f"""<!doctype html>
-<html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta http-equiv="refresh" content="60"><title>Hermes</title><style>{DASHBOARD_CSS}</style></head><body><main><div class="hero"><div class="badge">Hermes</div><p>Ürün linkleri çok siteli çalışır; Amazon arama sayfaları Amazon'a özel mod olarak korunur.</p><div class="actions"><a class="button primary" href="{log_url}" target="_top">LOG</a><a class="button secondary" href="{app_url}" target="_top">Config</a><form class="inline-form" method="post" action="./test-pushover"><button class="button test" type="submit">Pushover</button></form></div>{notice_html}<div class="grid">{card_html}{error_card_html}</div>{_render_table()}<p class="note">LOG butonu log sekmesini, Config butonu yapılandırma sekmesini açar. Pushover butonu test bildirimi gönderir.</p><p class="footer">Sayfa 60 saniyede bir otomatik yenilenir.</p></div></main></body></html>"""
+<html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta http-equiv="refresh" content="60"><title>Hermes</title><style>{DASHBOARD_CSS}</style></head><body><main><div class="hero"><div class="badge">Hermes</div><p>Ürün linkleri çok siteli çalışır; Amazon arama sayfaları Amazon'a özel mod olarak korunur. Telegram dinleme aktifse fırsat kanalları da aynı Pushover hattına bağlanır.</p><div class="actions"><a class="button primary" href="{log_url}" target="_top">LOG</a><a class="button secondary" href="{app_url}" target="_top">Config</a><form class="inline-form" method="post" action="./test-pushover"><button class="button test" type="submit">Pushover</button></form></div>{notice_html}<div class="grid">{card_html}{error_card_html}</div>{_render_telegram_panel(summary)}{_render_table()}<p class="note">LOG butonu log sekmesini, Config butonu yapılandırma sekmesini açar. Pushover butonu test bildirimi gönderir.</p><p class="footer">Sayfa 60 saniyede bir otomatik yenilenir.</p></div></main></body></html>"""
     return html.encode("utf-8")
 
 

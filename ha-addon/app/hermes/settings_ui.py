@@ -6,6 +6,7 @@ import urllib.parse
 import urllib.request
 from html import escape
 
+from .config_loader import DEFAULT_TELEGRAM_CHANNELS
 from .constants import OPTIONS_PATH
 from .logging_utils import log
 from .storage import load_json, save_json
@@ -23,7 +24,7 @@ h1 { margin:0 0 8px; font-size:34px; letter-spacing:-.04em; } h2 { margin:24px 0
 .button.primary { color:#14172a; background:linear-gradient(135deg,var(--accent),var(--accent2)); } .button.secondary { color:var(--text); background:#2a2f4d; border-color:var(--line); }
 .notice { margin:14px 0; padding:11px 13px; border-radius:12px; font-weight:700; font-size:13px; } .notice-ok { color:#c6f7e6; background:rgba(127,220,184,.14); border:1px solid rgba(127,220,184,.38); } .notice-fail { color:#ffd8e3; background:rgba(255,156,181,.14); border:1px solid rgba(255,156,181,.38); }
 .settings-section { margin-top:18px; border:1px solid var(--line); border-radius:18px; padding:16px; background:var(--card); } details { border:1px solid var(--line); border-radius:14px; background:#181c32; margin:9px 0; overflow:hidden; } summary { cursor:pointer; padding:13px 14px; font-weight:900; color:#f0f2ff; list-style:none; } summary::-webkit-details-marker { display:none; } summary::before { content:'\u25b8'; display:inline-block; margin-right:8px; color:var(--accent2); } details[open] summary::before { transform:rotate(90deg); }
-.form-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:12px; padding:0 14px 14px; } label { display:grid; gap:6px; color:var(--muted); font-size:12px; font-weight:700; } input[type='text'], input[type='number'], input[type='url'] { width:100%; min-height:40px; border-radius:11px; border:1px solid var(--line); background:#101428; color:var(--text); padding:0 11px; font-size:13px; }
+.form-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:12px; padding:0 14px 14px; } label { display:grid; gap:6px; color:var(--muted); font-size:12px; font-weight:700; } input[type='text'], input[type='number'], input[type='url'], textarea { width:100%; min-height:40px; border-radius:11px; border:1px solid var(--line); background:#101428; color:var(--text); padding:10px 11px; font-size:13px; font-family:inherit; } textarea { resize:vertical; line-height:1.35; }
 .checkbox-row { display:flex; align-items:center; gap:9px; min-height:40px; color:var(--text); } .danger { color:#ffd8e3; } .footer-note { margin-top:14px; border-left:4px solid #b79ad6; padding:12px 14px; background:rgba(183,154,214,.15); border-radius:10px; font-size:13px; }
 """
 
@@ -54,6 +55,18 @@ def _field(prefix, name, label, value="", field_type="text", required=False):
     return (
         f"<label>{escape(label)}"
         f"<input type='{field_type}' name='{escape(prefix + name, quote=True)}' value='{escape(str(value or ''), quote=True)}'{required_attr}>"
+        "</label>"
+    )
+
+
+def _textarea(prefix, name, label, values=None, rows=5):
+    if isinstance(values, list):
+        value = "\n".join(str(item) for item in values)
+    else:
+        value = str(values or "")
+    return (
+        f"<label>{escape(label)}"
+        f"<textarea name='{escape(prefix + name, quote=True)}' rows='{int(rows)}'>{escape(value)}</textarea>"
         "</label>"
     )
 
@@ -146,6 +159,33 @@ def _section(title, items, renderer, section_name):
     )
 
 
+def _telegram_section(options):
+    channels = options.get("channels")
+    if not isinstance(channels, list):
+        channels = DEFAULT_TELEGRAM_CHANNELS
+    keywords = options.get("keywords") if isinstance(options.get("keywords"), list) else []
+    exclude_keywords = options.get("exclude_keywords") if isinstance(options.get("exclude_keywords"), list) else []
+    inner = "".join(
+        [
+            _checkbox("", "telegram_enabled", "Telegram dinleme aktif", options.get("telegram_enabled", False)),
+            _field("", "api_id", "Telegram API ID", options.get("api_id", "")),
+            _field("", "api_hash", "Telegram API Hash", options.get("api_hash", "")),
+            _field("", "phone_number", "Telefon numarası", options.get("phone_number", "")),
+            _field("", "verification_code", "Telegram doğrulama kodu", options.get("verification_code", "")),
+            _field("", "session_name", "Session adı", options.get("session_name", "telegram_keyword_alert")),
+            _textarea("", "channels", "Kanallar (her satıra bir kanal)", channels, rows=7),
+            _textarea("", "keywords", "Keyword'ler (her satıra bir keyword)", keywords, rows=5),
+            _textarea("", "exclude_keywords", "Hariç tutulacak keyword'ler", exclude_keywords, rows=4),
+        ]
+    )
+    return (
+        "<section class='settings-section'><h2>Telegram dinleme</h2>"
+        f"<details><summary>Telegram ayarları</summary><div class='form-grid'>{inner}</div></details>"
+        "<p class='footer-note'>Telegram aktifse api_id, api_hash, telefon numarası, kanal ve keyword alanları dolu olmalı. İlk girişte kod telefonuna gelir; kodu bu alana yazıp Hermes'i yeniden başlatman gerekir.</p>"
+        "</section>"
+    )
+
+
 def _bool_from_form(form, key, default=False):
     return key in form if key in form else default
 
@@ -228,6 +268,33 @@ def _build_search_targets(form):
     return targets
 
 
+def _list_from_form(form, key):
+    raw_value = _first(form, key)
+    if not raw_value:
+        return []
+    values = []
+    seen = set()
+    for line in raw_value.replace(",", "\n").splitlines():
+        value = line.strip()
+        if not value or value.casefold() in seen:
+            continue
+        seen.add(value.casefold())
+        values.append(value)
+    return values
+
+
+def _update_telegram_options(options, form):
+    options["telegram_enabled"] = _bool_from_form(form, "telegram_enabled")
+    options["api_id"] = _first(form, "api_id")
+    options["api_hash"] = _first(form, "api_hash")
+    options["phone_number"] = _first(form, "phone_number")
+    options["verification_code"] = _first(form, "verification_code")
+    options["session_name"] = _first(form, "session_name", "telegram_keyword_alert") or "telegram_keyword_alert"
+    options["channels"] = _list_from_form(form, "channels") or DEFAULT_TELEGRAM_CHANNELS
+    options["keywords"] = _list_from_form(form, "keywords")
+    options["exclude_keywords"] = _list_from_form(form, "exclude_keywords")
+
+
 def _current_addon_slug():
     hostname = os.getenv("HOSTNAME", "").strip()
     hyphen_slug = ADDON_SLUG.replace("_", "-")
@@ -302,6 +369,7 @@ def render_settings_page(path="/"):
 {_section("Ürünler", options.get("products"), _product_form, "products")}
 {_section("Amazon arama sayfaları", options.get("amazon_search_pages"), _search_page_form, "amazon_search_pages")}
 {_section("Amazon arama hedefleri", options.get("amazon_search_targets"), _search_target_form, "amazon_search_targets")}
+{_telegram_section(options)}
 <div class="actions"><button class="button primary" type="submit">Kaydet</button><a class="button secondary" href="./">Vazgeç</a></div>
 <p class="footer-note">Kaydet sonrası ekran birkaç saniye içinde “yeniden başlatılıyor” mesajı verir. Hermes yeniden başlarken sayfa kısa süre yanıt vermeyebilir; 10-20 saniye sonra yenileyebilirsin.</p>
 </form></div></main></body></html>"""
@@ -321,6 +389,7 @@ def handle_settings_save(body):
         options["products"] = _build_products(form)
         options["amazon_search_pages"] = _build_search_pages(form)
         options["amazon_search_targets"] = _build_search_targets(form)
+        _update_telegram_options(options, form)
         _save_options_to_supervisor(options)
         save_json(OPTIONS_PATH, options)
         log("Ayarlar Home Assistant config'e kaydedildi; Hermes yeniden başlatılacak.")

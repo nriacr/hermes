@@ -7,7 +7,7 @@ from .constants import (
     OPTIONS_PATH,
 )
 from .errors import HermesError
-from .models import AmazonSearchPage, AmazonSearchTarget, HermesConfig, ProductRule
+from .models import AmazonSearchPage, AmazonSearchTarget, HermesConfig, ProductRule, TelegramConfig
 from .storage import load_json
 from .utils import detect_site_from_url, parse_bool, parse_decimal
 
@@ -63,6 +63,57 @@ def _parse_search_urls(item: Dict[str, object]) -> List[str]:
     if not urls:
         raise HermesError("Amazon arama sayfası için en az search_url doldurulmalı.")
     return urls
+
+
+DEFAULT_TELEGRAM_CHANNELS = [
+    "@yaniyocom",
+    "@firsatz",
+    "@onual_firsat",
+    "@onual_ekstra",
+    "@butcedostu",
+    "@depoindirim",
+    "@uygunfiyatdedektifi",
+    "@tasarrufluharca",
+    "@depourunleri",
+    "@evEkonomi",
+    "@firsatavi",
+]
+
+
+def _string_list(value: object) -> List[str]:
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item or "").strip()]
+    if isinstance(value, str):
+        return [line.strip() for line in value.replace(",", "\n").splitlines() if line.strip()]
+    return []
+
+
+def _optional_int(value: object, field_name: str) -> Optional[int]:
+    if value is None or str(value).strip() == "":
+        return None
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError) as exc:
+        raise HermesError(f"{field_name} tam sayı olmalı.") from exc
+
+
+def _prepare_telegram_config(payload: Dict[str, object]) -> TelegramConfig:
+    channels = _string_list(payload.get("channels")) or DEFAULT_TELEGRAM_CHANNELS
+    keywords = _string_list(payload.get("keywords"))
+    exclude_keywords = _string_list(payload.get("exclude_keywords"))
+    enabled = parse_bool(payload.get("telegram_enabled"), default=False)
+    return TelegramConfig(
+        enabled=enabled,
+        api_id=_optional_int(payload.get("api_id"), "api_id"),
+        api_hash=str(payload.get("api_hash") or "").strip(),
+        phone_number=str(payload.get("phone_number") or "").strip(),
+        verification_code=str(payload.get("verification_code") or "").strip(),
+        session_name=str(payload.get("session_name") or "telegram_keyword_alert").strip()
+        or "telegram_keyword_alert",
+        channels=channels,
+        keywords=keywords,
+        exclude_keywords=exclude_keywords,
+    )
 
 
 def _prepare_products(raw_products: object) -> List[ProductRule]:
@@ -187,13 +238,21 @@ def load_config() -> HermesConfig:
     pages = _prepare_search_pages(raw_pages)
     _attach_search_targets(pages, raw_targets)
     search_pages = list(pages.values())
+    telegram = _prepare_telegram_config(payload)
 
-    if not products and not search_pages:
-        raise HermesError("En az bir products veya amazon_search_pages kaydı tanımlanmalı.")
+    if not products and not search_pages and not telegram.enabled:
+        raise HermesError("En az bir products, amazon_search_pages veya Telegram dinleme kaydı tanımlanmalı.")
     if not user_key or not api_token:
         raise HermesError("Pushover anahtarları zorunlu.")
     if raw_pages and not any(page.targets for page in search_pages):
         raise HermesError("En az bir amazon_search_targets kaydı tanımlanmalı.")
+    if telegram.enabled:
+        if not telegram.api_id or not telegram.api_hash or not telegram.phone_number:
+            raise HermesError("Telegram aktifse api_id, api_hash ve phone_number zorunlu.")
+        if not telegram.channels:
+            raise HermesError("Telegram aktifse en az bir channels kaydı tanımlanmalı.")
+        if not telegram.keywords:
+            raise HermesError("Telegram aktifse en az bir keywords kaydı tanımlanmalı.")
 
     return HermesConfig(
         interval_seconds=interval_seconds,
@@ -204,4 +263,5 @@ def load_config() -> HermesConfig:
         pushover_api_token=api_token,
         products=products,
         amazon_search_pages=search_pages,
+        telegram=telegram,
     )

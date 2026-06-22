@@ -1,7 +1,7 @@
 name: Hermes
-version: "1.0.48"
+version: "2.0.0"
 slug: hermes
-description: Amazon, Hepsiburada, Trendyol ve Network ürün fiyatlarını izler; Amazon arama sayfalarını ayrıca takip eder.
+description: Ürün fiyatlarını, Amazon arama sayfalarını ve Telegram fırsat kanallarını Pushover bildirimiyle takip eder.
 url: https://github.com/nriacr/hermes
 arch:
   - aarch64
@@ -24,6 +24,26 @@ options:
   pushover_api_token: ""
   public_dashboard_enabled: false
   public_dashboard_token: ""
+  telegram_enabled: false
+  api_id: ""
+  api_hash: ""
+  phone_number: ""
+  verification_code: ""
+  session_name: "telegram_keyword_alert"
+  channels:
+    - "@yaniyocom"
+    - "@firsatz"
+    - "@onual_firsat"
+    - "@onual_ekstra"
+    - "@butcedostu"
+    - "@depoindirim"
+    - "@uygunfiyatdedektifi"
+    - "@tasarrufluharca"
+    - "@depourunleri"
+    - "@evEkonomi"
+    - "@firsatavi"
+  keywords: []
+  exclude_keywords: []
   products: []
   amazon_search_pages: []
   amazon_search_targets: []
@@ -35,6 +55,18 @@ schema:
   pushover_api_token: "str"
   public_dashboard_enabled: "bool?"
   public_dashboard_token: "str?"
+  telegram_enabled: "bool?"
+  api_id: "str?"
+  api_hash: "str?"
+  phone_number: "str?"
+  verification_code: "str?"
+  session_name: "str?"
+  channels:
+    - "str"
+  keywords:
+    - "str"
+  exclude_keywords:
+    - "str"
   products:
     - name: "str"
       url: "str"

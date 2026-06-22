@@ -72,3 +72,17 @@ class HermesConfig:
     pushover_api_token: str
     products: List[ProductRule]
     amazon_search_pages: List[AmazonSearchPage]
+    telegram: "TelegramConfig"
+
+
+@dataclass
+class TelegramConfig:
+    enabled: bool
+    api_id: Optional[int]
+    api_hash: str
+    phone_number: str
+    verification_code: str
+    session_name: str
+    channels: List[str]
+    keywords: List[str]
+    exclude_keywords: List[str]

@@ -3,6 +3,12 @@ from pathlib import Path
 OPTIONS_PATH = Path("/data/options.json")
 STATE_PATH = Path("/data/state.json")
 SUMMARY_PATH = Path("/data/latest_price_summary.json")
+TELEGRAM_SESSION_PATH = Path("/data/telegram_keyword_alert")
+TELEGRAM_LOGIN_STATE_PATH = Path("/data/login_state.json")
+TELEGRAM_SEEN_MESSAGES_PATH = Path("/data/seen_messages.json")
+TELEGRAM_SEEN_DEALS_PATH = Path("/data/seen_deals.json")
+TELEGRAM_STATUS_PATH = Path("/data/status.json")
+TELEGRAM_ERROR_EVENTS_PATH = Path("/data/error_events.json")
 PUSHOVER_URL = "https://api.pushover.net/1/messages.json"
 
 SITE_AMAZON = "amazon"
@@ -25,6 +31,7 @@ DEFAULT_REQUEST_DELAY_MIN_SECONDS = 3
 DEFAULT_REQUEST_DELAY_MAX_SECONDS = 8
 AMAZON_SEARCH_HTTP_COOLDOWN_SECONDS = 45 * 60
 AMAZON_SEARCH_ERROR_NOTIFICATION_HOUR = 11
+TELEGRAM_STATUS_HEARTBEAT_SECONDS = 60 * 60
 
 DEFAULT_HEADERS = {
     "Accept": (

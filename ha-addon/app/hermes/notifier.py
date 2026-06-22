@@ -11,6 +11,7 @@ def send_pushover(
     message: str,
     url: str,
     timeout: int,
+    url_title: str = "Ürünü aç",
 ) -> None:
     data = {
         "token": api_token,
@@ -18,7 +19,7 @@ def send_pushover(
         "title": title,
         "message": message,
         "url": url,
-        "url_title": "Ürünü aç",
+        "url_title": url_title,
         "priority": "0",
         "sound": "pushover",
     }

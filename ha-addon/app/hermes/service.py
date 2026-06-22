@@ -30,6 +30,7 @@ from .search_amazon import (
     title_matches_any_keyword,
 )
 from .storage import load_json, save_json
+from .telegram_listener import start_telegram_listener
 from .utils import (
     format_local_datetime,
     format_signed_tl,
@@ -948,6 +949,7 @@ def run_service() -> int:
         check_once(config)
         return 0
 
+    start_telegram_listener(config)
     log(f"Servis basladi. Kontrol araligi: {config.interval_seconds} saniye")
     while True:
         check_once(config)
