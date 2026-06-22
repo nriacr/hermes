@@ -232,6 +232,34 @@ def _message_preview(text: str, max_length: int = 1024) -> str:
     return clean[:max_length]
 
 
+def _record_recent_notification(
+    channel_name: str,
+    keyword: str,
+    price: Optional[str],
+    url: str,
+    text: str,
+) -> None:
+    status = _load_status()
+    recent = status.get("recent_notifications")
+    if not isinstance(recent, list):
+        recent = []
+    recent.insert(
+        0,
+        {
+            "created_at": _now_text(),
+            "channel": channel_name,
+            "keyword": keyword,
+            "price": price or "",
+            "url": url,
+            "message": _message_preview(text, 180),
+        },
+    )
+    status["recent_notifications"] = recent[:5]
+    status["last_notification"] = _now_text()
+    status["telegram_state"] = "Dinleniyor"
+    save_json(TELEGRAM_STATUS_PATH, status)
+
+
 def _send_keyword_notification(
     config: HermesConfig,
     event,
@@ -241,6 +269,7 @@ def _send_keyword_notification(
     text: str,
 ) -> None:
     session = requests.Session()
+    message_url = _telegram_message_link(event)
     price_line = f"\nFiyat: {price} TL" if price else ""
     message = (
         f"Kanal: {channel_name}\n"
@@ -253,12 +282,12 @@ def _send_keyword_notification(
         config.pushover_api_token,
         "Telegram keyword alarmı",
         message,
-        _telegram_message_link(event),
+        message_url,
         config.request_timeout_seconds,
         url_title="Telegram'da aç",
     )
     _increment_status("notifications_sent")
-    _save_status(last_notification=_now_text(), telegram_state="Dinleniyor")
+    _record_recent_notification(channel_name, keyword, price, message_url, text)
     log(f"Telegram bildirimi gönderildi: kanal={channel_name} | keyword={keyword} | fiyat={price or '-'}")
 
 

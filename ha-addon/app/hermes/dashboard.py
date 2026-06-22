@@ -35,6 +35,7 @@ p { margin:0; color:var(--muted); line-height:1.5; font-size:13px; }
 .card.status-ok { border-color:rgba(127,220,184,.38); background:linear-gradient(135deg,rgba(127,220,184,.12),var(--card) 62%); } .card.status-ok strong { color:var(--ok); } .card.status-warn strong { color:var(--warn); } .card.status-error strong { color:var(--bad); }
 .error-card { grid-column:1 / -1; } .error-card ul { display:grid; gap:9px; margin:10px 0 0; padding:0; list-style:none; color:var(--text); } .error-card li { display:grid; gap:6px; padding:10px 12px; border:1px solid rgba(255,156,181,.28); border-radius:12px; background:rgba(255,156,181,.08); font-size:12px; line-height:1.35; overflow-wrap:anywhere; } .error-card li.empty-error { border-color:rgba(127,220,184,.26); background:rgba(127,220,184,.08); color:var(--muted); } .error-card li strong { font-size:13px; color:var(--text); } .error-card li span { margin:0; color:var(--muted); } .error-card li em { color:#ffd8e3; font-style:normal; } .error-card li a { color:#9ec0ff; font-weight:800; text-decoration:none; width:max-content; } .error-card li a:hover { text-decoration:underline; } .failed-link { display:grid; gap:3px; margin-top:4px; padding:8px 10px; border-radius:10px; background:rgba(143,185,255,.10); border:1px solid rgba(143,185,255,.22); } .failed-link span { color:#c7d7ff; font-weight:800; font-size:11px; } .failed-link strong { color:#e8eaf8; font-size:12px; } .failed-link em { color:#cfd6f6; font-size:11px; }
 .summary-panel { margin-top:18px; border:1px solid var(--line); border-radius:18px; padding:16px; background:var(--card); } .summary-head { display:flex; align-items:flex-end; justify-content:space-between; gap:12px; margin-bottom:12px; } .summary-head h2 { font-size:18px; margin:0; } .summary-head span { color:var(--muted); font-size:12px; white-space:nowrap; } .table-section + .table-section { margin-top:18px; } .table-section h3 { margin:0 0 9px; font-size:14px; color:#d8dcff; } .deals-section h3 { color:#b7f0dc; }
+.telegram-recent { margin-top:14px; border:1px solid rgba(199,166,255,.22); border-radius:14px; padding:13px; background:rgba(15,18,34,.36); } .telegram-recent h3 { margin:0 0 10px; font-size:13px; color:#d8dcff; } .telegram-recent p { color:var(--muted); } .telegram-recent ul { display:grid; gap:8px; margin:0; padding:0; list-style:none; } .telegram-recent li { display:grid; gap:4px; padding:10px 11px; border:1px solid rgba(142,214,210,.20); border-radius:12px; background:rgba(142,214,210,.07); } .telegram-recent li a,.telegram-recent li strong { color:#bfe3ff; font-size:13px; font-weight:850; text-decoration:none; overflow-wrap:anywhere; } .telegram-recent li a:hover { color:#d8c3ff; text-decoration:underline; } .telegram-recent li span { color:var(--muted); font-size:11px; } .telegram-recent li em { color:#dce0f8; font-size:12px; font-style:normal; line-height:1.35; overflow-wrap:anywhere; }
 .table-wrap { overflow-x:auto; border:1px solid var(--line); border-radius:14px; } table { width:100%; border-collapse:collapse; min-width:860px; } th,td { padding:8px 8px; border-bottom:1px solid var(--line); text-align:right; white-space:nowrap; } th { color:#c8d0ff; background:var(--head); font-size:10px; text-transform:uppercase; letter-spacing:.035em; } td { color:var(--text); font-size:12px; font-variant-numeric:tabular-nums; } tr:last-child td { border-bottom:none; } th:nth-child(1),td:nth-child(1) { width:104px; } th:nth-child(1),td:nth-child(1),th:nth-child(2),td:nth-child(2) { text-align:left; } th:not(:nth-child(2)),td:not(:nth-child(2)) { width:100px; } th:nth-child(6),td:nth-child(6) { width:148px; } .empty-row td { color:var(--muted); text-align:left; background:rgba(255,255,255,.025); }
 tbody tr.site-amazon { --site-bg:rgba(255,199,116,.10); --site-line:rgba(255,199,116,.48); --site-link:#ffd79a; } tbody tr.site-hepsiburada { --site-bg:rgba(255,153,112,.10); --site-line:rgba(255,153,112,.48); --site-link:#ffc1a5; } tbody tr.site-network { --site-bg:rgba(143,214,196,.10); --site-line:rgba(143,214,196,.48); --site-link:#aee7d8; } tbody tr.site-trendyol { --site-bg:rgba(245,170,196,.10); --site-line:rgba(245,170,196,.48); --site-link:#f7c1d3; } tbody tr.site-other { --site-bg:rgba(183,177,222,.10); --site-line:rgba(183,177,222,.42); --site-link:#cbc6ef; } tbody tr[class*='site-'] td { background:linear-gradient(90deg,var(--site-bg),rgba(30,33,57,.28)); } tbody tr[class*='site-'] td:first-child { border-left:4px solid var(--site-line); color:var(--site-link); font-weight:800; } tbody tr[class*='site-'] .product-cell a { color:var(--site-link); } tbody tr[class*='site-']:hover td { background:linear-gradient(90deg,rgba(255,255,255,.055),var(--site-bg)); }
 .product-cell { max-width:360px; white-space:normal; line-height:1.22; } .product-cell a { color:#9ec0ff; text-decoration:none; } .product-cell a:hover { color:#d1b3ff; text-decoration:underline; } .product-cell span { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; text-overflow:ellipsis; } .deal-row td { color:#b7f0dc; } .deal-row td:first-child { color:var(--site-link); } .deal-row .product-cell a { color:#b7f0dc; } .note { margin-top:18px; border-left:4px solid #b79ad6; padding:12px 14px; background:rgba(183,154,214,.15); border-radius:10px; font-size:13px; } .footer { margin-top:18px; font-size:12px; color:var(--muted); }
@@ -419,6 +420,7 @@ def _collect_telegram_summary(options):
         "last_check": status.get("last_check") or "-",
         "last_notification": status.get("last_notification") or "-",
         "errors": _telegram_error_count_24h(),
+        "recent_notifications": status.get("recent_notifications") if isinstance(status.get("recent_notifications"), list) else [],
     }
 
 
@@ -520,12 +522,44 @@ def _render_telegram_panel(summary):
         f"<section class='card {escape(str(css))}'><span>{escape(str(label))}</span><strong>{escape(str(value))}</strong></section>"
         for label, value, css in cards
     )
+    recent_html = _render_telegram_recent_notifications(telegram.get("recent_notifications") or [])
     return f"""
     <section class="summary-panel">
-      <div class="summary-head"><h2>Telegram Dinleme</h2><span>Keyword bildirimleri</span></div>
+      <div class="summary-head"><h2>Telegram Takip</h2><span>Keyword bildirimleri</span></div>
       <div class="grid">{card_html}</div>
+      {recent_html}
     </section>
     """
+
+
+def _render_telegram_recent_notifications(items):
+    if not items:
+        return "<div class='telegram-recent'><h3>Son Telegram Bildirimleri</h3><p>Henüz Telegram bildirimi yok.</p></div>"
+    rows = []
+    for item in items[:5]:
+        if not isinstance(item, dict):
+            continue
+        keyword = escape(str(item.get("keyword") or "-"))
+        channel = escape(str(item.get("channel") or "-"))
+        created_at = escape(str(item.get("created_at") or "-"))
+        price = str(item.get("price") or "").strip()
+        price_text = f" · {escape(price)} TL" if price else ""
+        message = escape(str(item.get("message") or ""))
+        url = str(item.get("url") or "").strip()
+        title = f"{keyword}{price_text}"
+        if url:
+            title_html = f"<a href='{escape(url, quote=True)}' target='_blank' rel='noopener noreferrer'>{title}</a>"
+        else:
+            title_html = f"<strong>{title}</strong>"
+        rows.append(
+            "<li>"
+            f"{title_html}"
+            f"<span>{channel} · {created_at}</span>"
+            f"<em>{message}</em>"
+            "</li>"
+        )
+    body = "".join(rows) if rows else "<li class='empty-error'>Henüz Telegram bildirimi yok.</li>"
+    return f"<div class='telegram-recent'><h3>Son Telegram Bildirimleri</h3><ul>{body}</ul></div>"
 
 
 def _send_test_notification():
