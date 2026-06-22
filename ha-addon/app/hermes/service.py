@@ -171,6 +171,41 @@ def append_cached_search_page_rows(
     return added_count
 
 
+def preserve_cached_search_rows(
+    summary_rows: List[PriceSummaryRow],
+    amazon_empty_events: List[Dict[str, Any]],
+    state: Dict[str, Any],
+    page_key: str,
+    page_state: Dict[str, Any],
+    page,
+    failed_urls: List[str],
+) -> bool:
+    cached_count = append_cached_search_page_rows(summary_rows, page_state, page)
+    if not cached_count:
+        return False
+    amazon_empty_events.append(
+        {
+            "page": page.name,
+            "failed_links": len(failed_urls),
+            "cached_count": cached_count,
+            "full_empty": True,
+        }
+    )
+    retained_page_state = dict(page_state)
+    retained_page_state["last_checked_at"] = utc_now()
+    retained_page_state["last_error"] = None
+    retained_page_state["last_error_status"] = None
+    retained_page_state["last_warning"] = (
+        "Amazon arama bu tur okunamadı; son başarılı sonuçlar özet tabloda korundu."
+    )
+    state[page_key] = retained_page_state
+    log(
+        f"Amazon arama gecici bos dondu, son basarili veriler korundu: "
+        f"{page.name} | cached_urun={cached_count}"
+    )
+    return True
+
+
 def save_price_summary(rows: List[PriceSummaryRow]) -> None:
     sorted_rows = sorted_summary_rows(rows)
     payload = {
@@ -741,28 +776,9 @@ def check_once(config: HermesConfig) -> None:
                     log(f"Arama linki hatasi: {page.name} | link={idx}/{len(page.search_urls)} | {exc}")
 
             if not all_results:
-                cached_count = append_cached_search_page_rows(summary_rows, page_state, page)
-                if cached_count:
-                    amazon_empty_events.append(
-                        {
-                            "page": page.name,
-                            "failed_links": len(failed_urls),
-                            "cached_count": cached_count,
-                            "full_empty": True,
-                        }
-                    )
-                    retained_page_state = dict(page_state)
-                    retained_page_state["last_checked_at"] = utc_now()
-                    retained_page_state["last_error"] = None
-                    retained_page_state["last_error_status"] = None
-                    retained_page_state["last_warning"] = (
-                        "Amazon arama bu tur okunamadı; son başarılı sonuçlar özet tabloda korundu."
-                    )
-                    state[page_key] = retained_page_state
-                    log(
-                        f"Amazon arama gecici bos dondu, son basarili veriler korundu: "
-                        f"{page.name} | cached_urun={cached_count}"
-                    )
+                if preserve_cached_search_rows(
+                    summary_rows, amazon_empty_events, state, page_key, page_state, page, failed_urls
+                ):
                     continue
                 raise HermesError("Amazon arama sayfasindaki linklerin hicbirinde okunabilir urun bulunamadi.")
 
@@ -770,28 +786,9 @@ def check_once(config: HermesConfig) -> None:
             targets_state = dict(page_state.get("targets", {}))
 
             if not results:
-                cached_count = append_cached_search_page_rows(summary_rows, page_state, page)
-                if cached_count:
-                    amazon_empty_events.append(
-                        {
-                            "page": page.name,
-                            "failed_links": len(failed_urls),
-                            "cached_count": cached_count,
-                            "full_empty": True,
-                        }
-                    )
-                    retained_page_state = dict(page_state)
-                    retained_page_state["last_checked_at"] = utc_now()
-                    retained_page_state["last_error"] = None
-                    retained_page_state["last_error_status"] = None
-                    retained_page_state["last_warning"] = (
-                        "Amazon arama bu tur okunamadı; son başarılı sonuçlar özet tabloda korundu."
-                    )
-                    state[page_key] = retained_page_state
-                    log(
-                        f"Amazon arama gecici bos dondu, son basarili veriler korundu: "
-                        f"{page.name} | cached_urun={cached_count}"
-                    )
+                if preserve_cached_search_rows(
+                    summary_rows, amazon_empty_events, state, page_key, page_state, page, failed_urls
+                ):
                     continue
                 raise HermesError("Amazon arama sayfasindaki linklerin hicbirinde okunabilir urun bulunamadi.")
 

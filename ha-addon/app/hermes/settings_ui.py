@@ -170,7 +170,7 @@ def _telegram_section(options):
     exclude_keywords = options.get("exclude_keywords") if isinstance(options.get("exclude_keywords"), list) else []
     inner = "".join(
         [
-            _checkbox("", "telegram_enabled", "Telegram dinleme aktif", options.get("telegram_enabled", False)),
+            _checkbox("", "telegram_enabled", "Telegram takip aktif", options.get("telegram_enabled", False)),
             _field("", "api_id", "Telegram API ID", options.get("api_id", "")),
             _field("", "api_hash", "Telegram API Hash", options.get("api_hash", "")),
             _field("", "phone_number", "Telefon numarası", options.get("phone_number", "")),
@@ -183,9 +183,9 @@ def _telegram_section(options):
         ]
     )
     return (
-        "<section class='settings-section'><h2>Telegram dinleme</h2>"
+        "<section class='settings-section'><h2>Telegram takip</h2>"
         f"<details><summary>Telegram ayarları</summary><div class='form-grid'>{inner}</div></details>"
-        "<p class='footer-note'>Telegram aktifse api_id, api_hash, telefon numarası, kanal ve keyword alanları dolu olmalı. “24 saat susturulacak keyword'ler” listesinde olan keyword'lerde aynı gün aynı fiyat tekrar bildirilmez; listeden çıkarılan keyword'lerde tekrar susturma kapanır.</p>"
+        "<p class='footer-note'>Telegram takip aktifse api_id, api_hash, telefon numarası, kanal ve keyword alanları dolu olmalı. “24 saat susturulacak keyword'ler” listesinde olan keyword'lerde aynı gün aynı fiyat tekrar bildirilmez; listeden çıkarılan keyword'lerde tekrar susturma kapanır.</p>"
         "</section>"
     )
 

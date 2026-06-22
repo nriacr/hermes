@@ -181,17 +181,6 @@ def extract_result_candidates(html: str, max_items_to_scan: int) -> List[AmazonS
     return candidates
 
 
-def extract_results(html: str, max_items_to_scan: int) -> List[SearchResultItem]:
-    results = [
-        SearchResultItem(title=item.title, url=item.url, price=item.price)
-        for item in extract_result_candidates(html, max_items_to_scan)
-        if item.price is not None
-    ]
-    if not results:
-        raise HermesError("Amazon arama sonuç sayfasında okunabilir fiyat bulunamadı.")
-    return results
-
-
 def dedupe_results(results: List[SearchResultItem]) -> List[SearchResultItem]:
     deduped = {}
     for item in results:
