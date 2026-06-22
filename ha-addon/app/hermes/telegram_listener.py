@@ -197,8 +197,15 @@ def _deal_key(keyword: str, price: str) -> str:
     return f"{normalize_text(keyword)}|{price}"
 
 
-def _duplicate_deal(keyword: str, price: Optional[str]) -> bool:
+def _notify_once_enabled(keyword: str, notify_once_keywords: Iterable[str]) -> bool:
+    normalized_keyword = normalize_text(keyword)
+    return any(normalize_text(item) == normalized_keyword for item in notify_once_keywords)
+
+
+def _duplicate_deal(keyword: str, price: Optional[str], notify_once_keywords: Iterable[str]) -> bool:
     if not price:
+        return False
+    if not _notify_once_enabled(keyword, notify_once_keywords):
         return False
     payload = _prune_seen_deals(_load_seen_deals())
     key = _deal_key(keyword, price)
@@ -371,7 +378,7 @@ async def _run_telegram_listener(config: HermesConfig) -> None:
             return
 
         price = extract_price(text)
-        if _duplicate_deal(keyword, price):
+        if _duplicate_deal(keyword, price, telegram_config.notify_once_keywords):
             return
 
         try:

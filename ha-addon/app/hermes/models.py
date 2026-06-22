@@ -86,3 +86,4 @@ class TelegramConfig:
     channels: List[str]
     keywords: List[str]
     exclude_keywords: List[str]
+    notify_once_keywords: List[str]

@@ -101,6 +101,7 @@ def _prepare_telegram_config(payload: Dict[str, object]) -> TelegramConfig:
     channels = _string_list(payload.get("channels")) or DEFAULT_TELEGRAM_CHANNELS
     keywords = _string_list(payload.get("keywords"))
     exclude_keywords = _string_list(payload.get("exclude_keywords"))
+    notify_once_keywords = _string_list(payload.get("telegram_notify_once_keywords")) or list(keywords)
     enabled = parse_bool(payload.get("telegram_enabled"), default=False)
     return TelegramConfig(
         enabled=enabled,
@@ -113,6 +114,7 @@ def _prepare_telegram_config(payload: Dict[str, object]) -> TelegramConfig:
         channels=channels,
         keywords=keywords,
         exclude_keywords=exclude_keywords,
+        notify_once_keywords=notify_once_keywords,
     )
 
 

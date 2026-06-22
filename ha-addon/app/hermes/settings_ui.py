@@ -164,6 +164,9 @@ def _telegram_section(options):
     if not isinstance(channels, list):
         channels = DEFAULT_TELEGRAM_CHANNELS
     keywords = options.get("keywords") if isinstance(options.get("keywords"), list) else []
+    notify_once_keywords = options.get("telegram_notify_once_keywords")
+    if not isinstance(notify_once_keywords, list):
+        notify_once_keywords = list(keywords)
     exclude_keywords = options.get("exclude_keywords") if isinstance(options.get("exclude_keywords"), list) else []
     inner = "".join(
         [
@@ -175,13 +178,14 @@ def _telegram_section(options):
             _field("", "session_name", "Session adı", options.get("session_name", "telegram_keyword_alert")),
             _textarea("", "channels", "Kanallar (her satıra bir kanal)", channels, rows=7),
             _textarea("", "keywords", "Keyword'ler (her satıra bir keyword)", keywords, rows=5),
+            _textarea("", "telegram_notify_once_keywords", "24 saat susturulacak keyword'ler", notify_once_keywords, rows=5),
             _textarea("", "exclude_keywords", "Hariç tutulacak keyword'ler", exclude_keywords, rows=4),
         ]
     )
     return (
         "<section class='settings-section'><h2>Telegram dinleme</h2>"
         f"<details><summary>Telegram ayarları</summary><div class='form-grid'>{inner}</div></details>"
-        "<p class='footer-note'>Telegram aktifse api_id, api_hash, telefon numarası, kanal ve keyword alanları dolu olmalı. İlk girişte kod telefonuna gelir; kodu bu alana yazıp Hermes'i yeniden başlatman gerekir.</p>"
+        "<p class='footer-note'>Telegram aktifse api_id, api_hash, telefon numarası, kanal ve keyword alanları dolu olmalı. “24 saat susturulacak keyword'ler” listesinde olan keyword'lerde aynı gün aynı fiyat tekrar bildirilmez; listeden çıkarılan keyword'lerde tekrar susturma kapanır.</p>"
         "</section>"
     )
 
@@ -292,6 +296,7 @@ def _update_telegram_options(options, form):
     options["session_name"] = _first(form, "session_name", "telegram_keyword_alert") or "telegram_keyword_alert"
     options["channels"] = _list_from_form(form, "channels") or DEFAULT_TELEGRAM_CHANNELS
     options["keywords"] = _list_from_form(form, "keywords")
+    options["telegram_notify_once_keywords"] = _list_from_form(form, "telegram_notify_once_keywords") or list(options["keywords"])
     options["exclude_keywords"] = _list_from_form(form, "exclude_keywords")
 
 
