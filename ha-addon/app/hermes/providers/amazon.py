@@ -1,3 +1,4 @@
+import re
 from typing import Optional
 
 from ..errors import HermesError
@@ -24,6 +25,12 @@ AMAZON_PRODUCT_SELECTORS = [
     "#priceblock_dealprice",
 ]
 
+AMAZON_PRIMARY_PRICE_CONTAINERS = [
+    "#corePriceDisplay_desktop_feature_div",
+    "#corePrice_feature_div",
+    "#apex_desktop",
+]
+
 
 def _parse_visible_price(text: str):
     clean = str(text or "").strip()
@@ -37,7 +44,38 @@ def _parse_visible_price(text: str):
         return None
 
 
+def _price_from_split_spans(price_element):
+    whole = price_element.select_one(".a-price-whole")
+    if not whole:
+        return None
+    whole_text = re.sub(r"[^\d.]", "", whole.get_text("", strip=True))
+    if not whole_text:
+        return None
+    fraction = price_element.select_one(".a-price-fraction")
+    fraction_text = re.sub(r"\D", "", fraction.get_text("", strip=True)) if fraction else "00"
+    fraction_text = (fraction_text or "00")[:2].ljust(2, "0")
+    return _parse_visible_price(f"{whole_text},{fraction_text} TL")
+
+
+def _extract_split_primary_price(soup):
+    for container_selector in AMAZON_PRIMARY_PRICE_CONTAINERS:
+        container = soup.select_one(container_selector)
+        if not container:
+            continue
+        for price_element in container.select(".a-price"):
+            classes = set(price_element.get("class") or [])
+            if "a-text-price" in classes or price_element.get("data-a-strike") == "true":
+                continue
+            price = _price_from_split_spans(price_element)
+            if price is not None:
+                return price
+    return None
+
+
 def _extract_visible_primary_price(soup):
+    split_price = _extract_split_primary_price(soup)
+    if split_price is not None:
+        return split_price
     for selector in AMAZON_PRODUCT_SELECTORS:
         element = soup.select_one(selector)
         if not element:
