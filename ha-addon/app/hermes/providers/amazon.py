@@ -60,6 +60,34 @@ def _parse_visible_price(text: str):
         return None
 
 
+def _ancestor_has_active_row(element) -> bool:
+    current = element
+    while current is not None and getattr(current, "name", None):
+        classes = set(current.get("class") or [])
+        if (
+            current.get("data-csa-c-is-in-initial-active-row") == "true"
+            or "a-accordion-active" in classes
+        ):
+            return True
+        current = current.parent
+    return False
+
+
+def _extract_active_customer_visible_price(soup):
+    candidates = []
+    for amount_input in soup.select("input[name='items[0.base][customerVisiblePrice][amount]']"):
+        price = _parse_visible_price(str(amount_input.get("value") or ""))
+        if price is None:
+            continue
+        candidates.append((_ancestor_has_active_row(amount_input), price))
+    for is_active, price in candidates:
+        if is_active:
+            return price
+    if candidates:
+        return min(price for _, price in candidates)
+    return None
+
+
 def _price_from_split_spans(price_element):
     whole = price_element.select_one(".a-price-whole")
     if not whole:
@@ -102,6 +130,9 @@ def _extract_buying_option_price(soup):
 
 
 def _extract_visible_primary_price(soup):
+    active_price = _extract_active_customer_visible_price(soup)
+    if active_price is not None:
+        return active_price
     split_price = _extract_split_primary_price(soup)
     if split_price is not None:
         return split_price
