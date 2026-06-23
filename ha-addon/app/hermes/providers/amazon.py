@@ -3,7 +3,7 @@ from typing import Optional
 
 from ..errors import HermesError
 from ..models import OfferResult
-from ..utils import parse_decimal
+from ..utils import normalize_offer_text, parse_decimal
 from .amazon_common import extract_secondary_offer_price
 from .base import (
     extract_jsonld_product,
@@ -31,11 +31,27 @@ AMAZON_PRIMARY_PRICE_CONTAINERS = [
     "#apex_desktop",
 ]
 
+BUYING_OPTION_PRICE_PATTERNS = [
+    re.compile(
+        r"degis\s+tokus\s+olmadan\s+"
+        r"(?P<whole>\d{1,3}(?:\.\d{3})+|\d+)"
+        r"(?:,(?P<comma_fraction>\d{1,2})|\s*(?P<plain_fraction>\d{2}))?\s*tl"
+    ),
+    re.compile(
+        r"takas\s+olmadan\s+"
+        r"(?P<whole>\d{1,3}(?:\.\d{3})+|\d+)"
+        r"(?:,(?P<comma_fraction>\d{1,2})|\s*(?P<plain_fraction>\d{2}))?\s*tl"
+    ),
+]
+
 
 def _parse_visible_price(text: str):
     clean = str(text or "").strip()
     if not clean:
         return None
+    adjacent_fraction = re.search(r"(?P<whole>\d{1,3}(?:\.\d{3})+)(?P<fraction>\d{2})\s*TL", clean, re.I)
+    if adjacent_fraction:
+        clean = f"{adjacent_fraction.group('whole')},{adjacent_fraction.group('fraction')} TL"
     if "TL" in clean and "," not in clean and "." in clean:
         clean = clean.replace(".", "")
     try:
@@ -72,10 +88,26 @@ def _extract_split_primary_price(soup):
     return None
 
 
+def _extract_buying_option_price(soup):
+    normalized_text = normalize_offer_text(soup.get_text(" ", strip=True))
+    for pattern in BUYING_OPTION_PRICE_PATTERNS:
+        match = pattern.search(normalized_text)
+        if not match:
+            continue
+        fraction = match.group("comma_fraction") or match.group("plain_fraction") or "00"
+        price = _parse_visible_price(f"{match.group('whole')},{fraction} TL")
+        if price is not None:
+            return price
+    return None
+
+
 def _extract_visible_primary_price(soup):
     split_price = _extract_split_primary_price(soup)
     if split_price is not None:
         return split_price
+    buying_option_price = _extract_buying_option_price(soup)
+    if buying_option_price is not None:
+        return buying_option_price
     for selector in AMAZON_PRODUCT_SELECTORS:
         element = soup.select_one(selector)
         if not element:
