@@ -5,7 +5,7 @@ from http.server import ThreadingHTTPServer
 
 from . import dashboard as dashboard_module
 from .constants import OPTIONS_PATH, STATE_PATH
-from .dashboard import WEB_PORT, _StatusHandler, _render_public_page, _send_test_notification
+from .dashboard import WEB_PORT, _StatusHandler, _render_public_page, _reset_notifications_async, _send_test_notification
 from .settings_ui import SETTINGS_CSS, handle_settings_save, render_settings_page
 from .storage import load_json
 from .utils import parse_iso_datetime
@@ -170,6 +170,14 @@ class SettingsDashboardHandler(_StatusHandler):
             status = "ok" if ok else "fail"
             self.send_response(303)
             self.send_header("Location", f"?test={status}&msg={urllib.parse.quote(message)}")
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            return
+        if path.endswith("/reset-notifications"):
+            ok, message = _reset_notifications_async()
+            status = "ok" if ok else "fail"
+            self.send_response(303)
+            self.send_header("Location", f"?reset={status}&msg={urllib.parse.quote(message)}")
             self.send_header("Cache-Control", "no-store")
             self.end_headers()
             return

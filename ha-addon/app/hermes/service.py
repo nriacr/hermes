@@ -16,6 +16,7 @@ from .constants import (
     SITE_HEPSIBURADA,
     STATE_PATH,
     SUMMARY_PATH,
+    TELEGRAM_SEEN_DEALS_PATH,
 )
 from .errors import HermesError
 from .http_client import cleaned_html, fetch_amazon_page, fetch_hepsiburada_page, fetch_with_retries
@@ -317,6 +318,47 @@ def update_state_entry(
         updated["last_alerted_price"] = str(current_price)
         updated["last_alerted_at"] = utc_now()
     return updated
+
+
+def _clear_alert_suppression(entry: Dict[str, Any], force_product_due: bool = False) -> bool:
+    changed = False
+    for field_name in ("last_alerted_price", "last_alerted_at"):
+        if field_name in entry:
+            entry.pop(field_name, None)
+            changed = True
+    if force_product_due and entry.get("last_checked_at"):
+        entry.pop("last_checked_at", None)
+        changed = True
+    return changed
+
+
+def reset_notification_suppression() -> int:
+    state = load_json(STATE_PATH, {})
+    if not isinstance(state, dict):
+        state = {}
+    reset_count = 0
+    for key, value in list(state.items()):
+        if key == "_meta" or not isinstance(value, dict):
+            continue
+        if isinstance(value.get("targets"), dict):
+            for target_state in value["targets"].values():
+                if not isinstance(target_state, dict) or not isinstance(target_state.get("items"), dict):
+                    continue
+                for item_state in target_state["items"].values():
+                    if isinstance(item_state, dict) and _clear_alert_suppression(item_state):
+                        reset_count += 1
+            continue
+        if _clear_alert_suppression(value, force_product_due=True):
+            reset_count += 1
+
+    seen_deals = load_json(TELEGRAM_SEEN_DEALS_PATH, {})
+    if isinstance(seen_deals, dict) and seen_deals:
+        save_json(TELEGRAM_SEEN_DEALS_PATH, {})
+        reset_count += len(seen_deals)
+
+    save_json(STATE_PATH, state)
+    log(f"Bildirim susturma hafizasi sifirlandi: kayit={reset_count}")
+    return reset_count
 
 
 def cooldown_remaining_seconds(search_state: Dict[str, Any]) -> int:
