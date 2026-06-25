@@ -68,6 +68,8 @@ SUMMARY_DROP_QUIET_START_HOUR = 22
 SUMMARY_DROP_QUIET_END_HOUR = 8
 AMAZON_EMPTY_ALERT_MIN_PAGES = 2
 AMAZON_EMPTY_ALERT_MIN_FAILED_LINKS = 3
+PRICE_HISTORY_SPIKE_RATIO = Decimal("5")
+PRICE_HISTORY_SPIKE_ABSOLUTE_TL = Decimal("50000")
 
 
 def raise_if_age_verification(html: str) -> None:
@@ -89,9 +91,33 @@ def _state_decimal(value: Any):
         return None
 
 
-def price_bounds(state_entry: Dict[str, Any], current_price: Decimal):
+def _history_reference_price(current_price: Decimal, target_price: Decimal | None = None) -> Decimal:
+    if target_price is not None and target_price > 0:
+        return max(current_price, target_price)
+    return current_price
+
+
+def _is_absurd_history_price(value: Decimal, current_price: Decimal, target_price: Decimal | None = None) -> bool:
+    reference = _history_reference_price(current_price, target_price)
+    return value > reference * PRICE_HISTORY_SPIKE_RATIO and value - reference >= PRICE_HISTORY_SPIKE_ABSOLUTE_TL
+
+
+def sanitized_price_bounds(
+    state_entry: Dict[str, Any],
+    current_price: Decimal,
+    target_price: Decimal | None = None,
+    context: str = "",
+):
     min_price = _state_decimal(state_entry.get("min_price"))
     max_price = _state_decimal(state_entry.get("max_price"))
+    if min_price is not None and _is_absurd_history_price(min_price, current_price, target_price):
+        if context:
+            log(f"Hatali minimum fiyat gecmisi temizlendi: {context} | eski_min={min_price} | guncel={current_price}")
+        min_price = None
+    if max_price is not None and _is_absurd_history_price(max_price, current_price, target_price):
+        if context:
+            log(f"Hatali maksimum fiyat gecmisi temizlendi: {context} | eski_max={max_price} | guncel={current_price}")
+        max_price = None
     if min_price is None or current_price < min_price:
         min_price = current_price
     if max_price is None or current_price > max_price:
@@ -112,8 +138,7 @@ def summary_row_from_state(product: ProductRule, state_entry: Dict[str, Any], se
     price = _state_decimal(state_entry.get("last_price"))
     if price is None:
         return None
-    min_price = _state_decimal(state_entry.get("min_price")) or price
-    max_price = _state_decimal(state_entry.get("max_price")) or price
+    min_price, max_price = sanitized_price_bounds(state_entry, price, product.target_price)
     return PriceSummaryRow(
         seller=seller,
         product_title=str(state_entry.get("title") or product.name or product.url),
@@ -140,8 +165,7 @@ def append_cached_search_target_rows(
         price = _state_decimal(item_state.get("last_price"))
         if price is None:
             continue
-        min_price = _state_decimal(item_state.get("min_price")) or price
-        max_price = _state_decimal(item_state.get("max_price")) or price
+        min_price, max_price = sanitized_price_bounds(item_state, price, target.target_price)
         summary_rows.append(
             PriceSummaryRow(
                 seller="Amazon",
@@ -306,13 +330,24 @@ def update_state_entry(
     current_price: Decimal,
     target_price: Decimal,
     alert_sent: bool,
+    context: str = "",
 ) -> Dict[str, Any]:
-    min_price, max_price = price_bounds(state_entry, current_price)
+    previous_min_price = _state_decimal(state_entry.get("min_price"))
+    previous_max_price = _state_decimal(state_entry.get("max_price"))
+    min_price, max_price = sanitized_price_bounds(state_entry, current_price, target_price, context)
     updated = dict(state_entry)
     updated["last_price"] = str(current_price)
     updated["min_price"] = str(min_price)
     updated["max_price"] = str(max_price)
     updated["last_checked_at"] = utc_now()
+    if previous_min_price != min_price:
+        updated["min_price_at"] = updated["last_checked_at"]
+    elif not updated.get("min_price_at"):
+        updated["min_price_at"] = updated["last_checked_at"]
+    if previous_max_price != max_price:
+        updated["max_price_at"] = updated["last_checked_at"]
+    elif not updated.get("max_price_at"):
+        updated["max_price_at"] = updated["last_checked_at"]
     updated["was_below_target"] = current_price <= target_price
     if alert_sent:
         updated["last_alerted_price"] = str(current_price)
@@ -712,7 +747,12 @@ def check_once(config: HermesConfig) -> None:
             offer = _fetch_product_offer(session, product.site, product.url, config.request_timeout_seconds)
             display_name = product.name or offer.title or product.url
             matched_url = offer.url or product.url
-            min_price, max_price = price_bounds(state_entry, offer.price)
+            min_price, max_price = sanitized_price_bounds(
+                state_entry,
+                offer.price,
+                product.target_price,
+                f"{seller} | {display_name}",
+            )
             summary_rows.append(
                 PriceSummaryRow(
                     seller=seller,
@@ -760,6 +800,7 @@ def check_once(config: HermesConfig) -> None:
                 offer.price,
                 product.target_price,
                 alert_sent,
+                f"{seller} | {display_name}",
             )
             state[product_key]["title"] = offer.title
             state[product_key]["url"] = matched_url
@@ -866,7 +907,12 @@ def check_once(config: HermesConfig) -> None:
                     item_key = normalize_key(match.url)
                     seen_item_keys.add(item_key)
                     item_state = dict(items_state.get(item_key, {}))
-                    min_price, max_price = price_bounds(item_state, match.price)
+                    min_price, max_price = sanitized_price_bounds(
+                        item_state,
+                        match.price,
+                        target.target_price,
+                        f"Amazon arama | {page.name} | {match.title}",
+                    )
                     summary_rows.append(
                         PriceSummaryRow(
                             seller="Amazon",
@@ -915,6 +961,7 @@ def check_once(config: HermesConfig) -> None:
                         match.price,
                         target.target_price,
                         alert_sent,
+                        f"Amazon arama | {page.name} | {match.title}",
                     )
                     updated_items_state[item_key]["title"] = match.title
                     updated_items_state[item_key]["url"] = match.url

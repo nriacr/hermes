@@ -30,10 +30,12 @@ def extract_price_after_secondary_offer_text(text: str):
         return None
 
 
-def extract_secondary_offer_price(container: Any):
+def extract_secondary_offer_price(container: Any, include_container_fallback: bool = True):
     for selector in AMAZON_SECONDARY_OFFER_SELECTORS:
         for element in container.select(selector):
             price = extract_price_after_secondary_offer_text(element.get_text(" ", strip=True))
             if price is not None:
                 return price
-    return extract_price_after_secondary_offer_text(container.get_text(" ", strip=True))
+    if include_container_fallback:
+        return extract_price_after_secondary_offer_text(container.get_text(" ", strip=True))
+    return None

@@ -24,12 +24,6 @@ AMAZON_CARD_TITLE_SELECTORS = [
     "a.a-link-normal span",
 ]
 
-AMAZON_CARD_PRICE_SELECTORS = [
-    ".a-price .a-offscreen",
-    "span.a-price > span.a-offscreen",
-    ".a-price-whole",
-]
-
 AMAZON_SEARCH_STOP_SECTION_MARKERS = (
     "yardima mi ihtiyaciniz var",
     "baktiginiz urunlere gore belirlenen urunler",
@@ -61,25 +55,33 @@ def _extract_card_title(card: BeautifulSoup) -> Optional[str]:
 
 
 def _extract_card_price(card: BeautifulSoup):
-    secondary = extract_secondary_offer_price(card)
+    secondary = extract_secondary_offer_price(card, include_container_fallback=False)
     if secondary is not None:
         return secondary
-    for selector in AMAZON_CARD_PRICE_SELECTORS:
-        element = card.select_one(selector)
-        if element:
-            text = element.get_text(" ", strip=True)
-            if text:
-                try:
-                    return parse_decimal(text)
-                except HermesError:
-                    continue
-    text = card.get_text(" ", strip=True)
-    match = re.search(r"(\d{1,3}(?:\.\d{3})*,\d{2})\s*TL", text)
-    if match:
-        return parse_decimal(match.group(1))
-    match = re.search(r"(\d+(?:,\d{2})?)\s*TL", text)
-    if match:
-        return parse_decimal(match.group(1))
+    for price_element in card.select(".a-price"):
+        classes = set(price_element.get("class") or [])
+        if "a-text-price" in classes or price_element.get("data-a-strike") == "true":
+            continue
+        if _is_hidden_element(price_element):
+            continue
+        offscreen = price_element.select_one(".a-offscreen")
+        if offscreen and not _is_hidden_element(offscreen):
+            try:
+                return parse_decimal(offscreen.get_text(" ", strip=True))
+            except HermesError:
+                pass
+        whole = price_element.select_one(".a-price-whole")
+        if not whole or _is_hidden_element(whole):
+            continue
+        fraction = price_element.select_one(".a-price-fraction")
+        whole_text = re.sub(r"[^\d.]", "", whole.get_text("", strip=True))
+        fraction_text = re.sub(r"\D", "", fraction.get_text("", strip=True)) if fraction else "00"
+        if not whole_text:
+            continue
+        try:
+            return parse_decimal(f"{whole_text},{(fraction_text or '00')[:2].ljust(2, '0')}")
+        except HermesError:
+            continue
     return None
 
 
