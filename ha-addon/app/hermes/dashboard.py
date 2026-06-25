@@ -757,6 +757,13 @@ def _render_public_page(path: str):
 
 
 class _StatusHandler(BaseHTTPRequestHandler):
+    def _redirect_with_message(self, flag_name: str, ok: bool, message: str) -> None:
+        status = "ok" if ok else "fail"
+        self.send_response(303)
+        self.send_header("Location", f"?{flag_name}={status}&msg={urllib.parse.quote(message)}")
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+
     def do_GET(self) -> None:
         path = urllib.parse.urlparse(self.path).path.rstrip("/")
         status = 200
@@ -783,29 +790,17 @@ class _StatusHandler(BaseHTTPRequestHandler):
         path = urllib.parse.urlparse(self.path).path.rstrip("/")
         if path.endswith("/reset-notifications"):
             ok, message = _reset_notifications_async()
-            status = "ok" if ok else "fail"
-            self.send_response(303)
-            self.send_header("Location", f"?reset={status}&msg={urllib.parse.quote(message)}")
-            self.send_header("Cache-Control", "no-store")
-            self.end_headers()
+            self._redirect_with_message("reset", ok, message)
             return
         if path.endswith("/reset-price-history"):
             ok, message = _reset_price_history()
-            status = "ok" if ok else "fail"
-            self.send_response(303)
-            self.send_header("Location", f"?history={status}&msg={urllib.parse.quote(message)}")
-            self.send_header("Cache-Control", "no-store")
-            self.end_headers()
+            self._redirect_with_message("history", ok, message)
             return
         if not path.endswith("/test-pushover"):
             self.send_error(404)
             return
         ok, message = _send_test_notification()
-        status = "ok" if ok else "fail"
-        self.send_response(303)
-        self.send_header("Location", f"?test={status}&msg={urllib.parse.quote(message)}")
-        self.send_header("Cache-Control", "no-store")
-        self.end_headers()
+        self._redirect_with_message("test", ok, message)
 
     def log_message(self, _format, *args) -> None:
         _ = args

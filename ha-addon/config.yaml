@@ -1,5 +1,5 @@
 name: Hermes
-version: "2.0.11"
+version: "2.0.12"
 slug: hermes
 description: Ürün fiyatlarını, Amazon arama sayfalarını ve Telegram fırsat kanallarını Pushover bildirimiyle takip eder.
 url: https://github.com/nriacr/hermes

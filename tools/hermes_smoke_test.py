@@ -1,114 +1,101 @@
-#!/usr/bin/env python3
-"""Small regression checks for Hermes maintenance work.
-
-These tests avoid live network calls. They focus on parser and state behavior that
-has caused real production issues before.
-"""
-
-from __future__ import annotations
-
+import json
 import sys
 import tempfile
 import unittest
 from decimal import Decimal
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
-APP_DIR = ROOT / "ha-addon" / "app"
-sys.path.insert(0, str(APP_DIR))
 
-from hermes.models import PriceResult, Product, Site, SummaryRow  # noqa: E402
-from hermes.providers.search_amazon import parse_search_products  # noqa: E402
-from hermes.service import HermesService  # noqa: E402
-from hermes.settings import Settings  # noqa: E402
-from hermes.state import HermesState  # noqa: E402
+APP_PATH = Path(__file__).resolve().parents[1] / "ha-addon" / "app"
+sys.path.insert(0, str(APP_PATH))
+
+from hermes import service  # noqa: E402
+from hermes.search_amazon import extract_result_candidates  # noqa: E402
 
 
 class HermesSmokeTests(unittest.TestCase):
-    def make_service(self) -> HermesService:
-        temp_dir = Path(tempfile.mkdtemp(prefix="hermes-smoke-"))
-        settings = Settings(
-            raw={
-                "pushover_user_key": "",
-                "pushover_api_token": "",
-                "products": [],
-                "amazon_search_pages": [],
-                "amazon_search_targets": [],
-            },
-            data_dir=temp_dir,
-        )
-        state = HermesState(temp_dir / "state.json")
-        return HermesService(settings, state)
-
-    def test_amazon_search_card_uses_structured_price(self) -> None:
+    def test_amazon_search_card_uses_structured_price(self):
         html = """
-        <div data-component-type="s-search-result" data-asin="BTEST123">
-          <a class="a-link-normal" href="/dp/BTEST123"><h2><span>Test Product</span></h2></a>
-          <span class="a-price"><span class="a-offscreen">1.234,56 TL</span></span>
-          <span>Peşin fiyatına 9 x 3.210 TL</span>
+        <div class="s-main-slot">
+          <div data-component-type="s-search-result" data-asin="B000000001">
+            <h2><a href="/dp/B000000001"><span>Philips Hue Flare 2'li Paket</span></a></h2>
+            <span>Pesin fiyatina 9 x 3.210 TL</span>
+            <span class="a-price">
+              <span class="a-offscreen">10.448,99 TL</span>
+              <span class="a-price-whole">10.448</span>
+              <span class="a-price-fraction">99</span>
+            </span>
+          </div>
         </div>
         """
-        products = parse_search_products(html, "https://www.amazon.com.tr/s?k=test", 10)
-        self.assertEqual(len(products), 1)
-        self.assertEqual(products[0].price, Decimal("1234.56"))
-        self.assertEqual(products[0].url, "https://www.amazon.com.tr/dp/BTEST123")
+        item = extract_result_candidates(html, 10)[0]
+        self.assertEqual(item.price, Decimal("10448.99"))
 
-    def test_absurd_current_price_does_not_overwrite_history(self) -> None:
-        service = self.make_service()
-        state_entry = {"min_price": "4477.71", "max_price": "4983.55", "last_price": "4477.71"}
-        product = Product(
-            name="Belkin",
-            url="https://www.amazon.com.tr/dp/example",
-            target_price=Decimal("4400"),
-            site=Site.AMAZON,
-        )
-        result = PriceResult(
-            site=Site.AMAZON,
-            title="Belkin charger",
-            price=Decimal("104477.71"),
-            url=product.url,
-            seller="Amazon",
-        )
-
-        row = SummaryRow.from_product(product, result)
-        service.apply_price_history(row, state_entry)
-
-        self.assertEqual(row.min_price, Decimal("4477.71"))
-        self.assertEqual(row.max_price, Decimal("4983.55"))
-        self.assertEqual(state_entry["min_price"], "4477.71")
-        self.assertEqual(state_entry["max_price"], "4983.55")
-
-    def test_manual_price_history_reset_preserves_alert_state(self) -> None:
-        service = self.make_service()
-        service.state.data = {
-            "product_alerts": {"x": {"last_notified_at": "2026-06-25 10:00:00"}},
-            "product_seen": {"x": True},
-            "product_prices": {
-                "x": {
-                    "last_price": "100",
-                    "last_seen": "2026-06-25 10:00:00",
-                    "min_price": "90",
-                    "max_price": "120",
-                    "min_price_at": "2026-06-24 10:00:00",
-                    "max_price_at": "2026-06-25 10:00:00",
-                }
-            },
-            "search_prices": {
-                "y": {
-                    "last_price": "200",
-                    "min_price": "180",
-                    "max_price": "250",
-                }
-            },
+    def test_absurd_current_price_does_not_overwrite_history(self):
+        state_entry = {
+            "last_price": "10448.99",
+            "min_price": "10448.99",
+            "max_price": "12398.40",
         }
+        min_price, max_price = service.sanitized_price_bounds(
+            state_entry,
+            Decimal("3210448.99"),
+            Decimal("9500"),
+        )
+        self.assertEqual(min_price, Decimal("10448.99"))
+        self.assertEqual(max_price, Decimal("12398.40"))
 
-        cleared = service.reset_price_history()
+    def test_manual_price_history_reset_preserves_alert_state(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            original_state_path = service.STATE_PATH
+            original_summary_path = service.SUMMARY_PATH
+            try:
+                root = Path(tmpdir)
+                service.STATE_PATH = root / "state.json"
+                service.SUMMARY_PATH = root / "latest_price_summary.json"
+                service.STATE_PATH.write_text(
+                    json.dumps(
+                        {
+                            "product_a": {
+                                "last_price": "100",
+                                "min_price": "80",
+                                "max_price": "300",
+                                "last_alerted_price": "90",
+                            },
+                            "_meta": {"keep": "yes"},
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                service.SUMMARY_PATH.write_text(
+                    json.dumps(
+                        {
+                            "rows": [
+                                {
+                                    "price": "100,00",
+                                    "min_price": "80,00",
+                                    "max_price": "300,00",
+                                    "price_range": "80,00 / 300,00",
+                                }
+                            ]
+                        }
+                    ),
+                    encoding="utf-8",
+                )
 
-        self.assertEqual(cleared, 2)
-        self.assertIn("last_notified_at", service.state.data["product_alerts"]["x"])
-        self.assertEqual(service.state.data["product_prices"]["x"]["last_price"], "100")
-        self.assertNotIn("min_price", service.state.data["product_prices"]["x"])
-        self.assertNotIn("max_price", service.state.data["search_prices"]["y"])
+                cleared_count = service.reset_price_history()
+                state = json.loads(service.STATE_PATH.read_text(encoding="utf-8"))
+                summary = json.loads(service.SUMMARY_PATH.read_text(encoding="utf-8"))
+
+                self.assertEqual(cleared_count, 2)
+                self.assertEqual(state["product_a"]["last_price"], "100")
+                self.assertEqual(state["product_a"]["last_alerted_price"], "90")
+                self.assertNotIn("min_price", state["product_a"])
+                self.assertNotIn("max_price", state["product_a"])
+                self.assertEqual(summary["rows"][0]["price_range"], "100,00 / 100,00")
+            finally:
+                service.STATE_PATH = original_state_path
+                service.SUMMARY_PATH = original_summary_path
 
 
 if __name__ == "__main__":

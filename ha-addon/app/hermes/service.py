@@ -140,15 +140,27 @@ def _state_decimal(value: Any):
         return None
 
 
-def _history_reference_price(current_price: Decimal, target_price: Decimal | None = None) -> Decimal:
+def _history_reference_price(state_entry: Dict[str, Any], target_price: Decimal | None = None) -> Decimal | None:
+    references = []
     if target_price is not None and target_price > 0:
-        return max(current_price, target_price)
-    return current_price
+        references.append(target_price)
+    last_price = _state_decimal(state_entry.get("last_price"))
+    if last_price is not None and last_price > 0:
+        if target_price is None or not (
+            last_price > target_price * PRICE_HISTORY_SPIKE_RATIO
+            and last_price - target_price >= PRICE_HISTORY_SPIKE_ABSOLUTE_TL
+        ):
+            references.append(last_price)
+    return max(references) if references else None
 
 
-def _is_absurd_history_price(value: Decimal, current_price: Decimal, target_price: Decimal | None = None) -> bool:
-    reference = _history_reference_price(current_price, target_price)
-    return value > reference * PRICE_HISTORY_SPIKE_RATIO and value - reference >= PRICE_HISTORY_SPIKE_ABSOLUTE_TL
+def _is_absurd_current_price(
+    state_entry: Dict[str, Any], current_price: Decimal, target_price: Decimal | None = None
+) -> bool:
+    reference = _history_reference_price(state_entry, target_price)
+    if reference is None:
+        return False
+    return current_price > reference * PRICE_HISTORY_SPIKE_RATIO and current_price - reference >= PRICE_HISTORY_SPIKE_ABSOLUTE_TL
 
 
 def sanitized_price_bounds(
@@ -159,14 +171,11 @@ def sanitized_price_bounds(
 ):
     min_price = _state_decimal(state_entry.get("min_price"))
     max_price = _state_decimal(state_entry.get("max_price"))
-    if min_price is not None and _is_absurd_history_price(min_price, current_price, target_price):
+    if _is_absurd_current_price(state_entry, current_price, target_price):
         if context:
-            log(f"Hatali minimum fiyat gecmisi temizlendi: {context} | eski_min={min_price} | guncel={current_price}")
-        min_price = None
-    if max_price is not None and _is_absurd_history_price(max_price, current_price, target_price):
-        if context:
-            log(f"Hatali maksimum fiyat gecmisi temizlendi: {context} | eski_max={max_price} | guncel={current_price}")
-        max_price = None
+            log(f"Supheli fiyat min/maks gecmisine eklenmedi: {context} | fiyat={current_price}")
+        if min_price is not None and max_price is not None:
+            return min_price, max_price
     if min_price is None or current_price < min_price:
         min_price = current_price
     if max_price is None or current_price > max_price:
