@@ -24,6 +24,7 @@ from .utils import (
 WEB_PORT = 8099
 ADDON_SLUG = "hermes"
 RESET_NOTIFICATIONS_LOCK = threading.Lock()
+PRICE_HISTORY_RESET_LOCK = threading.Lock()
 
 DASHBOARD_CSS = """
 :root { color-scheme: dark; --bg:#0f1222; --panel:#171a30; --card:#1e2139; --line:#313658; --text:#e8eaf8; --muted:#a6abd1; --accent:#c7a6ff; --accent2:#8ed6d2; --ok:#7fdcb8; --warn:#ffd18a; --bad:#ff9cb5; --blue:#8fb9ff; --blue2:#6f93ff; --head:#262a45; }
@@ -618,6 +619,21 @@ def _reset_notifications_async():
     return True, "Bildirim susturma hafızası sıfırlandı. Hedef altında kalan fırsatlar için tek seferlik kontrol arka planda başladı."
 
 
+def _reset_price_history():
+    if not PRICE_HISTORY_RESET_LOCK.acquire(blocking=False):
+        return False, "Min/maks sıfırlama zaten çalışıyor. Lütfen biraz sonra tekrar dene."
+    try:
+        from .service import reset_price_history
+
+        cleared_count = reset_price_history()
+        return True, f"Min/maks fiyat geçmişi sıfırlandı. Temizlenen kayıt alanı: {cleared_count}."
+    except Exception as exc:  # noqa: BLE001
+        log(f"Min/maks fiyat gecmisi sifirlanamadi: {exc}")
+        return False, f"Min/maks fiyat geçmişi sıfırlanamadı: {exc}"
+    finally:
+        PRICE_HISTORY_RESET_LOCK.release()
+
+
 def _render_failed_links(detail):
     failed_links = detail.get("failed_links") or []
     if not failed_links:
@@ -671,6 +687,7 @@ def _render_page(path: str = "/") -> bytes:
     params = urllib.parse.parse_qs(urllib.parse.urlparse(path).query)
     test_status = params.get("test", [""])[0]
     reset_status = params.get("reset", [""])[0]
+    history_status = params.get("history", [""])[0]
     test_message = params.get("msg", [""])[0]
     status = "Çalışıyor" if summary["configured"] else "Ayar bekliyor"
     status_class = "status-ok" if summary["configured"] else "status-warn"
@@ -698,13 +715,13 @@ def _render_page(path: str = "/") -> bytes:
         + f"<ul>{error_details_html}</ul></section>"
     )
     notice_html = ""
-    if test_status in {"ok", "fail"} or reset_status in {"ok", "fail"}:
-        notice_status = test_status if test_status in {"ok", "fail"} else reset_status
+    if test_status in {"ok", "fail"} or reset_status in {"ok", "fail"} or history_status in {"ok", "fail"}:
+        notice_status = test_status if test_status in {"ok", "fail"} else (reset_status if reset_status in {"ok", "fail"} else history_status)
         notice_class = "notice-ok" if notice_status == "ok" else "notice-fail"
         notice_html = f"<p class='notice {notice_class}'>{escape(test_message)}</p>"
 
     html = f"""<!doctype html>
-<html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta http-equiv="refresh" content="60"><title>Hermes</title><style>{DASHBOARD_CSS}</style></head><body><main><div class="hero"><div class="badge">Hermes</div><p>Ürün linkleri çok siteli çalışır; Amazon arama sayfaları Amazon'a özel mod olarak korunur. Telegram dinleme aktifse fırsat kanalları da aynı Pushover hattına bağlanır.</p><div class="actions"><a class="button primary" href="{log_url}" target="_top">LOG</a><a class="button secondary" href="{app_url}" target="_top">Config</a><form class="inline-form" method="post" action="./test-pushover"><button class="button test" type="submit">Pushover</button></form><form class="inline-form" method="post" action="./reset-notifications"><button class="button secondary" type="submit">Bildirim Sıfırla</button></form></div>{notice_html}<div class="grid">{card_html}{error_card_html}</div>{_render_telegram_panel(summary)}{_render_table()}<p class="note">LOG butonu log sekmesini, Config butonu yapılandırma sekmesini açar. Pushover butonu test bildirimi gönderir. Bildirim Sıfırla butonu 24 saat susturma hafızasını temizleyip tek seferlik kontrol başlatır.</p><p class="footer">Sayfa 60 saniyede bir otomatik yenilenir.</p></div></main></body></html>"""
+<html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta http-equiv="refresh" content="60"><title>Hermes</title><style>{DASHBOARD_CSS}</style></head><body><main><div class="hero"><div class="badge">Hermes</div><p>Ürün linkleri çok siteli çalışır; Amazon arama sayfaları Amazon'a özel mod olarak korunur. Telegram dinleme aktifse fırsat kanalları da aynı Pushover hattına bağlanır.</p><div class="actions"><a class="button primary" href="{log_url}" target="_top">LOG</a><a class="button secondary" href="{app_url}" target="_top">Config</a><form class="inline-form" method="post" action="./test-pushover"><button class="button test" type="submit">Pushover</button></form><form class="inline-form" method="post" action="./reset-notifications"><button class="button secondary" type="submit">Bildirim Sıfırla</button></form><form class="inline-form" method="post" action="./reset-price-history"><button class="button secondary" type="submit">Min/Maks Sıfırla</button></form></div>{notice_html}<div class="grid">{card_html}{error_card_html}</div>{_render_telegram_panel(summary)}{_render_table()}<p class="note">LOG butonu log sekmesini, Config butonu yapılandırma sekmesini açar. Pushover butonu test bildirimi gönderir. Bildirim Sıfırla butonu 24 saat susturma hafızasını temizleyip tek seferlik kontrol başlatır. Min/Maks Sıfırla butonu yalnızca sen bastığında fiyat geçmişini güncel fiyattan yeniden başlatır.</p><p class="footer">Sayfa 60 saniyede bir otomatik yenilenir.</p></div></main></body></html>"""
     return html.encode("utf-8")
 
 
@@ -769,6 +786,14 @@ class _StatusHandler(BaseHTTPRequestHandler):
             status = "ok" if ok else "fail"
             self.send_response(303)
             self.send_header("Location", f"?reset={status}&msg={urllib.parse.quote(message)}")
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            return
+        if path.endswith("/reset-price-history"):
+            ok, message = _reset_price_history()
+            status = "ok" if ok else "fail"
+            self.send_response(303)
+            self.send_header("Location", f"?history={status}&msg={urllib.parse.quote(message)}")
             self.send_header("Cache-Control", "no-store")
             self.end_headers()
             return

@@ -70,12 +70,61 @@ AMAZON_EMPTY_ALERT_MIN_PAGES = 2
 AMAZON_EMPTY_ALERT_MIN_FAILED_LINKS = 3
 PRICE_HISTORY_SPIKE_RATIO = Decimal("5")
 PRICE_HISTORY_SPIKE_ABSOLUTE_TL = Decimal("50000")
+PRICE_HISTORY_KEYS = ("min_price", "max_price", "min_price_at", "max_price_at")
 
 
 def raise_if_age_verification(html: str) -> None:
     normalized = normalize_offer_text(html)
     if any(marker in normalized for marker in AGE_VERIFICATION_MARKERS):
         raise HermesError("Yaş doğrulaması gerekiyor. Bu sayfa otomatik takip edilemiyor.")
+
+
+def _clear_price_history_fields(value: Any) -> int:
+    if isinstance(value, list):
+        return sum(_clear_price_history_fields(item) for item in value)
+    if not isinstance(value, dict):
+        return 0
+    cleared_count = 0
+    for field_name in PRICE_HISTORY_KEYS:
+        if field_name in value:
+            value.pop(field_name, None)
+            cleared_count += 1
+    for child in value.values():
+        cleared_count += _clear_price_history_fields(child)
+    return cleared_count
+
+
+def reset_price_history() -> int:
+    state = load_json(STATE_PATH, {})
+    if not isinstance(state, dict):
+        state = {}
+    meta = state.get("_meta")
+    if not isinstance(meta, dict):
+        meta = {}
+    cleared_count = 0
+    for key, value in state.items():
+        if key == "_meta":
+            continue
+        cleared_count += _clear_price_history_fields(value)
+    meta["price_history_reset_at"] = utc_now()
+    state["_meta"] = meta
+    save_json(STATE_PATH, state)
+
+    summary = load_json(SUMMARY_PATH, {})
+    if isinstance(summary, dict) and isinstance(summary.get("rows"), list):
+        for row in summary["rows"]:
+            if not isinstance(row, dict):
+                continue
+            price = str(row.get("price") or "").strip()
+            if not price:
+                continue
+            row["min_price"] = price
+            row["max_price"] = price
+            row["price_range"] = f"{price} / {price}"
+        save_json(SUMMARY_PATH, summary)
+
+    log(f"Min/maks fiyat gecmisi sifirlandi: alan={cleared_count}")
+    return cleared_count
 
 
 def sorted_summary_rows(rows: List[PriceSummaryRow]) -> List[PriceSummaryRow]:
