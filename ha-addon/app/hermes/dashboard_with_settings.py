@@ -174,15 +174,27 @@ class SettingsDashboardHandler(_StatusHandler):
             return
         if path.endswith("/test-pushover"):
             ok, message = _send_test_notification()
-            self._redirect_with_message("test", ok, message)
+            status = "ok" if ok else "fail"
+            self.send_response(303)
+            self.send_header("Location", f"?test={status}&msg={urllib.parse.quote(message)}")
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
             return
         if path.endswith("/reset-notifications"):
             ok, message = _reset_notifications_async()
-            self._redirect_with_message("reset", ok, message)
+            status = "ok" if ok else "fail"
+            self.send_response(303)
+            self.send_header("Location", f"?reset={status}&msg={urllib.parse.quote(message)}")
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
             return
         if path.endswith("/reset-price-history"):
             ok, message = _reset_price_history()
-            self._redirect_with_message("history", ok, message)
+            status = "ok" if ok else "fail"
+            self.send_response(303)
+            self.send_header("Location", f"?history={status}&msg={urllib.parse.quote(message)}")
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
             return
         self.send_error(404)
 
