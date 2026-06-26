@@ -44,6 +44,41 @@ p { margin:0; color:var(--muted); line-height:1.5; font-size:13px; }
 tbody tr.site-amazon { --site-bg:rgba(255,199,116,.10); --site-line:rgba(255,199,116,.48); --site-link:#ffd79a; } tbody tr.site-hepsiburada { --site-bg:rgba(255,153,112,.10); --site-line:rgba(255,153,112,.48); --site-link:#ffc1a5; } tbody tr.site-network { --site-bg:rgba(143,214,196,.10); --site-line:rgba(143,214,196,.48); --site-link:#aee7d8; } tbody tr.site-trendyol { --site-bg:rgba(245,170,196,.10); --site-line:rgba(245,170,196,.48); --site-link:#f7c1d3; } tbody tr.site-other { --site-bg:rgba(183,177,222,.10); --site-line:rgba(183,177,222,.42); --site-link:#cbc6ef; } tbody tr[class*='site-'] td { background:linear-gradient(90deg,var(--site-bg),rgba(30,33,57,.28)); } tbody tr[class*='site-'] td:first-child { border-left:4px solid var(--site-line); color:var(--site-link); font-weight:800; } tbody tr[class*='site-'] .product-cell a { color:var(--site-link); } tbody tr[class*='site-']:hover td { background:linear-gradient(90deg,rgba(255,255,255,.055),var(--site-bg)); }
 .product-cell { max-width:360px; white-space:normal; line-height:1.22; } .product-cell a { color:#9ec0ff; text-decoration:none; } .product-cell a:hover { color:#d1b3ff; text-decoration:underline; } .product-cell span { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; text-overflow:ellipsis; } .deal-row td { color:#b7f0dc; } .deal-row td:first-child { color:var(--site-link); } .deal-row .product-cell a { color:#b7f0dc; } .note { margin-top:18px; border-left:4px solid #b79ad6; padding:12px 14px; background:rgba(183,154,214,.15); border-radius:10px; font-size:13px; } .footer { margin-top:18px; font-size:12px; color:var(--muted); }
 .public main { max-width:1180px; } .public .hero { padding:18px; } .public .badge { font-size:clamp(22px,4vw,36px); }
+.public-actions { margin:16px 0 6px; } .public-actions .button { min-width:132px; }
+@media (max-width:720px) {
+  body { font-size:13px; background:#0f1222; }
+  main { padding:10px 8px 26px; }
+  .hero { border-radius:18px; padding:14px; }
+  .public main { padding:0; }
+  .public .hero { min-height:100vh; border-width:0; border-radius:0; padding:14px 10px 24px; box-shadow:none; }
+  .badge { margin-bottom:8px; padding:8px 13px; font-size:28px; }
+  p { font-size:12px; }
+  .actions { gap:8px; }
+  .public-actions .button, .public-actions .inline-form { flex:1 1 calc(50% - 8px); }
+  .public-actions .button { width:100%; min-width:0; min-height:44px; padding:0 10px; font-size:12px; }
+  .grid { grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
+  .card { min-height:70px; padding:11px; border-radius:13px; }
+  .card span { font-size:11px; margin-bottom:6px; }
+  .card strong { font-size:15px; }
+  .summary-panel { margin-top:12px; padding:11px; border-radius:15px; }
+  .summary-head { align-items:flex-start; flex-direction:column; gap:4px; margin-bottom:10px; }
+  .summary-head h2 { font-size:16px; }
+  .summary-head span { white-space:normal; font-size:11px; }
+  .table-section h3 { font-size:13px; }
+  .table-wrap { overflow:visible; border:0; border-radius:0; }
+  table { min-width:0; }
+  thead { display:none; }
+  table, tbody, tr, td { display:block; width:100%; }
+  tbody tr[class*='site-'] { margin:0 0 10px; border:1px solid var(--line); border-radius:15px; padding:10px; background:rgba(30,33,57,.72); overflow:hidden; }
+  tbody tr[class*='site-'] td { display:flex; justify-content:space-between; gap:10px; padding:5px 0; border-bottom:0; background:transparent; text-align:right; white-space:normal; font-size:12px; }
+  tbody tr[class*='site-'] td:first-child { border-left:0; color:var(--site-link); }
+  tbody tr[class*='site-'] td::before { content:attr(data-label); flex:0 0 74px; color:var(--muted); text-align:left; font-size:10px; font-weight:800; letter-spacing:.03em; text-transform:uppercase; }
+  tbody tr[class*='site-'] .product-cell { max-width:none; display:block; text-align:left; line-height:1.3; }
+  tbody tr[class*='site-'] .product-cell::before { display:block; margin-bottom:4px; }
+  .product-cell span { -webkit-line-clamp:3; }
+  .empty-row td { padding:10px; border:1px solid var(--line); border-radius:12px; }
+  .note, .footer { font-size:11px; }
+}
 """
 
 
@@ -449,9 +484,10 @@ def _render_table_row(row):
         row_classes.append("deal-row")
     row_class = f' class="{" ".join(row_classes)}"'
     return (
-        f"<tr{row_class}><td>{seller}</td>"
-        f'<td class="product-cell" title="{product_title}">{label}</td>'
-        f"<td>{price}</td><td>{target}</td><td>{difference}</td><td>{price_range}</td></tr>"
+        f'<tr{row_class}><td data-label="Satıcı">{seller}</td>'
+        f'<td data-label="Ürün" class="product-cell" title="{product_title}">{label}</td>'
+        f'<td data-label="Güncel">{price}</td><td data-label="Hedef">{target}</td>'
+        f'<td data-label="Fark">{difference}</td><td data-label="Min / Maks">{price_range}</td></tr>'
     )
 
 
@@ -745,6 +781,15 @@ def _public_token_from_path(path: str) -> str:
     return str(params.get("token", [""])[0]).strip()
 
 
+def _public_base_path(path: str) -> str:
+    parsed = urllib.parse.urlparse(path)
+    parts = [urllib.parse.quote(urllib.parse.unquote(part), safe="") for part in parsed.path.split("/") if part]
+    if len(parts) >= 2 and parts[0] == "public":
+        return "/" + "/".join(parts[:2])
+    token = _public_token_from_path(path)
+    return f"/public/{urllib.parse.quote(token, safe='')}" if token else "/public"
+
+
 def _public_dashboard_allowed(path: str) -> bool:
     options = load_json(OPTIONS_PATH, {})
     if not isinstance(options, dict):
@@ -762,8 +807,33 @@ def _render_public_page(path: str):
         return 404, b"not found\n"
     payload = load_json(SUMMARY_PATH, {})
     checked_at = escape(str(payload.get("checked_at") or "-")) if isinstance(payload, dict) else "-"
+    params = urllib.parse.parse_qs(urllib.parse.urlparse(path).query)
+    action_status = ""
+    action_message = ""
+    for key in ("test", "reset", "history", "settings"):
+        status = params.get(key, [""])[0]
+        if status in {"ok", "fail"}:
+            action_status = status
+            action_message = params.get("msg", [""])[0]
+            break
+    notice_html = ""
+    if action_status:
+        notice_class = "notice-ok" if action_status == "ok" else "notice-fail"
+        notice_html = f"<p class='notice {notice_class}'>{escape(action_message)}</p>"
+    base_path = escape(_public_base_path(path), quote=True)
+    confirm_script = """
+<script>
+  document.querySelectorAll('form[data-confirm]').forEach((form) => {
+    form.addEventListener('submit', (event) => {
+      const message = form.getAttribute('data-confirm') || 'Bu işlemi yapmak istediğine emin misin?';
+      if (!window.confirm(message)) {
+        event.preventDefault();
+      }
+    });
+  });
+</script>"""
     html = f"""<!doctype html>
-<html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta http-equiv="refresh" content="60"><title>Hermes Tablo</title><style>{DASHBOARD_CSS}</style></head><body class="public"><main><div class="hero"><div class="badge">Hermes</div><p>Salt okunur fiyat tablosu. Son güncelleme: {checked_at}</p>{_render_table()}<p class="footer">Sayfa 60 saniyede bir otomatik yenilenir.</p></div></main></body></html>"""
+<html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="theme-color" content="#0f1222"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Hermes"><meta http-equiv="refresh" content="60"><title>Hermes</title><style>{DASHBOARD_CSS}</style></head><body class="public"><main><div class="hero"><div class="badge">Hermes</div><p>Mobil uyumlu fiyat paneli. Son güncelleme: {checked_at}</p><div class="actions public-actions"><a class="button secondary" href="{base_path}/settings">Ayarlar</a><form class="inline-form" method="post" action="{base_path}/test-pushover"><button class="button test" type="submit">Pushover</button></form><form class="inline-form" method="post" action="{base_path}/reset-notifications" data-confirm="Bildirim susturma hafızası sıfırlanacak ve hedef altında kalan fırsatlar için tek seferlik kontrol başlatılacak. Devam etmek istiyor musun?"><button class="button secondary" type="submit">Bildirim Sıfırla</button></form><form class="inline-form" method="post" action="{base_path}/reset-price-history" data-confirm="Min/maks fiyat geçmişi temizlenecek ve güncel fiyattan yeniden başlayacak. Devam etmek istiyor musun?"><button class="button secondary" type="submit">Min/Maks Sıfırla</button></form></div>{notice_html}{_render_table()}<p class="footer">Sayfa 60 saniyede bir otomatik yenilenir. iPhone'da Safari paylaş menüsünden “Ana Ekrana Ekle” diyerek uygulama gibi kullanabilirsin.</p></div></main>{confirm_script}</body></html>"""
     return 200, html.encode("utf-8")
 
 

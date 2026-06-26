@@ -1,26 +1,29 @@
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import urllib.parse
 
-from .dashboard import _render_public_page
+from .dashboard import (
+    _public_base_path,
+    _public_dashboard_allowed,
+    _render_public_page,
+    _reset_notifications_async,
+    _reset_price_history,
+    _send_test_notification,
+)
+from .settings_ui import handle_settings_save, render_settings_page
 
 PUBLIC_WEB_PORT = 8100
 
 
-class _PublicDashboardHandler(BaseHTTPRequestHandler):
-    def do_GET(self) -> None:
-        path = urllib.parse.urlparse(self.path).path.rstrip("/")
-        if path == "/health":
-            status = 200
-            payload = b"ok\n"
-            content_type = "text/plain; charset=utf-8"
-        elif path == "/public" or path.startswith("/public/"):
-            status, payload = _render_public_page(self.path)
-            content_type = "text/html; charset=utf-8" if status == 200 else "text/plain; charset=utf-8"
-        else:
-            status = 404
-            payload = b"not found\n"
-            content_type = "text/plain; charset=utf-8"
+def _public_suffix(path: str) -> str:
+    parsed = urllib.parse.urlparse(path)
+    parts = [urllib.parse.unquote(part) for part in parsed.path.split("/") if part]
+    if len(parts) <= 2 or parts[0] != "public":
+        return ""
+    return "/" + "/".join(parts[2:])
 
+
+class _PublicDashboardHandler(BaseHTTPRequestHandler):
+    def _send_payload(self, status: int, payload: bytes, content_type: str) -> None:
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Cache-Control", "no-store")
@@ -28,7 +31,67 @@ class _PublicDashboardHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(payload)
 
+    def _redirect_with_message(self, target_path: str, flag_name: str, ok: bool, message: str) -> None:
+        status = "ok" if ok else "fail"
+        separator = "&" if "?" in target_path else "?"
+        self.send_response(303)
+        self.send_header("Location", f"{target_path}{separator}{flag_name}={status}&msg={urllib.parse.quote(message)}")
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+
+    def do_GET(self) -> None:
+        path = urllib.parse.urlparse(self.path).path.rstrip("/")
+        if path == "/health":
+            status = 200
+            payload = b"ok\n"
+            content_type = "text/plain; charset=utf-8"
+            self._send_payload(status, payload, content_type)
+            return
+        if path == "/public" or path.startswith("/public/"):
+            if not _public_dashboard_allowed(self.path):
+                self._send_payload(404, b"not found\n", "text/plain; charset=utf-8")
+                return
+            suffix = _public_suffix(self.path)
+            if suffix == "/settings":
+                status = 200
+                payload = render_settings_page(self.path)
+                content_type = "text/html; charset=utf-8"
+            else:
+                status, payload = _render_public_page(self.path)
+                content_type = "text/html; charset=utf-8" if status == 200 else "text/plain; charset=utf-8"
+        else:
+            status = 404
+            payload = b"not found\n"
+            content_type = "text/plain; charset=utf-8"
+
+        self._send_payload(status, payload, content_type)
+
     def do_POST(self) -> None:
+        content_length = int(self.headers.get("Content-Length", "0") or 0)
+        body = self.rfile.read(content_length) if content_length else b""
+        if not _public_dashboard_allowed(self.path):
+            self.send_error(404)
+            return
+
+        base_path = _public_base_path(self.path)
+        suffix = _public_suffix(self.path)
+        if suffix == "/settings/save":
+            ok, message = handle_settings_save(body)
+            self._redirect_with_message(f"{base_path}/settings", "settings", ok, message)
+            return
+        if suffix == "/reset-notifications":
+            ok, message = _reset_notifications_async()
+            self._redirect_with_message(base_path, "reset", ok, message)
+            return
+        if suffix == "/reset-price-history":
+            ok, message = _reset_price_history()
+            self._redirect_with_message(base_path, "history", ok, message)
+            return
+        if suffix == "/test-pushover":
+            ok, message = _send_test_notification()
+            self._redirect_with_message(base_path, "test", ok, message)
+            return
+
         self.send_error(404)
 
     def log_message(self, _format, *args) -> None:
