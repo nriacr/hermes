@@ -10,6 +10,7 @@ APP_PATH = Path(__file__).resolve().parents[1] / "ha-addon" / "app"
 sys.path.insert(0, str(APP_PATH))
 
 from hermes import service  # noqa: E402
+from hermes.providers.hepsiburada import extract_offer as extract_hepsiburada_offer  # noqa: E402
 from hermes.search_amazon import extract_result_candidates  # noqa: E402
 
 
@@ -44,6 +45,28 @@ class HermesSmokeTests(unittest.TestCase):
         )
         self.assertEqual(min_price, Decimal("10448.99"))
         self.assertEqual(max_price, Decimal("12398.40"))
+
+    def test_hepsiburada_detail_embedded_listings_use_lowest_offer(self):
+        html = """
+        <html><head><title>Govee Uplighter Köşe Lambası RGB Fiyatı</title></head>
+        <body>
+          <script>
+            window.__HB_STATE__ = {
+              "variantListing": [
+                {"aiBasedShipmentDay": null, "listingId": "listing-hb", "merchantName": "Hepsiburada",
+                 "minimumPrice": 10499.25, "finalPriceOnSale": 13999,
+                 "prices": [{"formattedPrice": "13.999,00", "value": 13999}]},
+                {"aiBasedShipmentDay": null, "listingId": "listing-jetklik", "merchantName": "JetKlik",
+                 "minimumPrice": 12358.43, "finalPriceOnSale": 12358.43,
+                 "prices": [{"formattedPrice": "12.358,43", "value": 12358.43}]}
+              ]
+            };
+          </script>
+        </body></html>
+        """
+        offer = extract_hepsiburada_offer(html)
+        self.assertEqual(offer.seller, "Hepsiburada")
+        self.assertEqual(offer.price, Decimal("10499.25"))
 
     def test_manual_price_history_reset_preserves_alert_state(self):
         with tempfile.TemporaryDirectory() as tmpdir:

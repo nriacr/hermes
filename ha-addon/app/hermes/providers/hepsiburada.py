@@ -72,6 +72,7 @@ class HepsiburadaCandidate:
     price: Decimal
     url: str
     seller: str = "Hepsiburada"
+    identity: str = ""
 
 
 def _absolute_url(url: str) -> str:
@@ -254,7 +255,7 @@ def _closest_product_card(link):
 def _dedupe_candidates(candidates: Iterable[HepsiburadaCandidate]) -> list[HepsiburadaCandidate]:
     deduped: dict[str, HepsiburadaCandidate] = {}
     for candidate in candidates:
-        key = candidate.url or normalize_offer_text(candidate.title)
+        key = candidate.identity or candidate.url or normalize_offer_text(candidate.title)
         previous = deduped.get(key)
         if previous is None or candidate.price < previous.price:
             deduped[key] = candidate
@@ -436,6 +437,109 @@ def _detail_seller(lines: list[str]) -> str:
     return "Hepsiburada"
 
 
+def _number_price(raw_price: str) -> Optional[Decimal]:
+    try:
+        price = Decimal(str(raw_price))
+    except Exception:  # noqa: BLE001
+        return None
+    return price if _valid_price(price) else None
+
+
+def _embedded_text(soup) -> str:
+    return repair_mojibake(str(soup)).replace('\\"', '"')
+
+
+def _listing_mapping_price(mapping: dict) -> Optional[Decimal]:
+    prices = []
+    for key in ("minimumPrice", "finalPriceOnSale"):
+        price = _number_price(mapping.get(key))
+        if price is not None:
+            prices.append(price)
+    price_items = mapping.get("prices")
+    if isinstance(price_items, list):
+        for item in price_items:
+            if isinstance(item, dict):
+                price = _number_price(item.get("value"))
+                if price is not None:
+                    prices.append(price)
+    return min(prices) if prices else None
+
+
+def _json_object_at(text: str, start: int) -> Optional[dict]:
+    if start < 0 or start >= len(text) or text[start] != "{":
+        return None
+    depth = 0
+    in_string = False
+    escaped = False
+    for index in range(start, len(text)):
+        char = text[index]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+        elif char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                try:
+                    value = json.loads(text[start : index + 1])
+                except json.JSONDecodeError:
+                    return None
+                return value if isinstance(value, dict) else None
+    return None
+
+
+def _embedded_listing_mappings(text: str) -> Iterable[dict]:
+    start_pattern = re.compile(r'\{(?="(?:aiBasedShipmentDay|merchantId)"[\s\S]{0,1400}?"listingId")')
+    seen = set()
+    for match in start_pattern.finditer(text):
+        mapping = _json_object_at(text, match.start())
+        if not mapping:
+            continue
+        listing_id = str(mapping.get("listingId") or "").strip()
+        seller = str(mapping.get("merchantName") or "").strip()
+        if not listing_id or not seller:
+            continue
+        key = listing_id or f"{seller}:{match.start()}"
+        if key in seen:
+            continue
+        seen.add(key)
+        yield mapping
+
+
+def _embedded_detail_candidates(soup) -> list[HepsiburadaCandidate]:
+    html = _embedded_text(soup)
+    if '"merchantName"' not in html or not any(key in html for key in ('"minimumPrice"', '"finalPriceOnSale"')):
+        return []
+    title = extract_title(soup) or "Hepsiburada ürünü"
+    candidates = []
+    for mapping in _embedded_listing_mappings(html):
+        price = _listing_mapping_price(mapping)
+        if price is None:
+            continue
+        seller = _clean_text(mapping.get("merchantName") or "")
+        listing_id = str(mapping.get("listingId") or "").strip()
+        url = _absolute_url(str(mapping.get("url") or "")) if PRODUCT_URL_RE.search(str(mapping.get("url") or "")) else ""
+        identity = listing_id or f"{seller.casefold()}:{price}"
+        candidates.append(
+            HepsiburadaCandidate(
+                title=title,
+                price=price,
+                url=url,
+                seller=seller,
+                identity=identity,
+            )
+        )
+    return _dedupe_candidates(candidates)
+
+
 def _detail_candidate(soup) -> Optional[HepsiburadaCandidate]:
     title = extract_title(soup) or "Hepsiburada ürünü"
     lines = _visible_lines_until_details(soup)
@@ -459,6 +563,8 @@ def extract_offer(html: str) -> OfferResult:
     candidates = _search_candidates_from_dom(soup)
     if not candidates:
         candidates = _search_candidates_from_json(soup)
+    if not candidates:
+        candidates = _embedded_detail_candidates(soup)
     if not candidates:
         detail = _detail_candidate(soup)
         candidates = [detail] if detail else []
