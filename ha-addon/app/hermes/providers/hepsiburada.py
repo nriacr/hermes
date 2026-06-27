@@ -450,19 +450,30 @@ def _embedded_text(soup) -> str:
 
 
 def _listing_mapping_price(mapping: dict) -> Optional[Decimal]:
-    prices = []
-    for key in ("minimumPrice", "finalPriceOnSale"):
-        price = _number_price(mapping.get(key))
-        if price is not None:
-            prices.append(price)
     price_items = mapping.get("prices")
     if isinstance(price_items, list):
+        visible_prices = []
         for item in price_items:
             if isinstance(item, dict):
                 price = _number_price(item.get("value"))
                 if price is not None:
-                    prices.append(price)
-    return min(prices) if prices else None
+                    visible_prices.append(price)
+        if visible_prices:
+            return min(visible_prices)
+
+    final_price = _number_price(mapping.get("finalPriceOnSale"))
+    if final_price is not None:
+        return final_price
+
+    minimum_prices = mapping.get("minimumPrices")
+    if isinstance(minimum_prices, list):
+        for item in minimum_prices:
+            if isinstance(item, dict) and item.get("name") == "non-segmented-price":
+                price = _number_price(item.get("value"))
+                if price is not None:
+                    return price
+
+    return _number_price(mapping.get("minimumPrice"))
 
 
 def _json_object_at(text: str, start: int) -> Optional[dict]:

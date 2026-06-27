@@ -54,8 +54,8 @@ class HermesSmokeTests(unittest.TestCase):
             window.__HB_STATE__ = {
               "variantListing": [
                 {"aiBasedShipmentDay": null, "listingId": "listing-hb", "merchantName": "Hepsiburada",
-                 "minimumPrice": 10499.25, "finalPriceOnSale": 13999,
-                 "prices": [{"formattedPrice": "13.999,00", "value": 13999}]},
+                 "finalPriceOnSale": 10499.25,
+                 "prices": [{"formattedPrice": "10.499,25", "value": 10499.25}]},
                 {"aiBasedShipmentDay": null, "listingId": "listing-jetklik", "merchantName": "JetKlik",
                  "minimumPrice": 12358.43, "finalPriceOnSale": 12358.43,
                  "prices": [{"formattedPrice": "12.358,43", "value": 12358.43}]}
@@ -67,6 +67,30 @@ class HermesSmokeTests(unittest.TestCase):
         offer = extract_hepsiburada_offer(html)
         self.assertEqual(offer.seller, "Hepsiburada")
         self.assertEqual(offer.price, Decimal("10499.25"))
+
+    def test_hepsiburada_detail_ignores_hidden_minimum_price_when_final_price_exists(self):
+        html = """
+        <html><head><title>Samsung Galaxy Tab S10 FE+ Fiyatı</title></head>
+        <body>
+          <script>
+            window.__HB_STATE__ = {
+              "variantListing": [
+                {"aiBasedShipmentDay": null, "listingId": "listing-hb", "merchantName": "Hepsiburada",
+                 "minimumPrice": 14279, "finalPriceOnSale": 18999,
+                 "minimumPrices": [
+                   {"name": "10", "value": 14279},
+                   {"name": "30", "value": 14279},
+                   {"name": "non-segmented-price", "value": 18999}
+                 ]},
+                {"aiBasedShipmentDay": null, "listingId": "listing-vatan", "merchantName": "VATAN BİLGİSAYAR",
+                 "minimumPrice": 18999, "finalPriceOnSale": 18999}
+              ]
+            };
+          </script>
+        </body></html>
+        """
+        offer = extract_hepsiburada_offer(html)
+        self.assertEqual(offer.price, Decimal("18999"))
 
     def test_manual_price_history_reset_preserves_alert_state(self):
         with tempfile.TemporaryDirectory() as tmpdir:
