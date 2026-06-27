@@ -727,7 +727,7 @@ def _fetch_product_offer(session: requests.Session, site: str, url: str, timeout
     lowered = html.lower()
     if "captcha" in lowered and "robot" in lowered:
         raise HermesError(f"{site_label(site)} bot korumasi nedeniyle captcha sayfasi dondu.")
-    return extract_offer(site, html)
+    return extract_offer(site, html, source_url=url)
 
 
 def _fetch_amazon_detail_result(session: requests.Session, candidate, config: HermesConfig) -> SearchResultItem:

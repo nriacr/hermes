@@ -507,7 +507,43 @@ def _json_object_at(text: str, start: int) -> Optional[dict]:
     return None
 
 
-def _embedded_listing_mappings(text: str) -> Iterable[dict]:
+def _selected_variant_listing_mappings(text: str, selected_product_id: str) -> list[dict]:
+    if not selected_product_id:
+        return []
+    sku_pattern = re.compile(r'"sku"\s*:\s*"' + re.escape(selected_product_id) + r'"', re.IGNORECASE)
+    for match in sku_pattern.finditer(text):
+        position = match.start()
+        for _ in range(220):
+            position = text.rfind("{", 0, position)
+            if position < 0:
+                break
+            mapping = _json_object_at(text, position)
+            if (
+                mapping
+                and str(mapping.get("sku") or "").upper() == selected_product_id
+                and isinstance(mapping.get("variantListing"), list)
+            ):
+                return [item for item in mapping["variantListing"] if isinstance(item, dict)]
+            position -= 1
+    return []
+
+
+def _embedded_listing_mappings(text: str, selected_product_id: str = "") -> Iterable[dict]:
+    selected_mappings = _selected_variant_listing_mappings(text, selected_product_id)
+    if selected_mappings:
+        seen = set()
+        for mapping in selected_mappings:
+            listing_id = str(mapping.get("listingId") or "").strip()
+            seller = str(mapping.get("merchantName") or "").strip()
+            if not seller:
+                continue
+            key = listing_id or f"{seller}:{mapping.get('finalPriceOnSale')}:{mapping.get('minimumPrice')}"
+            if key in seen:
+                continue
+            seen.add(key)
+            yield mapping
+        return
+
     start_pattern = re.compile(r'\{(?="(?:aiBasedShipmentDay|merchantId)"[\s\S]{0,1400}?"listingId")')
     seen = set()
     for match in start_pattern.finditer(text):
@@ -525,20 +561,23 @@ def _embedded_listing_mappings(text: str) -> Iterable[dict]:
         yield mapping
 
 
-def _embedded_detail_candidates(soup) -> list[HepsiburadaCandidate]:
+def _embedded_detail_candidates(soup, source_url: str = "") -> list[HepsiburadaCandidate]:
     html = _embedded_text(soup)
     if '"merchantName"' not in html or not any(key in html for key in ('"minimumPrice"', '"finalPriceOnSale"')):
         return []
+    selected_product_id = _product_id_from_url(source_url)
     title = extract_title(soup) or "Hepsiburada ürünü"
     candidates = []
-    for mapping in _embedded_listing_mappings(html):
+    for mapping in _embedded_listing_mappings(html, selected_product_id):
         price = _listing_mapping_price(mapping)
         if price is None:
             continue
         seller = _clean_text(mapping.get("merchantName") or "")
         listing_id = str(mapping.get("listingId") or "").strip()
         url = _absolute_url(str(mapping.get("url") or "")) if PRODUCT_URL_RE.search(str(mapping.get("url") or "")) else ""
-        identity = listing_id or f"{seller.casefold()}:{price}"
+        seller_key = normalize_offer_text(seller)
+        identity = f"{selected_product_id}:{seller_key}" if selected_product_id and seller_key else listing_id
+        identity = identity or f"{seller.casefold()}:{price}"
         candidates.append(
             HepsiburadaCandidate(
                 title=title,
@@ -569,16 +608,23 @@ def _log_candidates(candidates: list[HepsiburadaCandidate]) -> None:
     log(f"Hepsiburada teklifleri: {preview}")
 
 
-def extract_offer(html: str) -> OfferResult:
+def extract_offer(html: str, source_url: str = "") -> OfferResult:
     soup = soup_from_html(html)
-    candidates = _search_candidates_from_dom(soup)
-    if not candidates:
-        candidates = _search_candidates_from_json(soup)
-    if not candidates:
-        candidates = _embedded_detail_candidates(soup)
-    if not candidates:
-        detail = _detail_candidate(soup)
-        candidates = [detail] if detail else []
+    selected_product_id = _product_id_from_url(source_url)
+    if selected_product_id:
+        candidates = _embedded_detail_candidates(soup, source_url=source_url)
+        if not candidates:
+            detail = _detail_candidate(soup)
+            candidates = [detail] if detail else []
+    else:
+        candidates = _search_candidates_from_dom(soup)
+        if not candidates:
+            candidates = _search_candidates_from_json(soup)
+        if not candidates:
+            candidates = _embedded_detail_candidates(soup, source_url=source_url)
+        if not candidates:
+            detail = _detail_candidate(soup)
+            candidates = [detail] if detail else []
     if not candidates:
         raise HermesError("Hepsiburada sayfasından fiyat bulunamadı.")
 

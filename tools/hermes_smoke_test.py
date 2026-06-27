@@ -10,7 +10,11 @@ APP_PATH = Path(__file__).resolve().parents[1] / "ha-addon" / "app"
 sys.path.insert(0, str(APP_PATH))
 
 from hermes import service  # noqa: E402
-from hermes.providers.hepsiburada import extract_offer as extract_hepsiburada_offer  # noqa: E402
+from hermes.providers.base import soup_from_html  # noqa: E402
+from hermes.providers.hepsiburada import (  # noqa: E402
+    _embedded_detail_candidates,
+    extract_offer as extract_hepsiburada_offer,
+)
 from hermes.search_amazon import extract_result_candidates  # noqa: E402
 
 
@@ -91,6 +95,39 @@ class HermesSmokeTests(unittest.TestCase):
         """
         offer = extract_hepsiburada_offer(html)
         self.assertEqual(offer.price, Decimal("18999"))
+
+    def test_hepsiburada_detail_offers_are_scoped_to_selected_variant(self):
+        html = """
+        <html><head><title>Samsung Galaxy Tab S10 FE+ Mavi Fiyatı</title></head>
+        <body>
+          <script>
+            window.__HB_STATE__ = {
+              "variants": [
+                {"sku": "HBCV00008E1SF6", "variantListing": [
+                  {"listingId": "selected-hb-1", "merchantName": "Hepsiburada",
+                   "finalPriceOnSale": 18999, "prices": [{"value": 18999}]},
+                  {"listingId": "selected-hb-2", "merchantName": "Hepsiburada",
+                   "finalPriceOnSale": 19999, "prices": [{"value": 19999}]},
+                  {"listingId": "selected-vatan", "merchantName": "VATAN BİLGİSAYAR",
+                   "finalPriceOnSale": 18999, "prices": [{"value": 18999}]}
+                ]},
+                {"sku": "HBCV00008E1QWF", "variantListing": [
+                  {"listingId": "other-color", "merchantName": "Başka Satıcı",
+                   "finalPriceOnSale": 1000, "prices": [{"value": 1000}]}
+                ]}
+              ]
+            };
+          </script>
+        </body></html>
+        """
+        source_url = "https://www.hepsiburada.com/samsung-tablet-p-HBCV00008E1SF6"
+        offer = extract_hepsiburada_offer(html, source_url=source_url)
+        candidates = _embedded_detail_candidates(soup_from_html(html), source_url=source_url)
+
+        self.assertEqual(offer.price, Decimal("18999"))
+        self.assertNotEqual(offer.seller, "Başka Satıcı")
+        self.assertEqual([item.seller for item in candidates].count("Hepsiburada"), 1)
+        self.assertFalse(any(item.price == Decimal("1000") for item in candidates))
 
     def test_manual_price_history_reset_preserves_alert_state(self):
         with tempfile.TemporaryDirectory() as tmpdir:

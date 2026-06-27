@@ -11,9 +11,11 @@ PROVIDERS = {
 }
 
 
-def extract_offer(site: str, html: str) -> OfferResult:
+def extract_offer(site: str, html: str, source_url: str = "") -> OfferResult:
     site_key = str(site or "").strip().lower()
     parser = PROVIDERS.get(site_key)
     if parser is None:
         raise HermesError(f"Desteklenmeyen site parserı: {site}")
+    if site_key == SITE_HEPSIBURADA:
+        return parser(html, source_url=source_url)
     return parser(html)
