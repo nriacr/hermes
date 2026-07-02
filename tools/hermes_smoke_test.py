@@ -15,7 +15,9 @@ from hermes.providers.hepsiburada import (  # noqa: E402
     _embedded_detail_candidates,
     extract_offer as extract_hepsiburada_offer,
 )
+from hermes.providers.nordbron import extract_offer as extract_nordbron_offer  # noqa: E402
 from hermes.search_amazon import extract_result_candidates  # noqa: E402
+from hermes.utils import detect_site_from_url  # noqa: E402
 
 
 class HermesSmokeTests(unittest.TestCase):
@@ -180,6 +182,24 @@ class HermesSmokeTests(unittest.TestCase):
             finally:
                 service.STATE_PATH = original_state_path
                 service.SUMMARY_PATH = original_summary_path
+
+    def test_nordbron_product_price(self):
+        html = """
+        <html>
+          <head><title>Stark Sırt Çantası</title></head>
+          <body>
+            <h1>Stark Sırt Çantası</h1>
+            <div class="product-detail_price__hYyw9"><span>₺ 4,850.00</span></div>
+          </body>
+        </html>
+        """
+        offer = extract_nordbron_offer(html)
+        self.assertEqual(offer.title, "Stark Sırt Çantası")
+        self.assertEqual(offer.price, Decimal("4850.00"))
+
+    def test_nordbron_site_detection(self):
+        url = "https://nordbron.com/stark-sirt-cantasi?Renk=Antrasit&Beden=Standart-Beden"
+        self.assertEqual(detect_site_from_url(url), "nordbron")
 
 
 if __name__ == "__main__":

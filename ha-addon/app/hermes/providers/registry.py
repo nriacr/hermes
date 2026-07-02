@@ -1,13 +1,14 @@
-from ..constants import SITE_AMAZON, SITE_HEPSIBURADA, SITE_NETWORK, SITE_TRENDYOL
+from ..constants import SITE_AMAZON, SITE_HEPSIBURADA, SITE_NETWORK, SITE_NORDBRON, SITE_TRENDYOL
 from ..errors import HermesError
 from ..models import OfferResult
-from . import amazon, hepsiburada, network, trendyol
+from . import amazon, hepsiburada, network, nordbron, trendyol
 
 PROVIDERS = {
     SITE_AMAZON: amazon.extract_offer,
     SITE_HEPSIBURADA: hepsiburada.extract_offer,
     SITE_TRENDYOL: trendyol.extract_offer,
     SITE_NETWORK: network.extract_offer,
+    SITE_NORDBRON: nordbron.extract_offer,
 }
 
 

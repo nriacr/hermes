@@ -14,6 +14,7 @@ from .constants import (
     SITE_HEPSIBURADA,
     SITE_LABELS,
     SITE_NETWORK,
+    SITE_NORDBRON,
     SITE_TRENDYOL,
     USER_AGENTS,
 )
@@ -160,6 +161,8 @@ def detect_site_from_url(url: str) -> str:
         return SITE_TRENDYOL
     if "network" in host:
         return SITE_NETWORK
+    if "nordbron" in host:
+        return SITE_NORDBRON
     if "amazon" in host:
         return SITE_AMAZON
     raise HermesError(f"Desteklenmeyen site alan adı: {host or url}")

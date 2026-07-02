@@ -15,11 +15,13 @@ SITE_AMAZON = "amazon"
 SITE_HEPSIBURADA = "hepsiburada"
 SITE_TRENDYOL = "trendyol"
 SITE_NETWORK = "network"
+SITE_NORDBRON = "nordbron"
 SITE_LABELS = {
     SITE_AMAZON: "Amazon",
     SITE_HEPSIBURADA: "Hepsiburada",
     SITE_TRENDYOL: "Trendyol",
     SITE_NETWORK: "Network",
+    SITE_NORDBRON: "Nordbron",
 }
 
 AMAZON_BASE_URL = "https://www.amazon.com.tr"
