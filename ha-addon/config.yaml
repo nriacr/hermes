@@ -1,5 +1,5 @@
 name: Hermes
-version: "2.1.0"
+version: "2.1.1"
 slug: hermes
 description: Ürün fiyatlarını, Amazon arama sayfalarını ve Telegram fırsat kanallarını Pushover bildirimiyle takip eder.
 url: https://github.com/nriacr/hermes
@@ -12,10 +12,6 @@ boot: auto
 init: false
 ingress: true
 ingress_port: 8099
-ports:
-  8100/tcp: 8100
-ports_description:
-  8100/tcp: Hermes public dashboard
 hassio_api: true
 hassio_role: manager
 panel_title: Hermes
