@@ -41,7 +41,7 @@ p { margin:0; color:var(--muted); line-height:1.5; font-size:13px; }
 .summary-panel { margin-top:18px; border:1px solid var(--line); border-radius:18px; padding:16px; background:var(--card); } .summary-head { display:flex; align-items:flex-end; justify-content:space-between; gap:12px; margin-bottom:12px; } .summary-head h2 { font-size:18px; margin:0; } .summary-head span { color:var(--muted); font-size:12px; white-space:nowrap; } .table-section + .table-section { margin-top:18px; } .table-section h3 { margin:0 0 9px; font-size:14px; color:#d8dcff; } .deals-section h3 { color:#b7f0dc; }
 .telegram-recent { margin-top:14px; border:1px solid rgba(199,166,255,.22); border-radius:14px; padding:13px; background:rgba(15,18,34,.36); } .telegram-recent h3 { margin:0 0 10px; font-size:13px; color:#d8dcff; } .telegram-recent p { color:var(--muted); } .telegram-recent ul { display:grid; gap:8px; margin:0; padding:0; list-style:none; } .telegram-recent li { display:grid; gap:4px; padding:10px 11px; border:1px solid rgba(142,214,210,.20); border-radius:12px; background:rgba(142,214,210,.07); } .telegram-recent li a,.telegram-recent li strong { color:#bfe3ff; font-size:13px; font-weight:850; text-decoration:none; overflow-wrap:anywhere; } .telegram-recent li a:hover { color:#d8c3ff; text-decoration:underline; } .telegram-recent li span { color:var(--muted); font-size:11px; } .telegram-recent li em { color:#dce0f8; font-size:12px; font-style:normal; line-height:1.35; overflow-wrap:anywhere; }
 .table-wrap { overflow-x:auto; border:1px solid var(--line); border-radius:14px; } table { width:100%; border-collapse:collapse; min-width:860px; } th,td { padding:8px 8px; border-bottom:1px solid var(--line); text-align:right; white-space:nowrap; } th { color:#c8d0ff; background:var(--head); font-size:10px; text-transform:uppercase; letter-spacing:.035em; } td { color:var(--text); font-size:12px; font-variant-numeric:tabular-nums; } tr:last-child td { border-bottom:none; } th:nth-child(1),td:nth-child(1) { width:104px; } th:nth-child(1),td:nth-child(1),th:nth-child(2),td:nth-child(2) { text-align:left; } th:not(:nth-child(2)),td:not(:nth-child(2)) { width:100px; } th:nth-child(6),td:nth-child(6) { width:148px; } .empty-row td { color:var(--muted); text-align:left; background:rgba(255,255,255,.025); }
-tbody tr.site-amazon { --site-bg:rgba(255,199,116,.10); --site-line:rgba(255,199,116,.48); --site-link:#ffd79a; } tbody tr.site-hepsiburada { --site-bg:rgba(255,153,112,.10); --site-line:rgba(255,153,112,.48); --site-link:#ffc1a5; } tbody tr.site-network { --site-bg:rgba(143,214,196,.10); --site-line:rgba(143,214,196,.48); --site-link:#aee7d8; } tbody tr.site-trendyol { --site-bg:rgba(245,170,196,.10); --site-line:rgba(245,170,196,.48); --site-link:#f7c1d3; } tbody tr.site-nordbron { --site-bg:rgba(166,203,255,.10); --site-line:rgba(166,203,255,.46); --site-link:#c8ddff; } tbody tr.site-other { --site-bg:rgba(183,177,222,.10); --site-line:rgba(183,177,222,.42); --site-link:#cbc6ef; } tbody tr[class*='site-'] td { background:linear-gradient(90deg,var(--site-bg),rgba(30,33,57,.28)); } tbody tr[class*='site-'] td:first-child { border-left:4px solid var(--site-line); color:var(--site-link); font-weight:800; } tbody tr[class*='site-'] .product-cell a { color:var(--site-link); } tbody tr[class*='site-']:hover td { background:linear-gradient(90deg,rgba(255,255,255,.055),var(--site-bg)); }
+tbody tr.site-amazon { --site-bg:rgba(255,199,116,.13); --site-bg-strong:rgba(255,199,116,.23); --site-line:rgba(255,199,116,.78); --site-link:#ffd27f; } tbody tr.site-hepsiburada { --site-bg:rgba(255,153,112,.13); --site-bg-strong:rgba(255,153,112,.24); --site-line:rgba(255,153,112,.80); --site-link:#ffb188; } tbody tr.site-network { --site-bg:rgba(143,214,196,.13); --site-bg-strong:rgba(143,214,196,.24); --site-line:rgba(143,214,196,.78); --site-link:#a8ead9; } tbody tr.site-trendyol { --site-bg:rgba(245,170,196,.13); --site-bg-strong:rgba(245,170,196,.24); --site-line:rgba(245,170,196,.78); --site-link:#f8b4cc; } tbody tr.site-nordbron { --site-bg:rgba(166,203,255,.13); --site-bg-strong:rgba(166,203,255,.24); --site-line:rgba(166,203,255,.78); --site-link:#bdd7ff; } tbody tr.site-other { --site-bg:rgba(183,177,222,.13); --site-bg-strong:rgba(183,177,222,.22); --site-line:rgba(183,177,222,.72); --site-link:#d1caff; } tbody tr[class*='site-'] td { background:linear-gradient(90deg,var(--site-bg),rgba(30,33,57,.28)); } tbody tr[class*='site-'] td:first-child { border-left:4px solid var(--site-line); color:var(--site-link); font-weight:800; } tbody tr[class*='site-'] .product-cell a { color:var(--site-link); } tbody tr[class*='site-']:hover td { background:linear-gradient(90deg,rgba(255,255,255,.055),var(--site-bg)); }
 .product-cell { max-width:360px; white-space:normal; line-height:1.22; } .product-cell a { color:#9ec0ff; text-decoration:none; } .product-cell a:hover { color:#d1b3ff; text-decoration:underline; } .product-cell span { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; text-overflow:ellipsis; } .deal-row td { color:#b7f0dc; } .deal-row td:first-child { color:var(--site-link); } .deal-row .product-cell a { color:#b7f0dc; } .note { margin-top:18px; border-left:4px solid #b79ad6; padding:12px 14px; background:rgba(183,154,214,.15); border-radius:10px; font-size:13px; } .footer { margin-top:18px; font-size:12px; color:var(--muted); }
 .public main { max-width:1180px; } .public .hero { padding:18px; } .public .badge { font-size:clamp(22px,4vw,36px); }
 .public-actions { margin:16px 0 6px; } .public-actions .button { min-width:132px; }
@@ -68,14 +68,19 @@ tbody tr.site-amazon { --site-bg:rgba(255,199,116,.10); --site-line:rgba(255,199
   .table-wrap { overflow:visible; border:0; border-radius:0; }
   table { min-width:0; }
   thead { display:none; }
-  table, tbody, tr, td { display:block; width:100%; }
-  tbody tr[class*='site-'] { margin:0 0 10px; border:1px solid var(--line); border-radius:15px; padding:10px; background:rgba(30,33,57,.72); overflow:hidden; }
-  tbody tr[class*='site-'] td { display:flex; justify-content:space-between; gap:10px; padding:5px 0; border-bottom:0; background:transparent; text-align:right; white-space:normal; font-size:12px; }
+  table, tbody, td { display:block; width:100%; }
+  tbody tr[class*='site-'] { position:relative; display:grid; grid-template-columns:1fr 1fr; gap:7px 9px; margin:0 0 8px; border:1px solid var(--site-line); border-left:7px solid var(--site-line); border-radius:15px; padding:9px 10px 9px 12px; background:linear-gradient(135deg,var(--site-bg-strong),rgba(30,33,57,.88) 58%),rgba(30,33,57,.86); box-shadow:0 8px 20px rgba(0,0,0,.18); overflow:hidden; }
+  tbody tr[class*='site-'] td { display:flex; justify-content:flex-start; gap:4px; padding:0; border-bottom:0; background:transparent; text-align:left; white-space:normal; font-size:12.5px; line-height:1.18; }
   tbody tr[class*='site-'] td:first-child { border-left:0; color:var(--site-link); }
-  tbody tr[class*='site-'] td::before { content:attr(data-label); flex:0 0 74px; color:var(--muted); text-align:left; font-size:10px; font-weight:800; letter-spacing:.03em; text-transform:uppercase; }
-  tbody tr[class*='site-'] .product-cell { max-width:none; display:block; text-align:left; line-height:1.3; }
-  tbody tr[class*='site-'] .product-cell::before { display:block; margin-bottom:4px; }
-  .product-cell span { -webkit-line-clamp:3; }
+  tbody tr[class*='site-'] td::before { content:attr(data-label); flex:0 0 auto; color:var(--muted); text-align:left; font-size:9px; font-weight:850; letter-spacing:.045em; text-transform:uppercase; }
+  tbody tr[class*='site-'] .seller-cell { grid-column:1 / -1; align-items:center; gap:11px; padding-bottom:1px; color:var(--site-link); font-size:14px; font-weight:900; }
+  tbody tr[class*='site-'] .seller-cell::before { flex:0 0 62px; }
+  tbody tr[class*='site-'] .product-cell { grid-column:1 / -1; max-width:none; display:block; padding-bottom:1px; text-align:left; line-height:1.26; font-size:13px; }
+  tbody tr[class*='site-'] .product-cell::before { display:block; margin-bottom:3px; }
+  tbody tr[class*='site-'] .price-cell, tbody tr[class*='site-'] .target-cell, tbody tr[class*='site-'] .diff-cell, tbody tr[class*='site-'] .range-cell { min-height:33px; border:1px solid rgba(255,255,255,.06); border-radius:10px; padding:5px 7px; background:rgba(12,15,30,.25); flex-direction:column; justify-content:center; }
+  tbody tr[class*='site-'] .range-cell { grid-column:1 / -1; min-height:31px; flex-direction:row; align-items:center; justify-content:flex-start; gap:8px; white-space:nowrap; }
+  tbody tr[class*='site-'] .range-cell::before { margin-right:3px; }
+  .product-cell span { -webkit-line-clamp:2; }
   .empty-row td { padding:10px; border:1px solid var(--line); border-radius:12px; }
   .note, .footer { font-size:11px; }
 }
@@ -515,10 +520,12 @@ def _render_table_row(row):
         row_classes.append("deal-row")
     row_class = f' class="{" ".join(row_classes)}"'
     return (
-        f'<tr{row_class}><td data-label="Satıcı">{seller}</td>'
+        f'<tr{row_class}><td data-label="Satıcı" class="seller-cell">{seller}</td>'
         f'<td data-label="Ürün" class="product-cell" title="{product_title}">{label}</td>'
-        f'<td data-label="Güncel">{price}</td><td data-label="Hedef">{target}</td>'
-        f'<td data-label="Fark">{difference}</td><td data-label="Min / Maks">{price_range}</td></tr>'
+        f'<td data-label="Güncel" class="price-cell">{price}</td>'
+        f'<td data-label="Hedef" class="target-cell">{target}</td>'
+        f'<td data-label="Fark" class="diff-cell">{difference}</td>'
+        f'<td data-label="Min / Maks" class="range-cell">{price_range}</td></tr>'
     )
 
 
