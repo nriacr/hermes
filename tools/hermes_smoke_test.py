@@ -201,6 +201,18 @@ class HermesSmokeTests(unittest.TestCase):
         url = "https://nordbron.com/stark-sirt-cantasi?Renk=Antrasit&Beden=Standart-Beden"
         self.assertEqual(detect_site_from_url(url), "nordbron")
 
+    def test_nordbron_product_page_is_not_misread_as_captcha(self):
+        html = """
+        <html>
+          <body>
+            <div class="product-detail_price__hYyw9"><span>₺ 3,900.00</span></div>
+            <script>{"customerSettings":{"requireCaptchaValidation":true},"label":"robot"}</script>
+          </body>
+        </html>
+        """
+        self.assertFalse(service.is_bot_protection_page("nordbron", html))
+        self.assertTrue(service.is_bot_protection_page("nordbron", "captcha robot"))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -14,6 +14,7 @@ from .constants import (
     NOTIFY_REPEAT_SECONDS,
     SITE_AMAZON,
     SITE_HEPSIBURADA,
+    SITE_NORDBRON,
     STATE_PATH,
     SUMMARY_PATH,
     TELEGRAM_SEEN_DEALS_PATH,
@@ -77,6 +78,15 @@ def raise_if_age_verification(html: str) -> None:
     normalized = normalize_offer_text(html)
     if any(marker in normalized for marker in AGE_VERIFICATION_MARKERS):
         raise HermesError("Yaş doğrulaması gerekiyor. Bu sayfa otomatik takip edilemiyor.")
+
+
+def is_bot_protection_page(site: str, html: str) -> bool:
+    lowered = html.lower()
+    if "captcha" not in lowered or "robot" not in lowered:
+        return False
+    if site == SITE_NORDBRON and "product-detail_price" in lowered:
+        return False
+    return True
 
 
 def _clear_price_history_fields(value: Any) -> int:
@@ -724,8 +734,7 @@ def _fetch_product_offer(session: requests.Session, site: str, url: str, timeout
         response = fetch_with_retries(session, url, timeout)
     html = cleaned_html(response)
     raise_if_age_verification(html)
-    lowered = html.lower()
-    if "captcha" in lowered and "robot" in lowered:
+    if is_bot_protection_page(site, html):
         raise HermesError(f"{site_label(site)} bot korumasi nedeniyle captcha sayfasi dondu.")
     return extract_offer(site, html, source_url=url)
 
