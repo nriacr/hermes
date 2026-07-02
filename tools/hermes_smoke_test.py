@@ -10,6 +10,7 @@ APP_PATH = Path(__file__).resolve().parents[1] / "ha-addon" / "app"
 sys.path.insert(0, str(APP_PATH))
 
 from hermes import service  # noqa: E402
+from hermes.config_loader import _prepare_products  # noqa: E402
 from hermes.providers.base import soup_from_html  # noqa: E402
 from hermes.providers.hepsiburada import (  # noqa: E402
     _embedded_detail_candidates,
@@ -212,6 +213,38 @@ class HermesSmokeTests(unittest.TestCase):
         """
         self.assertFalse(service.is_bot_protection_page("nordbron", html))
         self.assertTrue(service.is_bot_protection_page("nordbron", "captcha robot"))
+
+    def test_product_card_can_expand_to_multiple_site_links(self):
+        products = _prepare_products(
+            [
+                {
+                    "name": "Ortak ürün",
+                    "target_price": 1000,
+                    "url_1": "https://www.amazon.com.tr/dp/B000000001",
+                    "url_2": "https://www.hepsiburada.com/ornek-urun-p-HBCV000000000",
+                    "url_3": "https://nordbron.com/stark-sirt-cantasi",
+                    "notify_once_in_24H": True,
+                    "active": True,
+                }
+            ]
+        )
+        self.assertEqual(len(products), 3)
+        self.assertEqual([item.site for item in products], ["amazon", "hepsiburada", "nordbron"])
+        self.assertTrue(all(item.name == "Ortak ürün" for item in products))
+
+    def test_legacy_product_url_still_loads(self):
+        products = _prepare_products(
+            [
+                {
+                    "name": "Eski ürün",
+                    "target_price": 1000,
+                    "url": "https://www.trendyol.com/ornek/urun-p-1",
+                    "active": True,
+                }
+            ]
+        )
+        self.assertEqual(len(products), 1)
+        self.assertEqual(products[0].site, "trendyol")
 
 
 if __name__ == "__main__":

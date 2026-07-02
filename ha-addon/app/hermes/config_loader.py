@@ -11,6 +11,8 @@ from .models import AmazonSearchPage, AmazonSearchTarget, HermesConfig, ProductR
 from .storage import load_json
 from .utils import detect_site_from_url, parse_bool, parse_decimal
 
+PRODUCT_URL_FIELDS = ("url_1", "url_2", "url_3", "url_4", "url_5")
+
 
 def _required_value(item: Dict[str, object], field_name: str, context: str) -> str:
     value = str(item.get(field_name) or "").strip()
@@ -52,6 +54,24 @@ def _parse_search_urls(item: Dict[str, object]) -> List[str]:
             urls.append(raw_url)
     if not urls:
         raise HermesError("Amazon arama sayfası için en az search_url doldurulmalı.")
+    return urls
+
+
+def _product_urls(item: Dict[str, object]) -> List[str]:
+    urls: List[str] = []
+    for field_name in PRODUCT_URL_FIELDS:
+        raw_url = str(item.get(field_name) or "").strip()
+        if raw_url and raw_url not in urls:
+            urls.append(raw_url)
+    raw_urls = item.get("urls")
+    if isinstance(raw_urls, list):
+        for raw_url in raw_urls:
+            url = str(raw_url or "").strip()
+            if url and url not in urls:
+                urls.append(url)
+    legacy_url = str(item.get("url") or "").strip()
+    if legacy_url and legacy_url not in urls:
+        urls.append(legacy_url)
     return urls
 
 
@@ -117,21 +137,25 @@ def _prepare_products(raw_products: object) -> List[ProductRule]:
             continue
         if not parse_bool(item.get("active"), default=True):
             continue
-        url = str(item.get("url") or "").strip()
-        if not url:
+        urls = _product_urls(item)
+        if not urls:
             continue
-        name = str(item.get("name") or url).strip()
-        products.append(
-            ProductRule(
-                name=name,
-                site=detect_site_from_url(url),
-                url=url,
-                target_price=parse_decimal(_required_value(item, "target_price", f"Ürün ({name})")),
-                check_interval_minutes=_optional_bounded_integer(item, "check_interval_minutes", 1, 1440),
-                notify_once_in_24h=parse_bool(item.get("notify_once_in_24H"), default=True),
-                active=True,
+        name = str(item.get("name") or urls[0]).strip()
+        target_price = parse_decimal(_required_value(item, "target_price", f"Ürün ({name})"))
+        check_interval_minutes = _optional_bounded_integer(item, "check_interval_minutes", 1, 1440)
+        notify_once_in_24h = parse_bool(item.get("notify_once_in_24H"), default=True)
+        for url in urls:
+            products.append(
+                ProductRule(
+                    name=name,
+                    site=detect_site_from_url(url),
+                    url=url,
+                    target_price=target_price,
+                    check_interval_minutes=check_interval_minutes,
+                    notify_once_in_24h=notify_once_in_24h,
+                    active=True,
+                )
             )
-        )
     return products
 
 

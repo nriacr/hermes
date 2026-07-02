@@ -14,6 +14,7 @@ from .utils import parse_bool
 
 ADDON_SLUG = "hermes"
 SUPERVISOR_BASE_URL = "http://supervisor"
+PRODUCT_URL_FIELDS = ("url_1", "url_2", "url_3", "url_4", "url_5")
 
 SETTINGS_CSS = """
 :root { color-scheme: dark; --bg:#0f1222; --panel:#171a30; --card:#1e2139; --line:#313658; --text:#e8eaf8; --muted:#a6abd1; --accent:#c7a6ff; --accent2:#8ed6d2; --ok:#7fdcb8; --bad:#ff9cb5; }
@@ -88,6 +89,25 @@ def _summary_name(item, fallback):
     return fallback
 
 
+def _product_urls_for_form(item):
+    urls = []
+    if isinstance(item, dict):
+        for field_name in PRODUCT_URL_FIELDS:
+            url = str(item.get(field_name) or "").strip()
+            if url and url not in urls:
+                urls.append(url)
+        raw_urls = item.get("urls")
+        if isinstance(raw_urls, list):
+            for raw_url in raw_urls:
+                url = str(raw_url or "").strip()
+                if url and url not in urls:
+                    urls.append(url)
+        legacy_url = str(item.get("url") or "").strip()
+        if legacy_url and legacy_url not in urls:
+            urls.append(legacy_url)
+    return urls[: len(PRODUCT_URL_FIELDS)]
+
+
 def _search_target_title(item, fallback):
     if isinstance(item, dict):
         value = str(item.get("product_name") or item.get("name") or fallback).strip()
@@ -103,11 +123,21 @@ def _details(title, prefix, inner, open_when_empty=False):
 def _product_form(item, index, is_new=False):
     prefix = f"products_{index}_"
     title = "Yeni ürün ekle" if is_new else _summary_name(item, f"Ürün {index + 1}")
+    urls = _product_urls_for_form(item)
     inner = "".join(
         [
             _field(prefix, "name", "Ad", item.get("name", ""), required=not is_new),
-            _field(prefix, "url", "URL", item.get("url", ""), "url", required=not is_new),
             _field(prefix, "target_price", "Hedef fiyat", item.get("target_price", ""), "number", required=not is_new),
+            *[
+                _field(
+                    prefix,
+                    field_name,
+                    f"Ürün URL {url_index}",
+                    urls[url_index - 1] if len(urls) >= url_index else "",
+                    "url",
+                )
+                for url_index, field_name in enumerate(PRODUCT_URL_FIELDS, start=1)
+            ],
             _field(prefix, "check_interval_minutes", "Özel kontrol aralığı (dk)", item.get("check_interval_minutes", ""), "number"),
             _checkbox(prefix, "notify_once_in_24H", "24 saat içinde aynı bildirimi tekrar gönderme", item.get("notify_once_in_24H", True)),
             _checkbox(prefix, "active", "Aktif", item.get("active", True)),
@@ -202,20 +232,25 @@ def _build_products(form):
         if _bool_from_form(form, prefix + "delete"):
             continue
         name = _first(form, prefix + "name")
-        url = _first(form, prefix + "url")
         target = _first(form, prefix + "target_price")
         interval = _first(form, prefix + "check_interval_minutes")
-        if not any([name, url, target, interval]):
+        urls = []
+        for field_name in PRODUCT_URL_FIELDS:
+            url = _first(form, prefix + field_name)
+            if url and url not in urls:
+                urls.append(url)
+        if not any([name, target, interval, *urls]):
             continue
-        if not name or not url or not target:
-            raise ValueError("Ürün eklerken ad, URL ve hedef fiyat alanları dolu olmalı.")
+        if not name or not target or not urls:
+            raise ValueError("Ürün eklerken ad, hedef fiyat ve en az bir ürün URL alanı dolu olmalı.")
         item = {
             "name": name,
-            "url": url,
             "target_price": _number(target),
             "notify_once_in_24H": _bool_from_form(form, prefix + "notify_once_in_24H"),
             "active": _bool_from_form(form, prefix + "active"),
         }
+        for url_index, url in enumerate(urls, start=1):
+            item[f"url_{url_index}"] = url
         if interval:
             item["check_interval_minutes"] = _number(interval)
         products.append(item)

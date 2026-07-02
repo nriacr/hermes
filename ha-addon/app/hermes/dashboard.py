@@ -231,10 +231,30 @@ def _target_text(labels):
     return f"{prefix}: {', '.join(labels)}"
 
 
-def _context_for_product(item):
-    url = str(item.get("url") or "").strip()
-    if not url:
-        return None
+PRODUCT_URL_FIELDS = ("url_1", "url_2", "url_3", "url_4", "url_5")
+
+
+def _product_urls_from_options(item):
+    urls = []
+    if not isinstance(item, dict):
+        return urls
+    for field_name in PRODUCT_URL_FIELDS:
+        url = str(item.get(field_name) or "").strip()
+        if url and url not in urls:
+            urls.append(url)
+    raw_urls = item.get("urls")
+    if isinstance(raw_urls, list):
+        for raw_url in raw_urls:
+            url = str(raw_url or "").strip()
+            if url and url not in urls:
+                urls.append(url)
+    legacy_url = str(item.get("url") or "").strip()
+    if legacy_url and legacy_url not in urls:
+        urls.append(legacy_url)
+    return urls
+
+
+def _context_for_product_url(item, url):
     try:
         site = detect_site_from_url(url)
         seller = site_label(site)
@@ -250,6 +270,15 @@ def _context_for_product(item):
         "urls": [url],
         "keywords": [name],
     }
+
+
+def _contexts_for_product(item):
+    return [
+        context
+        for url in _product_urls_from_options(item)
+        for context in [_context_for_product_url(item, url)]
+        if context
+    ]
 
 
 def _search_urls_from_page(item):
@@ -286,8 +315,7 @@ def _error_contexts(options):
     contexts = {}
     for item in products:
         if isinstance(item, dict):
-            context = _context_for_product(item)
-            if context:
+            for context in _contexts_for_product(item):
                 key, value = context
                 contexts[key] = value
     for page in pages:
