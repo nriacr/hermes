@@ -419,7 +419,7 @@ def request_log_label(source: str, name: str = "", detail: str = "") -> str:
     for value in (name, detail):
         text = str(value or "").strip()
         if text:
-            parts.append(log_cell(text, 64))
+            parts.append(text[:61] + "..." if len(text) > 64 else text)
     return " | ".join(parts)
 
 
