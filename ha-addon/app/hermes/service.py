@@ -414,6 +414,15 @@ def wait_before_request(label: str, config: HermesConfig) -> None:
         time.sleep(delay)
 
 
+def request_log_label(source: str, name: str = "", detail: str = "") -> str:
+    parts = [str(source or "İstek").strip()]
+    for value in (name, detail):
+        text = str(value or "").strip()
+        if text:
+            parts.append(log_cell(text, 64))
+    return " | ".join(parts)
+
+
 def update_error_notification_state(state_entry: Dict[str, Any]) -> Dict[str, Any]:
     updated = dict(state_entry)
     updated["last_error_notified_at"] = utc_now()
@@ -728,7 +737,7 @@ def _fetch_product_offer(session: requests.Session, product: ProductRule, config
 
 
 def _fetch_amazon_detail_result(session: requests.Session, candidate, config: HermesConfig) -> SearchResultItem:
-    wait_before_request("Amazon detay", config)
+    wait_before_request(request_log_label("Amazon detay", candidate.title), config)
     response = fetch_amazon_page(session, candidate.url, config.request_timeout_seconds)
     html = cleaned_html(response)
     raise_if_age_verification(html)
@@ -750,8 +759,9 @@ def _fetch_amazon_search_results(
     config: HermesConfig,
     max_items_to_scan: int,
     target_keywords: List[str],
+    label: str = "Arama",
 ):
-    wait_before_request("Arama", config)
+    wait_before_request(label, config)
     response = fetch_amazon_page(session, search_url, config.request_timeout_seconds, expect_search=True)
     html = cleaned_html(response)
     raise_if_age_verification(html)
@@ -799,7 +809,7 @@ def check_once(config: HermesConfig) -> None:
             continue
         try:
             display_name = product.name or product.url
-            wait_before_request(f"{seller} | {display_name}", config)
+            wait_before_request(request_log_label(seller, display_name), config)
             offer = _fetch_product_offer(session, product, config)
             display_name = product.name or offer.title or product.url
             matched_url = offer.url or product.url
@@ -905,6 +915,7 @@ def check_once(config: HermesConfig) -> None:
                         config,
                         page.max_items_to_scan,
                         target_keywords,
+                        request_log_label("Amazon arama", page.name, f"link {idx}/{len(page.search_urls)}"),
                     )
                     all_results.extend(url_results)
                     log(
