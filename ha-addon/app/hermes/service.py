@@ -798,7 +798,8 @@ def check_once(config: HermesConfig) -> None:
                 summary_rows.append(cached_row)
             continue
         try:
-            wait_before_request(seller, config)
+            display_name = product.name or product.url
+            wait_before_request(f"{seller} | {display_name}", config)
             offer = _fetch_product_offer(session, product, config)
             display_name = product.name or offer.title or product.url
             matched_url = offer.url or product.url
