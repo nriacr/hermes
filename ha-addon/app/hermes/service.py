@@ -218,87 +218,6 @@ def summary_row_from_state(product: ProductRule, state_entry: Dict[str, Any], se
     )
 
 
-def append_cached_search_target_rows(
-    summary_rows: List[PriceSummaryRow],
-    target_state: Dict[str, Any],
-    target,
-) -> int:
-    items_state = target_state.get("items", {}) if isinstance(target_state, dict) else {}
-    if not isinstance(items_state, dict):
-        return 0
-    added_count = 0
-    for item_state in items_state.values():
-        if not isinstance(item_state, dict):
-            continue
-        price = _state_decimal(item_state.get("last_price"))
-        if price is None:
-            continue
-        min_price, max_price = sanitized_price_bounds(item_state, price, target.target_price)
-        summary_rows.append(
-            PriceSummaryRow(
-                seller="Amazon",
-                product_title=str(item_state.get("title") or target.name),
-                product_url=str(item_state.get("url") or ""),
-                price=price,
-                target_price=target.target_price,
-                min_price=min_price,
-                max_price=max_price,
-            )
-        )
-        added_count += 1
-    return added_count
-
-
-def append_cached_search_page_rows(
-    summary_rows: List[PriceSummaryRow],
-    page_state: Dict[str, Any],
-    page,
-) -> int:
-    targets_state = page_state.get("targets", {}) if isinstance(page_state, dict) else {}
-    if not isinstance(targets_state, dict):
-        return 0
-    added_count = 0
-    for target in page.targets:
-        target_state = targets_state.get(normalize_key(target.name), {})
-        added_count += append_cached_search_target_rows(summary_rows, target_state, target)
-    return added_count
-
-
-def preserve_cached_search_rows(
-    summary_rows: List[PriceSummaryRow],
-    amazon_empty_events: List[Dict[str, Any]],
-    state: Dict[str, Any],
-    page_key: str,
-    page_state: Dict[str, Any],
-    page,
-    failed_urls: List[str],
-) -> bool:
-    cached_count = append_cached_search_page_rows(summary_rows, page_state, page)
-    if not cached_count:
-        return False
-    amazon_empty_events.append(
-        {
-            "page": page.name,
-            "failed_links": len(failed_urls),
-            "cached_count": cached_count,
-            "full_empty": True,
-        }
-    )
-    retained_page_state = dict(page_state)
-    retained_page_state["last_checked_at"] = utc_now()
-    retained_page_state["last_error"] = None
-    retained_page_state["last_error_status"] = None
-    retained_page_state["last_warning"] = (
-        "Amazon arama bu tur okunamadı; son başarılı sonuçlar özet tabloda korundu."
-    )
-    state[page_key] = retained_page_state
-    log(
-        f"Amazon arama gecici bos dondu, son basarili veriler korundu: "
-        f"{page.name} | cached_urun={cached_count}"
-    )
-    return True
-
-
 def save_price_summary(rows: List[PriceSummaryRow]) -> None:
     sorted_rows = sorted_summary_rows(rows)
     payload = {
@@ -692,9 +611,8 @@ def maybe_alert_amazon_empty_searches(
     for event in events[:8]:
         page_name = str(event.get("page") or "-")
         failed_links = int(event.get("failed_links") or 0)
-        cached_count = int(event.get("cached_count") or 0)
         mode = "tamamen bos" if event.get("full_empty") else "kismi bos"
-        event_lines.append(f"- {page_name}: {mode}, bos link={failed_links}, korunan urun={cached_count}")
+        event_lines.append(f"- {page_name}: {mode}, bos link={failed_links}")
     if len(events) > 8:
         event_lines.append(f"- +{len(events) - 8} ek Amazon arama kaydi")
 
@@ -702,7 +620,7 @@ def maybe_alert_amazon_empty_searches(
         "Amazon arama sayfalarinda anlamli sayida bos donus yakalandi.\n"
         f"Etkilenen arama sayfasi: {len(affected_pages)}\n"
         f"Bos donen link sayisi: {failed_link_count}\n"
-        "Hermes tabloyu son basarili verilerle korudu; yine de config/Amazon linklerini kontrol etmeni oneririm.\n"
+        "Okunamayan urunler bu tur ozet tablodan cikarildi; config/Amazon linklerini kontrol etmeni oneririm.\n"
         + "\n".join(event_lines)
     )
     try:
@@ -856,6 +774,7 @@ def check_once(config: HermesConfig) -> None:
                 )
                 alert_sent = True
                 log(f"Bildirim gonderildi: {seller} | {display_name}")
+                save_price_summary(summary_rows)
             elif offer.price <= product.target_price and product.notify_once_in_24h:
                 log(
                     f"Bildirim atlandi, 24 saat dolmadi veya fiyat daha dusuk degil: "
@@ -926,20 +845,26 @@ def check_once(config: HermesConfig) -> None:
                     log(f"Arama linki hatasi: {page.name} | link={idx}/{len(page.search_urls)} | {exc}")
 
             if not all_results:
-                if preserve_cached_search_rows(
-                    summary_rows, amazon_empty_events, state, page_key, page_state, page, failed_urls
-                ):
-                    continue
+                amazon_empty_events.append(
+                    {
+                        "page": page.name,
+                        "failed_links": len(failed_urls) or len(page.search_urls),
+                        "full_empty": True,
+                    }
+                )
                 raise HermesError("Amazon arama sayfasindaki linklerin hicbirinde okunabilir urun bulunamadi.")
 
             results = dedupe_results(all_results)
             targets_state = dict(page_state.get("targets", {}))
 
             if not results:
-                if preserve_cached_search_rows(
-                    summary_rows, amazon_empty_events, state, page_key, page_state, page, failed_urls
-                ):
-                    continue
+                amazon_empty_events.append(
+                    {
+                        "page": page.name,
+                        "failed_links": len(failed_urls) or len(page.search_urls),
+                        "full_empty": True,
+                    }
+                )
                 raise HermesError("Amazon arama sayfasindaki linklerin hicbirinde okunabilir urun bulunamadi.")
 
             if failed_urls:
@@ -947,7 +872,6 @@ def check_once(config: HermesConfig) -> None:
                     {
                         "page": page.name,
                         "failed_links": len(failed_urls),
-                        "cached_count": 0,
                         "full_empty": False,
                     }
                 )
@@ -1017,6 +941,7 @@ def check_once(config: HermesConfig) -> None:
                         )
                         alert_sent = True
                         log(f"Arama bildirimi gonderildi: {target.name} | {match.title}")
+                        save_price_summary(summary_rows)
                     elif match.price <= target.target_price and target.notify_once_in_24h:
                         log(
                             "Arama bildirimi atlandi, 24 saat dolmadi veya fiyat daha dusuk degil: "
