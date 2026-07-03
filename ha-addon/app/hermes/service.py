@@ -4,6 +4,7 @@ import time
 from datetime import timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, List
+from urllib.parse import parse_qs, urlparse
 
 import requests
 
@@ -22,7 +23,7 @@ from .constants import (
 from .errors import HermesError
 from .http_client import cleaned_html, fetch_amazon_page, fetch_hepsiburada_page, fetch_with_retries
 from .logging_utils import log
-from .models import HermesConfig, PriceSummaryRow, ProductRule, SearchResultItem
+from .models import HermesConfig, OfferResult, PriceSummaryRow, ProductRule, SearchResultItem
 from .notifier import send_pushover
 from .providers.registry import extract_offer
 from .search_amazon import (
@@ -72,6 +73,7 @@ AMAZON_EMPTY_ALERT_MIN_FAILED_LINKS = 3
 PRICE_HISTORY_SPIKE_RATIO = Decimal("5")
 PRICE_HISTORY_SPIKE_ABSOLUTE_TL = Decimal("50000")
 PRICE_HISTORY_KEYS = ("min_price", "max_price", "min_price_at", "max_price_at")
+AMAZON_PRODUCT_SEARCH_MAX_ITEMS = 24
 
 
 def raise_if_age_verification(html: str) -> None:
@@ -643,7 +645,75 @@ def maybe_alert_amazon_empty_searches(
     state["_meta"] = meta
 
 
-def _fetch_product_offer(session: requests.Session, site: str, url: str, timeout: int):
+def is_amazon_search_url(url: str) -> bool:
+    parsed = urlparse(str(url or ""))
+    host = parsed.netloc.casefold()
+    if "amazon." not in host:
+        return False
+    if parsed.path.rstrip("/") == "/s":
+        return True
+    query = parse_qs(parsed.query)
+    return "k" in query and not any(part in parsed.path for part in ("/dp/", "/gp/product/"))
+
+
+def best_offer_from_amazon_search_results(results: List[SearchResultItem], product_name: str) -> OfferResult:
+    matches = filter_matching_results(results, product_name) if product_name else results
+    if not matches:
+        raise HermesError("Amazon arama sayfasında ürün adına uyan fiyatlı ürün bulunamadı.")
+    best = min(matches, key=lambda item: item.price)
+    return OfferResult(title=best.title, price=best.price, seller="Amazon", url=best.url)
+
+
+def _fetch_amazon_search_product_offer(
+    session: requests.Session,
+    product: ProductRule,
+    config: HermesConfig,
+) -> OfferResult:
+    response = fetch_amazon_page(
+        session,
+        product.url,
+        config.request_timeout_seconds,
+        expect_search=True,
+    )
+    html = cleaned_html(response)
+    raise_if_age_verification(html)
+    if "captcha" in html.lower() and "robot" in html.lower():
+        raise HermesError("Amazon bot korumasi nedeniyle captcha sayfasi dondu.")
+
+    candidates = extract_result_candidates(html, AMAZON_PRODUCT_SEARCH_MAX_ITEMS)
+    target_keywords = [product.name] if product.name else []
+    results: List[SearchResultItem] = []
+    skipped_detail_count = 0
+    for candidate in candidates:
+        if candidate.price is not None:
+            results.append(SearchResultItem(title=candidate.title, url=candidate.url, price=candidate.price))
+            continue
+        if target_keywords and not title_matches_any_keyword(candidate.title, target_keywords):
+            skipped_detail_count += 1
+            continue
+        try:
+            results.append(_fetch_amazon_detail_result(session, candidate, config))
+        except Exception as exc:  # noqa: BLE001
+            log(f"Amazon product arama detay fiyatı okunamadı: {log_cell(candidate.title, 60)} | {exc}")
+
+    if skipped_detail_count:
+        log(f"Amazon product arama detay fiyatı atlandı: eslesmeyen_urun={skipped_detail_count}")
+    if not results:
+        raise HermesError("Amazon arama sayfasında okunabilir fiyat bulunamadı.")
+    offer = best_offer_from_amazon_search_results(dedupe_results(results), product.name)
+    log(
+        "Amazon product arama linki okundu: "
+        f"{product.name or product.url} | eslesen_fiyat={offer.price} TL"
+    )
+    return offer
+
+
+def _fetch_product_offer(session: requests.Session, product: ProductRule, config: HermesConfig):
+    site = product.site
+    url = product.url
+    timeout = config.request_timeout_seconds
+    if site == SITE_AMAZON and is_amazon_search_url(url):
+        return _fetch_amazon_search_product_offer(session, product, config)
     if site == SITE_HEPSIBURADA:
         response = fetch_hepsiburada_page(session, url, timeout)
     elif site == SITE_AMAZON:
@@ -729,7 +799,7 @@ def check_once(config: HermesConfig) -> None:
             continue
         try:
             wait_before_request(seller, config)
-            offer = _fetch_product_offer(session, product.site, product.url, config.request_timeout_seconds)
+            offer = _fetch_product_offer(session, product, config)
             display_name = product.name or offer.title or product.url
             matched_url = offer.url or product.url
             min_price, max_price = sanitized_price_bounds(

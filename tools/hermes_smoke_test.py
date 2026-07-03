@@ -11,6 +11,7 @@ sys.path.insert(0, str(APP_PATH))
 
 from hermes import service  # noqa: E402
 from hermes.config_loader import _prepare_products  # noqa: E402
+from hermes.models import SearchResultItem  # noqa: E402
 from hermes.providers.base import soup_from_html  # noqa: E402
 from hermes.providers.hepsiburada import (  # noqa: E402
     _embedded_detail_candidates,
@@ -38,6 +39,32 @@ class HermesSmokeTests(unittest.TestCase):
         """
         item = extract_result_candidates(html, 10)[0]
         self.assertEqual(item.price, Decimal("10448.99"))
+
+    def test_amazon_search_url_can_be_used_as_product_url(self):
+        self.assertTrue(service.is_amazon_search_url("https://www.amazon.com.tr/s?k=juo+q3"))
+        self.assertFalse(service.is_amazon_search_url("https://www.amazon.com.tr/dp/B000000001"))
+
+    def test_product_amazon_search_uses_lowest_matching_offer(self):
+        results = [
+            SearchResultItem(
+                title="Juo Q3 Masa Lambası Siyah",
+                url="https://www.amazon.com.tr/dp/B000000001",
+                price=Decimal("2037.00"),
+            ),
+            SearchResultItem(
+                title="Juo Q3 Masa Lambası Beyaz",
+                url="https://www.amazon.com.tr/dp/B000000002",
+                price=Decimal("2099.00"),
+            ),
+            SearchResultItem(
+                title="Başka Marka Masa Lambası",
+                url="https://www.amazon.com.tr/dp/B000000003",
+                price=Decimal("999.00"),
+            ),
+        ]
+        offer = service.best_offer_from_amazon_search_results(results, "juo q3")
+        self.assertEqual(offer.price, Decimal("2037.00"))
+        self.assertEqual(offer.url, "https://www.amazon.com.tr/dp/B000000001")
 
     def test_absurd_current_price_does_not_overwrite_history(self):
         state_entry = {
