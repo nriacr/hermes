@@ -23,7 +23,7 @@ from .constants import (
 from .errors import HermesError
 from .http_client import cleaned_html, fetch_amazon_page, fetch_hepsiburada_page, fetch_with_retries
 from .logging_utils import log
-from .models import HermesConfig, OfferResult, PriceSummaryRow, ProductRule, SearchResultItem
+from .models import AmazonSearchPage, HermesConfig, OfferResult, PriceSummaryRow, ProductRule, SearchResultItem
 from .notifier import send_pushover
 from .providers.registry import extract_offer
 from .search_amazon import (
@@ -423,6 +423,29 @@ def request_log_label(source: str, name: str = "", detail: str = "") -> str:
     return " | ".join(parts)
 
 
+def balanced_request_order(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    buckets: Dict[str, List[Dict[str, Any]]] = {}
+    site_order: List[str] = []
+    for item in items:
+        site = str(item.get("site") or "unknown").strip().lower() or "unknown"
+        if site not in buckets:
+            buckets[site] = []
+            site_order.append(site)
+        buckets[site].append(item)
+
+    ordered: List[Dict[str, Any]] = []
+    last_site = ""
+    while any(buckets.values()):
+        candidates = [site for site in site_order if buckets[site] and site != last_site]
+        if not candidates:
+            candidates = [site for site in site_order if buckets[site]]
+
+        selected_site = max(candidates, key=lambda site: (len(buckets[site]), -site_order.index(site)))
+        ordered.append(buckets[selected_site].pop(0))
+        last_site = selected_site
+    return ordered
+
+
 def update_error_notification_state(state_entry: Dict[str, Any]) -> Dict[str, Any]:
     updated = dict(state_entry)
     updated["last_error_notified_at"] = utc_now()
@@ -797,16 +820,9 @@ def check_once(config: HermesConfig) -> None:
     session = requests.Session()
     summary_rows: List[PriceSummaryRow] = []
     amazon_empty_events: List[Dict[str, Any]] = []
+    request_tasks: List[Dict[str, Any]] = []
 
-    for product in config.products:
-        product_key = normalize_item_key("product", product.site, product.url)
-        state_entry = state.get(product_key, {})
-        seller = site_label(product.site)
-        if not product_check_due(product, state_entry, config.interval_seconds):
-            cached_row = summary_row_from_state(product, state_entry, seller)
-            if cached_row:
-                summary_rows.append(cached_row)
-            continue
+    def check_product(product: ProductRule, product_key: str, state_entry: Dict[str, Any], seller: str) -> None:
         try:
             display_name = product.name or product.url
             wait_before_request(request_log_label(seller, display_name), config)
@@ -886,23 +902,9 @@ def check_once(config: HermesConfig) -> None:
             failed["last_checked_at"] = utc_now()
             state[product_key] = failed
 
-    for page in config.amazon_search_pages:
-        if not page.targets:
-            log(f"Amazon arama atlandi: {page.name} | Bu arama sayfasina hedef urun eklenmemis.")
-            continue
-        page_key = normalize_item_key("amazon_search", page.name, *page.search_urls)
-        page_state = state.get(page_key, {})
-        remaining = cooldown_remaining_seconds(page_state)
-        if remaining > 0:
-            minutes = max(1, round(remaining / 60))
-            log(
-                f"Amazon arama gecici olarak atlandi: {page.name} | "
-                f"Amazon korumasi sonrasi {minutes} dk sonra yeniden denenecek."
-            )
-            skipped = dict(page_state)
-            skipped["last_skipped_at"] = utc_now()
-            state[page_key] = skipped
-            continue
+    def check_amazon_search_page(
+        page: AmazonSearchPage, page_key: str, page_state: Dict[str, Any]
+    ) -> None:
         try:
             all_results = []
             failed_urls = []
@@ -1089,6 +1091,61 @@ def check_once(config: HermesConfig) -> None:
             updated_page_state["last_error_status"] = error_status
             updated_page_state["last_checked_at"] = utc_now()
             state[page_key] = updated_page_state
+
+    for product in config.products:
+        product_key = normalize_item_key("product", product.site, product.url)
+        state_entry = state.get(product_key, {})
+        if not isinstance(state_entry, dict):
+            state_entry = {}
+        seller = site_label(product.site)
+        if not product_check_due(product, state_entry, config.interval_seconds):
+            cached_row = summary_row_from_state(product, state_entry, seller)
+            if cached_row:
+                summary_rows.append(cached_row)
+            continue
+
+        request_tasks.append(
+            {
+                "site": product.site,
+                "name": product.name or product.url,
+                "run": lambda product=product, product_key=product_key, state_entry=state_entry, seller=seller: check_product(
+                    product, product_key, state_entry, seller
+                ),
+            }
+        )
+
+    for page in config.amazon_search_pages:
+        if not page.targets:
+            log(f"Amazon arama atlandi: {page.name} | Bu arama sayfasina hedef urun eklenmemis.")
+            continue
+        page_key = normalize_item_key("amazon_search", page.name, *page.search_urls)
+        page_state = state.get(page_key, {})
+        if not isinstance(page_state, dict):
+            page_state = {}
+        remaining = cooldown_remaining_seconds(page_state)
+        if remaining > 0:
+            minutes = max(1, round(remaining / 60))
+            log(
+                f"Amazon arama gecici olarak atlandi: {page.name} | "
+                f"Amazon korumasi sonrasi {minutes} dk sonra yeniden denenecek."
+            )
+            skipped = dict(page_state)
+            skipped["last_skipped_at"] = utc_now()
+            state[page_key] = skipped
+            continue
+
+        request_tasks.append(
+            {
+                "site": SITE_AMAZON,
+                "name": page.name,
+                "run": lambda page=page, page_key=page_key, page_state=page_state: check_amazon_search_page(
+                    page, page_key, page_state
+                ),
+            }
+        )
+
+    for task in balanced_request_order(request_tasks):
+        task["run"]()
 
     if config.products or config.amazon_search_pages:
         publish_price_summary(summary_rows)

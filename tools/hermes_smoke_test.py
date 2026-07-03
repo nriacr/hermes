@@ -66,6 +66,24 @@ class HermesSmokeTests(unittest.TestCase):
         self.assertEqual(offer.price, Decimal("2037.00"))
         self.assertEqual(offer.url, "https://www.amazon.com.tr/dp/B000000001")
 
+    def test_request_order_spreads_same_site_requests(self):
+        items = [
+            {"site": "amazon", "name": "amazon-1"},
+            {"site": "amazon", "name": "amazon-2"},
+            {"site": "amazon", "name": "amazon-3"},
+            {"site": "hepsiburada", "name": "hb-1"},
+            {"site": "hepsiburada", "name": "hb-2"},
+            {"site": "nordbron", "name": "nordbron-1"},
+        ]
+        ordered = service.balanced_request_order(items)
+        ordered_sites = [item["site"] for item in ordered]
+        adjacent_same_site = sum(
+            1 for previous, current in zip(ordered_sites, ordered_sites[1:]) if previous == current
+        )
+
+        self.assertCountEqual(ordered_sites, [item["site"] for item in items])
+        self.assertEqual(adjacent_same_site, 0)
+
     def test_absurd_current_price_does_not_overwrite_history(self):
         state_entry = {
             "last_price": "10448.99",
