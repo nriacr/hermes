@@ -69,15 +69,14 @@ tbody tr.site-amazon { --site-bg:rgba(255,199,116,.13); --site-bg-strong:rgba(25
   table { min-width:0; }
   thead { display:none; }
   table, tbody, td { display:block; width:100%; }
-  tbody tr[class*='site-'] { position:relative; display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:7px 8px; margin:0 0 8px; border:1px solid var(--site-line); border-left:7px solid var(--site-line); border-radius:15px; padding:9px 10px 9px 12px; background:linear-gradient(135deg,var(--site-bg-strong),rgba(30,33,57,.88) 58%),rgba(30,33,57,.86); box-shadow:0 8px 20px rgba(0,0,0,.18); overflow:hidden; }
+  tbody tr[class*='site-'] { position:relative; display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:6px 8px; margin:0 0 8px; border:1px solid var(--site-line); border-left:7px solid var(--site-line); border-radius:15px; padding:9px 10px 9px 12px; background:linear-gradient(135deg,var(--site-bg-strong),rgba(30,33,57,.88) 58%),rgba(30,33,57,.86); box-shadow:0 8px 20px rgba(0,0,0,.18); overflow:hidden; }
   tbody tr[class*='site-'] td { display:flex; justify-content:flex-start; gap:4px; padding:0; border-bottom:0; background:transparent; text-align:left; white-space:normal; font-size:12.5px; line-height:1.18; }
   tbody tr[class*='site-'] td:first-child { border-left:0; color:var(--site-link); }
   tbody tr[class*='site-'] td::before { content:attr(data-label); flex:0 0 auto; color:var(--muted); text-align:left; font-size:9px; font-weight:850; letter-spacing:.045em; text-transform:uppercase; }
-  tbody tr[class*='site-'] .seller-cell { grid-column:1 / -1; align-items:center; gap:11px; padding-bottom:1px; color:var(--site-link); font-size:14px; font-weight:900; }
-  tbody tr[class*='site-'] .seller-cell::before { flex:0 0 62px; }
-  tbody tr[class*='site-'] .product-cell { grid-column:1 / -1; max-width:none; display:block; padding-bottom:1px; text-align:left; line-height:1.26; font-size:13px; }
-  tbody tr[class*='site-'] .product-cell::before { display:block; margin-bottom:3px; }
-  tbody tr[class*='site-'] .price-cell, tbody tr[class*='site-'] .target-cell, tbody tr[class*='site-'] .diff-cell, tbody tr[class*='site-'] .range-cell { min-height:33px; border:1px solid rgba(255,255,255,.06); border-radius:10px; padding:5px 7px; background:rgba(12,15,30,.25); flex-direction:column; justify-content:center; }
+  tbody tr[class*='site-'] .seller-cell { grid-column:1 / -1; align-items:center; gap:0; padding-bottom:0; color:var(--site-link); font-size:14px; font-weight:900; }
+  tbody tr[class*='site-'] .seller-cell::before, tbody tr[class*='site-'] .product-cell::before { display:none; }
+  tbody tr[class*='site-'] .product-cell { grid-column:1 / -1; max-width:none; display:block; padding-bottom:0; text-align:left; line-height:1.22; font-size:13px; }
+  tbody tr[class*='site-'] .price-cell, tbody tr[class*='site-'] .target-cell, tbody tr[class*='site-'] .diff-cell, tbody tr[class*='site-'] .range-cell { min-height:33px; border:1px solid rgba(255,255,255,.06); border-radius:10px; padding:5px 7px; background:rgba(12,15,30,.25); flex-direction:column; justify-content:center; font-size:13.5px; }
   tbody tr[class*='site-'] .price-cell, tbody tr[class*='site-'] .target-cell, tbody tr[class*='site-'] .diff-cell { min-width:0; }
   tbody tr[class*='site-'] .range-cell { grid-column:1 / -1; min-height:31px; flex-direction:row; align-items:center; justify-content:flex-start; gap:8px; white-space:nowrap; }
   tbody tr[class*='site-'] .range-cell::before { margin-right:3px; }
