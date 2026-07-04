@@ -11,7 +11,7 @@ sys.path.insert(0, str(APP_PATH))
 
 from hermes import service  # noqa: E402
 from hermes.config_loader import _prepare_products  # noqa: E402
-from hermes.models import SearchResultItem  # noqa: E402
+from hermes.models import PriceSummaryRow, SearchResultItem  # noqa: E402
 from hermes.providers.base import soup_from_html  # noqa: E402
 from hermes.providers.hepsiburada import (  # noqa: E402
     _embedded_detail_candidates,
@@ -87,6 +87,45 @@ class HermesSmokeTests(unittest.TestCase):
     def test_cycle_duration_is_formatted_in_minutes(self):
         self.assertEqual(service.format_minutes(75), "1.2 dk")
         self.assertEqual(service.format_minutes(600), "10 dk")
+
+    def test_early_summary_save_preserves_previous_cycle_duration(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            original_summary_path = service.SUMMARY_PATH
+            try:
+                service.SUMMARY_PATH = Path(tmpdir) / "latest_price_summary.json"
+                service.SUMMARY_PATH.write_text(
+                    json.dumps(
+                        {
+                            "cycle_duration_seconds": 90,
+                            "scan_duration_seconds": 30,
+                            "rows": [],
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                rows = [
+                    PriceSummaryRow(
+                        seller="Amazon",
+                        product_title="Test ürün",
+                        product_url="https://example.com",
+                        price=Decimal("100"),
+                        target_price=Decimal("90"),
+                        min_price=Decimal("100"),
+                        max_price=Decimal("100"),
+                    )
+                ]
+
+                service.save_price_summary(rows)
+                early_payload = json.loads(service.SUMMARY_PATH.read_text(encoding="utf-8"))
+                self.assertEqual(early_payload["cycle_duration_seconds"], 90)
+                self.assertEqual(early_payload["scan_duration_seconds"], 30)
+
+                service.publish_price_summary(rows, cycle_duration_seconds=180, scan_duration_seconds=120)
+                final_payload = json.loads(service.SUMMARY_PATH.read_text(encoding="utf-8"))
+                self.assertEqual(final_payload["cycle_duration_seconds"], 180)
+                self.assertEqual(final_payload["scan_duration_seconds"], 120)
+            finally:
+                service.SUMMARY_PATH = original_summary_path
 
     def test_absurd_current_price_does_not_overwrite_history(self):
         state_entry = {
