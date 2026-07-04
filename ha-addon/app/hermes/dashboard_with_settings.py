@@ -4,7 +4,7 @@ from html import escape
 from http.server import ThreadingHTTPServer
 
 from . import dashboard as dashboard_module
-from .constants import OPTIONS_PATH, STATE_PATH
+from .constants import OPTIONS_PATH, STATE_PATH, SUMMARY_PATH
 from .dashboard import (
     WEB_PORT,
     _StatusHandler,
@@ -21,6 +21,9 @@ from .utils import parse_iso_datetime
 def _collect_summary_all_errors():
     options = load_json(OPTIONS_PATH, {})
     state = load_json(STATE_PATH, {})
+    latest_summary = load_json(SUMMARY_PATH, {})
+    if not isinstance(latest_summary, dict):
+        latest_summary = {}
     products = options.get("products") if isinstance(options.get("products"), list) else []
     pages = options.get("amazon_search_pages", options.get("search_pages", []))
     targets = options.get("amazon_search_targets", options.get("search_targets", []))
@@ -68,6 +71,7 @@ def _collect_summary_all_errors():
         "amazon_targets": len(targets),
         "last_check": last_check.strftime("%Y-%m-%d %H:%M:%S") if last_check else "-",
         "next_check": (last_check + timedelta(seconds=interval_seconds)).strftime("%Y-%m-%d %H:%M:%S") if last_check else "-",
+        "cycle_duration": latest_summary.get("cycle_duration_minutes") or "-",
         "errors": error_count,
         "error_details": error_details,
         "configured": bool(options),
