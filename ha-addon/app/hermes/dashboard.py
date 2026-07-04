@@ -73,6 +73,7 @@ tbody tr.site-amazon { --site-bg:rgba(255,199,116,.13); --site-bg-strong:rgba(25
   .summary-head { align-items:flex-start; flex-direction:column; gap:4px; margin-bottom:10px; }
   .summary-head h2 { font-size:16px; }
   .summary-head span { white-space:normal; font-size:11px; }
+  .public .summary-head span { font-size:13px; line-height:1.35; color:#c3c8ea; }
   .table-section h3 { font-size:13px; }
   .table-wrap { overflow:visible; border:0; border-radius:0; }
   table { min-width:0; }
