@@ -84,6 +84,10 @@ class HermesSmokeTests(unittest.TestCase):
         self.assertCountEqual(ordered_sites, [item["site"] for item in items])
         self.assertEqual(adjacent_same_site, 0)
 
+    def test_cycle_duration_is_formatted_in_minutes(self):
+        self.assertEqual(service.format_minutes(75), "1.2 dk")
+        self.assertEqual(service.format_minutes(600), "10 dk")
+
     def test_absurd_current_price_does_not_overwrite_history(self):
         state_entry = {
             "last_price": "10448.99",

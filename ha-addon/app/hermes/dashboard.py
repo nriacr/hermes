@@ -404,6 +404,9 @@ def _error_detail_key(detail):
 def _collect_summary():
     options = load_json(OPTIONS_PATH, {})
     state = load_json(STATE_PATH, {})
+    latest_summary = load_json(SUMMARY_PATH, {})
+    if not isinstance(latest_summary, dict):
+        latest_summary = {}
     products = options.get("products") if isinstance(options.get("products"), list) else []
     pages = options.get("amazon_search_pages", options.get("search_pages", []))
     targets = options.get("amazon_search_targets", options.get("search_targets", []))
@@ -451,6 +454,7 @@ def _collect_summary():
         "amazon_targets": len(targets),
         "last_check": last_check.strftime("%Y-%m-%d %H:%M:%S") if last_check else "-",
         "next_check": (last_check + timedelta(seconds=interval_seconds)).strftime("%Y-%m-%d %H:%M:%S") if last_check else "-",
+        "cycle_duration": latest_summary.get("cycle_duration_minutes") or "-",
         "errors": error_count,
         "error_details": error_details[:4],
         "configured": bool(options),
@@ -771,6 +775,7 @@ def _render_page(path: str = "/") -> bytes:
     cards = [
         ("Durum", status, status_class),
         ("Kontrol aralığı", f"{summary['interval']} saniye", ""),
+        ("Çevrim süresi", summary["cycle_duration"], ""),
         ("Ürün linkleri", summary["products"], ""),
         ("Amazon arama sayfaları", summary["amazon_pages"], ""),
         ("Amazon arama hedefleri", summary["amazon_targets"], ""),
@@ -859,6 +864,14 @@ def _render_public_page(path: str):
         notice_class = "notice-ok" if action_status == "ok" else "notice-fail"
         notice_html = f"<p class='notice {notice_class}'>{escape(action_message)}</p>"
     base_path = escape(_public_base_path(path), quote=True)
+    cycle_duration = "-"
+    if isinstance(payload, dict):
+        cycle_duration = escape(str(payload.get("cycle_duration_minutes") or "-"))
+    public_metrics = (
+        "<div class='grid public-metrics'>"
+        f"<section class='card'><span>Çevrim süresi</span><strong>{cycle_duration}</strong></section>"
+        "</div>"
+    )
     confirm_script = """
 <script>
   document.querySelectorAll('form[data-confirm]').forEach((form) => {
@@ -871,7 +884,7 @@ def _render_public_page(path: str):
   });
 </script>"""
     html = f"""<!doctype html>
-<html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="theme-color" content="#0f1222"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Hermes"><meta http-equiv="refresh" content="60"><title>Hermes</title><style>{DASHBOARD_CSS}</style></head><body class="public"><main><div class="hero"><div class="badge">Hermes</div><p>Mobil uyumlu fiyat paneli. Son güncelleme: {checked_at}</p><div class="actions public-actions"><a class="button secondary" href="{base_path}/settings">Ayarlar</a><form class="inline-form" method="post" action="{base_path}/test-pushover"><button class="button test" type="submit">Pushover</button></form><form class="inline-form" method="post" action="{base_path}/reset-notifications" data-confirm="Bildirim susturma hafızası sıfırlanacak ve hedef altında kalan fırsatlar için tek seferlik kontrol başlatılacak. Devam etmek istiyor musun?"><button class="button secondary" type="submit">Bildirim Sıfırla</button></form><form class="inline-form" method="post" action="{base_path}/reset-price-history" data-confirm="Min/maks fiyat geçmişi temizlenecek ve güncel fiyattan yeniden başlayacak. Devam etmek istiyor musun?"><button class="button secondary" type="submit">Min/Maks Sıfırla</button></form></div>{notice_html}{_render_table()}<p class="footer">Sayfa 60 saniyede bir otomatik yenilenir. iPhone'da Safari paylaş menüsünden “Ana Ekrana Ekle” diyerek uygulama gibi kullanabilirsin.</p></div></main>{confirm_script}</body></html>"""
+<html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="theme-color" content="#0f1222"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Hermes"><meta http-equiv="refresh" content="60"><title>Hermes</title><style>{DASHBOARD_CSS}</style></head><body class="public"><main><div class="hero"><div class="badge">Hermes</div><p>Mobil uyumlu fiyat paneli. Son güncelleme: {checked_at}</p><div class="actions public-actions"><a class="button secondary" href="{base_path}/settings">Ayarlar</a><form class="inline-form" method="post" action="{base_path}/test-pushover"><button class="button test" type="submit">Pushover</button></form><form class="inline-form" method="post" action="{base_path}/reset-notifications" data-confirm="Bildirim susturma hafızası sıfırlanacak ve hedef altında kalan fırsatlar için tek seferlik kontrol başlatılacak. Devam etmek istiyor musun?"><button class="button secondary" type="submit">Bildirim Sıfırla</button></form><form class="inline-form" method="post" action="{base_path}/reset-price-history" data-confirm="Min/maks fiyat geçmişi temizlenecek ve güncel fiyattan yeniden başlayacak. Devam etmek istiyor musun?"><button class="button secondary" type="submit">Min/Maks Sıfırla</button></form></div>{notice_html}{public_metrics}{_render_table()}<p class="footer">Sayfa 60 saniyede bir otomatik yenilenir. iPhone'da Safari paylaş menüsünden “Ana Ekrana Ekle” diyerek uygulama gibi kullanabilirsin.</p></div></main>{confirm_script}</body></html>"""
     return 200, html.encode("utf-8")
 
 

@@ -220,11 +220,35 @@ def summary_row_from_state(product: ProductRule, state_entry: Dict[str, Any], se
     )
 
 
-def save_price_summary(rows: List[PriceSummaryRow]) -> None:
+def format_minutes(seconds: float | int | None) -> str:
+    if seconds is None:
+        return "-"
+    minutes = max(0, float(seconds)) / 60
+    if minutes < 10:
+        return f"{minutes:.1f} dk"
+    return f"{minutes:.0f} dk"
+
+
+def save_price_summary(
+    rows: List[PriceSummaryRow],
+    cycle_duration_seconds: float | None = None,
+    scan_duration_seconds: float | None = None,
+) -> None:
     sorted_rows = sorted_summary_rows(rows)
+    previous_payload = load_json(SUMMARY_PATH, {})
+    if not isinstance(previous_payload, dict):
+        previous_payload = {}
+    if cycle_duration_seconds is None:
+        cycle_duration_seconds = previous_payload.get("cycle_duration_seconds")
+    if scan_duration_seconds is None:
+        scan_duration_seconds = previous_payload.get("scan_duration_seconds")
     payload = {
         "checked_at": format_local_datetime(local_now()),
         "row_count": len(sorted_rows),
+        "cycle_duration_seconds": cycle_duration_seconds,
+        "cycle_duration_minutes": format_minutes(cycle_duration_seconds),
+        "scan_duration_seconds": scan_duration_seconds,
+        "scan_duration_minutes": format_minutes(scan_duration_seconds),
         "rows": [
             {
                 "no": idx,
@@ -284,8 +308,12 @@ def log_price_summary(rows: List[PriceSummaryRow]) -> None:
         )
 
 
-def publish_price_summary(rows: List[PriceSummaryRow]) -> None:
-    save_price_summary(rows)
+def publish_price_summary(
+    rows: List[PriceSummaryRow],
+    cycle_duration_seconds: float | None = None,
+    scan_duration_seconds: float | None = None,
+) -> None:
+    save_price_summary(rows, cycle_duration_seconds, scan_duration_seconds)
     log_price_summary(rows)
 
 
@@ -814,6 +842,7 @@ def _fetch_amazon_search_results(
 
 
 def check_once(config: HermesConfig) -> None:
+    cycle_started_at = time.monotonic()
     state = load_json(STATE_PATH, {})
     if not isinstance(state, dict):
         state = {}
@@ -1148,7 +1177,9 @@ def check_once(config: HermesConfig) -> None:
         task["run"]()
 
     if config.products or config.amazon_search_pages:
-        publish_price_summary(summary_rows)
+        scan_duration_seconds = time.monotonic() - cycle_started_at
+        cycle_duration_seconds = scan_duration_seconds + config.interval_seconds
+        publish_price_summary(summary_rows, cycle_duration_seconds, scan_duration_seconds)
         maybe_alert_summary_drop(state, summary_rows, config, session)
         maybe_alert_amazon_empty_searches(state, amazon_empty_events, config, session)
     save_json(STATE_PATH, state)
