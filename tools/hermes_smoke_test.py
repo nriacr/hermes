@@ -10,7 +10,7 @@ APP_PATH = Path(__file__).resolve().parents[1] / "ha-addon" / "app"
 sys.path.insert(0, str(APP_PATH))
 
 from hermes import service  # noqa: E402
-from hermes.http_client import fetch_amazon_page  # noqa: E402
+from hermes.http_client import amazon_url_variants, fetch_amazon_page  # noqa: E402
 from hermes.config_loader import _prepare_products  # noqa: E402
 from hermes.models import PriceSummaryRow, SearchResultItem  # noqa: E402
 from hermes.providers.base import soup_from_html  # noqa: E402
@@ -54,6 +54,12 @@ class HermesSmokeTests(unittest.TestCase):
 
         self.assertIs(first, second)
         self.assertEqual(session.calls, 1)
+
+    def test_amazon_product_url_variants_start_with_clean_product_url(self):
+        url = "https://www.amazon.com.tr/gp/product/B0B2PSDNV1?ref=ppx_yo2ov_dt_b_fed_asin_title&th=1"
+        variants = amazon_url_variants(url)
+        self.assertEqual(variants[0], "https://www.amazon.com.tr/dp/B0B2PSDNV1?th=1")
+        self.assertIn(url, variants)
 
     def test_amazon_search_card_uses_structured_price(self):
         html = """

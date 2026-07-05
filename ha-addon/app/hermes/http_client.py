@@ -7,7 +7,7 @@ import requests
 from .constants import RETRY_DELAYS_SECONDS, RETRY_STATUS_CODES
 from .errors import HermesError, HttpStatusHermesError
 from .logging_utils import log
-from .utils import build_headers, normalize_offer_text, repair_mojibake
+from .utils import build_headers, canonical_amazon_product_url, normalize_offer_text, repair_mojibake
 
 try:
     from curl_cffi import requests as curl_requests
@@ -25,6 +25,12 @@ AMAZON_STABLE_SEARCH_PARAMS = {
     "rh",
     "srs",
     "url",
+}
+
+AMAZON_STABLE_PRODUCT_PARAMS = {
+    "smid",
+    "psc",
+    "th",
 }
 
 
@@ -95,6 +101,26 @@ def _clean_amazon_search_url(url: str) -> str:
     return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, urlencode(kept_params), parsed.fragment))
 
 
+def _is_amazon_product_url(url: str) -> bool:
+    parsed = urlsplit(url)
+    return "amazon." in parsed.netloc.lower() and any(part in parsed.path for part in ("/dp/", "/gp/product/"))
+
+
+def _clean_amazon_product_url(url: str) -> str:
+    if not _is_amazon_product_url(url):
+        return url
+    parsed = urlsplit(url)
+    clean_url = canonical_amazon_product_url(url)
+    kept_params = [
+        (key, value)
+        for key, value in parse_qsl(parsed.query, keep_blank_values=True)
+        if key in AMAZON_STABLE_PRODUCT_PARAMS
+    ]
+    if kept_params:
+        clean_url = f"{clean_url}?{urlencode(kept_params)}"
+    return clean_url
+
+
 def _with_amazon_locale_path(url: str) -> str:
     parsed = urlsplit(url)
     if "amazon." not in parsed.netloc.lower():
@@ -114,6 +140,9 @@ def amazon_url_variants(url: str):
         if candidate and candidate not in variants:
             variants.append(candidate)
 
+    cleaned_product_url = _clean_amazon_product_url(url)
+    add(cleaned_product_url)
+    add(_with_amazon_locale_path(cleaned_product_url))
     add(url)
     add(_with_amazon_locale_path(url))
     cleaned_url = _clean_amazon_search_url(url)
@@ -280,8 +309,11 @@ def fetch_amazon_page(session: requests.Session, url: str, timeout: int, expect_
             if _is_hard_amazon_block_error(exc):
                 hard_blocked = True
 
-    if curl_requests is not None and not hard_blocked:
-        for candidate in amazon_url_variants(url):
+    if curl_requests is not None:
+        curl_candidates = amazon_url_variants(url)
+        if hard_blocked:
+            curl_candidates = curl_candidates[:1]
+        for candidate in curl_candidates:
             try:
                 return _get_amazon_response_with_curl(candidate, timeout, expect_search)
             except Exception as exc:  # noqa: BLE001
