@@ -724,6 +724,31 @@ def best_offer_from_amazon_search_results(results: List[SearchResultItem], produ
     return OfferResult(title=best.title, price=best.price, seller="Amazon", url=best.url)
 
 
+def _amazon_detail_result_cache(session: requests.Session) -> Dict[str, SearchResultItem]:
+    cache = getattr(session, "_hermes_amazon_detail_result_cache", None)
+    if not isinstance(cache, dict):
+        cache = {}
+        setattr(session, "_hermes_amazon_detail_result_cache", cache)
+    return cache
+
+
+def _amazon_search_result_cache(session: requests.Session) -> Dict[str, List[SearchResultItem]]:
+    cache = getattr(session, "_hermes_amazon_search_result_cache", None)
+    if not isinstance(cache, dict):
+        cache = {}
+        setattr(session, "_hermes_amazon_search_result_cache", cache)
+    return cache
+
+
+def _amazon_search_cache_key(
+    search_url: str,
+    max_items_to_scan: int,
+    target_keywords: List[str],
+) -> str:
+    keywords = "|".join(sorted(normalize_key(keyword) for keyword in target_keywords if keyword))
+    return f"{search_url}|{max_items_to_scan}|{keywords}"
+
+
 def _fetch_amazon_search_product_offer(
     session: requests.Session,
     product: ProductRule,
@@ -788,6 +813,11 @@ def _fetch_product_offer(session: requests.Session, product: ProductRule, config
 
 
 def _fetch_amazon_detail_result(session: requests.Session, candidate, config: HermesConfig) -> SearchResultItem:
+    cache = _amazon_detail_result_cache(session)
+    cache_key = str(candidate.url or "").strip()
+    if cache_key in cache:
+        return cache[cache_key]
+
     wait_before_request(request_log_label("Amazon detay", candidate.title), config)
     response = fetch_amazon_page(session, candidate.url, config.request_timeout_seconds)
     html = cleaned_html(response)
@@ -801,7 +831,10 @@ def _fetch_amazon_detail_result(session: requests.Session, candidate, config: He
         "Amazon arama fiyatı ürün detayından tamamlandı: "
         f"{log_cell(title, 60)} | fiyat={offer.price} TL"
     )
-    return SearchResultItem(title=title, url=url, price=offer.price)
+    result = SearchResultItem(title=title, url=url, price=offer.price)
+    if cache_key:
+        cache[cache_key] = result
+    return result
 
 
 def _fetch_amazon_search_results(
@@ -812,6 +845,11 @@ def _fetch_amazon_search_results(
     target_keywords: List[str],
     label: str = "Arama",
 ):
+    cache = _amazon_search_result_cache(session)
+    cache_key = _amazon_search_cache_key(search_url, max_items_to_scan, target_keywords)
+    if cache_key in cache:
+        return list(cache[cache_key])
+
     wait_before_request(label, config)
     response = fetch_amazon_page(session, search_url, config.request_timeout_seconds, expect_search=True)
     html = cleaned_html(response)
@@ -838,6 +876,7 @@ def _fetch_amazon_search_results(
         log(f"Amazon detay fiyatı atlandı: eslesmeyen_urun={skipped_detail_count}")
     if not results:
         raise HermesError("Amazon arama sonuçlarında veya ürün detaylarında okunabilir fiyat bulunamadı.")
+    cache[cache_key] = list(results)
     return results
 
 

@@ -1,5 +1,5 @@
 import time
-from typing import Optional
+from typing import Dict, Optional, Tuple
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import requests
@@ -162,6 +162,12 @@ def _is_usable_amazon_response(response, expect_search: bool) -> bool:
 
 
 def _get_amazon_response(session, candidate: str, timeout: int, expect_search: bool):
+    cache = _amazon_response_cache(session)
+    cache_key = _amazon_cache_key(candidate, expect_search)
+    cached_response = cache.get(cache_key)
+    if cached_response is not None:
+        return cached_response
+
     response = session.get(
         candidate,
         headers=amazon_headers(candidate),
@@ -171,6 +177,7 @@ def _get_amazon_response(session, candidate: str, timeout: int, expect_search: b
     response.raise_for_status()
     if not _is_usable_amazon_response(response, expect_search):
         raise HermesError("Amazon beklenen arama/urun sayfasi yerine bos veya farkli bir sayfa dondurdu.")
+    cache[cache_key] = response
     return response
 
 
@@ -189,6 +196,35 @@ def _get_amazon_response_with_curl(candidate: str, timeout: int, expect_search: 
     if not _is_usable_amazon_response(response, expect_search):
         raise HermesError("Amazon alternatif istekte de bos veya farkli bir sayfa dondurdu.")
     return response
+
+
+def _amazon_error_status(exc: Exception) -> Optional[int]:
+    status_code = getattr(exc, "status_code", None)
+    if isinstance(status_code, int):
+        return status_code
+    response = getattr(exc, "response", None)
+    response_status = getattr(response, "status_code", None)
+    return response_status if isinstance(response_status, int) else None
+
+
+def _is_hard_amazon_block_error(exc: Exception) -> bool:
+    status_code = _amazon_error_status(exc)
+    if status_code in {429, 503}:
+        return True
+    message = normalize_offer_text(str(exc))
+    return "bot korumasi" in message or "captcha" in message or "robot" in message
+
+
+def _amazon_cache_key(url: str, expect_search: bool) -> Tuple[bool, str]:
+    return expect_search, str(url or "").strip()
+
+
+def _amazon_response_cache(session: requests.Session) -> Dict[Tuple[bool, str], requests.Response]:
+    cache = getattr(session, "_hermes_amazon_response_cache", None)
+    if not isinstance(cache, dict):
+        cache = {}
+        setattr(session, "_hermes_amazon_response_cache", cache)
+    return cache
 
 
 def _seed_amazon_session(session: requests.Session) -> None:
@@ -217,14 +253,18 @@ def _prime_amazon_session(session: requests.Session, timeout: int) -> None:
 
 def fetch_amazon_page(session: requests.Session, url: str, timeout: int, expect_search: bool = False):
     last_error: Optional[Exception] = None
+    hard_blocked = False
     _seed_amazon_session(session)
     for candidate in amazon_url_variants(url):
         try:
             return _get_amazon_response(session, candidate, timeout, expect_search)
         except Exception as exc:  # noqa: BLE001
             last_error = exc
+            if _is_hard_amazon_block_error(exc):
+                hard_blocked = True
+                break
 
-    if expect_search:
+    if expect_search and not hard_blocked:
         try:
             _prime_amazon_session(session, timeout)
             for candidate in amazon_url_variants(url):
@@ -232,15 +272,22 @@ def fetch_amazon_page(session: requests.Session, url: str, timeout: int, expect_
                     return _get_amazon_response(session, candidate, timeout, expect_search)
                 except Exception as exc:  # noqa: BLE001
                     last_error = exc
+                    if _is_hard_amazon_block_error(exc):
+                        hard_blocked = True
+                        break
         except Exception as exc:  # noqa: BLE001
             last_error = exc
+            if _is_hard_amazon_block_error(exc):
+                hard_blocked = True
 
-    if curl_requests is not None:
+    if curl_requests is not None and not hard_blocked:
         for candidate in amazon_url_variants(url):
             try:
                 return _get_amazon_response_with_curl(candidate, timeout, expect_search)
             except Exception as exc:  # noqa: BLE001
                 last_error = exc
+                if _is_hard_amazon_block_error(exc):
+                    break
 
     if last_error:
         raise last_error

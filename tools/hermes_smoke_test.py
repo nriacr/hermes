@@ -10,6 +10,7 @@ APP_PATH = Path(__file__).resolve().parents[1] / "ha-addon" / "app"
 sys.path.insert(0, str(APP_PATH))
 
 from hermes import service  # noqa: E402
+from hermes.http_client import fetch_amazon_page  # noqa: E402
 from hermes.config_loader import _prepare_products  # noqa: E402
 from hermes.models import PriceSummaryRow, SearchResultItem  # noqa: E402
 from hermes.providers.base import soup_from_html  # noqa: E402
@@ -23,6 +24,37 @@ from hermes.utils import detect_site_from_url  # noqa: E402
 
 
 class HermesSmokeTests(unittest.TestCase):
+    def test_amazon_page_fetch_is_cached_per_session(self):
+        class FakeResponse:
+            status_code = 200
+            headers = {"content-type": "text/html; charset=utf-8"}
+            content = b"<html><body>amazon product page</body></html>"
+            text = "<html><body>amazon product page</body></html>"
+
+            def raise_for_status(self):
+                return None
+
+        class FakeSession:
+            def __init__(self):
+                self.calls = 0
+                self.cookies = self
+
+            def set(self, *_args, **_kwargs):
+                return None
+
+            def get(self, *_args, **_kwargs):
+                self.calls += 1
+                return FakeResponse()
+
+        session = FakeSession()
+        url = "https://www.amazon.com.tr/dp/B000000001"
+
+        first = fetch_amazon_page(session, url, 10)
+        second = fetch_amazon_page(session, url, 10)
+
+        self.assertIs(first, second)
+        self.assertEqual(session.calls, 1)
+
     def test_amazon_search_card_uses_structured_price(self):
         html = """
         <div class="s-main-slot">
