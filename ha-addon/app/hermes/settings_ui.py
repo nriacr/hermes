@@ -108,6 +108,9 @@ def _watch_form(item, index, is_new=False):
     prefix = f"watches_{index}_"
     title = "Yeni takip ekle" if is_new else _summary_name(item, f"Takip {index + 1}")
     urls = _watch_urls_for_form(item)
+    max_items = item.get("max_items_to_scan", 24 if is_new else "")
+    notify_once = True if is_new else item.get("notify_once_in_24H", True)
+    active = True if is_new else item.get("active", True)
     inner = "".join(
         [
             _field(prefix, "name", "Ad", item.get("name", ""), required=not is_new),
@@ -122,10 +125,10 @@ def _watch_form(item, index, is_new=False):
                 )
                 for url_index, field_name in enumerate(WATCH_URL_FIELDS, start=1)
             ],
-            _field(prefix, "max_items_to_scan", "Arama linklerinde taranacak maksimum ürün", item.get("max_items_to_scan", ""), "number"),
+            _field(prefix, "max_items_to_scan", "Arama linklerinde taranacak maksimum ürün", max_items, "number"),
             _field(prefix, "check_interval_minutes", "Özel kontrol aralığı (dk)", item.get("check_interval_minutes", ""), "number"),
-            _checkbox(prefix, "notify_once_in_24H", "24 saat içinde aynı bildirimi tekrar gönderme", item.get("notify_once_in_24H", True)),
-            _checkbox(prefix, "active", "Aktif", item.get("active", True)),
+            _checkbox(prefix, "notify_once_in_24H", "24 saat içinde aynı bildirimi tekrar gönderme", notify_once),
+            _checkbox(prefix, "active", "Aktif", active),
             _checkbox(prefix, "delete", "Sil", False, danger=True) if not is_new else "",
         ]
     )
