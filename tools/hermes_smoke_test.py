@@ -20,6 +20,7 @@ from hermes.providers.hepsiburada import (  # noqa: E402
     _embedded_detail_candidates,
     extract_offer as extract_hepsiburada_offer,
     extract_selected_variant_label,
+    extract_selected_variant_labels,
     extract_variant_urls,
     title_with_variant_label,
 )
@@ -555,6 +556,49 @@ class HermesSmokeTests(unittest.TestCase):
 
         self.assertEqual(label, "Gümüş")
         self.assertTrue(title.endswith("- Gümüş"))
+
+    def test_hepsiburada_selected_variant_label_combines_color_and_capacity(self):
+        html = """
+        <html><body>
+          <main>
+            <h1>Samsung Galaxy Tab S11 Ultra</h1>
+            <span>Renk:</span><strong>Gri</strong>
+            <span>Kapasite:</span><strong>512 GB</strong>
+            <button>Sepete ekle</button>
+          </main>
+          <section>Ürün Bilgileri</section>
+        </body></html>
+        """
+
+        self.assertEqual(extract_selected_variant_labels(html), ["Gri", "512 GB"])
+        self.assertEqual(extract_selected_variant_label(html), "Gri / 512 GB")
+
+    def test_hepsiburada_selected_variant_does_not_fall_back_to_other_variants(self):
+        html = """
+        <html><head><title>Samsung Galaxy Tab S11 Ultra Gri 512 GB</title></head>
+        <body>
+          <script>
+            window.__HB_STATE__ = {
+              "variants": [
+                {"sku": "HBCV_SELECTED_WITHOUT_LISTING", "name": "Gri 512 GB"},
+                {"sku": "HBCV_OTHER_VARIANT", "variantListing": [
+                  {"listingId": "other-cheap", "merchantName": "Hepsiburada",
+                   "finalPriceOnSale": 1000, "prices": [{"value": 1000}]}
+                ]}
+              ]
+            };
+          </script>
+          <span>Renk:</span><strong>Gri</strong>
+          <span>Kapasite:</span><strong>512 GB</strong>
+          <div data-test-id="price-current-price">43.809,00 TL</div>
+        </body></html>
+        """
+        offer = extract_hepsiburada_offer(
+            html,
+            source_url="https://www.hepsiburada.com/samsung-tablet-p-HBCV_SELECTED_WITHOUT_LISTING",
+        )
+
+        self.assertEqual(offer.price, Decimal("43809.00"))
 
     def test_manual_price_history_reset_preserves_alert_state(self):
         with tempfile.TemporaryDirectory() as tmpdir:

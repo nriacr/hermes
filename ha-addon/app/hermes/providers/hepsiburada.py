@@ -46,7 +46,21 @@ BAD_TITLE_MARKERS = (
 )
 PRODUCT_CARD_CLASS_MARKERS = ("productcard", "productlistcontent")
 NON_PRODUCT_PATH_MARKERS = ("degerlendirme", "yorum", "review")
-VARIANT_FIELD_LABELS = ("renk",)
+VARIANT_FIELD_LABELS = (
+    "renk",
+    "kapasite",
+    "hafiza",
+    "hafıza",
+    "depolama",
+    "dahili hafiza",
+    "dahili hafıza",
+    "ram",
+    "beden",
+    "boyut",
+    "numara",
+    "secenek",
+    "seçenek",
+)
 BRAND_ANCHORS = (
     "apple",
     "samsung",
@@ -96,6 +110,10 @@ def _product_id_from_url(url: str) -> str:
 
 def is_product_url(url: str) -> bool:
     return bool(_product_id_from_url(url))
+
+
+def product_id_from_url(url: str) -> str:
+    return _product_id_from_url(url)
 
 
 def _canonical_product_url(candidate: str) -> str:
@@ -483,25 +501,40 @@ def _clean_variant_value(value: str) -> str:
     return cleaned
 
 
-def extract_selected_variant_label(html: str) -> str:
+def _variant_field_label(normalized_line: str) -> str:
+    normalized = normalized_line.strip(" :")
+    for label in sorted(VARIANT_FIELD_LABELS, key=len, reverse=True):
+        if normalized == label or normalized.startswith(f"{label}:") or normalized.startswith(f"{label} "):
+            return label
+    return ""
+
+
+def extract_selected_variant_labels(html: str) -> list[str]:
     soup = soup_from_html(html)
     lines = _visible_lines_until_details(soup)
+    values: list[str] = []
+    seen: set[str] = set()
     for index, line in enumerate(lines[:80]):
         normalized = normalize_offer_text(line).strip(" :")
-        for label in VARIANT_FIELD_LABELS:
-            if normalized == label and index + 1 < len(lines):
-                value = _clean_variant_value(lines[index + 1])
-                if value:
-                    return value
-            if normalized.startswith(f"{label}:"):
-                value = _clean_variant_value(line.split(":", 1)[1])
-                if value:
-                    return value
-            if normalized.startswith(f"{label} "):
-                value = _clean_variant_value(line[len(label) :])
-                if value:
-                    return value
-    return ""
+        label = _variant_field_label(normalized)
+        if not label:
+            continue
+        value = ""
+        if normalized == label and index + 1 < len(lines):
+            value = _clean_variant_value(lines[index + 1])
+        elif normalized.startswith(f"{label}:"):
+            value = _clean_variant_value(line.split(":", 1)[1])
+        elif normalized.startswith(f"{label} "):
+            value = _clean_variant_value(line[len(label) :])
+        normalized_value = normalize_offer_text(value)
+        if value and normalized_value not in seen:
+            seen.add(normalized_value)
+            values.append(value)
+    return values
+
+
+def extract_selected_variant_label(html: str) -> str:
+    return " / ".join(extract_selected_variant_labels(html))
 
 
 def title_with_variant_label(title: str, variant_label: str) -> str:
@@ -630,6 +663,8 @@ def _embedded_listing_mappings(text: str, selected_product_id: str = "") -> Iter
                 continue
             seen.add(key)
             yield mapping
+        return
+    if selected_product_id:
         return
 
     start_pattern = re.compile(r'\{(?="(?:aiBasedShipmentDay|merchantId)"[\s\S]{0,1400}?"listingId")')

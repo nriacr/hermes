@@ -836,8 +836,11 @@ def _fetch_hepsiburada_watch_offers(
             offer = extract_offer(SITE_HEPSIBURADA, variant_html, source_url=variant_url)
             variant_label = hepsiburada_provider.extract_selected_variant_label(variant_html)
             offer_title = hepsiburada_provider.title_with_variant_label(offer.title, variant_label)
+            variant_identity = normalize_offer_text(variant_label) or hepsiburada_provider.product_id_from_url(
+                variant_url
+            )
             dedupe_key = (
-                normalize_offer_text(variant_label),
+                variant_identity,
                 normalize_offer_text(offer.seller or ""),
                 str(offer.price),
                 normalize_offer_text(offer_title),
