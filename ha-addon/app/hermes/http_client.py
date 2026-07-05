@@ -332,6 +332,22 @@ def _amazon_response_cache(session: requests.Session) -> Dict[Tuple[bool, str], 
     return cache
 
 
+def _reset_amazon_client_state(session: requests.Session) -> None:
+    for attr_name in (
+        "_hermes_amazon_curl_session",
+        "_hermes_amazon_response_cache",
+        "_hermes_amazon_primed",
+        "_hermes_amazon_seeded",
+    ):
+        if hasattr(session, attr_name):
+            delattr(session, attr_name)
+    for domain in (".amazon.com.tr", "www.amazon.com.tr"):
+        try:
+            session.cookies.clear(domain=domain)
+        except Exception:  # noqa: BLE001
+            pass
+
+
 def _seed_amazon_session(session: requests.Session) -> None:
     if getattr(session, "_hermes_amazon_seeded", False):
         return
@@ -370,18 +386,26 @@ def fetch_amazon_page(session: requests.Session, url: str, timeout: int, expect_
                 last_error = exc
                 _record_amazon_attempt(attempts, "curl", candidate, expect_search, exc)
                 if _is_hard_amazon_block_error(exc):
+                    _reset_amazon_client_state(session)
+                    _seed_amazon_session(session)
+                    try:
+                        return _get_amazon_response_with_curl(session, candidate, timeout, expect_search)
+                    except Exception as retry_exc:  # noqa: BLE001
+                        last_error = retry_exc
+                        _record_amazon_attempt(attempts, "curl_fresh", candidate, expect_search, retry_exc)
                     hard_blocked = True
                     break
 
-    for candidate in amazon_url_variants(url):
-        try:
-            return _get_amazon_response(session, candidate, timeout, expect_search)
-        except Exception as exc:  # noqa: BLE001
-            last_error = exc
-            _record_amazon_attempt(attempts, "requests", candidate, expect_search, exc)
-            if _is_hard_amazon_block_error(exc):
-                hard_blocked = True
-                break
+    if not hard_blocked:
+        for candidate in amazon_url_variants(url):
+            try:
+                return _get_amazon_response(session, candidate, timeout, expect_search)
+            except Exception as exc:  # noqa: BLE001
+                last_error = exc
+                _record_amazon_attempt(attempts, "requests", candidate, expect_search, exc)
+                if _is_hard_amazon_block_error(exc):
+                    hard_blocked = True
+                    break
 
     if expect_search and not hard_blocked:
         try:
@@ -402,6 +426,8 @@ def fetch_amazon_page(session: requests.Session, url: str, timeout: int, expect_
                 hard_blocked = True
 
     if last_error:
+        if hard_blocked:
+            _reset_amazon_client_state(session)
         _log_amazon_diagnostics(url, expect_search, attempts)
         raise last_error
     _log_amazon_diagnostics(url, expect_search, attempts)

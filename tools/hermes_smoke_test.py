@@ -1,4 +1,5 @@
 import json
+import requests
 import sys
 import tempfile
 import unittest
@@ -60,6 +61,59 @@ class HermesSmokeTests(unittest.TestCase):
 
         self.assertIs(first, second)
         self.assertEqual(session.calls, 1)
+
+    def test_amazon_hard_curl_block_does_not_fallback_to_requests(self):
+        curl_calls = {"count": 0}
+
+        class FakeCookies:
+            def set(self, *_args, **_kwargs):
+                return None
+
+            def clear(self, *_args, **_kwargs):
+                return None
+
+        class FakeRequestsSession:
+            def __init__(self):
+                self.calls = 0
+                self.cookies = FakeCookies()
+
+            def get(self, *_args, **_kwargs):
+                self.calls += 1
+                raise AssertionError("requests fallback should not run after a hard curl block")
+
+        class FakeCurlResponse:
+            status_code = 503
+            headers = {}
+            content = b""
+            text = ""
+
+            def raise_for_status(self):
+                error = requests.HTTPError("503 Server Error")
+                error.response = self
+                raise error
+
+        class FakeCurlSession:
+            def get(self, *_args, **_kwargs):
+                curl_calls["count"] += 1
+                return FakeCurlResponse()
+
+        class FakeCurlRequests:
+            @staticmethod
+            def Session():
+                return FakeCurlSession()
+
+        original_curl_requests = http_client.curl_requests
+        http_client.curl_requests = FakeCurlRequests
+        session = FakeRequestsSession()
+        try:
+            with self.assertRaises(requests.HTTPError):
+                fetch_amazon_page(session, "https://www.amazon.com.tr/s?k=juo+q3", 10, expect_search=True)
+        finally:
+            http_client.curl_requests = original_curl_requests
+
+        self.assertEqual(session.calls, 0)
+        self.assertEqual(curl_calls["count"], 2)
+        self.assertFalse(hasattr(session, "_hermes_amazon_curl_session"))
 
     def test_amazon_product_url_variants_start_with_clean_product_url(self):
         url = "https://www.amazon.com.tr/gp/product/B0B2PSDNV1?ref=ppx_yo2ov_dt_b_fed_asin_title&th=1"
