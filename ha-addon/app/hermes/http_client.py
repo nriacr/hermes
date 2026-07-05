@@ -645,6 +645,16 @@ def _is_hepsiburada_search_url(url: str) -> bool:
     return parsed.path.rstrip("/").lower() == "/ara" or "q=" in parsed.query.lower()
 
 
+def _clean_hepsiburada_search_url(url: str) -> str:
+    if not _is_hepsiburada_search_url(url):
+        return url
+    parsed = urlsplit(url)
+    kept_params = [(key, value) for key, value in parse_qsl(parsed.query, keep_blank_values=True) if key == "q"]
+    if not kept_params:
+        return url
+    return urlunsplit((parsed.scheme, parsed.netloc, "/ara", urlencode(kept_params), ""))
+
+
 def hepsiburada_url_variants(url: str):
     variants = []
 
@@ -654,6 +664,7 @@ def hepsiburada_url_variants(url: str):
 
     add(url)
     if _is_hepsiburada_search_url(url):
+        add(_clean_hepsiburada_search_url(url))
         return variants
 
     clean_url = url.split("?", 1)[0]
@@ -694,6 +705,16 @@ def _get_hepsiburada_response(session, candidate: str, timeout: int):
     return response
 
 
+def _record_hepsiburada_attempt(attempts: List[str], method: str, candidate: str, exc: Exception) -> None:
+    reason = getattr(exc, "status_code", None) or exc.__class__.__name__
+    attempts.append(f"{method}:{reason}:{candidate[:100]}")
+
+
+def _log_hepsiburada_diagnostics(url: str, attempts: List[str]) -> None:
+    if attempts:
+        log(f"Hepsiburada teşhis: deneme={len(attempts)} | akis={' > '.join(attempts[-6:])} | url={url}")
+
+
 def fetch_hepsiburada_page(session: requests.Session, url: str, timeout: int) -> requests.Response:
     try:
         session.get(
@@ -706,16 +727,27 @@ def fetch_hepsiburada_page(session: requests.Session, url: str, timeout: int) ->
         pass
 
     last_error: Optional[Exception] = None
+    attempts: List[str] = []
+    variants = hepsiburada_url_variants(url)
     for candidate in hepsiburada_url_variants(url):
         try:
             return _get_hepsiburada_response(session, candidate, timeout)
         except Exception as exc:
             last_error = exc
+            _record_hepsiburada_attempt(attempts, "requests", candidate, exc)
+
+    fresh_session = requests.Session()
+    for candidate in variants:
+        try:
+            return _get_hepsiburada_response(fresh_session, candidate, timeout)
+        except Exception as exc:
+            last_error = exc
+            _record_hepsiburada_attempt(attempts, "requests_fresh", candidate, exc)
 
     if curl_requests is not None:
         try:
             curl_session = curl_requests.Session()
-            for candidate in hepsiburada_url_variants(url):
+            for candidate in variants:
                 try:
                     response = curl_session.get(
                         candidate,
@@ -732,11 +764,15 @@ def fetch_hepsiburada_page(session: requests.Session, url: str, timeout: int) ->
                     return response
                 except Exception as exc:
                     last_error = exc
+                    _record_hepsiburada_attempt(attempts, "curl", candidate, exc)
         except Exception as exc:
             last_error = exc
+            _record_hepsiburada_attempt(attempts, "curl_setup", url, exc)
 
     if last_error:
+        _log_hepsiburada_diagnostics(url, attempts)
         raise last_error
+    _log_hepsiburada_diagnostics(url, attempts)
     raise HttpStatusHermesError(0, url)
 
 

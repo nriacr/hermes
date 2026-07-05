@@ -24,6 +24,7 @@ from .http_client import cleaned_html, fetch_amazon_page, fetch_hepsiburada_page
 from .logging_utils import log
 from .models import HermesConfig, OfferResult, PriceSummaryRow, SearchResultItem, WatchRule
 from .notifier import send_pushover
+from .providers import hepsiburada as hepsiburada_provider
 from .providers.registry import extract_offer
 from .search_amazon import (
     dedupe_results,
@@ -216,6 +217,30 @@ def summary_row_from_state(watch: WatchRule, state_entry: Dict[str, Any], seller
         min_price=min_price,
         max_price=max_price,
     )
+
+
+def cached_summary_rows_for_watch(
+    watch: WatchRule,
+    watch_key: str,
+    state: Dict[str, Any],
+    seller: str,
+) -> List[PriceSummaryRow]:
+    base_entry = state.get(watch_key, {})
+    offer_keys = []
+    if isinstance(base_entry, dict) and isinstance(base_entry.get("offer_keys"), list):
+        offer_keys = [str(key) for key in base_entry["offer_keys"] if key]
+    if not offer_keys:
+        offer_keys = [watch_key]
+
+    rows = []
+    for offer_key in offer_keys:
+        entry = state.get(offer_key, {})
+        if not isinstance(entry, dict):
+            continue
+        row = summary_row_from_state(watch, entry, seller)
+        if row:
+            rows.append(row)
+    return rows
 
 
 def format_minutes(seconds: float | int | None) -> str:
@@ -765,14 +790,76 @@ def _fetch_amazon_search_watch_offer(
     return offer
 
 
-def _fetch_watch_offer(session: requests.Session, watch: WatchRule, config: HermesConfig):
+def _hepsiburada_variant_scan_limit(watch: WatchRule) -> int:
+    return max(1, min(int(watch.max_items_to_scan or 1), 8))
+
+
+def _fetch_hepsiburada_watch_offers(
+    session: requests.Session,
+    watch: WatchRule,
+    config: HermesConfig,
+) -> List[OfferResult]:
+    response = fetch_hepsiburada_page(session, watch.url, config.request_timeout_seconds)
+    html = cleaned_html(response)
+    raise_if_age_verification(html)
+    if is_bot_protection_page(SITE_HEPSIBURADA, html):
+        raise HermesError("Hepsiburada bot korumasi nedeniyle captcha sayfasi dondu.")
+
+    if not hepsiburada_provider.is_product_url(watch.url):
+        return [extract_offer(SITE_HEPSIBURADA, html, source_url=watch.url)]
+
+    variant_urls = hepsiburada_provider.extract_variant_urls(
+        html,
+        watch.url,
+        _hepsiburada_variant_scan_limit(watch),
+    )
+    if len(variant_urls) > 1:
+        log(f"Hepsiburada varyasyonlari bulundu: {watch.name or watch.url} | adet={len(variant_urls)}")
+
+    offers: List[OfferResult] = []
+    errors: List[str] = []
+    for variant_url in variant_urls or [watch.url]:
+        try:
+            if variant_url == watch.url:
+                variant_html = html
+            else:
+                variant_response = fetch_hepsiburada_page(
+                    session,
+                    variant_url,
+                    config.request_timeout_seconds,
+                )
+                variant_html = cleaned_html(variant_response)
+                raise_if_age_verification(variant_html)
+                if is_bot_protection_page(SITE_HEPSIBURADA, variant_html):
+                    raise HermesError("Hepsiburada bot korumasi nedeniyle captcha sayfasi dondu.")
+            offer = extract_offer(SITE_HEPSIBURADA, variant_html, source_url=variant_url)
+            offers.append(
+                OfferResult(
+                    title=offer.title,
+                    price=offer.price,
+                    seller=offer.seller,
+                    url=offer.url or variant_url,
+                )
+            )
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"{variant_url} | {exc}")
+            log(f"Hepsiburada varyasyon okunamadi: {variant_url} | {exc}")
+
+    if offers:
+        return offers
+    if errors:
+        raise HermesError(errors[-1])
+    raise HermesError("Hepsiburada sayfasından fiyat bulunamadı.")
+
+
+def _fetch_watch_offers(session: requests.Session, watch: WatchRule, config: HermesConfig) -> List[OfferResult]:
     site = watch.site
     url = watch.url
     timeout = config.request_timeout_seconds
     if site == SITE_AMAZON and is_amazon_search_url(url):
-        return _fetch_amazon_search_watch_offer(session, watch, config)
+        return [_fetch_amazon_search_watch_offer(session, watch, config)]
     if site == SITE_HEPSIBURADA:
-        response = fetch_hepsiburada_page(session, url, timeout)
+        return _fetch_hepsiburada_watch_offers(session, watch, config)
     elif site == SITE_AMAZON:
         response = fetch_amazon_page(session, url, timeout)
     else:
@@ -781,7 +868,7 @@ def _fetch_watch_offer(session: requests.Session, watch: WatchRule, config: Herm
     raise_if_age_verification(html)
     if is_bot_protection_page(site, html):
         raise HermesError(f"{site_label(site)} bot korumasi nedeniyle captcha sayfasi dondu.")
-    return extract_offer(site, html, source_url=url)
+    return [extract_offer(site, html, source_url=url)]
 
 
 def _fetch_amazon_detail_result(session: requests.Session, candidate, config: HermesConfig) -> SearchResultItem:
@@ -824,9 +911,7 @@ def check_once(config: HermesConfig) -> None:
         if watch.site == SITE_AMAZON:
             remaining = amazon_protection_remaining_seconds(state, watch_key)
             if remaining > 0:
-                cached_row = summary_row_from_state(watch, state_entry, seller)
-                if cached_row:
-                    summary_rows.append(cached_row)
+                summary_rows.extend(cached_summary_rows_for_watch(watch, watch_key, state, seller))
                 minutes = max(1, round(remaining / 60))
                 log(
                     f"Amazon linki gecici koruma nedeniyle atlandi: "
@@ -836,72 +921,91 @@ def check_once(config: HermesConfig) -> None:
         try:
             display_name = watch.name or watch.url
             wait_before_request(request_log_label(seller, display_name), config)
-            offer = _fetch_watch_offer(session, watch, config)
-            display_name = watch.name or offer.title or watch.url
-            matched_url = offer.url or watch.url
-            min_price, max_price = sanitized_price_bounds(
-                state_entry,
-                offer.price,
-                watch.target_price,
-                f"{seller} | {display_name}",
-            )
-            summary_rows.append(
-                PriceSummaryRow(
-                    seller=seller,
-                    product_title=offer.title or display_name,
-                    product_url=matched_url,
-                    price=offer.price,
-                    target_price=watch.target_price,
-                    min_price=min_price,
-                    max_price=max_price,
-                )
-            )
-            log(
-                f"Kontrol edildi: {seller} | {display_name} | fiyat={offer.price} TL | "
-                f"hedef={watch.target_price} TL"
-            )
+            offers = _fetch_watch_offers(session, watch, config)
+            offer_keys: List[str] = []
+            for offer in offers:
+                offer_display_name = offer.title or watch.name or watch.url
+                matched_url = offer.url or watch.url
+                offer_key = normalize_item_key("watch_offer", watch.site, watch.name, matched_url)
+                offer_state_entry = state.get(offer_key, {})
+                if not isinstance(offer_state_entry, dict):
+                    offer_state_entry = {}
+                offer_keys.append(offer_key)
 
-            alert_sent = False
-            if should_alert(state_entry, offer.price, watch.target_price, watch.notify_once_in_24h):
-                seller_note = f" ({offer.seller})" if offer.seller and watch.site == SITE_HEPSIBURADA else ""
-                message = (
-                    f"Site: {seller}\n"
-                    f"{display_name}\n"
-                    f"Guncel fiyat: {offer.price} TL{seller_note}\n"
-                    f"Hedef fiyat: {watch.target_price} TL"
+                min_price, max_price = sanitized_price_bounds(
+                    offer_state_entry,
+                    offer.price,
+                    watch.target_price,
+                    f"{seller} | {offer_display_name}",
                 )
-                send_pushover(
-                    session,
-                    config.pushover_user_key,
-                    config.pushover_api_token,
-                    f"{seller} fiyat alarmi",
-                    message,
-                    matched_url,
-                    config.request_timeout_seconds,
+                summary_rows.append(
+                    PriceSummaryRow(
+                        seller=seller,
+                        product_title=offer_display_name,
+                        product_url=matched_url,
+                        price=offer.price,
+                        target_price=watch.target_price,
+                        min_price=min_price,
+                        max_price=max_price,
+                    )
                 )
-                alert_sent = True
-                log(f"Bildirim gonderildi: {seller} | {display_name}")
-                save_price_summary(summary_rows)
-            elif offer.price <= watch.target_price and watch.notify_once_in_24h:
                 log(
-                    f"Bildirim atlandi, 24 saat dolmadi veya fiyat daha dusuk degil: "
-                    f"{seller} | {matched_url}"
+                    f"Kontrol edildi: {seller} | {offer_display_name} | fiyat={offer.price} TL | "
+                    f"hedef={watch.target_price} TL"
                 )
 
-            state[watch_key] = update_state_entry(
-                state_entry,
-                offer.price,
-                watch.target_price,
-                alert_sent,
-                f"{seller} | {display_name}",
-            )
-            state[watch_key]["title"] = offer.title
-            state[watch_key]["url"] = matched_url
-            state[watch_key]["configured_url"] = watch.url
-            state[watch_key]["watch_name"] = watch.name
-            state[watch_key]["site"] = watch.site
-            state[watch_key]["last_error"] = None
-            state[watch_key]["last_error_status"] = None
+                alert_sent = False
+                if should_alert(offer_state_entry, offer.price, watch.target_price, watch.notify_once_in_24h):
+                    seller_note = f" ({offer.seller})" if offer.seller and watch.site == SITE_HEPSIBURADA else ""
+                    message = (
+                        f"Site: {seller}\n"
+                        f"{offer_display_name}\n"
+                        f"Guncel fiyat: {offer.price} TL{seller_note}\n"
+                        f"Hedef fiyat: {watch.target_price} TL"
+                    )
+                    send_pushover(
+                        session,
+                        config.pushover_user_key,
+                        config.pushover_api_token,
+                        f"{seller} fiyat alarmi",
+                        message,
+                        matched_url,
+                        config.request_timeout_seconds,
+                    )
+                    alert_sent = True
+                    log(f"Bildirim gonderildi: {seller} | {offer_display_name}")
+                    save_price_summary(summary_rows)
+                elif offer.price <= watch.target_price and watch.notify_once_in_24h:
+                    log(
+                        f"Bildirim atlandi, 24 saat dolmadi veya fiyat daha dusuk degil: "
+                        f"{seller} | {matched_url}"
+                    )
+
+                state[offer_key] = update_state_entry(
+                    offer_state_entry,
+                    offer.price,
+                    watch.target_price,
+                    alert_sent,
+                    f"{seller} | {offer_display_name}",
+                )
+                state[offer_key]["title"] = offer_display_name
+                state[offer_key]["url"] = matched_url
+                state[offer_key]["configured_url"] = watch.url
+                state[offer_key]["watch_name"] = watch.name
+                state[offer_key]["site"] = watch.site
+                state[offer_key]["last_error"] = None
+                state[offer_key]["last_error_status"] = None
+
+            state[watch_key] = {
+                **dict(state_entry),
+                "site": watch.site,
+                "watch_name": watch.name,
+                "configured_url": watch.url,
+                "offer_keys": offer_keys,
+                "last_error": None,
+                "last_error_status": None,
+                "last_checked_at": utc_now(),
+            }
         except Exception as exc:  # noqa: BLE001
             log(f"Hata: {seller} | {watch.url} | {exc}")
             if watch.site == SITE_AMAZON and is_amazon_protection_error(exc):
@@ -936,6 +1040,7 @@ def check_once(config: HermesConfig) -> None:
             failed["site"] = watch.site
             failed["watch_name"] = watch.name
             failed["configured_url"] = watch.url
+            failed["offer_keys"] = []
             failed["last_error"] = str(exc)
             failed["last_error_status"] = getattr(exc, "status_code", None)
             failed["last_checked_at"] = utc_now()
@@ -948,9 +1053,7 @@ def check_once(config: HermesConfig) -> None:
             state_entry = {}
         seller = site_label(watch.site)
         if not watch_check_due(watch, state_entry, config.interval_seconds):
-            cached_row = summary_row_from_state(watch, state_entry, seller)
-            if cached_row:
-                summary_rows.append(cached_row)
+            summary_rows.extend(cached_summary_rows_for_watch(watch, watch_key, state, seller))
             continue
 
         request_tasks.append(

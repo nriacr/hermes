@@ -19,6 +19,7 @@ from hermes.providers.base import soup_from_html  # noqa: E402
 from hermes.providers.hepsiburada import (  # noqa: E402
     _embedded_detail_candidates,
     extract_offer as extract_hepsiburada_offer,
+    extract_variant_urls,
 )
 from hermes.providers.nordbron import extract_offer as extract_nordbron_offer  # noqa: E402
 from hermes.search_amazon import extract_result_candidates  # noqa: E402
@@ -509,6 +510,29 @@ class HermesSmokeTests(unittest.TestCase):
         self.assertNotEqual(offer.seller, "Başka Satıcı")
         self.assertEqual([item.seller for item in candidates].count("Hepsiburada"), 1)
         self.assertFalse(any(item.price == Decimal("1000") for item in candidates))
+
+    def test_hepsiburada_variant_urls_are_discovered_without_listing_urls(self):
+        html = """
+        <html><body>
+          <div aria-label="Renk seçenekleri">
+            <a href="/samsung-galaxy-tab-s10-fe-mavi-p-HBCV00008E1SXR">Mavi</a>
+            <a href="/samsung-galaxy-tab-s10-fe-gri-p-HBCV00008E1ABC">Gri</a>
+          </div>
+          <script>
+            {"variantListing":[
+              {"merchantName":"Hepsiburada","url":"/satici-link-p-HBCV00008E1BAD","finalPriceOnSale":18999}
+            ]}
+          </script>
+        </body></html>
+        """
+        urls = extract_variant_urls(
+            html,
+            "https://www.hepsiburada.com/samsung-galaxy-tab-s10-fe-mavi-p-HBCV00008E1SXR",
+        )
+
+        self.assertEqual(len(urls), 2)
+        self.assertIn("https://www.hepsiburada.com/samsung-galaxy-tab-s10-fe-gri-p-HBCV00008E1ABC", urls)
+        self.assertFalse(any("BAD" in url for url in urls))
 
     def test_manual_price_history_reset_preserves_alert_state(self):
         with tempfile.TemporaryDirectory() as tmpdir:

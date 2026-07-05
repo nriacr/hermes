@@ -92,6 +92,10 @@ def _product_id_from_url(url: str) -> str:
     return match.group(1).upper() if match else ""
 
 
+def is_product_url(url: str) -> bool:
+    return bool(_product_id_from_url(url))
+
+
 def _valid_price(price: Decimal) -> bool:
     return MIN_PRICE <= price <= MAX_PRICE
 
@@ -198,6 +202,19 @@ def _text_from_element(element) -> str:
         return ""
     value = element.get("title") or element.get("aria-label") or element.get_text(" ", strip=True)
     return _clean_text(value)
+
+
+def _element_context_text(element) -> str:
+    if not element:
+        return ""
+    values = [
+        element.get("title") or "",
+        element.get("aria-label") or "",
+        element.get("data-test-id") or "",
+        _class_text(element),
+        element.get_text(" ", strip=True),
+    ]
+    return _clean_text(" ".join(str(value) for value in values if value))
 
 
 def _title_from_card(card, link) -> str:
@@ -588,6 +605,57 @@ def _embedded_detail_candidates(soup, source_url: str = "") -> list[HepsiburadaC
             )
         )
     return _dedupe_candidates(candidates)
+
+
+def _variant_context_allows(segment: str) -> bool:
+    normalized = normalize_offer_text(segment)
+    return any(marker in normalized for marker in ("variant", "varyant", "renk", "color", "secenek", "seçenek"))
+
+
+def extract_variant_urls(html: str, source_url: str, limit: int = 8) -> list[str]:
+    """Return detail-page variant URLs without mixing their prices on the current page."""
+    selected_product_id = _product_id_from_url(source_url)
+    if not selected_product_id:
+        return []
+
+    urls: list[str] = []
+
+    def add(candidate: str) -> None:
+        absolute = _absolute_url(candidate)
+        product_id = _product_id_from_url(absolute)
+        if not product_id or absolute in urls:
+            return
+        urls.append(absolute)
+
+    add(source_url)
+    soup = soup_from_html(html)
+    for link in soup.select("a[href]"):
+        href = str(link.get("href") or "")
+        if not PRODUCT_URL_RE.search(href):
+            continue
+        context = _element_context_text(link)
+        parent = link.parent
+        for _ in range(3):
+            if parent is None:
+                break
+            context += " " + _element_context_text(parent)
+            parent = parent.parent
+        if _variant_context_allows(context):
+            add(href)
+        if len(urls) >= limit:
+            return urls[:limit]
+
+    text = _embedded_text(soup)
+    for match in PRODUCT_URL_RE.finditer(text):
+        segment = text[max(0, match.start() - 900) : match.end() + 900]
+        if not _variant_context_allows(segment):
+            continue
+        if "merchantName" in segment and "variantListing" in segment:
+            continue
+        add(match.group(0))
+        if len(urls) >= limit:
+            break
+    return urls[:limit]
 
 
 def _detail_candidate(soup) -> Optional[HepsiburadaCandidate]:
