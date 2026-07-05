@@ -23,6 +23,23 @@ EMBEDDED_VARIANT_RE = re.compile(
     r'"merchantName":"(?P<seller>[^"]*)"',
     re.IGNORECASE,
 )
+VARIANT_LABEL_JSON_KEYS = (
+    "variantName",
+    "variantValue",
+    "variantValueName",
+    "selectedValue",
+    "optionValue",
+    "displayName",
+    "name",
+    "value",
+    "color",
+    "colour",
+    "renk",
+    "capacity",
+    "storage",
+    "depolama",
+)
+VARIANT_LABEL_JSON_KEYS_NORMALIZED = {normalize_offer_text(item) for item in VARIANT_LABEL_JSON_KEYS}
 DETAIL_PRICE_SELECTORS = [
     "[data-test-id='price-current-price']",
     "[data-test-id='price-current-price'] span",
@@ -628,9 +645,9 @@ def _json_object_at(text: str, start: int) -> Optional[dict]:
     return None
 
 
-def _selected_variant_listing_mappings(text: str, selected_product_id: str) -> list[dict]:
+def _selected_variant_mapping(text: str, selected_product_id: str) -> Optional[dict]:
     if not selected_product_id:
-        return []
+        return None
     sku_pattern = re.compile(r'"sku"\s*:\s*"' + re.escape(selected_product_id) + r'"', re.IGNORECASE)
     for match in sku_pattern.finditer(text):
         position = match.start()
@@ -644,9 +661,60 @@ def _selected_variant_listing_mappings(text: str, selected_product_id: str) -> l
                 and str(mapping.get("sku") or "").upper() == selected_product_id
                 and isinstance(mapping.get("variantListing"), list)
             ):
-                return [item for item in mapping["variantListing"] if isinstance(item, dict)]
+                return mapping
             position -= 1
-    return []
+    return None
+
+
+def _selected_variant_listing_mappings(text: str, selected_product_id: str) -> list[dict]:
+    mapping = _selected_variant_mapping(text, selected_product_id)
+    if not mapping:
+        return []
+    return [item for item in mapping["variantListing"] if isinstance(item, dict)]
+
+
+def _variant_label_from_value(value: Any) -> str:
+    if not isinstance(value, str):
+        return ""
+    cleaned = _clean_variant_value(value)
+    normalized = normalize_offer_text(cleaned)
+    if not cleaned:
+        return ""
+    if any(marker in normalized for marker in ("http", "www", "hepsiburada", "hbc", "merchant", "listing")):
+        return ""
+    if PRICE_RE.search(cleaned):
+        return ""
+    return cleaned
+
+
+def _variant_label_from_mapping(mapping: dict) -> str:
+    labels: list[str] = []
+    seen: set[str] = set()
+    stack: list[Any] = [mapping]
+    while stack:
+        current = stack.pop()
+        if isinstance(current, dict):
+            for key, value in current.items():
+                normalized_key = normalize_offer_text(str(key))
+                if normalized_key in VARIANT_LABEL_JSON_KEYS_NORMALIZED:
+                    label = _variant_label_from_value(value)
+                    normalized_label = normalize_offer_text(label)
+                    if label and normalized_label not in seen:
+                        seen.add(normalized_label)
+                        labels.append(label)
+                if isinstance(value, (dict, list)):
+                    stack.append(value)
+        elif isinstance(current, list):
+            stack.extend(current)
+    return " / ".join(labels[:3])
+
+
+def extract_embedded_variant_label(html: str, source_url: str) -> str:
+    selected_product_id = _product_id_from_url(source_url)
+    if not selected_product_id:
+        return ""
+    mapping = _selected_variant_mapping(_embedded_text(soup_from_html(html)), selected_product_id)
+    return _variant_label_from_mapping(mapping) if mapping else ""
 
 
 def _embedded_listing_mappings(text: str, selected_product_id: str = "") -> Iterable[dict]:
@@ -711,6 +779,21 @@ def _embedded_detail_candidates(soup, source_url: str = "") -> list[HepsiburadaC
             )
         )
     return _dedupe_candidates(candidates)
+
+
+def extract_embedded_variant_offer(html: str, source_url: str) -> Optional[OfferResult]:
+    soup = soup_from_html(html)
+    candidates = _embedded_detail_candidates(soup, source_url=source_url)
+    if not candidates:
+        return None
+    _log_candidates(candidates)
+    best = candidates[0]
+    return OfferResult(
+        title=repair_mojibake(best.title),
+        price=best.price,
+        seller=best.seller,
+        url=source_url,
+    )
 
 
 def _variant_context_allows(segment: str) -> bool:

@@ -83,6 +83,16 @@ def raise_if_age_verification(html: str) -> None:
 
 def is_bot_protection_page(site: str, html: str) -> bool:
     lowered = html.lower()
+    normalized = normalize_offer_text(html)
+    if site == SITE_HEPSIBURADA and any(
+        marker in normalized
+        for marker in (
+            "hepsiburada guvenlik",
+            "hbblockandcaptcha",
+            "static hepsiburada net security",
+        )
+    ):
+        return True
     if "captcha" not in lowered or "robot" not in lowered:
         return False
     if site == SITE_NORDBRON and "product-detail_price" in lowered:
@@ -821,20 +831,28 @@ def _fetch_hepsiburada_watch_offers(
     seen_offer_keys: set[tuple[str, str, str, str]] = set()
     for variant_url in variant_urls or [watch.url]:
         try:
+            variant_label = hepsiburada_provider.extract_embedded_variant_label(html, variant_url)
+            embedded_offer = hepsiburada_provider.extract_embedded_variant_offer(html, variant_url)
             if variant_url == watch.url:
                 variant_html = html
+                offer = embedded_offer or extract_offer(SITE_HEPSIBURADA, variant_html, source_url=variant_url)
             else:
-                variant_response = fetch_hepsiburada_page(
-                    session,
-                    variant_url,
-                    config.request_timeout_seconds,
-                )
-                variant_html = cleaned_html(variant_response)
-                raise_if_age_verification(variant_html)
-                if is_bot_protection_page(SITE_HEPSIBURADA, variant_html):
-                    raise HermesError("Hepsiburada bot korumasi nedeniyle captcha sayfasi dondu.")
-            offer = extract_offer(SITE_HEPSIBURADA, variant_html, source_url=variant_url)
-            variant_label = hepsiburada_provider.extract_selected_variant_label(variant_html)
+                if embedded_offer:
+                    offer = embedded_offer
+                    variant_html = ""
+                else:
+                    variant_response = fetch_hepsiburada_page(
+                        session,
+                        variant_url,
+                        config.request_timeout_seconds,
+                    )
+                    variant_html = cleaned_html(variant_response)
+                    raise_if_age_verification(variant_html)
+                    if is_bot_protection_page(SITE_HEPSIBURADA, variant_html):
+                        raise HermesError("Hepsiburada bot korumasi nedeniyle captcha sayfasi dondu.")
+                    offer = extract_offer(SITE_HEPSIBURADA, variant_html, source_url=variant_url)
+            if variant_html:
+                variant_label = hepsiburada_provider.extract_selected_variant_label(variant_html) or variant_label
             offer_title = hepsiburada_provider.title_with_variant_label(offer.title, variant_label)
             variant_identity = normalize_offer_text(variant_label) or hepsiburada_provider.product_id_from_url(
                 variant_url

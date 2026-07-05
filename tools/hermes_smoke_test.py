@@ -18,6 +18,8 @@ from hermes.models import PriceSummaryRow, SearchResultItem  # noqa: E402
 from hermes.providers.base import soup_from_html  # noqa: E402
 from hermes.providers.hepsiburada import (  # noqa: E402
     _embedded_detail_candidates,
+    extract_embedded_variant_label,
+    extract_embedded_variant_offer,
     extract_offer as extract_hepsiburada_offer,
     extract_selected_variant_label,
     extract_selected_variant_labels,
@@ -599,6 +601,59 @@ class HermesSmokeTests(unittest.TestCase):
         )
 
         self.assertEqual(offer.price, Decimal("43809.00"))
+
+    def test_hepsiburada_embedded_variant_offer_reads_requested_capacity(self):
+        html = """
+        <html><head><title>Samsung Galaxy Tab S11 Ultra</title></head>
+        <body>
+          <script>
+            window.__HB_STATE__ = {
+              "variants": [
+                {"sku": "HBCV256GRI", "name": "Gri 256 GB", "variantListing": [
+                  {"listingId": "v256", "merchantName": "cemil shop",
+                   "finalPriceOnSale": 42499, "prices": [{"value": 42499}]}
+                ]},
+                {"sku": "HBCV512GRI", "name": "Gri 512 GB", "variantListing": [
+                  {"listingId": "v512", "merchantName": "Hepsiburada",
+                   "finalPriceOnSale": 54999, "prices": [{"value": 54999}]}
+                ]},
+                {"sku": "HBCV1TBGRI", "name": "Gri 1 TB", "variantListing": [
+                  {"listingId": "v1tb", "merchantName": "Hepsiburada",
+                   "finalPriceOnSale": 68999, "prices": [{"value": 68999}]}
+                ]}
+              ]
+            };
+          </script>
+        </body></html>
+        """
+        offer = extract_embedded_variant_offer(
+            html,
+            "https://www.hepsiburada.com/samsung-tablet-p-HBCV512GRI",
+        )
+
+        self.assertIsNotNone(offer)
+        self.assertEqual(offer.price, Decimal("54999"))
+        self.assertEqual(offer.seller, "Hepsiburada")
+        self.assertEqual(extract_embedded_variant_label(html, "https://www.hepsiburada.com/samsung-tablet-p-HBCV512GRI"), "Gri 512 GB")
+
+    def test_hepsiburada_variant_identity_keeps_same_seller_price_variants(self):
+        silver_identity = service.normalize_offer_text("Gümüş 128 GB")
+        gray_identity = service.normalize_offer_text("Gri 128 GB")
+
+        self.assertNotEqual(
+            (
+                silver_identity,
+                service.normalize_offer_text("VATAN BİLGİSAYAR"),
+                "18399",
+                service.normalize_offer_text("Samsung Galaxy Tab S10 FE+ - Gümüş 128 GB"),
+            ),
+            (
+                gray_identity,
+                service.normalize_offer_text("VATAN BİLGİSAYAR"),
+                "18399",
+                service.normalize_offer_text("Samsung Galaxy Tab S10 FE+ - Gri 128 GB"),
+            ),
+        )
 
     def test_manual_price_history_reset_preserves_alert_state(self):
         with tempfile.TemporaryDirectory() as tmpdir:
