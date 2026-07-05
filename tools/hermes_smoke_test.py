@@ -61,6 +61,17 @@ class HermesSmokeTests(unittest.TestCase):
         self.assertEqual(variants[0], "https://www.amazon.com.tr/dp/B0B2PSDNV1?th=1")
         self.assertIn(url, variants)
 
+    def test_amazon_protection_error_is_scoped_per_key(self):
+        state = {}
+        error = service.HermesError("Amazon bot korumasi nedeniyle captcha/koruma sayfasi dondu.")
+
+        self.assertTrue(service.is_amazon_protection_error(error))
+        service.note_amazon_protection(state, "amazon-a", "test", error)
+
+        self.assertGreater(service.amazon_protection_remaining_seconds(state, "amazon-a"), 0)
+        self.assertEqual(service.amazon_protection_remaining_seconds(state, "amazon-b"), 0)
+        self.assertIn("amazon_protection", state["_meta"])
+
     def test_amazon_search_card_uses_structured_price(self):
         html = """
         <div class="s-main-slot">

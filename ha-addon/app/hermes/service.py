@@ -425,6 +425,50 @@ def cooldown_remaining_seconds(search_state: Dict[str, Any]) -> int:
     return max(0, remaining)
 
 
+def amazon_protection_cooldown_seconds() -> int:
+    return 90
+
+
+def amazon_protection_state(state: Dict[str, Any]) -> Dict[str, Any]:
+    meta = state.get("_meta")
+    if not isinstance(meta, dict):
+        meta = {}
+        state["_meta"] = meta
+    protection = meta.get("amazon_protection")
+    if not isinstance(protection, dict):
+        protection = {}
+        meta["amazon_protection"] = protection
+    return protection
+
+
+def is_amazon_protection_error(exc: Exception) -> bool:
+    status_code = getattr(exc, "status_code", None)
+    if status_code in {429, 503}:
+        return True
+    message = normalize_key(str(exc))
+    return any(marker in message for marker in ("captcha", "robot", "bot_korumasi", "koruma_sayfasi"))
+
+
+def amazon_protection_remaining_seconds(state: Dict[str, Any], key: str) -> int:
+    guard = amazon_protection_state(state).get(key)
+    if not isinstance(guard, dict):
+        return 0
+    blocked_at = parse_iso_datetime(guard.get("blocked_at"))
+    if not blocked_at:
+        return 0
+    elapsed = (local_now().astimezone(timezone.utc) - blocked_at).total_seconds()
+    return max(0, amazon_protection_cooldown_seconds() - int(elapsed))
+
+
+def note_amazon_protection(state: Dict[str, Any], key: str, source: str, exc: Exception) -> None:
+    protection = amazon_protection_state(state)
+    protection[key] = {
+        "blocked_at": utc_now(),
+        "source": source,
+        "message": str(exc)[:300],
+    }
+
+
 def should_send_search_error_notification(state_entry: Dict[str, Any]) -> bool:
     now = local_now()
     if now.hour != AMAZON_SEARCH_ERROR_NOTIFICATION_HOUR:
@@ -891,6 +935,18 @@ def check_once(config: HermesConfig) -> None:
     request_tasks: List[Dict[str, Any]] = []
 
     def check_product(product: ProductRule, product_key: str, state_entry: Dict[str, Any], seller: str) -> None:
+        if product.site == SITE_AMAZON:
+            remaining = amazon_protection_remaining_seconds(state, product_key)
+            if remaining > 0:
+                cached_row = summary_row_from_state(product, state_entry, seller)
+                if cached_row:
+                    summary_rows.append(cached_row)
+                minutes = max(1, round(remaining / 60))
+                log(
+                    f"Amazon linki gecici koruma nedeniyle atlandi: "
+                    f"{product.name or product.url} | kalan={minutes} dk"
+                )
+                return
         try:
             display_name = product.name or product.url
             wait_before_request(request_log_label(seller, display_name), config)
@@ -961,6 +1017,8 @@ def check_once(config: HermesConfig) -> None:
             state[product_key]["last_error_status"] = None
         except Exception as exc:  # noqa: BLE001
             log(f"Hata: {seller} | {product.url} | {exc}")
+            if product.site == SITE_AMAZON and is_amazon_protection_error(exc):
+                note_amazon_protection(state, product_key, product.name or product.url, exc)
             failed = dict(state_entry)
             if should_reset_product_alert_on_error(exc):
                 failed = reset_product_alert_after_missing(failed, seller, product.name or product.url)
@@ -978,6 +1036,16 @@ def check_once(config: HermesConfig) -> None:
             failed_urls = []
             target_keywords = [target.product_name for target in page.targets]
             for idx, search_url in enumerate(page.search_urls, start=1):
+                url_key = normalize_item_key("amazon_search_url", page.name, search_url)
+                remaining = amazon_protection_remaining_seconds(state, url_key)
+                if remaining > 0:
+                    minutes = max(1, round(remaining / 60))
+                    failed_urls.append(f"{search_url} | gecici koruma nedeniyle atlandi")
+                    log(
+                        f"Amazon arama linki gecici koruma nedeniyle atlandi: {page.name} | "
+                        f"link={idx}/{len(page.search_urls)} | kalan={minutes} dk"
+                    )
+                    continue
                 try:
                     url_results = _fetch_amazon_search_results(
                         session,
@@ -994,6 +1062,8 @@ def check_once(config: HermesConfig) -> None:
                     )
                 except Exception as exc:  # noqa: BLE001
                     failed_urls.append(f"{search_url} | {exc}")
+                    if is_amazon_protection_error(exc):
+                        note_amazon_protection(state, url_key, f"{page.name} link {idx}", exc)
                     log(f"Arama linki hatasi: {page.name} | link={idx}/{len(page.search_urls)} | {exc}")
 
             if not all_results:
