@@ -1,5 +1,5 @@
 import time
-from typing import Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import requests
@@ -258,6 +258,68 @@ def _is_hard_amazon_block_error(exc: Exception) -> bool:
     return "bot korumasi" in message or "captcha" in message or "robot" in message
 
 
+def _amazon_request_type(url: str, expect_search: bool) -> str:
+    if expect_search:
+        return "arama"
+    return "ürün" if _is_amazon_product_url(url) else "sayfa"
+
+
+def _short_amazon_url(url: str) -> str:
+    clean = repair_mojibake(str(url or "")).strip()
+    return clean[:117] + "..." if len(clean) > 120 else clean
+
+
+def _amazon_error_reason(exc: Exception) -> str:
+    status_code = _amazon_error_status(exc)
+    message = normalize_offer_text(str(exc))
+    if status_code:
+        return f"http_{status_code}"
+    if "captcha" in message or "robot" in message or "bot korumasi" in message:
+        return "bot_korumasi"
+    if "bos veya farkli bir sayfa" in message:
+        return "beklenmeyen_sayfa"
+    if "arama/urun sayfasi yerine" in message:
+        return "beklenmeyen_sayfa"
+    return type(exc).__name__
+
+
+def _record_amazon_attempt(
+    attempts: List[Dict[str, Any]],
+    method: str,
+    candidate: str,
+    expect_search: bool,
+    exc: Exception,
+) -> None:
+    attempts.append(
+        {
+            "method": method,
+            "type": _amazon_request_type(candidate, expect_search),
+            "status": _amazon_error_status(exc),
+            "reason": _amazon_error_reason(exc),
+            "url": candidate,
+        }
+    )
+
+
+def _log_amazon_diagnostics(original_url: str, expect_search: bool, attempts: List[Dict[str, Any]]) -> None:
+    if not attempts:
+        return
+    last = attempts[-1]
+    flow = " > ".join(
+        f"{attempt['method']}:{attempt.get('status') or attempt['reason']}" for attempt in attempts[-6:]
+    )
+    log(
+        "Amazon teşhis: "
+        f"tip={_amazon_request_type(original_url, expect_search)} | "
+        f"deneme={len(attempts)} | "
+        f"son_yontem={last['method']} | "
+        f"son_status={last.get('status') or '-'} | "
+        f"son_sebep={last['reason']} | "
+        f"akis={flow} | "
+        f"url={_short_amazon_url(str(last['url']))}"
+    )
+
+
 def _amazon_cache_key(url: str, expect_search: bool) -> Tuple[bool, str]:
     return expect_search, str(url or "").strip()
 
@@ -297,6 +359,7 @@ def _prime_amazon_session(session: requests.Session, timeout: int) -> None:
 def fetch_amazon_page(session: requests.Session, url: str, timeout: int, expect_search: bool = False):
     last_error: Optional[Exception] = None
     hard_blocked = False
+    attempts: List[Dict[str, Any]] = []
     _seed_amazon_session(session)
 
     if curl_requests is not None:
@@ -305,6 +368,7 @@ def fetch_amazon_page(session: requests.Session, url: str, timeout: int, expect_
                 return _get_amazon_response_with_curl(session, candidate, timeout, expect_search)
             except Exception as exc:  # noqa: BLE001
                 last_error = exc
+                _record_amazon_attempt(attempts, "curl", candidate, expect_search, exc)
                 if _is_hard_amazon_block_error(exc):
                     hard_blocked = True
                     break
@@ -314,6 +378,7 @@ def fetch_amazon_page(session: requests.Session, url: str, timeout: int, expect_
             return _get_amazon_response(session, candidate, timeout, expect_search)
         except Exception as exc:  # noqa: BLE001
             last_error = exc
+            _record_amazon_attempt(attempts, "requests", candidate, expect_search, exc)
             if _is_hard_amazon_block_error(exc):
                 hard_blocked = True
                 break
@@ -326,16 +391,20 @@ def fetch_amazon_page(session: requests.Session, url: str, timeout: int, expect_
                     return _get_amazon_response(session, candidate, timeout, expect_search)
                 except Exception as exc:  # noqa: BLE001
                     last_error = exc
+                    _record_amazon_attempt(attempts, "requests_prime", candidate, expect_search, exc)
                     if _is_hard_amazon_block_error(exc):
                         hard_blocked = True
                         break
         except Exception as exc:  # noqa: BLE001
             last_error = exc
+            _record_amazon_attempt(attempts, "prime", "https://www.amazon.com.tr/", expect_search, exc)
             if _is_hard_amazon_block_error(exc):
                 hard_blocked = True
 
     if last_error:
+        _log_amazon_diagnostics(url, expect_search, attempts)
         raise last_error
+    _log_amazon_diagnostics(url, expect_search, attempts)
     raise HttpStatusHermesError(0, url)
 
 
