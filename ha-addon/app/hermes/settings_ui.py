@@ -84,7 +84,7 @@ def _checkbox(prefix, name, label, checked=True, danger=False):
 
 def _summary_name(item, fallback):
     if isinstance(item, dict):
-        value = str(item.get("name") or item.get("product_name") or fallback).strip()
+        value = str(item.get("name") or fallback).strip()
         return value or fallback
     return fallback
 

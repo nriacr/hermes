@@ -888,7 +888,7 @@ def check_once(config: HermesConfig) -> None:
                     f"{seller} | {matched_url}"
                 )
 
-            state[product_key] = update_state_entry(
+            state[watch_key] = update_state_entry(
                 state_entry,
                 offer.price,
                 watch.target_price,
