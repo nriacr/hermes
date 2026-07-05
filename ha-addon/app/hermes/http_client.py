@@ -45,6 +45,7 @@ AMAZON_CHROME_USER_AGENT = (
 AMAZON_HARD_BLOCK_RESCUE_VARIANT_LIMIT = 3
 AMAZON_BROWSER_RESCUE_VARIANT_LIMIT = 2
 AMAZON_BROWSER_MIN_TIMEOUT_SECONDS = 25
+AMAZON_DIAGNOSTIC_SNIPPET_LENGTH = 220
 
 
 class _HtmlResponse:
@@ -290,8 +291,13 @@ def _get_amazon_response_with_browser(session: requests.Session, candidate: str,
             "--disable-default-apps",
             "--disable-extensions",
             "--disable-sync",
+            "--disable-setuid-sandbox",
+            "--disable-software-rasterizer",
+            "--disable-crash-reporter",
+            "--disable-features=Translate,MediaRouter,OptimizationHints",
             "--hide-scrollbars",
             "--no-first-run",
+            "--no-zygote",
             "--no-sandbox",
             "--window-size=1365,900",
             "--lang=tr-TR",
@@ -313,11 +319,35 @@ def _get_amazon_response_with_browser(session: requests.Session, candidate: str,
         except OSError as exc:
             raise HermesError(f"Amazon gercek tarayici modu baslatilamadi: {exc}") from exc
 
+    stdout = completed.stdout or ""
+    stderr = completed.stderr or ""
+    response = _HtmlResponse(candidate, stdout)
+    try:
+        if stdout and _is_usable_amazon_response(response, expect_search):
+            if completed.returncode != 0:
+                log(
+                    "Amazon tarayici modu HTML dondurdu: "
+                    f"returncode={completed.returncode} | stderr={_diagnostic_snippet(stderr)} | "
+                    f"url={_short_amazon_url(candidate)}"
+                )
+            cache[cache_key] = response
+            return response
+    except Exception as exc:  # noqa: BLE001
+        if completed.returncode != 0:
+            log(
+                "Amazon tarayici modu HTML kullanilamadi: "
+                f"returncode={completed.returncode} | sebep={_amazon_error_reason(exc)} | "
+                f"stdout={_diagnostic_snippet(stdout)} | stderr={_diagnostic_snippet(stderr)} | "
+                f"url={_short_amazon_url(candidate)}"
+            )
+        raise
+
     if completed.returncode != 0:
-        error_text = normalize_offer_text((completed.stderr or completed.stdout or "").strip())
+        error_text = _diagnostic_snippet(stderr or stdout)
         raise HermesError(f"Amazon gercek tarayici modu basarisiz oldu: {error_text[:160] or completed.returncode}")
 
-    response = _HtmlResponse(candidate, completed.stdout or "")
+    if not stdout:
+        raise HermesError("Amazon gercek tarayici modunda bos HTML dondu.")
     if not _is_usable_amazon_response(response, expect_search):
         raise HermesError("Amazon gercek tarayici modunda da bos veya farkli bir sayfa dondurdu.")
     cache[cache_key] = response
@@ -364,6 +394,11 @@ def _amazon_error_reason(exc: Exception) -> str:
     if "arama/urun sayfasi yerine" in message:
         return "beklenmeyen_sayfa"
     return type(exc).__name__
+
+
+def _diagnostic_snippet(value: str) -> str:
+    text = normalize_offer_text(repair_mojibake(str(value or "")))
+    return text[:AMAZON_DIAGNOSTIC_SNIPPET_LENGTH] if text else "-"
 
 
 def _record_amazon_attempt(
@@ -513,6 +548,23 @@ def fetch_amazon_page(session: requests.Session, url: str, timeout: int, expect_
                             )
                     _reset_amazon_client_state(session)
                     _seed_amazon_session(session)
+                    for requests_candidate in variants:
+                        try:
+                            return _get_amazon_response(
+                                session,
+                                requests_candidate,
+                                timeout,
+                                expect_search,
+                            )
+                        except Exception as requests_exc:  # noqa: BLE001
+                            last_error = requests_exc
+                            _record_amazon_attempt(
+                                attempts,
+                                "requests_after_rescue",
+                                requests_candidate,
+                                expect_search,
+                                requests_exc,
+                            )
                     break
 
     if not hard_blocked:

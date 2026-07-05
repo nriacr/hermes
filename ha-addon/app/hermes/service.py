@@ -421,7 +421,7 @@ def cooldown_remaining_seconds(search_state: Dict[str, Any]) -> int:
 
 
 def amazon_protection_cooldown_seconds() -> int:
-    return 90
+    return 0
 
 
 def amazon_protection_state(state: Dict[str, Any]) -> Dict[str, Any]:

@@ -62,7 +62,7 @@ class HermesSmokeTests(unittest.TestCase):
         self.assertIs(first, second)
         self.assertEqual(session.calls, 1)
 
-    def test_amazon_hard_curl_block_does_not_fallback_to_requests(self):
+    def test_amazon_hard_curl_block_can_recover_with_requests_after_rescue(self):
         curl_calls = {"count": 0}
         browser_calls = {"count": 0}
 
@@ -80,7 +80,16 @@ class HermesSmokeTests(unittest.TestCase):
 
             def get(self, *_args, **_kwargs):
                 self.calls += 1
-                raise AssertionError("requests fallback should not run after a hard curl block")
+                return FakeRequestsResponse()
+
+        class FakeRequestsResponse:
+            status_code = 200
+            headers = {"content-type": "text/html; charset=utf-8"}
+            content = b'<html><body><div data-component-type="s-search-result"><a href="/dp/B000">Amazon</a></div></body></html>'
+            text = content.decode("utf-8")
+
+            def raise_for_status(self):
+                return None
 
         class FakeCurlResponse:
             status_code = 503
@@ -114,13 +123,13 @@ class HermesSmokeTests(unittest.TestCase):
 
         http_client._get_amazon_response_with_browser = fake_browser_rescue
         try:
-            with self.assertRaises(http_client.HermesError):
-                fetch_amazon_page(session, "https://www.amazon.com.tr/s?k=juo+q3", 10, expect_search=True)
+            response = fetch_amazon_page(session, "https://www.amazon.com.tr/s?k=juo+q3", 10, expect_search=True)
         finally:
             http_client.curl_requests = original_curl_requests
             http_client._get_amazon_response_with_browser = original_browser_rescue
 
-        self.assertEqual(session.calls, 0)
+        self.assertEqual(response.status_code, 200)
+        self.assertGreater(session.calls, 0)
         self.assertEqual(curl_calls["count"], 3)
         self.assertEqual(browser_calls["count"], 2)
         self.assertFalse(hasattr(session, "_hermes_amazon_curl_session"))
@@ -250,6 +259,43 @@ class HermesSmokeTests(unittest.TestCase):
         self.assertEqual(browser_calls["count"], 1)
         self.assertEqual(session.normal_requests, 0)
 
+    def test_amazon_browser_rescue_accepts_usable_stdout_with_nonzero_exit(self):
+        class FakeCookies:
+            def set(self, *_args, **_kwargs):
+                return None
+
+            def clear(self, *_args, **_kwargs):
+                return None
+
+        class FakeSession:
+            cookies = FakeCookies()
+
+        def fake_run(*_args, **_kwargs):
+            return http_client.subprocess.CompletedProcess(
+                args=["chromium"],
+                returncode=1,
+                stdout='<html><body><div data-component-type="s-search-result"><a href="/dp/B000">Amazon</a></div></body></html>',
+                stderr="dbus connection warning",
+            )
+
+        original_run = http_client.subprocess.run
+        original_chromium_binary = http_client._chromium_binary
+        http_client.subprocess.run = fake_run
+        http_client._chromium_binary = lambda: "/usr/bin/chromium"
+        try:
+            response = http_client._get_amazon_response_with_browser(
+                FakeSession(),
+                "https://www.amazon.com.tr/s?k=juo+q3",
+                10,
+                True,
+            )
+        finally:
+            http_client.subprocess.run = original_run
+            http_client._chromium_binary = original_chromium_binary
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("s-search-result", response.text)
+
     def test_amazon_product_url_variants_start_with_clean_product_url(self):
         url = "https://www.amazon.com.tr/gp/product/B0B2PSDNV1?ref=ppx_yo2ov_dt_b_fed_asin_title&th=1"
         variants = amazon_url_variants(url)
@@ -263,7 +309,7 @@ class HermesSmokeTests(unittest.TestCase):
         self.assertTrue(service.is_amazon_protection_error(error))
         service.note_amazon_protection(state, "amazon-a", "test", error)
 
-        self.assertGreater(service.amazon_protection_remaining_seconds(state, "amazon-a"), 0)
+        self.assertEqual(service.amazon_protection_remaining_seconds(state, "amazon-a"), 0)
         self.assertEqual(service.amazon_protection_remaining_seconds(state, "amazon-b"), 0)
         self.assertIn("amazon_protection", state["_meta"])
 
