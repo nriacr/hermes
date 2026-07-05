@@ -38,6 +38,8 @@ AMAZON_CHROME_USER_AGENT = (
     "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 )
 
+AMAZON_HARD_BLOCK_RESCUE_VARIANT_LIMIT = 3
+
 
 def decode_response_text(response: requests.Response) -> str:
     fallback = response.text
@@ -376,28 +378,39 @@ def fetch_amazon_page(session: requests.Session, url: str, timeout: int, expect_
     last_error: Optional[Exception] = None
     hard_blocked = False
     attempts: List[Dict[str, Any]] = []
+    variants = amazon_url_variants(url)
     _seed_amazon_session(session)
 
     if curl_requests is not None:
-        for candidate in amazon_url_variants(url):
+        for candidate_index, candidate in enumerate(variants):
             try:
                 return _get_amazon_response_with_curl(session, candidate, timeout, expect_search)
             except Exception as exc:  # noqa: BLE001
                 last_error = exc
                 _record_amazon_attempt(attempts, "curl", candidate, expect_search, exc)
                 if _is_hard_amazon_block_error(exc):
-                    _reset_amazon_client_state(session)
-                    _seed_amazon_session(session)
-                    try:
-                        return _get_amazon_response_with_curl(session, candidate, timeout, expect_search)
-                    except Exception as retry_exc:  # noqa: BLE001
-                        last_error = retry_exc
-                        _record_amazon_attempt(attempts, "curl_fresh", candidate, expect_search, retry_exc)
                     hard_blocked = True
+                    rescue_candidates = variants[
+                        candidate_index : candidate_index + AMAZON_HARD_BLOCK_RESCUE_VARIANT_LIMIT
+                    ]
+                    for rescue_index, rescue_candidate in enumerate(rescue_candidates):
+                        _reset_amazon_client_state(session)
+                        _seed_amazon_session(session)
+                        method = "curl_fresh" if rescue_index == 0 else "curl_variant_fresh"
+                        try:
+                            return _get_amazon_response_with_curl(
+                                session,
+                                rescue_candidate,
+                                timeout,
+                                expect_search,
+                            )
+                        except Exception as retry_exc:  # noqa: BLE001
+                            last_error = retry_exc
+                            _record_amazon_attempt(attempts, method, rescue_candidate, expect_search, retry_exc)
                     break
 
     if not hard_blocked:
-        for candidate in amazon_url_variants(url):
+        for candidate in variants:
             try:
                 return _get_amazon_response(session, candidate, timeout, expect_search)
             except Exception as exc:  # noqa: BLE001
@@ -410,7 +423,7 @@ def fetch_amazon_page(session: requests.Session, url: str, timeout: int, expect_
     if expect_search and not hard_blocked:
         try:
             _prime_amazon_session(session, timeout)
-            for candidate in amazon_url_variants(url):
+            for candidate in variants:
                 try:
                     return _get_amazon_response(session, candidate, timeout, expect_search)
                 except Exception as exc:  # noqa: BLE001
