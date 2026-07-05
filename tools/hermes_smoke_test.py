@@ -64,6 +64,7 @@ class HermesSmokeTests(unittest.TestCase):
 
     def test_amazon_hard_curl_block_does_not_fallback_to_requests(self):
         curl_calls = {"count": 0}
+        browser_calls = {"count": 0}
 
         class FakeCookies:
             def set(self, *_args, **_kwargs):
@@ -103,16 +104,25 @@ class HermesSmokeTests(unittest.TestCase):
                 return FakeCurlSession()
 
         original_curl_requests = http_client.curl_requests
+        original_browser_rescue = http_client._get_amazon_response_with_browser
         http_client.curl_requests = FakeCurlRequests
         session = FakeRequestsSession()
+
+        def fake_browser_rescue(*_args, **_kwargs):
+            browser_calls["count"] += 1
+            raise http_client.HermesError("browser rescue failed")
+
+        http_client._get_amazon_response_with_browser = fake_browser_rescue
         try:
-            with self.assertRaises(requests.HTTPError):
+            with self.assertRaises(http_client.HermesError):
                 fetch_amazon_page(session, "https://www.amazon.com.tr/s?k=juo+q3", 10, expect_search=True)
         finally:
             http_client.curl_requests = original_curl_requests
+            http_client._get_amazon_response_with_browser = original_browser_rescue
 
         self.assertEqual(session.calls, 0)
         self.assertEqual(curl_calls["count"], 3)
+        self.assertEqual(browser_calls["count"], 2)
         self.assertFalse(hasattr(session, "_hermes_amazon_curl_session"))
 
     def test_amazon_hard_curl_block_can_recover_with_fresh_variant(self):
@@ -157,7 +167,13 @@ class HermesSmokeTests(unittest.TestCase):
                 return FakeCurlSession()
 
         original_curl_requests = http_client.curl_requests
+        original_browser_rescue = http_client._get_amazon_response_with_browser
         http_client.curl_requests = FakeCurlRequests
+
+        def fake_browser_rescue(*_args, **_kwargs):
+            raise AssertionError("browser rescue should not run when fresh curl variant recovers")
+
+        http_client._get_amazon_response_with_browser = fake_browser_rescue
         try:
             response = fetch_amazon_page(
                 FakeRequestsSession(),
@@ -167,9 +183,72 @@ class HermesSmokeTests(unittest.TestCase):
             )
         finally:
             http_client.curl_requests = original_curl_requests
+            http_client._get_amazon_response_with_browser = original_browser_rescue
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(curl_calls["count"], 3)
+
+    def test_amazon_browser_rescue_recovers_after_curl_blocks(self):
+        curl_calls = {"count": 0}
+        browser_calls = {"count": 0}
+
+        class FakeCookies:
+            def set(self, *_args, **_kwargs):
+                return None
+
+            def clear(self, *_args, **_kwargs):
+                return None
+
+        class FakeRequestsSession:
+            def __init__(self):
+                self.cookies = FakeCookies()
+                self.normal_requests = 0
+
+            def get(self, *_args, **_kwargs):
+                self.normal_requests += 1
+                raise AssertionError("normal requests should not run while browser rescue can recover")
+
+        class FakeCurlResponse:
+            status_code = 503
+            headers = {}
+            content = b""
+            text = ""
+
+            def raise_for_status(self):
+                error = requests.HTTPError("503 Server Error")
+                error.response = self
+                raise error
+
+        class FakeCurlSession:
+            def get(self, *_args, **_kwargs):
+                curl_calls["count"] += 1
+                return FakeCurlResponse()
+
+        class FakeCurlRequests:
+            @staticmethod
+            def Session():
+                return FakeCurlSession()
+
+        def fake_browser_rescue(_session, candidate, _timeout, expect_search):
+            browser_calls["count"] += 1
+            html = "<html><body>amazon <div data-component-type='s-search-result'>ok</div></body></html>"
+            return http_client._HtmlResponse(candidate, html)
+
+        original_curl_requests = http_client.curl_requests
+        original_browser_rescue = http_client._get_amazon_response_with_browser
+        http_client.curl_requests = FakeCurlRequests
+        http_client._get_amazon_response_with_browser = fake_browser_rescue
+        session = FakeRequestsSession()
+        try:
+            response = fetch_amazon_page(session, "https://www.amazon.com.tr/s?k=juo+q3", 10, expect_search=True)
+        finally:
+            http_client.curl_requests = original_curl_requests
+            http_client._get_amazon_response_with_browser = original_browser_rescue
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(curl_calls["count"], 3)
+        self.assertEqual(browser_calls["count"], 1)
+        self.assertEqual(session.normal_requests, 0)
 
     def test_amazon_product_url_variants_start_with_clean_product_url(self):
         url = "https://www.amazon.com.tr/gp/product/B0B2PSDNV1?ref=ppx_yo2ov_dt_b_fed_asin_title&th=1"

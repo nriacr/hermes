@@ -1,3 +1,7 @@
+import os
+import shutil
+import subprocess
+import tempfile
 import time
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -39,6 +43,20 @@ AMAZON_CHROME_USER_AGENT = (
 )
 
 AMAZON_HARD_BLOCK_RESCUE_VARIANT_LIMIT = 3
+AMAZON_BROWSER_RESCUE_VARIANT_LIMIT = 2
+AMAZON_BROWSER_MIN_TIMEOUT_SECONDS = 25
+
+
+class _HtmlResponse:
+    def __init__(self, url: str, html: str):
+        self.url = url
+        self.status_code = 200
+        self.headers = {"content-type": "text/html; charset=utf-8"}
+        self.text = html
+        self.content = html.encode("utf-8", errors="replace")
+
+    def raise_for_status(self) -> None:
+        return None
 
 
 def decode_response_text(response: requests.Response) -> str:
@@ -243,6 +261,69 @@ def _get_amazon_response_with_curl(session: requests.Session, candidate: str, ti
     return response
 
 
+def _chromium_binary() -> str:
+    configured = os.getenv("HERMES_CHROMIUM_PATH", "").strip()
+    if configured:
+        return configured
+    for candidate in ("chromium", "chromium-browser", "google-chrome", "google-chrome-stable"):
+        found = shutil.which(candidate)
+        if found:
+            return found
+    raise HermesError("Amazon icin gercek tarayici modu kullanilamiyor; Chromium bulunamadi.")
+
+
+def _get_amazon_response_with_browser(session: requests.Session, candidate: str, timeout: int, expect_search: bool):
+    cache = _amazon_response_cache(session)
+    cache_key = _amazon_cache_key(f"browser:{candidate}", expect_search)
+    cached_response = cache.get(cache_key)
+    if cached_response is not None:
+        return cached_response
+
+    browser_timeout = max(AMAZON_BROWSER_MIN_TIMEOUT_SECONDS, int(timeout) + 10)
+    with tempfile.TemporaryDirectory(prefix="hermes-amazon-browser-") as profile_dir:
+        command = [
+            _chromium_binary(),
+            "--headless=new",
+            "--disable-gpu",
+            "--disable-dev-shm-usage",
+            "--disable-background-networking",
+            "--disable-default-apps",
+            "--disable-extensions",
+            "--disable-sync",
+            "--hide-scrollbars",
+            "--no-first-run",
+            "--no-sandbox",
+            "--window-size=1365,900",
+            "--lang=tr-TR",
+            f"--user-agent={AMAZON_CHROME_USER_AGENT}",
+            f"--user-data-dir={profile_dir}",
+            "--dump-dom",
+            candidate,
+        ]
+        try:
+            completed = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                timeout=browser_timeout,
+                check=False,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise HermesError("Amazon gercek tarayici modu zaman asimina ugradi.") from exc
+        except OSError as exc:
+            raise HermesError(f"Amazon gercek tarayici modu baslatilamadi: {exc}") from exc
+
+    if completed.returncode != 0:
+        error_text = normalize_offer_text((completed.stderr or completed.stdout or "").strip())
+        raise HermesError(f"Amazon gercek tarayici modu basarisiz oldu: {error_text[:160] or completed.returncode}")
+
+    response = _HtmlResponse(candidate, completed.stdout or "")
+    if not _is_usable_amazon_response(response, expect_search):
+        raise HermesError("Amazon gercek tarayici modunda da bos veya farkli bir sayfa dondurdu.")
+    cache[cache_key] = response
+    return response
+
+
 def _amazon_error_status(exc: Exception) -> Optional[int]:
     status_code = getattr(exc, "status_code", None)
     if isinstance(status_code, int):
@@ -407,6 +488,31 @@ def fetch_amazon_page(session: requests.Session, url: str, timeout: int, expect_
                         except Exception as retry_exc:  # noqa: BLE001
                             last_error = retry_exc
                             _record_amazon_attempt(attempts, method, rescue_candidate, expect_search, retry_exc)
+                    browser_candidates = variants[
+                        candidate_index : candidate_index + AMAZON_BROWSER_RESCUE_VARIANT_LIMIT
+                    ]
+                    for browser_candidate in browser_candidates:
+                        try:
+                            response = _get_amazon_response_with_browser(
+                                session,
+                                browser_candidate,
+                                timeout,
+                                expect_search,
+                            )
+                            _reset_amazon_client_state(session)
+                            _seed_amazon_session(session)
+                            return response
+                        except Exception as browser_exc:  # noqa: BLE001
+                            last_error = browser_exc
+                            _record_amazon_attempt(
+                                attempts,
+                                "browser_rescue",
+                                browser_candidate,
+                                expect_search,
+                                browser_exc,
+                            )
+                    _reset_amazon_client_state(session)
+                    _seed_amazon_session(session)
                     break
 
     if not hard_blocked:
