@@ -10,6 +10,7 @@ APP_PATH = Path(__file__).resolve().parents[1] / "ha-addon" / "app"
 sys.path.insert(0, str(APP_PATH))
 
 from hermes import service  # noqa: E402
+from hermes import http_client  # noqa: E402
 from hermes.http_client import amazon_url_variants, fetch_amazon_page  # noqa: E402
 from hermes.config_loader import _prepare_products  # noqa: E402
 from hermes.models import PriceSummaryRow, SearchResultItem  # noqa: E402
@@ -49,8 +50,13 @@ class HermesSmokeTests(unittest.TestCase):
         session = FakeSession()
         url = "https://www.amazon.com.tr/dp/B000000001"
 
-        first = fetch_amazon_page(session, url, 10)
-        second = fetch_amazon_page(session, url, 10)
+        original_curl_requests = http_client.curl_requests
+        http_client.curl_requests = None
+        try:
+            first = fetch_amazon_page(session, url, 10)
+            second = fetch_amazon_page(session, url, 10)
+        finally:
+            http_client.curl_requests = original_curl_requests
 
         self.assertIs(first, second)
         self.assertEqual(session.calls, 1)

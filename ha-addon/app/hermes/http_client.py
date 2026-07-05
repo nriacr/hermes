@@ -7,7 +7,7 @@ import requests
 from .constants import RETRY_DELAYS_SECONDS, RETRY_STATUS_CODES
 from .errors import HermesError, HttpStatusHermesError
 from .logging_utils import log
-from .utils import build_headers, canonical_amazon_product_url, normalize_offer_text, repair_mojibake
+from .utils import build_headers, canonical_amazon_product_url, normalize_offer_text, repair_mojibake, referer_for_url
 
 try:
     from curl_cffi import requests as curl_requests
@@ -32,6 +32,11 @@ AMAZON_STABLE_PRODUCT_PARAMS = {
     "psc",
     "th",
 }
+
+AMAZON_CHROME_USER_AGENT = (
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+)
 
 
 def decode_response_text(response: requests.Response) -> str:
@@ -66,25 +71,24 @@ def fetch_with_retries(session: requests.Session, url: str, timeout: int) -> req
 
 
 def amazon_headers(url: str):
-    headers = build_headers(url)
-    headers.update(
-        {
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-            "Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7",
-            "Accept-Encoding": "gzip, deflate",
-            "Cache-Control": "no-cache",
-            "Pragma": "no-cache",
-            "Upgrade-Insecure-Requests": "1",
-            "Sec-Fetch-Dest": "document",
-            "Sec-Fetch-Mode": "navigate",
-            "Sec-Fetch-Site": "none",
-            "Sec-Fetch-User": "?1",
-            "sec-ch-ua": '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
-            "sec-ch-ua-mobile": "?0",
-            "sec-ch-ua-platform": '"Linux"',
-        }
-    )
-    return headers
+    return {
+        "User-Agent": AMAZON_CHROME_USER_AGENT,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+        "Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Cache-Control": "no-cache",
+        "Pragma": "no-cache",
+        "Connection": "keep-alive",
+        "Upgrade-Insecure-Requests": "1",
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "none",
+        "Sec-Fetch-User": "?1",
+        "sec-ch-ua": '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": '"Linux"',
+        "Referer": referer_for_url(url),
+    }
 
 
 def _clean_amazon_search_url(url: str) -> str:
@@ -210,10 +214,19 @@ def _get_amazon_response(session, candidate: str, timeout: int, expect_search: b
     return response
 
 
-def _get_amazon_response_with_curl(candidate: str, timeout: int, expect_search: bool):
+def _get_amazon_response_with_curl(session: requests.Session, candidate: str, timeout: int, expect_search: bool):
     if curl_requests is None:
         raise HermesError("Amazon icin tarayici-benzeri alternatif istek kullanilamiyor.")
-    curl_session = curl_requests.Session()
+    cache = _amazon_response_cache(session)
+    cache_key = _amazon_cache_key(candidate, expect_search)
+    cached_response = cache.get(cache_key)
+    if cached_response is not None:
+        return cached_response
+
+    curl_session = getattr(session, "_hermes_amazon_curl_session", None)
+    if curl_session is None:
+        curl_session = curl_requests.Session()
+        setattr(session, "_hermes_amazon_curl_session", curl_session)
     response = curl_session.get(
         candidate,
         headers=amazon_headers(candidate),
@@ -224,6 +237,7 @@ def _get_amazon_response_with_curl(candidate: str, timeout: int, expect_search: 
     response.raise_for_status()
     if not _is_usable_amazon_response(response, expect_search):
         raise HermesError("Amazon alternatif istekte de bos veya farkli bir sayfa dondurdu.")
+    cache[cache_key] = response
     return response
 
 
@@ -284,6 +298,17 @@ def fetch_amazon_page(session: requests.Session, url: str, timeout: int, expect_
     last_error: Optional[Exception] = None
     hard_blocked = False
     _seed_amazon_session(session)
+
+    if curl_requests is not None:
+        for candidate in amazon_url_variants(url):
+            try:
+                return _get_amazon_response_with_curl(session, candidate, timeout, expect_search)
+            except Exception as exc:  # noqa: BLE001
+                last_error = exc
+                if _is_hard_amazon_block_error(exc):
+                    hard_blocked = True
+                    break
+
     for candidate in amazon_url_variants(url):
         try:
             return _get_amazon_response(session, candidate, timeout, expect_search)
@@ -308,18 +333,6 @@ def fetch_amazon_page(session: requests.Session, url: str, timeout: int, expect_
             last_error = exc
             if _is_hard_amazon_block_error(exc):
                 hard_blocked = True
-
-    if curl_requests is not None:
-        curl_candidates = amazon_url_variants(url)
-        if hard_blocked:
-            curl_candidates = curl_candidates[:1]
-        for candidate in curl_candidates:
-            try:
-                return _get_amazon_response_with_curl(candidate, timeout, expect_search)
-            except Exception as exc:  # noqa: BLE001
-                last_error = exc
-                if _is_hard_amazon_block_error(exc):
-                    break
 
     if last_error:
         raise last_error
