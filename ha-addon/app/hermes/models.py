@@ -1,35 +1,18 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from decimal import Decimal
 from typing import List, Optional
 
 
 @dataclass
-class ProductRule:
+class WatchRule:
     name: str
     site: str
     url: str
     target_price: Decimal
+    max_items_to_scan: int = 24
     check_interval_minutes: Optional[int] = None
     notify_once_in_24h: bool = True
     active: bool = True
-
-
-@dataclass
-class AmazonSearchTarget:
-    name: str
-    search_name: str
-    product_name: str
-    target_price: Decimal
-    notify_once_in_24h: bool = True
-    active: bool = True
-
-
-@dataclass
-class AmazonSearchPage:
-    name: str
-    search_urls: List[str]
-    max_items_to_scan: int = 24
-    targets: List[AmazonSearchTarget] = field(default_factory=list)
 
 
 @dataclass
@@ -70,8 +53,7 @@ class HermesConfig:
     request_delay_max_seconds: int
     pushover_user_key: str
     pushover_api_token: str
-    products: List[ProductRule]
-    amazon_search_pages: List[AmazonSearchPage]
+    watches: List[WatchRule]
     telegram: "TelegramConfig"
 
 

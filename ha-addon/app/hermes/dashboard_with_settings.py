@@ -24,11 +24,7 @@ def _collect_summary_all_errors():
     latest_summary = load_json(SUMMARY_PATH, {})
     if not isinstance(latest_summary, dict):
         latest_summary = {}
-    products = options.get("products") if isinstance(options.get("products"), list) else []
-    pages = options.get("amazon_search_pages", options.get("search_pages", []))
-    targets = options.get("amazon_search_targets", options.get("search_targets", []))
-    pages = pages if isinstance(pages, list) else []
-    targets = targets if isinstance(targets, list) else []
+    watches = options.get("takip_edilenler") if isinstance(options.get("takip_edilenler"), list) else []
     contexts = dashboard_module._error_contexts(options if isinstance(options, dict) else {})
 
     error_cutoff = timedelta(hours=24)
@@ -53,22 +49,11 @@ def _collect_summary_all_errors():
                     if detail_key not in seen_details:
                         seen_details.add(detail_key)
                         error_details.append(detail)
-            nested = value.get("targets")
-            if isinstance(nested, dict):
-                for target_state in nested.values():
-                    if not isinstance(target_state, dict):
-                        continue
-                    checked_at = parse_iso_datetime(target_state.get("last_checked_at"))
-                    if checked_at:
-                        last_checks.append(checked_at.astimezone())
-
     interval_seconds = int(options.get("interval_seconds") or 60)
     last_check = max(last_checks) if last_checks else None
     return {
         "interval": interval_seconds,
-        "products": len(products),
-        "amazon_pages": len(pages),
-        "amazon_targets": len(targets),
+        "watches": len(watches),
         "last_check": last_check.strftime("%Y-%m-%d %H:%M:%S") if last_check else "-",
         "next_check": (last_check + timedelta(seconds=interval_seconds)).strftime("%Y-%m-%d %H:%M:%S") if last_check else "-",
         "cycle_duration": dashboard_module._duration_text(

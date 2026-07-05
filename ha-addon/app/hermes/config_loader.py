@@ -7,11 +7,11 @@ from .constants import (
     OPTIONS_PATH,
 )
 from .errors import HermesError
-from .models import AmazonSearchPage, AmazonSearchTarget, HermesConfig, ProductRule, TelegramConfig
+from .models import HermesConfig, TelegramConfig, WatchRule
 from .storage import load_json
 from .utils import detect_site_from_url, parse_bool, parse_decimal
 
-PRODUCT_URL_FIELDS = ("url_1", "url_2", "url_3", "url_4", "url_5")
+WATCH_URL_FIELDS = ("url_1", "url_2", "url_3", "url_4", "url_5")
 
 
 def _required_value(item: Dict[str, object], field_name: str, context: str) -> str:
@@ -46,32 +46,12 @@ def _optional_bounded_integer(
     return value
 
 
-def _parse_search_urls(item: Dict[str, object]) -> List[str]:
+def _watch_urls(item: Dict[str, object]) -> List[str]:
     urls: List[str] = []
-    for field_name in ("search_url", "search_url_2"):
+    for field_name in WATCH_URL_FIELDS:
         raw_url = str(item.get(field_name) or "").strip()
         if raw_url and raw_url not in urls:
             urls.append(raw_url)
-    if not urls:
-        raise HermesError("Amazon arama sayfası için en az search_url doldurulmalı.")
-    return urls
-
-
-def _product_urls(item: Dict[str, object]) -> List[str]:
-    urls: List[str] = []
-    for field_name in PRODUCT_URL_FIELDS:
-        raw_url = str(item.get(field_name) or "").strip()
-        if raw_url and raw_url not in urls:
-            urls.append(raw_url)
-    raw_urls = item.get("urls")
-    if isinstance(raw_urls, list):
-        for raw_url in raw_urls:
-            url = str(raw_url or "").strip()
-            if url and url not in urls:
-                urls.append(url)
-    legacy_url = str(item.get("url") or "").strip()
-    if legacy_url and legacy_url not in urls:
-        urls.append(legacy_url)
     return urls
 
 
@@ -126,89 +106,39 @@ def _prepare_telegram_config(payload: Dict[str, object]) -> TelegramConfig:
     )
 
 
-def _prepare_products(raw_products: object) -> List[ProductRule]:
-    products: List[ProductRule] = []
-    if not isinstance(raw_products, list):
-        return products
-    for item in raw_products:
+def _prepare_watches(raw_watches: object) -> List[WatchRule]:
+    watches: List[WatchRule] = []
+    if not isinstance(raw_watches, list):
+        return watches
+    for item in raw_watches:
         if not isinstance(item, dict):
             continue
         if not parse_bool(item.get("active"), default=True):
             continue
-        urls = _product_urls(item)
+        urls = _watch_urls(item)
         if not urls:
             continue
-        name = str(item.get("name") or urls[0]).strip()
-        target_price = parse_decimal(_required_value(item, "target_price", f"Ürün ({name})"))
+        name = str(item.get("name") or "").strip()
+        if not name:
+            raise HermesError("Takip edilen kayıt için name alanı zorunlu.")
+        target_price = parse_decimal(_required_value(item, "target_price", f"Takip edilen ({name})"))
+        max_items_to_scan = _bounded_integer(item, "max_items_to_scan", 24, 1, 100)
         check_interval_minutes = _optional_bounded_integer(item, "check_interval_minutes", 1, 1440)
         notify_once_in_24h = parse_bool(item.get("notify_once_in_24H"), default=True)
         for url in urls:
-            products.append(
-                ProductRule(
+            watches.append(
+                WatchRule(
                     name=name,
                     site=detect_site_from_url(url),
                     url=url,
                     target_price=target_price,
+                    max_items_to_scan=max_items_to_scan,
                     check_interval_minutes=check_interval_minutes,
                     notify_once_in_24h=notify_once_in_24h,
                     active=True,
                 )
             )
-    return products
-
-
-def _prepare_search_pages(raw_pages: object) -> Dict[str, AmazonSearchPage]:
-    pages: Dict[str, AmazonSearchPage] = {}
-    if not isinstance(raw_pages, list):
-        return pages
-    for item in raw_pages:
-        if not isinstance(item, dict):
-            continue
-        page_name = str(item.get("name") or "").strip()
-        if not page_name:
-            continue
-        pages[page_name] = AmazonSearchPage(
-            name=page_name,
-            search_urls=_parse_search_urls(item),
-            max_items_to_scan=int(item.get("max_items_to_scan", 24)),
-            targets=[],
-        )
-    return pages
-
-
-def _attach_search_targets(pages: Dict[str, AmazonSearchPage], raw_targets: object) -> None:
-    if not isinstance(raw_targets, list):
-        return
-    for item in raw_targets:
-        if not isinstance(item, dict):
-            continue
-        if not parse_bool(item.get("active"), default=True):
-            continue
-        search_name = str(item.get("search_name") or "").strip()
-        if not search_name and len(pages) == 1:
-            search_name = next(iter(pages))
-        if not search_name:
-            raise HermesError(
-                "Birden fazla amazon_search_pages varsa amazon_search_targets içinde search_name doldurulmalı."
-            )
-        if search_name not in pages:
-            raise HermesError(
-                f"amazon_search_targets içinde tanımlanan arama sayfası bulunamadı: {search_name}"
-            )
-
-        product_name = str(item.get("product_name") or item.get("name") or "").strip()
-        if not product_name:
-            continue
-        pages[search_name].targets.append(
-            AmazonSearchTarget(
-                name=product_name,
-                search_name=search_name,
-                product_name=product_name,
-                target_price=parse_decimal(_required_value(item, "target_price", f"Amazon hedefi ({product_name})")),
-                notify_once_in_24h=parse_bool(item.get("notify_once_in_24H"), default=True),
-                active=True,
-            )
-        )
+    return watches
 
 
 def load_config() -> HermesConfig:
@@ -244,22 +174,13 @@ def load_config() -> HermesConfig:
     user_key = str(payload.get("pushover_user_key", "")).strip()
     api_token = str(payload.get("pushover_api_token", "")).strip()
 
-    raw_products = payload.get("products", [])
-    raw_pages = payload.get("amazon_search_pages", [])
-    raw_targets = payload.get("amazon_search_targets", [])
-
-    products = _prepare_products(raw_products)
-    pages = _prepare_search_pages(raw_pages)
-    _attach_search_targets(pages, raw_targets)
-    search_pages = list(pages.values())
+    watches = _prepare_watches(payload.get("takip_edilenler", []))
     telegram = _prepare_telegram_config(payload)
 
-    if not products and not search_pages and not telegram.enabled:
-        raise HermesError("En az bir products, amazon_search_pages veya Telegram dinleme kaydı tanımlanmalı.")
+    if not watches and not telegram.enabled:
+        raise HermesError("En az bir takip edilen kayıt veya Telegram dinleme kaydı tanımlanmalı.")
     if not user_key or not api_token:
         raise HermesError("Pushover anahtarları zorunlu.")
-    if raw_pages and not any(page.targets for page in search_pages):
-        raise HermesError("En az bir amazon_search_targets kaydı tanımlanmalı.")
     if telegram.enabled:
         if not telegram.api_id or not telegram.api_hash or not telegram.phone_number:
             raise HermesError("Telegram aktifse api_id, api_hash ve phone_number zorunlu.")
@@ -275,7 +196,6 @@ def load_config() -> HermesConfig:
         request_delay_max_seconds=request_delay_max_seconds,
         pushover_user_key=user_key,
         pushover_api_token=api_token,
-        products=products,
-        amazon_search_pages=search_pages,
+        watches=watches,
         telegram=telegram,
     )

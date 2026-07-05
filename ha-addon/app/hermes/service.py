@@ -11,7 +11,6 @@ import requests
 from .config_loader import load_config
 from .constants import (
     AMAZON_SEARCH_ERROR_NOTIFICATION_HOUR,
-    AMAZON_SEARCH_HTTP_COOLDOWN_SECONDS,
     APP_VERSION,
     NOTIFY_REPEAT_SECONDS,
     SITE_AMAZON,
@@ -23,7 +22,7 @@ from .constants import (
 from .errors import HermesError
 from .http_client import cleaned_html, fetch_amazon_page, fetch_hepsiburada_page, fetch_with_retries
 from .logging_utils import log
-from .models import AmazonSearchPage, HermesConfig, OfferResult, PriceSummaryRow, ProductRule, SearchResultItem
+from .models import HermesConfig, OfferResult, PriceSummaryRow, SearchResultItem, WatchRule
 from .notifier import send_pushover
 from .providers.registry import extract_offer
 from .search_amazon import (
@@ -73,7 +72,6 @@ AMAZON_EMPTY_ALERT_MIN_FAILED_LINKS = 3
 PRICE_HISTORY_SPIKE_RATIO = Decimal("5")
 PRICE_HISTORY_SPIKE_ABSOLUTE_TL = Decimal("50000")
 PRICE_HISTORY_KEYS = ("min_price", "max_price", "min_price_at", "max_price_at")
-AMAZON_PRODUCT_SEARCH_MAX_ITEMS = 24
 
 
 def raise_if_age_verification(html: str) -> None:
@@ -195,8 +193,8 @@ def sanitized_price_bounds(
     return min_price, max_price
 
 
-def product_check_due(product: ProductRule, state_entry: Dict[str, Any], global_interval_seconds: int) -> bool:
-    interval_seconds = product.check_interval_minutes * 60 if product.check_interval_minutes else global_interval_seconds
+def watch_check_due(watch: WatchRule, state_entry: Dict[str, Any], global_interval_seconds: int) -> bool:
+    interval_seconds = watch.check_interval_minutes * 60 if watch.check_interval_minutes else global_interval_seconds
     last_checked = parse_iso_datetime(state_entry.get("last_checked_at"))
     if not last_checked:
         return True
@@ -204,17 +202,17 @@ def product_check_due(product: ProductRule, state_entry: Dict[str, Any], global_
     return elapsed_seconds >= interval_seconds
 
 
-def summary_row_from_state(product: ProductRule, state_entry: Dict[str, Any], seller: str):
+def summary_row_from_state(watch: WatchRule, state_entry: Dict[str, Any], seller: str):
     price = _state_decimal(state_entry.get("last_price"))
     if price is None:
         return None
-    min_price, max_price = sanitized_price_bounds(state_entry, price, product.target_price)
+    min_price, max_price = sanitized_price_bounds(state_entry, price, watch.target_price)
     return PriceSummaryRow(
         seller=seller,
-        product_title=str(state_entry.get("title") or product.name or product.url),
-        product_url=str(state_entry.get("url") or state_entry.get("configured_url") or product.url),
+        product_title=str(state_entry.get("title") or watch.name or watch.url),
+        product_url=str(state_entry.get("url") or state_entry.get("configured_url") or watch.url),
         price=price,
-        target_price=product.target_price,
+        target_price=watch.target_price,
         min_price=min_price,
         max_price=max_price,
     )
@@ -393,32 +391,12 @@ def reset_notification_suppression() -> int:
     for key, value in list(state.items()):
         if key == "_meta" or not isinstance(value, dict):
             continue
-        if isinstance(value.get("targets"), dict):
-            for target_state in value["targets"].values():
-                if not isinstance(target_state, dict) or not isinstance(target_state.get("items"), dict):
-                    continue
-                for item_state in target_state["items"].values():
-                    if isinstance(item_state, dict) and _clear_alert_suppression(item_state):
-                        reset_count += 1
-            continue
         if _clear_alert_suppression(value, force_product_due=True):
             reset_count += 1
 
     save_json(STATE_PATH, state)
     log(f"Bildirim susturma hafizasi sifirlandi: kayit={reset_count}")
     return reset_count
-
-
-def cooldown_remaining_seconds(search_state: Dict[str, Any]) -> int:
-    status = search_state.get("last_error_status")
-    if status not in {429, 503}:
-        return 0
-    last_checked = parse_iso_datetime(search_state.get("last_checked_at"))
-    if not last_checked:
-        return 0
-    elapsed = (local_now().astimezone(timezone.utc) - last_checked).total_seconds()
-    remaining = AMAZON_SEARCH_HTTP_COOLDOWN_SECONDS - int(elapsed)
-    return max(0, remaining)
 
 
 def amazon_protection_cooldown_seconds() -> int:
@@ -520,30 +498,6 @@ def update_error_notification_state(state_entry: Dict[str, Any]) -> Dict[str, An
     return updated
 
 
-def reset_missing_alerts(
-    updated_items_state: Dict[str, Any], seen_item_keys: set, page_name: str, target_name: str
-) -> None:
-    missing_reset_count = 0
-    for missing_item_key, missing_item_state in list(updated_items_state.items()):
-        if missing_item_key in seen_item_keys or not isinstance(missing_item_state, dict):
-            continue
-        if (
-            missing_item_state.get("last_alerted_price") is not None
-            or missing_item_state.get("last_alerted_at") is not None
-        ):
-            changed = dict(missing_item_state)
-            changed.pop("last_alerted_price", None)
-            changed.pop("last_alerted_at", None)
-            changed["last_missing_at"] = utc_now()
-            updated_items_state[missing_item_key] = changed
-            missing_reset_count += 1
-    if missing_reset_count:
-        log(
-            f"Amazon aramada kaybolan urunler tekrar bildirim icin hazirlandi: "
-            f"{page_name} / {target_name} | adet={missing_reset_count}"
-        )
-
-
 def should_reset_product_alert_on_error(exc: Exception) -> bool:
     normalized = normalize_offer_text(str(exc))
     return any(marker in normalized for marker in PRODUCT_MISSING_PRICE_MARKERS)
@@ -563,16 +517,11 @@ def reset_product_alert_after_missing(
 
 
 def summary_config_signature(config: HermesConfig) -> str:
-    product_part = ",".join(
-        f"{product.site}:{product.url}:{product.target_price}:{product.active}"
-        for product in config.products
+    watch_part = ",".join(
+        f"{watch.site}:{watch.url}:{watch.target_price}:{watch.active}"
+        for watch in config.watches
     )
-    search_part = ",".join(
-        f"{page.name}:{len(page.search_urls)}:"
-        + ",".join(f"{target.name}:{target.target_price}:{target.active}" for target in page.targets)
-        for page in config.amazon_search_pages
-    )
-    return f"products={product_part}|search={search_part}"
+    return f"watches={watch_part}"
 
 
 def summary_drop_threshold(expected_count: int) -> int:
@@ -638,7 +587,7 @@ def maybe_alert_summary_drop(
                 f"Bu tur bulunan ürün sayısı: {current_count}\n"
                 f"Fark: -{drop_count}\n"
                 "Config'i, özellikle Amazon arama linklerini kontrol etmeni öneririm. "
-                "Amazon arama sayfaları geçici olarak boş veya eksik dönmüş olabilir."
+                "Amazon arama linkleri geçici olarak boş veya eksik dönmüş olabilir."
             )
             try:
                 send_pushover(
@@ -772,31 +721,14 @@ def _amazon_detail_result_cache(session: requests.Session) -> Dict[str, SearchRe
     return cache
 
 
-def _amazon_search_result_cache(session: requests.Session) -> Dict[str, List[SearchResultItem]]:
-    cache = getattr(session, "_hermes_amazon_search_result_cache", None)
-    if not isinstance(cache, dict):
-        cache = {}
-        setattr(session, "_hermes_amazon_search_result_cache", cache)
-    return cache
-
-
-def _amazon_search_cache_key(
-    search_url: str,
-    max_items_to_scan: int,
-    target_keywords: List[str],
-) -> str:
-    keywords = "|".join(sorted(normalize_key(keyword) for keyword in target_keywords if keyword))
-    return f"{search_url}|{max_items_to_scan}|{keywords}"
-
-
-def _fetch_amazon_search_product_offer(
+def _fetch_amazon_search_watch_offer(
     session: requests.Session,
-    product: ProductRule,
+    watch: WatchRule,
     config: HermesConfig,
 ) -> OfferResult:
     response = fetch_amazon_page(
         session,
-        product.url,
+        watch.url,
         config.request_timeout_seconds,
         expect_search=True,
     )
@@ -805,8 +737,8 @@ def _fetch_amazon_search_product_offer(
     if "captcha" in html.lower() and "robot" in html.lower():
         raise HermesError("Amazon bot korumasi nedeniyle captcha sayfasi dondu.")
 
-    candidates = extract_result_candidates(html, AMAZON_PRODUCT_SEARCH_MAX_ITEMS)
-    target_keywords = [product.name] if product.name else []
+    candidates = extract_result_candidates(html, watch.max_items_to_scan)
+    target_keywords = [watch.name] if watch.name else []
     results: List[SearchResultItem] = []
     skipped_detail_count = 0
     for candidate in candidates:
@@ -825,20 +757,20 @@ def _fetch_amazon_search_product_offer(
         log(f"Amazon product arama detay fiyatı atlandı: eslesmeyen_urun={skipped_detail_count}")
     if not results:
         raise HermesError("Amazon arama sayfasında okunabilir fiyat bulunamadı.")
-    offer = best_offer_from_amazon_search_results(dedupe_results(results), product.name)
+    offer = best_offer_from_amazon_search_results(dedupe_results(results), watch.name)
     log(
-        "Amazon product arama linki okundu: "
-        f"{product.name or product.url} | eslesen_fiyat={offer.price} TL"
+        "Amazon arama linki okundu: "
+        f"{watch.name or watch.url} | eslesen_fiyat={offer.price} TL"
     )
     return offer
 
 
-def _fetch_product_offer(session: requests.Session, product: ProductRule, config: HermesConfig):
-    site = product.site
-    url = product.url
+def _fetch_watch_offer(session: requests.Session, watch: WatchRule, config: HermesConfig):
+    site = watch.site
+    url = watch.url
     timeout = config.request_timeout_seconds
     if site == SITE_AMAZON and is_amazon_search_url(url):
-        return _fetch_amazon_search_product_offer(session, product, config)
+        return _fetch_amazon_search_watch_offer(session, watch, config)
     if site == SITE_HEPSIBURADA:
         response = fetch_hepsiburada_page(session, url, timeout)
     elif site == SITE_AMAZON:
@@ -877,49 +809,6 @@ def _fetch_amazon_detail_result(session: requests.Session, candidate, config: He
     return result
 
 
-def _fetch_amazon_search_results(
-    session: requests.Session,
-    search_url: str,
-    config: HermesConfig,
-    max_items_to_scan: int,
-    target_keywords: List[str],
-    label: str = "Arama",
-):
-    cache = _amazon_search_result_cache(session)
-    cache_key = _amazon_search_cache_key(search_url, max_items_to_scan, target_keywords)
-    if cache_key in cache:
-        return list(cache[cache_key])
-
-    wait_before_request(label, config)
-    response = fetch_amazon_page(session, search_url, config.request_timeout_seconds, expect_search=True)
-    html = cleaned_html(response)
-    raise_if_age_verification(html)
-    if "captcha" in html.lower() and "robot" in html.lower():
-        raise HermesError("Amazon bot korumasi nedeniyle captcha sayfasi dondu.")
-
-    candidates = extract_result_candidates(html, max_items_to_scan)
-    results: List[SearchResultItem] = []
-    skipped_detail_count = 0
-    for candidate in candidates:
-        if candidate.price is not None:
-            results.append(SearchResultItem(title=candidate.title, url=candidate.url, price=candidate.price))
-            continue
-        if not title_matches_any_keyword(candidate.title, target_keywords):
-            skipped_detail_count += 1
-            continue
-        try:
-            results.append(_fetch_amazon_detail_result(session, candidate, config))
-        except Exception as exc:  # noqa: BLE001
-            log(f"Amazon arama detay fiyatı okunamadı: {log_cell(candidate.title, 60)} | {exc}")
-
-    if skipped_detail_count:
-        log(f"Amazon detay fiyatı atlandı: eslesmeyen_urun={skipped_detail_count}")
-    if not results:
-        raise HermesError("Amazon arama sonuçlarında veya ürün detaylarında okunabilir fiyat bulunamadı.")
-    cache[cache_key] = list(results)
-    return results
-
-
 def check_once(config: HermesConfig) -> None:
     cycle_started_at = time.monotonic()
     state = load_json(STATE_PATH, {})
@@ -930,29 +819,30 @@ def check_once(config: HermesConfig) -> None:
     amazon_empty_events: List[Dict[str, Any]] = []
     request_tasks: List[Dict[str, Any]] = []
 
-    def check_product(product: ProductRule, product_key: str, state_entry: Dict[str, Any], seller: str) -> None:
-        if product.site == SITE_AMAZON:
-            remaining = amazon_protection_remaining_seconds(state, product_key)
+    def check_watch(watch: WatchRule, watch_key: str, state_entry: Dict[str, Any], seller: str) -> None:
+        is_amazon_search_watch = watch.site == SITE_AMAZON and is_amazon_search_url(watch.url)
+        if watch.site == SITE_AMAZON:
+            remaining = amazon_protection_remaining_seconds(state, watch_key)
             if remaining > 0:
-                cached_row = summary_row_from_state(product, state_entry, seller)
+                cached_row = summary_row_from_state(watch, state_entry, seller)
                 if cached_row:
                     summary_rows.append(cached_row)
                 minutes = max(1, round(remaining / 60))
                 log(
                     f"Amazon linki gecici koruma nedeniyle atlandi: "
-                    f"{product.name or product.url} | kalan={minutes} dk"
+                    f"{watch.name or watch.url} | kalan={minutes} dk"
                 )
                 return
         try:
-            display_name = product.name or product.url
+            display_name = watch.name or watch.url
             wait_before_request(request_log_label(seller, display_name), config)
-            offer = _fetch_product_offer(session, product, config)
-            display_name = product.name or offer.title or product.url
-            matched_url = offer.url or product.url
+            offer = _fetch_watch_offer(session, watch, config)
+            display_name = watch.name or offer.title or watch.url
+            matched_url = offer.url or watch.url
             min_price, max_price = sanitized_price_bounds(
                 state_entry,
                 offer.price,
-                product.target_price,
+                watch.target_price,
                 f"{seller} | {display_name}",
             )
             summary_rows.append(
@@ -961,24 +851,24 @@ def check_once(config: HermesConfig) -> None:
                     product_title=offer.title or display_name,
                     product_url=matched_url,
                     price=offer.price,
-                    target_price=product.target_price,
+                    target_price=watch.target_price,
                     min_price=min_price,
                     max_price=max_price,
                 )
             )
             log(
                 f"Kontrol edildi: {seller} | {display_name} | fiyat={offer.price} TL | "
-                f"hedef={product.target_price} TL"
+                f"hedef={watch.target_price} TL"
             )
 
             alert_sent = False
-            if should_alert(state_entry, offer.price, product.target_price, product.notify_once_in_24h):
-                seller_note = f" ({offer.seller})" if offer.seller and product.site == SITE_HEPSIBURADA else ""
+            if should_alert(state_entry, offer.price, watch.target_price, watch.notify_once_in_24h):
+                seller_note = f" ({offer.seller})" if offer.seller and watch.site == SITE_HEPSIBURADA else ""
                 message = (
                     f"Site: {seller}\n"
                     f"{display_name}\n"
                     f"Guncel fiyat: {offer.price} TL{seller_note}\n"
-                    f"Hedef fiyat: {product.target_price} TL"
+                    f"Hedef fiyat: {watch.target_price} TL"
                 )
                 send_pushover(
                     session,
@@ -992,7 +882,7 @@ def check_once(config: HermesConfig) -> None:
                 alert_sent = True
                 log(f"Bildirim gonderildi: {seller} | {display_name}")
                 save_price_summary(summary_rows)
-            elif offer.price <= product.target_price and product.notify_once_in_24h:
+            elif offer.price <= watch.target_price and watch.notify_once_in_24h:
                 log(
                     f"Bildirim atlandi, 24 saat dolmadi veya fiyat daha dusuk degil: "
                     f"{seller} | {matched_url}"
@@ -1001,211 +891,34 @@ def check_once(config: HermesConfig) -> None:
             state[product_key] = update_state_entry(
                 state_entry,
                 offer.price,
-                product.target_price,
+                watch.target_price,
                 alert_sent,
                 f"{seller} | {display_name}",
             )
-            state[product_key]["title"] = offer.title
-            state[product_key]["url"] = matched_url
-            state[product_key]["configured_url"] = product.url
-            state[product_key]["site"] = product.site
-            state[product_key]["last_error"] = None
-            state[product_key]["last_error_status"] = None
+            state[watch_key]["title"] = offer.title
+            state[watch_key]["url"] = matched_url
+            state[watch_key]["configured_url"] = watch.url
+            state[watch_key]["watch_name"] = watch.name
+            state[watch_key]["site"] = watch.site
+            state[watch_key]["last_error"] = None
+            state[watch_key]["last_error_status"] = None
         except Exception as exc:  # noqa: BLE001
-            log(f"Hata: {seller} | {product.url} | {exc}")
-            if product.site == SITE_AMAZON and is_amazon_protection_error(exc):
-                note_amazon_protection(state, product_key, product.name or product.url, exc)
+            log(f"Hata: {seller} | {watch.url} | {exc}")
+            if watch.site == SITE_AMAZON and is_amazon_protection_error(exc):
+                note_amazon_protection(state, watch_key, watch.name or watch.url, exc)
+            if is_amazon_search_watch:
+                amazon_empty_events.append({"page": watch.name, "failed_links": 1, "full_empty": True})
             failed = dict(state_entry)
             if should_reset_product_alert_on_error(exc):
-                failed = reset_product_alert_after_missing(failed, seller, product.name or product.url)
-            failed["site"] = product.site
-            failed["last_error"] = str(exc)
-            failed["last_error_status"] = getattr(exc, "status_code", None)
-            failed["last_checked_at"] = utc_now()
-            state[product_key] = failed
-
-    def check_amazon_search_page(
-        page: AmazonSearchPage, page_key: str, page_state: Dict[str, Any]
-    ) -> None:
-        try:
-            all_results = []
-            failed_urls = []
-            target_keywords = [target.product_name for target in page.targets]
-            for idx, search_url in enumerate(page.search_urls, start=1):
-                url_key = normalize_item_key("amazon_search_url", page.name, search_url)
-                remaining = amazon_protection_remaining_seconds(state, url_key)
-                if remaining > 0:
-                    minutes = max(1, round(remaining / 60))
-                    failed_urls.append(f"{search_url} | gecici koruma nedeniyle atlandi")
-                    log(
-                        f"Amazon arama linki gecici koruma nedeniyle atlandi: {page.name} | "
-                        f"link={idx}/{len(page.search_urls)} | kalan={minutes} dk"
-                    )
-                    continue
+                failed = reset_product_alert_after_missing(failed, seller, watch.name or watch.url)
+            if is_amazon_search_watch and should_send_search_error_notification(failed):
                 try:
-                    url_results = _fetch_amazon_search_results(
-                        session,
-                        search_url,
-                        config,
-                        page.max_items_to_scan,
-                        target_keywords,
-                        request_log_label("Amazon arama", page.name, f"link {idx}/{len(page.search_urls)}"),
-                    )
-                    all_results.extend(url_results)
-                    log(
-                        f"Arama linki kontrol edildi: {page.name} | "
-                        f"link={idx}/{len(page.search_urls)} | okunan_urun={len(url_results)}"
-                    )
-                except Exception as exc:  # noqa: BLE001
-                    failed_urls.append(f"{search_url} | {exc}")
-                    if is_amazon_protection_error(exc):
-                        note_amazon_protection(state, url_key, f"{page.name} link {idx}", exc)
-                    log(f"Arama linki hatasi: {page.name} | link={idx}/{len(page.search_urls)} | {exc}")
-
-            if not all_results:
-                amazon_empty_events.append(
-                    {
-                        "page": page.name,
-                        "failed_links": len(failed_urls) or len(page.search_urls),
-                        "full_empty": True,
-                    }
-                )
-                raise HermesError("Amazon arama sayfasindaki linklerin hicbirinde okunabilir urun bulunamadi.")
-
-            results = dedupe_results(all_results)
-            targets_state = dict(page_state.get("targets", {}))
-
-            if not results:
-                amazon_empty_events.append(
-                    {
-                        "page": page.name,
-                        "failed_links": len(failed_urls) or len(page.search_urls),
-                        "full_empty": True,
-                    }
-                )
-                raise HermesError("Amazon arama sayfasindaki linklerin hicbirinde okunabilir urun bulunamadi.")
-
-            if failed_urls:
-                amazon_empty_events.append(
-                    {
-                        "page": page.name,
-                        "failed_links": len(failed_urls),
-                        "full_empty": False,
-                    }
-                )
-
-            log(
-                f"Arama sayfasi kontrol edildi: {page.name} | okunan_urun={len(results)} | "
-                f"link_sayisi={len(page.search_urls)} | hedef_sayisi={len(page.targets)}"
-            )
-
-            for target in page.targets:
-                target_key = normalize_key(target.name)
-                target_state = targets_state.get(target_key, {})
-                items_state = target_state.get("items", {})
-                updated_items_state = dict(items_state)
-                matches = filter_matching_results(results, target.product_name)
-                seen_item_keys = set()
-
-                log(
-                    f"Arama hedefi kontrol edildi: {page.name} / {target.name} | "
-                    f"eslesen_urun={len(matches)} | hedef={target.target_price} TL"
-                )
-
-                for match in matches:
-                    item_key = normalize_key(match.url)
-                    seen_item_keys.add(item_key)
-                    item_state = dict(items_state.get(item_key, {}))
-                    min_price, max_price = sanitized_price_bounds(
-                        item_state,
-                        match.price,
-                        target.target_price,
-                        f"Amazon arama | {page.name} | {match.title}",
-                    )
-                    summary_rows.append(
-                        PriceSummaryRow(
-                            seller="Amazon",
-                            product_title=match.title,
-                            product_url=match.url,
-                            price=match.price,
-                            target_price=target.target_price,
-                            min_price=min_price,
-                            max_price=max_price,
-                        )
-                    )
-                    alert_sent = False
-
-                    if should_alert(
-                        item_state,
-                        match.price,
-                        target.target_price,
-                        target.notify_once_in_24h,
-                    ):
-                        message = (
-                            f"Amazon arama: {page.name}\n"
-                            f"Hedef: {target.name}\n"
-                            f"Eslesen urun: {match.title}\n"
-                            f"Guncel fiyat: {match.price} TL\n"
-                            f"Hedef fiyat: {target.target_price} TL"
-                        )
-                        send_pushover(
-                            session,
-                            config.pushover_user_key,
-                            config.pushover_api_token,
-                            "Amazon arama alarmi",
-                            message,
-                            match.url,
-                            config.request_timeout_seconds,
-                        )
-                        alert_sent = True
-                        log(f"Arama bildirimi gonderildi: {target.name} | {match.title}")
-                        save_price_summary(summary_rows)
-                    elif match.price <= target.target_price and target.notify_once_in_24h:
-                        log(
-                            "Arama bildirimi atlandi, 24 saat dolmadi veya fiyat daha dusuk degil: "
-                            f"{match.title} | fiyat={match.price} TL"
-                        )
-
-                    updated_items_state[item_key] = update_state_entry(
-                        item_state,
-                        match.price,
-                        target.target_price,
-                        alert_sent,
-                        f"Amazon arama | {page.name} | {match.title}",
-                    )
-                    updated_items_state[item_key]["title"] = match.title
-                    updated_items_state[item_key]["url"] = match.url
-                    updated_items_state[item_key]["last_error"] = None
-
-                if not failed_urls:
-                    reset_missing_alerts(updated_items_state, seen_item_keys, page.name, target.name)
-
-                targets_state[target_key] = {
-                    "items": updated_items_state,
-                    "last_match_count": len(matches),
-                    "last_checked_at": utc_now(),
-                }
-
-            state[page_key] = {
-                "targets": targets_state,
-                "last_checked_at": utc_now(),
-                "last_error": None if not failed_urls else "; ".join(failed_urls)[:900],
-                "last_error_status": None,
-                "last_error_notified_at": page_state.get("last_error_notified_at"),
-            }
-        except Exception as exc:  # noqa: BLE001
-            error_message = str(exc)
-            error_status = getattr(exc, "status_code", None)
-            log(f"Hata: {' | '.join(page.search_urls)} | {error_message}")
-            updated_page_state = dict(page_state)
-            if should_send_search_error_notification(updated_page_state):
-                try:
-                    target_names = ", ".join(target.name for target in page.targets)
                     message = (
-                        f"Amazon arama: {page.name}\n"
-                        f"Hedefler: {target_names}\n"
-                        f"Hata: {error_message}\n"
-                        "Kontrol etmen gerekebilir: link gecersiz olabilir, Amazon korumasi olabilir veya sayfa yapisi degismis olabilir."
+                        f"Amazon arama: {watch.name}\n"
+                        f"Aranan keyword: {watch.name}\n"
+                        f"Hata: {exc}\n"
+                        f"Link: {watch.url}\n"
+                        "Kontrol etmen gerekebilir: link geçersiz olabilir, Amazon koruması olabilir veya sayfa yapısı değişmiş olabilir."
                     )
                     send_pushover(
                         session,
@@ -1213,67 +926,39 @@ def check_once(config: HermesConfig) -> None:
                         config.pushover_api_token,
                         "Amazon arama hatasi",
                         message[:900],
-                        page.search_urls[0],
+                        watch.url,
                         config.request_timeout_seconds,
                     )
-                    updated_page_state = update_error_notification_state(updated_page_state)
-                    log(f"Amazon arama hata bildirimi gonderildi: {page.name}")
+                    failed = update_error_notification_state(failed)
+                    log(f"Amazon arama hata bildirimi gonderildi: {watch.name}")
                 except Exception as notify_exc:  # noqa: BLE001
-                    log(f"Amazon arama hata bildirimi gonderilemedi: {page.name} | {notify_exc}")
+                    log(f"Amazon arama hata bildirimi gonderilemedi: {watch.name} | {notify_exc}")
+            failed["site"] = watch.site
+            failed["watch_name"] = watch.name
+            failed["configured_url"] = watch.url
+            failed["last_error"] = str(exc)
+            failed["last_error_status"] = getattr(exc, "status_code", None)
+            failed["last_checked_at"] = utc_now()
+            state[watch_key] = failed
 
-            updated_page_state["last_error"] = error_message
-            updated_page_state["last_error_status"] = error_status
-            updated_page_state["last_checked_at"] = utc_now()
-            state[page_key] = updated_page_state
-
-    for product in config.products:
-        product_key = normalize_item_key("product", product.site, product.url)
-        state_entry = state.get(product_key, {})
+    for watch in config.watches:
+        watch_key = normalize_item_key("watch", watch.site, watch.name, watch.url)
+        state_entry = state.get(watch_key, {})
         if not isinstance(state_entry, dict):
             state_entry = {}
-        seller = site_label(product.site)
-        if not product_check_due(product, state_entry, config.interval_seconds):
-            cached_row = summary_row_from_state(product, state_entry, seller)
+        seller = site_label(watch.site)
+        if not watch_check_due(watch, state_entry, config.interval_seconds):
+            cached_row = summary_row_from_state(watch, state_entry, seller)
             if cached_row:
                 summary_rows.append(cached_row)
             continue
 
         request_tasks.append(
             {
-                "site": product.site,
-                "name": product.name or product.url,
-                "run": lambda product=product, product_key=product_key, state_entry=state_entry, seller=seller: check_product(
-                    product, product_key, state_entry, seller
-                ),
-            }
-        )
-
-    for page in config.amazon_search_pages:
-        if not page.targets:
-            log(f"Amazon arama atlandi: {page.name} | Bu arama sayfasina hedef urun eklenmemis.")
-            continue
-        page_key = normalize_item_key("amazon_search", page.name, *page.search_urls)
-        page_state = state.get(page_key, {})
-        if not isinstance(page_state, dict):
-            page_state = {}
-        remaining = cooldown_remaining_seconds(page_state)
-        if remaining > 0:
-            minutes = max(1, round(remaining / 60))
-            log(
-                f"Amazon arama gecici olarak atlandi: {page.name} | "
-                f"Amazon korumasi sonrasi {minutes} dk sonra yeniden denenecek."
-            )
-            skipped = dict(page_state)
-            skipped["last_skipped_at"] = utc_now()
-            state[page_key] = skipped
-            continue
-
-        request_tasks.append(
-            {
-                "site": SITE_AMAZON,
-                "name": page.name,
-                "run": lambda page=page, page_key=page_key, page_state=page_state: check_amazon_search_page(
-                    page, page_key, page_state
+                "site": watch.site,
+                "name": watch.name or watch.url,
+                "run": lambda watch=watch, watch_key=watch_key, state_entry=state_entry, seller=seller: check_watch(
+                    watch, watch_key, state_entry, seller
                 ),
             }
         )
@@ -1281,7 +966,7 @@ def check_once(config: HermesConfig) -> None:
     for task in balanced_request_order(request_tasks):
         task["run"]()
 
-    if config.products or config.amazon_search_pages:
+    if config.watches:
         scan_duration_seconds = time.monotonic() - cycle_started_at
         cycle_duration_seconds = scan_duration_seconds + config.interval_seconds
         publish_price_summary(summary_rows, cycle_duration_seconds, scan_duration_seconds)

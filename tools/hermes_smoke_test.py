@@ -13,7 +13,7 @@ sys.path.insert(0, str(APP_PATH))
 from hermes import service  # noqa: E402
 from hermes import http_client  # noqa: E402
 from hermes.http_client import amazon_url_variants, fetch_amazon_page  # noqa: E402
-from hermes.config_loader import _prepare_products  # noqa: E402
+from hermes.config_loader import _prepare_watches  # noqa: E402
 from hermes.models import PriceSummaryRow, SearchResultItem  # noqa: E402
 from hermes.providers.base import soup_from_html  # noqa: E402
 from hermes.providers.hepsiburada import (  # noqa: E402
@@ -592,8 +592,8 @@ class HermesSmokeTests(unittest.TestCase):
         self.assertFalse(service.is_bot_protection_page("nordbron", html))
         self.assertTrue(service.is_bot_protection_page("nordbron", "captcha robot"))
 
-    def test_product_card_can_expand_to_multiple_site_links(self):
-        products = _prepare_products(
+    def test_watch_card_can_expand_to_multiple_site_links(self):
+        watches = _prepare_watches(
             [
                 {
                     "name": "Ortak ürün",
@@ -606,23 +606,23 @@ class HermesSmokeTests(unittest.TestCase):
                 }
             ]
         )
-        self.assertEqual(len(products), 3)
-        self.assertEqual([item.site for item in products], ["amazon", "hepsiburada", "nordbron"])
-        self.assertTrue(all(item.name == "Ortak ürün" for item in products))
+        self.assertEqual(len(watches), 3)
+        self.assertEqual([item.site for item in watches], ["amazon", "hepsiburada", "nordbron"])
+        self.assertTrue(all(item.name == "Ortak ürün" for item in watches))
 
-    def test_legacy_product_url_still_loads(self):
-        products = _prepare_products(
+    def test_watch_card_detects_site_from_url(self):
+        watches = _prepare_watches(
             [
                 {
-                    "name": "Eski ürün",
+                    "name": "Yeni ürün",
                     "target_price": 1000,
-                    "url": "https://www.trendyol.com/ornek/urun-p-1",
+                    "url_1": "https://www.trendyol.com/ornek/urun-p-1",
                     "active": True,
                 }
             ]
         )
-        self.assertEqual(len(products), 1)
-        self.assertEqual(products[0].site, "trendyol")
+        self.assertEqual(len(watches), 1)
+        self.assertEqual(watches[0].site, "trendyol")
 
 
 if __name__ == "__main__":

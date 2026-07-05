@@ -14,7 +14,7 @@ from .utils import parse_bool
 
 ADDON_SLUG = "hermes"
 SUPERVISOR_BASE_URL = "http://supervisor"
-PRODUCT_URL_FIELDS = ("url_1", "url_2", "url_3", "url_4", "url_5")
+WATCH_URL_FIELDS = ("url_1", "url_2", "url_3", "url_4", "url_5")
 
 SETTINGS_CSS = """
 :root { color-scheme: dark; --bg:#0f1222; --panel:#171a30; --card:#1e2139; --line:#313658; --text:#e8eaf8; --muted:#a6abd1; --accent:#c7a6ff; --accent2:#8ed6d2; --ok:#7fdcb8; --bad:#ff9cb5; }
@@ -89,30 +89,14 @@ def _summary_name(item, fallback):
     return fallback
 
 
-def _product_urls_for_form(item):
+def _watch_urls_for_form(item):
     urls = []
     if isinstance(item, dict):
-        for field_name in PRODUCT_URL_FIELDS:
+        for field_name in WATCH_URL_FIELDS:
             url = str(item.get(field_name) or "").strip()
             if url and url not in urls:
                 urls.append(url)
-        raw_urls = item.get("urls")
-        if isinstance(raw_urls, list):
-            for raw_url in raw_urls:
-                url = str(raw_url or "").strip()
-                if url and url not in urls:
-                    urls.append(url)
-        legacy_url = str(item.get("url") or "").strip()
-        if legacy_url and legacy_url not in urls:
-            urls.append(legacy_url)
-    return urls[: len(PRODUCT_URL_FIELDS)]
-
-
-def _search_target_title(item, fallback):
-    if isinstance(item, dict):
-        value = str(item.get("product_name") or item.get("name") or fallback).strip()
-        return value or fallback
-    return fallback
+    return urls[: len(WATCH_URL_FIELDS)]
 
 
 def _details(title, prefix, inner, open_when_empty=False):
@@ -120,10 +104,10 @@ def _details(title, prefix, inner, open_when_empty=False):
     return f"<details{open_attr}><summary>{escape(title)}</summary><div class='form-grid'>{inner}</div></details>"
 
 
-def _product_form(item, index, is_new=False):
-    prefix = f"products_{index}_"
-    title = "Yeni ürün ekle" if is_new else _summary_name(item, f"Ürün {index + 1}")
-    urls = _product_urls_for_form(item)
+def _watch_form(item, index, is_new=False):
+    prefix = f"watches_{index}_"
+    title = "Yeni takip ekle" if is_new else _summary_name(item, f"Takip {index + 1}")
+    urls = _watch_urls_for_form(item)
     inner = "".join(
         [
             _field(prefix, "name", "Ad", item.get("name", ""), required=not is_new),
@@ -132,44 +116,14 @@ def _product_form(item, index, is_new=False):
                 _field(
                     prefix,
                     field_name,
-                    f"Ürün URL {url_index}",
+                    f"Link {url_index}",
                     urls[url_index - 1] if len(urls) >= url_index else "",
                     "url",
                 )
-                for url_index, field_name in enumerate(PRODUCT_URL_FIELDS, start=1)
+                for url_index, field_name in enumerate(WATCH_URL_FIELDS, start=1)
             ],
+            _field(prefix, "max_items_to_scan", "Arama linklerinde taranacak maksimum ürün", item.get("max_items_to_scan", ""), "number"),
             _field(prefix, "check_interval_minutes", "Özel kontrol aralığı (dk)", item.get("check_interval_minutes", ""), "number"),
-            _checkbox(prefix, "notify_once_in_24H", "24 saat içinde aynı bildirimi tekrar gönderme", item.get("notify_once_in_24H", True)),
-            _checkbox(prefix, "active", "Aktif", item.get("active", True)),
-            _checkbox(prefix, "delete", "Sil", False, danger=True) if not is_new else "",
-        ]
-    )
-    return _details(title, prefix, inner, open_when_empty=is_new)
-
-
-def _search_page_form(item, index, is_new=False):
-    prefix = f"amazon_search_pages_{index}_"
-    title = "Yeni Amazon arama sayfası ekle" if is_new else _summary_name(item, f"Amazon arama sayfası {index + 1}")
-    inner = "".join(
-        [
-            _field(prefix, "name", "Ad", item.get("name", ""), required=not is_new),
-            _field(prefix, "search_url", "Arama URL", item.get("search_url", ""), "url", required=not is_new),
-            _field(prefix, "search_url_2", "Arama URL 2", item.get("search_url_2", ""), "url"),
-            _field(prefix, "max_items_to_scan", "Taranacak maksimum ürün", item.get("max_items_to_scan", ""), "number"),
-            _checkbox(prefix, "delete", "Sil", False, danger=True) if not is_new else "",
-        ]
-    )
-    return _details(title, prefix, inner, open_when_empty=is_new)
-
-
-def _search_target_form(item, index, is_new=False):
-    prefix = f"amazon_search_targets_{index}_"
-    title = "Yeni Amazon arama hedefi ekle" if is_new else _search_target_title(item, f"Amazon arama hedefi {index + 1}")
-    inner = "".join(
-        [
-            _field(prefix, "search_name", "Arama sayfası adı", item.get("search_name", "")),
-            _field(prefix, "product_name", "Ürün adı", item.get("product_name") or item.get("name", ""), required=not is_new),
-            _field(prefix, "target_price", "Hedef fiyat", item.get("target_price", ""), "number", required=not is_new),
             _checkbox(prefix, "notify_once_in_24H", "24 saat içinde aynı bildirimi tekrar gönderme", item.get("notify_once_in_24H", True)),
             _checkbox(prefix, "active", "Aktif", item.get("active", True)),
             _checkbox(prefix, "delete", "Sil", False, danger=True) if not is_new else "",
@@ -220,25 +174,26 @@ def _bool_from_form(form, key, default=False):
     return key in form if key in form else default
 
 
-def _build_products(form):
-    products = []
-    count = int(_first(form, "products_count", "0") or 0)
+def _build_watches(form):
+    watches = []
+    count = int(_first(form, "watches_count", "0") or 0)
     for index in range(count):
-        prefix = f"products_{index}_"
+        prefix = f"watches_{index}_"
         if _bool_from_form(form, prefix + "delete"):
             continue
         name = _first(form, prefix + "name")
         target = _first(form, prefix + "target_price")
+        max_items = _first(form, prefix + "max_items_to_scan")
         interval = _first(form, prefix + "check_interval_minutes")
         urls = []
-        for field_name in PRODUCT_URL_FIELDS:
+        for field_name in WATCH_URL_FIELDS:
             url = _first(form, prefix + field_name)
             if url and url not in urls:
                 urls.append(url)
-        if not any([name, target, interval, *urls]):
+        if not any([name, target, max_items, interval, *urls]):
             continue
         if not name or not target or not urls:
-            raise ValueError("Ürün eklerken ad, hedef fiyat ve en az bir ürün URL alanı dolu olmalı.")
+            raise ValueError("Takip eklerken ad, hedef fiyat ve en az bir link alanı dolu olmalı.")
         item = {
             "name": name,
             "target_price": _number(target),
@@ -247,60 +202,12 @@ def _build_products(form):
         }
         for url_index, url in enumerate(urls, start=1):
             item[f"url_{url_index}"] = url
-        if interval:
-            item["check_interval_minutes"] = _number(interval)
-        products.append(item)
-    return products
-
-
-def _build_search_pages(form):
-    pages = []
-    count = int(_first(form, "amazon_search_pages_count", "0") or 0)
-    for index in range(count):
-        prefix = f"amazon_search_pages_{index}_"
-        if _bool_from_form(form, prefix + "delete"):
-            continue
-        name = _first(form, prefix + "name")
-        url = _first(form, prefix + "search_url")
-        url_2 = _first(form, prefix + "search_url_2")
-        max_items = _first(form, prefix + "max_items_to_scan")
-        if not any([name, url, url_2, max_items]):
-            continue
-        if not name or not url:
-            raise ValueError("Amazon arama sayfası eklerken ad ve arama URL alanları dolu olmalı.")
-        item = {"name": name, "search_url": url}
-        if url_2:
-            item["search_url_2"] = url_2
         if max_items:
             item["max_items_to_scan"] = _number(max_items)
-        pages.append(item)
-    return pages
-
-
-def _build_search_targets(form):
-    targets = []
-    count = int(_first(form, "amazon_search_targets_count", "0") or 0)
-    for index in range(count):
-        prefix = f"amazon_search_targets_{index}_"
-        if _bool_from_form(form, prefix + "delete"):
-            continue
-        search_name = _first(form, prefix + "search_name")
-        product_name = _first(form, prefix + "product_name")
-        target_price = _first(form, prefix + "target_price")
-        if not any([search_name, product_name, target_price]):
-            continue
-        if not product_name or not target_price:
-            raise ValueError("Amazon arama hedefi eklerken ürün adı ve hedef fiyat alanları dolu olmalı.")
-        item = {
-            "product_name": product_name,
-            "target_price": _number(target_price),
-            "notify_once_in_24H": _bool_from_form(form, prefix + "notify_once_in_24H"),
-            "active": _bool_from_form(form, prefix + "active"),
-        }
-        if search_name:
-            item["search_name"] = search_name
-        targets.append(item)
-    return targets
+        if interval:
+            item["check_interval_minutes"] = _number(interval)
+        watches.append(item)
+    return watches
 
 
 def _list_from_form(form, key):
@@ -328,6 +235,19 @@ def _update_telegram_options(options, form):
     options["channels"] = _list_from_form(form, "channels") or DEFAULT_TELEGRAM_CHANNELS
     options["keywords"] = _list_from_form(form, "keywords")
     options["exclude_keywords"] = _list_from_form(form, "exclude_keywords")
+
+
+def _clean_editable_options(options):
+    keep_keys = (
+        "interval_seconds",
+        "request_delay_min_seconds",
+        "request_delay_max_seconds",
+        "pushover_user_key",
+        "pushover_api_token",
+        "public_dashboard_enabled",
+        "public_dashboard_token",
+    )
+    return {key: options[key] for key in keep_keys if key in options}
 
 
 def _current_addon_slug():
@@ -400,10 +320,8 @@ def render_settings_page(path="/"):
         notice = f"<p class='notice {css}'>{escape(message)}</p>"
     html = f"""<!doctype html>
 <html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Hermes Ayarlar</title><style>{SETTINGS_CSS}</style></head>
-<body><main><div class="hero"><h1>Hermes Ayarlar</h1><p>Listelerde yalnızca adlar görünür; satıra tıklayınca ayrıntılar açılır. Kaydettiğinde Home Assistant config güncellenir ve Hermes kısa süre içinde yeniden başlatılır.</p><div class="actions"><a class="button secondary" href="./">Ana ekran</a></div>{notice}<form method="post" action="./settings/save">
-{_section("Ürünler", options.get("products"), _product_form, "products")}
-{_section("Amazon arama sayfaları", options.get("amazon_search_pages"), _search_page_form, "amazon_search_pages")}
-{_section("Amazon arama hedefleri", options.get("amazon_search_targets"), _search_target_form, "amazon_search_targets")}
+<body><main><div class="hero"><h1>Hermes Ayarlar</h1><p>Listelerde yalnızca adlar görünür; satıra tıklayınca ayrıntılar açılır. Takip edilenler bölümünde aynı kayıt altına en fazla 5 link ekleyebilirsin; Hermes siteyi ve link tipini otomatik algılar.</p><div class="actions"><a class="button secondary" href="./">Ana ekran</a></div>{notice}<form method="post" action="./settings/save">
+{_section("Takip edilenler", options.get("takip_edilenler"), _watch_form, "watches")}
 {_telegram_section(options)}
 <div class="actions"><button class="button primary" type="submit">Kaydet</button><a class="button secondary" href="./">Vazgeç</a></div>
 <p class="footer-note">Kaydet sonrası ekran birkaç saniye içinde “yeniden başlatılıyor” mesajı verir. Hermes yeniden başlarken sayfa kısa süre yanıt vermeyebilir; 10-20 saniye sonra yenileyebilirsin.</p>
@@ -417,11 +335,8 @@ def handle_settings_save(body):
         options = load_json(OPTIONS_PATH, {})
         if not isinstance(options, dict):
             options = {}
-        options.pop("interval_minutes", None)
-        options.pop("request_timeout_seconds", None)
-        options["products"] = _build_products(form)
-        options["amazon_search_pages"] = _build_search_pages(form)
-        options["amazon_search_targets"] = _build_search_targets(form)
+        options = _clean_editable_options(options)
+        options["takip_edilenler"] = _build_watches(form)
         _update_telegram_options(options, form)
         _save_options_to_supervisor(options)
         save_json(OPTIONS_PATH, options)

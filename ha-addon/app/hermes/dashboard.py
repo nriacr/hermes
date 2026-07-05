@@ -264,20 +264,6 @@ def _unique_text(values):
     return unique
 
 
-def _target_labels_for_page(page, targets, page_count):
-    page_name = str(page.get("name") or "").strip()
-    labels = []
-    for target in targets:
-        if not isinstance(target, dict):
-            continue
-        search_name = str(target.get("search_name") or "").strip()
-        if search_name == page_name or (not search_name and page_count == 1):
-            label = str(target.get("product_name") or target.get("name") or "").strip()
-            if label:
-                labels.append(label)
-    return _unique_text(labels)
-
-
 def _target_text(labels):
     if not labels:
         return "Aranan keyword belirtilmemiş"
@@ -285,30 +271,21 @@ def _target_text(labels):
     return f"{prefix}: {', '.join(labels)}"
 
 
-PRODUCT_URL_FIELDS = ("url_1", "url_2", "url_3", "url_4", "url_5")
+WATCH_URL_FIELDS = ("url_1", "url_2", "url_3", "url_4", "url_5")
 
 
-def _product_urls_from_options(item):
+def _watch_urls_from_options(item):
     urls = []
     if not isinstance(item, dict):
         return urls
-    for field_name in PRODUCT_URL_FIELDS:
+    for field_name in WATCH_URL_FIELDS:
         url = str(item.get(field_name) or "").strip()
         if url and url not in urls:
             urls.append(url)
-    raw_urls = item.get("urls")
-    if isinstance(raw_urls, list):
-        for raw_url in raw_urls:
-            url = str(raw_url or "").strip()
-            if url and url not in urls:
-                urls.append(url)
-    legacy_url = str(item.get("url") or "").strip()
-    if legacy_url and legacy_url not in urls:
-        urls.append(legacy_url)
     return urls
 
 
-def _context_for_product_url(item, url):
+def _context_for_watch_url(item, url):
     try:
         site = detect_site_from_url(url)
         seller = site_label(site)
@@ -316,81 +293,34 @@ def _context_for_product_url(item, url):
         site = str(item.get("site") or "urun").strip().lower()
         seller = _site_name(site, False)
     name = str(item.get("name") or url).strip()
-    key = normalize_item_key("product", site, url)
+    key = normalize_item_key("watch", site, name, url)
     return key, {
         "title": f"{seller}: {name}",
-        "meta": "Ürün linki kontrol edilirken hata oluştu.",
+        "meta": f"Takip edilen: {name}",
         "url": url,
         "urls": [url],
         "keywords": [name],
     }
 
 
-def _contexts_for_product(item):
+def _contexts_for_watch(item):
     return [
         context
-        for url in _product_urls_from_options(item)
-        for context in [_context_for_product_url(item, url)]
+        for url in _watch_urls_from_options(item)
+        for context in [_context_for_watch_url(item, url)]
         if context
     ]
 
 
-def _search_urls_from_page(item):
-    urls = []
-    for field_name in ("search_url", "search_url_2"):
-        url = str(item.get(field_name) or "").strip()
-        if url and url not in urls:
-            urls.append(url)
-    return urls
-
-
-def _context_for_search_page(page, targets, page_count):
-    name = str(page.get("name") or "").strip()
-    urls = _search_urls_from_page(page)
-    if not name or not urls:
-        return None
-    labels = _target_labels_for_page(page, targets, page_count)
-    key = normalize_item_key("amazon_search", name, *urls)
-    return key, {
-        "title": f"Amazon arama: {name}",
-        "meta": _target_text(labels),
-        "url": urls[0],
-        "urls": urls,
-        "keywords": labels,
-    }
-
-
 def _error_contexts(options):
-    products = options.get("products") if isinstance(options.get("products"), list) else []
-    pages = options.get("amazon_search_pages", options.get("search_pages", []))
-    targets = options.get("amazon_search_targets", options.get("search_targets", []))
-    pages = pages if isinstance(pages, list) else []
-    targets = targets if isinstance(targets, list) else []
+    watches = options.get("takip_edilenler") if isinstance(options.get("takip_edilenler"), list) else []
     contexts = {}
-    for item in products:
+    for item in watches:
         if isinstance(item, dict):
-            for context in _contexts_for_product(item):
-                key, value = context
-                contexts[key] = value
-    for page in pages:
-        if isinstance(page, dict):
-            context = _context_for_search_page(page, targets, len(pages))
-            if context:
+            for context in _contexts_for_watch(item):
                 key, value = context
                 contexts[key] = value
     return contexts
-
-
-def _state_target_keywords(state_entry):
-    targets = state_entry.get("targets")
-    if not isinstance(targets, dict):
-        return []
-    labels = []
-    for key in targets.keys():
-        label = str(key or "").replace("_", " ").strip()
-        if label:
-            labels.append(label)
-    return _unique_text(labels)
 
 
 def _urls_from_error_and_state(raw_error, state_entry):
@@ -416,11 +346,10 @@ def _find_error_context(state_key, state_entry, raw_error, contexts):
 
 def _error_detail(state_key, state_entry, contexts):
     raw_error = state_entry.get("last_error")
-    is_search = isinstance(state_entry.get("targets"), dict)
     context = _find_error_context(state_key, state_entry, raw_error, contexts)
     failed_links = _error_link_details(raw_error)
-    keywords = context.get("keywords") or (_state_target_keywords(state_entry) if is_search else [])
-    keyword_text = _target_text(keywords) if is_search else ""
+    keywords = context.get("keywords") or []
+    keyword_text = _target_text(keywords) if keywords else ""
     for failed_link in failed_links:
         if keyword_text:
             failed_link["keywords"] = keyword_text
@@ -429,11 +358,11 @@ def _error_detail(state_key, state_entry, contexts):
         or str(context.get("url") or state_entry.get("url") or "").strip()
         or _extract_first_url(raw_error)
     )
-    title = context.get("title") or _site_name(state_entry.get("site"), is_search)
+    title = context.get("title") or _site_name(state_entry.get("site"), False)
     meta = context.get("meta") or keyword_text
     if not meta:
-        meta = "Amazon arama sayfası kontrol edilirken hata oluştu." if is_search else "Ürün kontrol edilirken hata oluştu."
-    elif is_search and "keyword" not in meta.casefold():
+        meta = "Takip edilen link kontrol edilirken hata oluştu."
+    elif keyword_text and "keyword" not in meta.casefold():
         meta = f"{meta} · {keyword_text}" if keyword_text else meta
     return {
         "title": repair_mojibake(title),
@@ -456,11 +385,7 @@ def _collect_summary():
     latest_summary = load_json(SUMMARY_PATH, {})
     if not isinstance(latest_summary, dict):
         latest_summary = {}
-    products = options.get("products") if isinstance(options.get("products"), list) else []
-    pages = options.get("amazon_search_pages", options.get("search_pages", []))
-    targets = options.get("amazon_search_targets", options.get("search_targets", []))
-    pages = pages if isinstance(pages, list) else []
-    targets = targets if isinstance(targets, list) else []
+    watches = options.get("takip_edilenler") if isinstance(options.get("takip_edilenler"), list) else []
     contexts = _error_contexts(options if isinstance(options, dict) else {})
 
     error_cutoff = timedelta(hours=24)
@@ -485,22 +410,11 @@ def _collect_summary():
                     if detail_key not in seen_details:
                         seen_details.add(detail_key)
                         error_details.append(detail)
-            nested = value.get("targets")
-            if isinstance(nested, dict):
-                for target_state in nested.values():
-                    if not isinstance(target_state, dict):
-                        continue
-                    checked_at = parse_iso_datetime(target_state.get("last_checked_at"))
-                    if checked_at:
-                        last_checks.append(checked_at.astimezone())
-
     interval_seconds = int(options.get("interval_seconds") or 60)
     last_check = max(last_checks) if last_checks else None
     return {
         "interval": interval_seconds,
-        "products": len(products),
-        "amazon_pages": len(pages),
-        "amazon_targets": len(targets),
+        "watches": len(watches),
         "last_check": last_check.strftime("%Y-%m-%d %H:%M:%S") if last_check else "-",
         "next_check": (last_check + timedelta(seconds=interval_seconds)).strftime("%Y-%m-%d %H:%M:%S") if last_check else "-",
         "cycle_duration": _duration_text(
@@ -825,9 +739,7 @@ def _render_page(path: str = "/") -> bytes:
         ("Kontrol aralığı", f"{summary['interval']} saniye", ""),
         ("Çevrim süresi", summary["cycle_duration"], ""),
         ("Son güncelleme", summary.get("last_update", "-"), ""),
-        ("Ürün linkleri", summary["products"], ""),
-        ("Amazon arama sayfaları", summary["amazon_pages"], ""),
-        ("Amazon arama hedefleri", summary["amazon_targets"], ""),
+        ("Takip edilenler", summary["watches"], ""),
     ]
     card_html = "".join(
         f"<section class='card {escape(str(css))}'><span>{escape(str(label))}</span><strong>{escape(str(value))}</strong></section>"
