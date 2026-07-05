@@ -19,7 +19,9 @@ from hermes.providers.base import soup_from_html  # noqa: E402
 from hermes.providers.hepsiburada import (  # noqa: E402
     _embedded_detail_candidates,
     extract_offer as extract_hepsiburada_offer,
+    extract_selected_variant_label,
     extract_variant_urls,
+    title_with_variant_label,
 )
 from hermes.providers.nordbron import extract_offer as extract_nordbron_offer  # noqa: E402
 from hermes.search_amazon import extract_result_candidates  # noqa: E402
@@ -536,6 +538,23 @@ class HermesSmokeTests(unittest.TestCase):
         self.assertEqual(len(urls), 2)
         self.assertIn("https://www.hepsiburada.com/samsung-galaxy-tab-s10-fe-gri-p-HBCV00008E1ABC", urls)
         self.assertFalse(any("BAD" in url for url in urls))
+
+    def test_hepsiburada_selected_variant_label_is_added_to_title(self):
+        html = """
+        <html><body>
+          <main>
+            <h1>Samsung Galaxy Tab S10 FE+ 8GB 128GB SM-X620</h1>
+            <span>Renk:</span><strong>Gümüş</strong>
+            <button>Sepete ekle</button>
+          </main>
+          <section>Ürün Bilgileri</section>
+        </body></html>
+        """
+        label = extract_selected_variant_label(html)
+        title = title_with_variant_label("Samsung Galaxy Tab S10 FE+ 8GB 128GB SM-X620", label)
+
+        self.assertEqual(label, "Gümüş")
+        self.assertTrue(title.endswith("- Gümüş"))
 
     def test_manual_price_history_reset_preserves_alert_state(self):
         with tempfile.TemporaryDirectory() as tmpdir:

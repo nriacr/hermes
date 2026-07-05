@@ -46,6 +46,7 @@ BAD_TITLE_MARKERS = (
 )
 PRODUCT_CARD_CLASS_MARKERS = ("productcard", "productlistcontent")
 NON_PRODUCT_PATH_MARKERS = ("degerlendirme", "yorum", "review")
+VARIANT_FIELD_LABELS = ("renk",)
 BRAND_ANCHORS = (
     "apple",
     "samsung",
@@ -464,6 +465,53 @@ def _visible_lines_until_details(soup) -> list[str]:
             break
         lines.append(line)
     return lines
+
+
+def _clean_variant_value(value: str) -> str:
+    cleaned = _clean_text(value)
+    cleaned = re.split(
+        r"\b(Satıcı|Satici|Sepete|Adet|Teslimat|Ürün|Urun|Kuponlar)\b",
+        cleaned,
+        maxsplit=1,
+    )[0]
+    cleaned = _clean_text(cleaned.strip(" :-"))
+    if not cleaned or len(cleaned) > 48:
+        return ""
+    normalized = normalize_offer_text(cleaned)
+    if any(marker in normalized for marker in ("fiyat", "taksit", "sepete", "teslimat")):
+        return ""
+    return cleaned
+
+
+def extract_selected_variant_label(html: str) -> str:
+    soup = soup_from_html(html)
+    lines = _visible_lines_until_details(soup)
+    for index, line in enumerate(lines[:80]):
+        normalized = normalize_offer_text(line).strip(" :")
+        for label in VARIANT_FIELD_LABELS:
+            if normalized == label and index + 1 < len(lines):
+                value = _clean_variant_value(lines[index + 1])
+                if value:
+                    return value
+            if normalized.startswith(f"{label}:"):
+                value = _clean_variant_value(line.split(":", 1)[1])
+                if value:
+                    return value
+            if normalized.startswith(f"{label} "):
+                value = _clean_variant_value(line[len(label) :])
+                if value:
+                    return value
+    return ""
+
+
+def title_with_variant_label(title: str, variant_label: str) -> str:
+    clean_title = _clean_text(title)
+    clean_label = _clean_variant_value(variant_label)
+    if not clean_title or not clean_label:
+        return clean_title
+    if normalize_offer_text(clean_label) in normalize_offer_text(clean_title):
+        return clean_title
+    return f"{clean_title} - {clean_label}"
 
 
 def _detail_seller(lines: list[str]) -> str:

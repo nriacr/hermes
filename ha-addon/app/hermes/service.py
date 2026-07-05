@@ -818,6 +818,7 @@ def _fetch_hepsiburada_watch_offers(
 
     offers: List[OfferResult] = []
     errors: List[str] = []
+    seen_offer_keys: set[tuple[str, str, str, str]] = set()
     for variant_url in variant_urls or [watch.url]:
         try:
             if variant_url == watch.url:
@@ -833,9 +834,24 @@ def _fetch_hepsiburada_watch_offers(
                 if is_bot_protection_page(SITE_HEPSIBURADA, variant_html):
                     raise HermesError("Hepsiburada bot korumasi nedeniyle captcha sayfasi dondu.")
             offer = extract_offer(SITE_HEPSIBURADA, variant_html, source_url=variant_url)
+            variant_label = hepsiburada_provider.extract_selected_variant_label(variant_html)
+            offer_title = hepsiburada_provider.title_with_variant_label(offer.title, variant_label)
+            dedupe_key = (
+                normalize_offer_text(variant_label),
+                normalize_offer_text(offer.seller or ""),
+                str(offer.price),
+                normalize_offer_text(offer_title),
+            )
+            if dedupe_key in seen_offer_keys:
+                log(
+                    "Hepsiburada varyasyon kopyasi atlandi: "
+                    f"{variant_label or offer_title} | {offer.seller or '-'} | {offer.price} TL"
+                )
+                continue
+            seen_offer_keys.add(dedupe_key)
             offers.append(
                 OfferResult(
-                    title=offer.title,
+                    title=offer_title,
                     price=offer.price,
                     seller=offer.seller,
                     url=variant_url,
