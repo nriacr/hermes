@@ -548,7 +548,6 @@ def _collect_telegram_summary(options):
         "channels": status.get("telegram_channels") or len(channels),
         "keywords": status.get("telegram_keywords") or len(keywords),
         "notifications": status.get("notifications_sent", 0),
-        "duplicates": status.get("duplicates_suppressed", 0),
         "last_check": status.get("last_check") or "-",
         "last_notification": status.get("last_notification") or "-",
         "errors": _telegram_error_count_24h(),
@@ -647,7 +646,6 @@ def _render_telegram_panel(summary):
         ("Telegram kanalları", telegram.get("channels", 0), ""),
         ("Keyword sayısı", telegram.get("keywords", 0), ""),
         ("Gönderilen bildirim", telegram.get("notifications", 0), ""),
-        ("Susturulan tekrar", telegram.get("duplicates", 0), ""),
         ("Son Telegram kontrolü", telegram.get("last_check", "-"), ""),
         ("Son Telegram bildirimi", telegram.get("last_notification", "-"), ""),
         ("Telegram hata sayısı (24s)", telegram.get("errors", 0), "status-error" if int(telegram.get("errors", 0) or 0) else ""),
@@ -676,11 +674,9 @@ def _render_telegram_recent_notifications(items):
         keyword = escape(str(item.get("keyword") or "-"))
         channel = escape(str(item.get("channel") or "-"))
         created_at = escape(str(item.get("created_at") or "-"))
-        price = str(item.get("price") or "").strip()
-        price_text = f" · {escape(price)} TL" if price else ""
         message = escape(str(item.get("message") or ""))
         url = str(item.get("url") or "").strip()
-        title = f"{keyword}{price_text}"
+        title = keyword
         if url:
             title_html = f"<a href='{escape(url, quote=True)}' target='_blank' rel='noopener noreferrer'>{title}</a>"
         else:

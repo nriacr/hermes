@@ -1,5 +1,5 @@
 name: Hermes
-version: "2.1.27"
+version: "2.1.28"
 slug: hermes
 description: Ürün fiyatlarını, Amazon arama sayfalarını ve Telegram fırsat kanallarını Pushover bildirimiyle takip eder.
 url: https://github.com/nriacr/hermes
@@ -47,7 +47,6 @@ options:
     - "@evEkonomi"
     - "@firsatavi"
   keywords: []
-  telegram_notify_once_keywords: []
   exclude_keywords: []
   products: []
   amazon_search_pages: []
@@ -69,8 +68,6 @@ schema:
   channels:
     - "str"
   keywords:
-    - "str"
-  telegram_notify_once_keywords:
     - "str"
   exclude_keywords:
     - "str"

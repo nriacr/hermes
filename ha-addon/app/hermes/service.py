@@ -18,7 +18,6 @@ from .constants import (
     SITE_NORDBRON,
     STATE_PATH,
     SUMMARY_PATH,
-    TELEGRAM_SEEN_DEALS_PATH,
 )
 from .errors import HermesError
 from .http_client import cleaned_html, fetch_amazon_page, fetch_hepsiburada_page, fetch_with_retries
@@ -403,11 +402,6 @@ def reset_notification_suppression() -> int:
             continue
         if _clear_alert_suppression(value, force_product_due=True):
             reset_count += 1
-
-    seen_deals = load_json(TELEGRAM_SEEN_DEALS_PATH, {})
-    if isinstance(seen_deals, dict) and seen_deals:
-        save_json(TELEGRAM_SEEN_DEALS_PATH, {})
-        reset_count += len(seen_deals)
 
     save_json(STATE_PATH, state)
     log(f"Bildirim susturma hafizasi sifirlandi: kayit={reset_count}")

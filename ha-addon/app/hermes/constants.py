@@ -6,7 +6,6 @@ SUMMARY_PATH = Path("/data/latest_price_summary.json")
 TELEGRAM_SESSION_PATH = Path("/data/telegram_keyword_alert")
 TELEGRAM_LOGIN_STATE_PATH = Path("/data/login_state.json")
 TELEGRAM_SEEN_MESSAGES_PATH = Path("/data/seen_messages.json")
-TELEGRAM_SEEN_DEALS_PATH = Path("/data/seen_deals.json")
 TELEGRAM_STATUS_PATH = Path("/data/status.json")
 TELEGRAM_ERROR_EVENTS_PATH = Path("/data/error_events.json")
 PUSHOVER_URL = "https://api.pushover.net/1/messages.json"

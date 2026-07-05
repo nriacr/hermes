@@ -3,7 +3,6 @@ import re
 import threading
 import time
 from datetime import datetime, timedelta
-from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, Iterable, Optional
 
 import requests
@@ -11,7 +10,6 @@ import requests
 from .constants import (
     TELEGRAM_ERROR_EVENTS_PATH,
     TELEGRAM_LOGIN_STATE_PATH,
-    TELEGRAM_SEEN_DEALS_PATH,
     TELEGRAM_SEEN_MESSAGES_PATH,
     TELEGRAM_SESSION_PATH,
     TELEGRAM_STATUS_HEARTBEAT_SECONDS,
@@ -32,19 +30,11 @@ except Exception:  # pragma: no cover - handled at runtime inside the add-on
     SessionPasswordNeededError = Exception
 
 
-PRICE_PATTERNS = (
-    re.compile(r"₺\s*(?P<price>\d{1,3}(?:\.\d{3})*(?:,\d{1,2})?|\d+(?:,\d{1,2})?)", re.IGNORECASE),
-    re.compile(r"(?P<price>\d{1,3}(?:\.\d{3})*(?:,\d{1,2})?|\d+(?:,\d{1,2})?)\s*(?:TL|TRY|₺)", re.IGNORECASE),
-)
 MAX_SEEN_MESSAGES = 5000
 
 
 def normalize_text(value: str) -> str:
     return normalize_offer_text(value)
-
-
-def _today() -> str:
-    return local_now().date().isoformat()
 
 
 def _now_text() -> str:
@@ -58,7 +48,6 @@ def _status_defaults() -> Dict[str, Any]:
         "telegram_channels": 0,
         "telegram_keywords": 0,
         "notifications_sent": 0,
-        "duplicates_suppressed": 0,
         "last_check": "-",
         "last_notification": "-",
         "last_error": "",
@@ -147,39 +136,6 @@ def _mark_message_seen(key: str) -> None:
     save_json(TELEGRAM_SEEN_MESSAGES_PATH, payload)
 
 
-def _load_seen_deals() -> Dict[str, Any]:
-    payload = load_json(TELEGRAM_SEEN_DEALS_PATH, {})
-    return payload if isinstance(payload, dict) else {}
-
-
-def _prune_seen_deals(payload: Dict[str, Any]) -> Dict[str, Any]:
-    today = _today()
-    return {key: value for key, value in payload.items() if value == today}
-
-
-def _normalize_price(raw_price: str) -> Optional[str]:
-    cleaned = str(raw_price or "").strip()
-    cleaned = re.sub(r"[^\d,\.]", "", cleaned)
-    if not cleaned:
-        return None
-    if "," in cleaned and "." in cleaned:
-        cleaned = cleaned.replace(".", "").replace(",", ".")
-    elif "," in cleaned:
-        cleaned = cleaned.replace(".", "").replace(",", ".")
-    try:
-        return f"{Decimal(cleaned):.2f}"
-    except InvalidOperation:
-        return None
-
-
-def extract_price(text: str) -> Optional[str]:
-    for pattern in PRICE_PATTERNS:
-        match = pattern.search(text or "")
-        if match:
-            return _normalize_price(match.group("price"))
-    return None
-
-
 def _matching_keyword(message_text: str, keywords: Iterable[str]) -> Optional[str]:
     normalized_message = normalize_text(message_text)
     for keyword in keywords:
@@ -191,32 +147,6 @@ def _matching_keyword(message_text: str, keywords: Iterable[str]) -> Optional[st
 def _has_exclude_keyword(message_text: str, exclude_keywords: Iterable[str]) -> bool:
     normalized_message = normalize_text(message_text)
     return any(normalize_text(keyword) in normalized_message for keyword in exclude_keywords)
-
-
-def _deal_key(keyword: str, price: str) -> str:
-    return f"{normalize_text(keyword)}|{price}"
-
-
-def _notify_once_enabled(keyword: str, notify_once_keywords: Iterable[str]) -> bool:
-    normalized_keyword = normalize_text(keyword)
-    return any(normalize_text(item) == normalized_keyword for item in notify_once_keywords)
-
-
-def _duplicate_deal(keyword: str, price: Optional[str], notify_once_keywords: Iterable[str]) -> bool:
-    if not price:
-        return False
-    if not _notify_once_enabled(keyword, notify_once_keywords):
-        return False
-    payload = _prune_seen_deals(_load_seen_deals())
-    key = _deal_key(keyword, price)
-    if payload.get(key) == _today():
-        save_json(TELEGRAM_SEEN_DEALS_PATH, payload)
-        _increment_status("duplicates_suppressed")
-        log(f"Telegram tekrar susturuldu: keyword={keyword} | fiyat={price}")
-        return True
-    payload[key] = _today()
-    save_json(TELEGRAM_SEEN_DEALS_PATH, payload)
-    return False
 
 
 def _telegram_message_link(event) -> str:
@@ -235,7 +165,6 @@ def _message_preview(text: str, max_length: int = 1024) -> str:
 def _record_recent_notification(
     channel_name: str,
     keyword: str,
-    price: Optional[str],
     url: str,
     text: str,
 ) -> None:
@@ -249,7 +178,6 @@ def _record_recent_notification(
             "created_at": _now_text(),
             "channel": channel_name,
             "keyword": keyword,
-            "price": price or "",
             "url": url,
             "message": _message_preview(text, 180),
         },
@@ -265,17 +193,11 @@ def _send_keyword_notification(
     event,
     channel_name: str,
     keyword: str,
-    price: Optional[str],
     text: str,
 ) -> None:
     session = requests.Session()
     message_url = _telegram_message_link(event)
-    price_line = f"\nFiyat: {price} TL" if price else ""
-    message = (
-        f"Kanal: {channel_name}\n"
-        f"Keyword: {keyword}{price_line}\n\n"
-        f"{_message_preview(text)}"
-    )
+    message = _message_preview(text)
     send_pushover(
         session,
         config.pushover_user_key,
@@ -287,8 +209,8 @@ def _send_keyword_notification(
         url_title="Telegram'da aç",
     )
     _increment_status("notifications_sent")
-    _record_recent_notification(channel_name, keyword, price, message_url, text)
-    log(f"Telegram bildirimi gönderildi: kanal={channel_name} | keyword={keyword} | fiyat={price or '-'}")
+    _record_recent_notification(channel_name, keyword, message_url, text)
+    log(f"Telegram bildirimi gönderildi: kanal={channel_name} | keyword={keyword}")
 
 
 async def _wait_for_code() -> None:
@@ -406,12 +328,8 @@ async def _run_telegram_listener(config: HermesConfig) -> None:
             log(f"Telegram mesajı exclude keyword nedeniyle atlandı: kanal={_channel_label(event)} | keyword={keyword}")
             return
 
-        price = extract_price(text)
-        if _duplicate_deal(keyword, price, telegram_config.notify_once_keywords):
-            return
-
         try:
-            _send_keyword_notification(config, event, _channel_label(event), keyword, price, text)
+            _send_keyword_notification(config, event, _channel_label(event), keyword, text)
         except Exception as exc:  # noqa: BLE001
             record_telegram_error(f"Pushover bildirimi gönderilemedi: {exc}", "Telegram bildirim")
 
