@@ -140,8 +140,8 @@ class HermesSmokeTests(unittest.TestCase):
         self.assertEqual(adjacent_same_site, 0)
 
     def test_cycle_duration_is_formatted_in_minutes(self):
-        self.assertEqual(service.format_minutes(75), "1.2 dk")
-        self.assertEqual(service.format_minutes(600), "10 dk")
+        self.assertEqual(service.format_minutes(75), "1 dk 15 sn")
+        self.assertEqual(service.format_minutes(600), "10 dk 0 sn")
 
     def test_early_summary_save_preserves_previous_cycle_duration(self):
         with tempfile.TemporaryDirectory() as tmpdir:

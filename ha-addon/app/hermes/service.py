@@ -223,10 +223,11 @@ def summary_row_from_state(product: ProductRule, state_entry: Dict[str, Any], se
 def format_minutes(seconds: float | int | None) -> str:
     if seconds is None:
         return "-"
-    minutes = max(0, float(seconds)) / 60
-    if minutes < 10:
-        return f"{minutes:.1f} dk"
-    return f"{minutes:.0f} dk"
+    total_seconds = max(0, int(round(float(seconds))))
+    minutes, remaining_seconds = divmod(total_seconds, 60)
+    if minutes:
+        return f"{minutes} dk {remaining_seconds} sn"
+    return f"{remaining_seconds} sn"
 
 
 def save_price_summary(

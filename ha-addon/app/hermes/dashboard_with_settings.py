@@ -71,7 +71,11 @@ def _collect_summary_all_errors():
         "amazon_targets": len(targets),
         "last_check": last_check.strftime("%Y-%m-%d %H:%M:%S") if last_check else "-",
         "next_check": (last_check + timedelta(seconds=interval_seconds)).strftime("%Y-%m-%d %H:%M:%S") if last_check else "-",
-        "cycle_duration": latest_summary.get("cycle_duration_minutes") or "-",
+        "cycle_duration": dashboard_module._duration_text(
+            latest_summary.get("cycle_duration_seconds"),
+            latest_summary.get("cycle_duration_minutes") or "-",
+        ),
+        "last_update": dashboard_module._relative_time_text(latest_summary.get("checked_at")),
         "errors": error_count,
         "error_details": error_details,
         "configured": bool(options),

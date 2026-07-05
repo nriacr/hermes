@@ -45,10 +45,10 @@ tbody tr.site-amazon { --site-bg:rgba(255,199,116,.13); --site-bg-strong:rgba(25
 .product-cell { max-width:360px; white-space:normal; line-height:1.22; } .product-cell a { color:#9ec0ff; text-decoration:none; } .product-cell a:hover { color:#d1b3ff; text-decoration:underline; } .product-cell span { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; text-overflow:ellipsis; } .deal-row td { color:#b7f0dc; } .deal-row td:first-child { color:var(--site-link); } .deal-row .product-cell a { color:#b7f0dc; } .note { margin-top:18px; border-left:4px solid #b79ad6; padding:12px 14px; background:rgba(183,154,214,.15); border-radius:10px; font-size:13px; } .footer { margin-top:18px; font-size:12px; color:var(--muted); }
 .public main { max-width:1180px; } .public .hero { padding:18px; } .public .badge { font-size:clamp(22px,4vw,36px); }
 .public-actions { margin:16px 0 6px; } .public-actions .button { min-width:132px; }
-.public-cycle-row { display:flex; gap:8px; flex:1 1 290px; }
-.public-cycle-row .inline-form { flex:1 1 50%; }
+.public-cycle-row { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; flex:1 1 430px; }
+.public-cycle-row .inline-form { min-width:0; }
 .public-cycle-row .button { width:100%; min-width:0; }
-.public-cycle-pill { flex:1 1 50%; min-height:40px; padding:7px 10px; border:1px solid var(--line); border-radius:13px; background:#2a2f4d; }
+.public-cycle-pill { min-width:0; min-height:40px; padding:7px 10px; border:1px solid var(--line); border-radius:13px; background:#2a2f4d; }
 .public-cycle-pill span { display:block; color:var(--muted); font-size:10px; font-weight:800; letter-spacing:.035em; text-transform:uppercase; }
 .public-cycle-pill strong { display:block; margin-top:2px; font-size:14px; line-height:1.1; color:var(--text); }
 @media (max-width:720px) {
@@ -62,9 +62,11 @@ tbody tr.site-amazon { --site-bg:rgba(255,199,116,.13); --site-bg-strong:rgba(25
   .actions { gap:8px; }
   .public-actions .button, .public-actions .inline-form { flex:1 1 calc(50% - 8px); }
   .public-actions .button { width:100%; min-width:0; min-height:44px; padding:0 10px; font-size:12px; }
-  .public-cycle-row { flex:1 1 100%; }
+  .public-cycle-row { flex:1 1 100%; gap:7px; }
   .public-cycle-row .button { min-height:44px; }
   .public-cycle-pill { min-height:44px; padding:8px 10px; }
+  .public-cycle-pill span { font-size:9px; }
+  .public-cycle-pill strong { font-size:13px; }
   .grid { grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
   .card { min-height:70px; padding:11px; border-radius:13px; }
   .card span { font-size:11px; margin-bottom:6px; }
@@ -106,6 +108,45 @@ def _parse_turkish_money(value):
         return Decimal(text)
     except InvalidOperation:
         return None
+
+
+def _relative_time_text(value) -> str:
+    raw_value = str(value or "").strip()
+    parsed = None
+    for fmt in ("%Y-%m-%d %H:%M:%S",):
+        try:
+            parsed = datetime.strptime(raw_value, fmt).astimezone()
+            break
+        except ValueError:
+            pass
+    if parsed is None:
+        parsed = parse_iso_datetime(raw_value)
+    if not parsed:
+        return "-"
+    elapsed_seconds = max(0, int((datetime.now().astimezone() - parsed.astimezone()).total_seconds()))
+    if elapsed_seconds < 60:
+        return "az önce" if elapsed_seconds < 10 else f"{elapsed_seconds} sn önce"
+    minutes = elapsed_seconds // 60
+    if minutes < 60:
+        return f"{minutes} dk önce"
+    hours = minutes // 60
+    if hours < 24:
+        return f"{hours} sa önce"
+    days = hours // 24
+    return f"{days} gün önce"
+
+
+def _duration_text(seconds_value, fallback="-") -> str:
+    if seconds_value in (None, ""):
+        return str(fallback or "-")
+    try:
+        total_seconds = max(0, int(round(float(seconds_value))))
+    except (TypeError, ValueError):
+        return str(fallback or "-")
+    minutes, seconds = divmod(total_seconds, 60)
+    if minutes:
+        return f"{minutes} dk {seconds} sn"
+    return f"{seconds} sn"
 
 
 def _is_target_hit(row):
@@ -464,7 +505,11 @@ def _collect_summary():
         "amazon_targets": len(targets),
         "last_check": last_check.strftime("%Y-%m-%d %H:%M:%S") if last_check else "-",
         "next_check": (last_check + timedelta(seconds=interval_seconds)).strftime("%Y-%m-%d %H:%M:%S") if last_check else "-",
-        "cycle_duration": latest_summary.get("cycle_duration_minutes") or "-",
+        "cycle_duration": _duration_text(
+            latest_summary.get("cycle_duration_seconds"),
+            latest_summary.get("cycle_duration_minutes") or "-",
+        ),
+        "last_update": _relative_time_text(latest_summary.get("checked_at")),
         "errors": error_count,
         "error_details": error_details[:4],
         "configured": bool(options),
@@ -574,7 +619,6 @@ def _render_table():
 
     deal_rows = [row for row in rows if _is_target_hit(row)]
     watch_rows = [row for row in rows if not _is_target_hit(row)]
-    checked_at = escape(str(payload.get("checked_at") or "-"))
     row_count = escape(str(payload.get("row_count") or len(rows)))
     deal_count = escape(str(len(deal_rows)))
     sections = _render_table_section(
@@ -590,7 +634,7 @@ def _render_table():
     )
     return f"""
     <section class="summary-panel">
-      <div class="summary-head"><h2>Özet Tablo</h2><span>{checked_at} · {row_count} ürün · {deal_count} fırsat</span></div>
+      <div class="summary-head"><h2>Özet Tablo</h2><span>{row_count} ürün · {deal_count} fırsat</span></div>
       {sections}
     </section>
     """
@@ -786,11 +830,10 @@ def _render_page(path: str = "/") -> bytes:
         ("Durum", status, status_class),
         ("Kontrol aralığı", f"{summary['interval']} saniye", ""),
         ("Çevrim süresi", summary["cycle_duration"], ""),
+        ("Son güncelleme", summary.get("last_update", "-"), ""),
         ("Ürün linkleri", summary["products"], ""),
         ("Amazon arama sayfaları", summary["amazon_pages"], ""),
         ("Amazon arama hedefleri", summary["amazon_targets"], ""),
-        ("Son kontrol", summary["last_check"], ""),
-        ("Sonraki kontrol", summary["next_check"], ""),
     ]
     card_html = "".join(
         f"<section class='card {escape(str(css))}'><span>{escape(str(label))}</span><strong>{escape(str(value))}</strong></section>"
@@ -859,7 +902,6 @@ def _render_public_page(path: str):
     if not _public_dashboard_allowed(path):
         return 404, b"not found\n"
     payload = load_json(SUMMARY_PATH, {})
-    checked_at = escape(str(payload.get("checked_at") or "-")) if isinstance(payload, dict) else "-"
     params = urllib.parse.parse_qs(urllib.parse.urlparse(path).query)
     action_status = ""
     action_message = ""
@@ -875,14 +917,19 @@ def _render_public_page(path: str):
         notice_html = f"<p class='notice {notice_class}'>{escape(action_message)}</p>"
     base_path = escape(_public_base_path(path), quote=True)
     cycle_duration = "-"
+    last_update = "-"
     if isinstance(payload, dict):
-        cycle_duration = escape(str(payload.get("cycle_duration_minutes") or "-"))
+        cycle_duration = escape(
+            _duration_text(payload.get("cycle_duration_seconds"), payload.get("cycle_duration_minutes") or "-")
+        )
+        last_update = escape(_relative_time_text(payload.get("checked_at")))
     public_cycle_row = (
         "<div class='public-cycle-row'>"
         f'<form class="inline-form" method="post" action="{base_path}/reset-price-history" '
         'data-confirm="Min/maks fiyat geçmişi temizlenecek ve güncel fiyattan yeniden başlayacak. Devam etmek istiyor musun?">'
         '<button class="button secondary" type="submit">Min/Maks Sıfırla</button></form>'
         f"<section class='public-cycle-pill'><span>Çevrim süresi</span><strong>{cycle_duration}</strong></section>"
+        f"<section class='public-cycle-pill'><span>Son güncelleme</span><strong>{last_update}</strong></section>"
         "</div>"
     )
     confirm_script = """
@@ -897,7 +944,7 @@ def _render_public_page(path: str):
   });
 </script>"""
     html = f"""<!doctype html>
-<html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="theme-color" content="#0f1222"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Hermes"><meta http-equiv="refresh" content="60"><title>Hermes</title><style>{DASHBOARD_CSS}</style></head><body class="public"><main><div class="hero"><div class="badge">Hermes</div><p>Mobil uyumlu fiyat paneli. Son güncelleme: {checked_at}</p><div class="actions public-actions"><a class="button secondary" href="{base_path}/settings">Ayarlar</a><form class="inline-form" method="post" action="{base_path}/test-pushover"><button class="button test" type="submit">Pushover</button></form><form class="inline-form" method="post" action="{base_path}/reset-notifications" data-confirm="Bildirim susturma hafızası sıfırlanacak ve hedef altında kalan fırsatlar için tek seferlik kontrol başlatılacak. Devam etmek istiyor musun?"><button class="button secondary" type="submit">Bildirim Sıfırla</button></form>{public_cycle_row}</div>{notice_html}{_render_table()}<p class="footer">Sayfa 60 saniyede bir otomatik yenilenir. iPhone'da Safari paylaş menüsünden “Ana Ekrana Ekle” diyerek uygulama gibi kullanabilirsin.</p></div></main>{confirm_script}</body></html>"""
+<html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="theme-color" content="#0f1222"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Hermes"><meta http-equiv="refresh" content="60"><title>Hermes</title><style>{DASHBOARD_CSS}</style></head><body class="public"><main><div class="hero"><div class="badge">Hermes</div><p>Mobil uyumlu fiyat paneli.</p><div class="actions public-actions"><a class="button secondary" href="{base_path}/settings">Ayarlar</a><form class="inline-form" method="post" action="{base_path}/test-pushover"><button class="button test" type="submit">Pushover</button></form><form class="inline-form" method="post" action="{base_path}/reset-notifications" data-confirm="Bildirim susturma hafızası sıfırlanacak ve hedef altında kalan fırsatlar için tek seferlik kontrol başlatılacak. Devam etmek istiyor musun?"><button class="button secondary" type="submit">Bildirim Sıfırla</button></form>{public_cycle_row}</div>{notice_html}{_render_table()}<p class="footer">Sayfa 60 saniyede bir otomatik yenilenir. iPhone'da Safari paylaş menüsünden “Ana Ekrana Ekle” diyerek uygulama gibi kullanabilirsin.</p></div></main>{confirm_script}</body></html>"""
     return 200, html.encode("utf-8")
 
 
