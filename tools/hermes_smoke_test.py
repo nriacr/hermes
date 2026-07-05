@@ -517,6 +517,9 @@ class HermesSmokeTests(unittest.TestCase):
           <div aria-label="Renk seçenekleri">
             <a href="/samsung-galaxy-tab-s10-fe-mavi-p-HBCV00008E1SXR">Mavi</a>
             <a href="/samsung-galaxy-tab-s10-fe-gri-p-HBCV00008E1ABC">Gri</a>
+            <a href="/samsung-galaxy-tab-s10-fe-gri-p-HBCV00008E1ABC?magaza=Teknosa">Gri kopya</a>
+            <a href="/samsung-galaxy-tab-s10-fe-gri-degerlendirmeleri-p-HBCV00008E1ABC">Yorumlar</a>
+            <a href="https://com.pozitron.hepsiburada/https/www.hepsiburada.com/samsung-galaxy-tab-s10-fe-gumus-p-HBCV00008E1BAD">Uygulama linki</a>
           </div>
           <script>
             {"variantListing":[

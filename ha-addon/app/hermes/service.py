@@ -838,7 +838,7 @@ def _fetch_hepsiburada_watch_offers(
                     title=offer.title,
                     price=offer.price,
                     seller=offer.seller,
-                    url=offer.url or variant_url,
+                    url=variant_url,
                 )
             )
         except Exception as exc:  # noqa: BLE001

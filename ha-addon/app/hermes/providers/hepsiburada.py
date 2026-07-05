@@ -3,7 +3,7 @@ import re
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any, Iterable, Optional
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlsplit
 
 from ..errors import HermesError
 from ..logging_utils import log
@@ -45,6 +45,7 @@ BAD_TITLE_MARKERS = (
     "fiyat:",
 )
 PRODUCT_CARD_CLASS_MARKERS = ("productcard", "productlistcontent")
+NON_PRODUCT_PATH_MARKERS = ("degerlendirme", "yorum", "review")
 BRAND_ANCHORS = (
     "apple",
     "samsung",
@@ -94,6 +95,28 @@ def _product_id_from_url(url: str) -> str:
 
 def is_product_url(url: str) -> bool:
     return bool(_product_id_from_url(url))
+
+
+def _canonical_product_url(candidate: str) -> str:
+    cleaned = repair_mojibake(candidate).strip()
+    if not cleaned:
+        return ""
+    if cleaned.startswith("/"):
+        cleaned = _absolute_url(cleaned)
+    parsed = urlsplit(cleaned)
+    if parsed.scheme not in {"http", "https"} or parsed.netloc.casefold() not in {
+        "www.hepsiburada.com",
+        "hepsiburada.com",
+    }:
+        return ""
+    path = parsed.path
+    normalized_path = normalize_offer_text(path)
+    if any(marker in normalized_path for marker in NON_PRODUCT_PATH_MARKERS):
+        return ""
+    match = PRODUCT_URL_RE.search(path)
+    if not match:
+        return ""
+    return _absolute_url(match.group(0))
 
 
 def _valid_price(price: Decimal) -> bool:
@@ -619,12 +642,14 @@ def extract_variant_urls(html: str, source_url: str, limit: int = 8) -> list[str
         return []
 
     urls: list[str] = []
+    seen_product_ids: set[str] = set()
 
     def add(candidate: str) -> None:
-        absolute = _absolute_url(candidate)
+        absolute = _canonical_product_url(candidate)
         product_id = _product_id_from_url(absolute)
-        if not product_id or absolute in urls:
+        if not product_id or product_id in seen_product_ids:
             return
+        seen_product_ids.add(product_id)
         urls.append(absolute)
 
     add(source_url)
