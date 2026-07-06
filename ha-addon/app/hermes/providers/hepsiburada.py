@@ -75,8 +75,13 @@ COUPON_MARKERS = ("kupon", "hepsipara", "kazan")
 CART_SPECIAL_MARKERS = ("sepete özel", "sepete ozel")
 PREMIUM_PRICE_MARKERS = (
     "premium ile",
+    "premium'a özel",
     "premium'a özel fiyat",
     "premium'a ozel fiyat",
+    "premium’a özel",
+    "premium’a özel fiyat",
+    "premium’a ozel fiyat",
+    "premiuma özel",
     "premiuma özel fiyat",
     "premiuma ozel fiyat",
     "premium özel fiyat",
@@ -298,10 +303,11 @@ def _cart_special_prices(text: str) -> list[Decimal]:
 
 def _prices_after_markers(text: str, markers: tuple[str, ...], window: int = 96) -> list[Decimal]:
     clean = _clean_text(text)
+    searchable = clean.casefold().replace("’", "'").replace("`", "'").replace("´", "'")
     prices: list[Decimal] = []
     for marker in markers:
-        pattern = re.compile(re.escape(marker), re.IGNORECASE)
-        for match in pattern.finditer(clean):
+        pattern = re.compile(re.escape(marker.casefold().replace("’", "'").replace("`", "'").replace("´", "'")))
+        for match in pattern.finditer(searchable):
             position = match.start()
             segment = clean[position : position + window]
             for match in PRICE_RE.finditer(segment):
@@ -735,7 +741,7 @@ def _price_context_allows(context: str) -> bool:
 
 
 def _price_context_is_premium(context: str) -> bool:
-    normalized = normalize_offer_text(context)
+    normalized = normalize_offer_text(context).replace("’", "'").replace("`", "'").replace("´", "'")
     return any(marker in normalized for marker in PREMIUM_PRICE_MARKERS_NORMALIZED)
 
 
@@ -1147,9 +1153,11 @@ def extract_offer(html: str, source_url: str = "") -> OfferResult:
     selected_product_id = _product_id_from_url(source_url)
     if selected_product_id:
         candidates = _embedded_detail_candidates(soup, source_url=source_url)
-        if not candidates:
-            detail = _detail_candidate(soup)
-            candidates = [detail] if detail else []
+        detail = _detail_candidate(soup)
+        if detail:
+            detail.identity = f"{selected_product_id}:visible-detail:{normalize_offer_text(detail.seller)}"
+            candidates.append(detail)
+        candidates = _dedupe_candidates(candidates)
     else:
         candidates = _search_candidates_from_dom(soup)
         if not candidates:
