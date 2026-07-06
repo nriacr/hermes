@@ -73,7 +73,16 @@ DETAIL_STOP_MARKERS = ("urun bilgileri", "urun aciklamasi", "degerlendirmeler")
 INSTALLMENT_MARKERS = ("peşin fiyatına", "pesin fiyatina", "taksit", " x ")
 COUPON_MARKERS = ("kupon", "hepsipara", "kazan")
 CART_SPECIAL_MARKERS = ("sepete özel", "sepete ozel")
-PREMIUM_PRICE_MARKERS = ("premium ile",)
+PREMIUM_PRICE_MARKERS = (
+    "premium ile",
+    "premium'a özel fiyat",
+    "premium'a ozel fiyat",
+    "premiuma özel fiyat",
+    "premiuma ozel fiyat",
+    "premium özel fiyat",
+    "premium ozel fiyat",
+)
+PREMIUM_PRICE_MARKERS_NORMALIZED = {normalize_offer_text(item) for item in PREMIUM_PRICE_MARKERS}
 BAD_TITLE_MARKERS = (
     "teslimat bilgisi",
     "sepete ekle",
@@ -726,7 +735,8 @@ def _price_context_allows(context: str) -> bool:
 
 
 def _price_context_is_premium(context: str) -> bool:
-    return any(marker in normalize_offer_text(context) for marker in PREMIUM_PRICE_MARKERS)
+    normalized = normalize_offer_text(context)
+    return any(marker in normalized for marker in PREMIUM_PRICE_MARKERS_NORMALIZED)
 
 
 def _premium_entries_from_nested_value(value: Any, parent_context: str = "") -> list[tuple[Decimal, str]]:
@@ -783,7 +793,11 @@ def _mapping_price_entries(mapping: dict) -> list[tuple[Decimal, str]]:
                 continue
             context = " ".join(str(value) for value in item.values() if isinstance(value, str))
             normalized_context = normalize_offer_text(context)
-            if collection_key == "minimumPrices" and "premium ile" not in normalized_context and "non segmented price" not in normalized_context:
+            if (
+                collection_key == "minimumPrices"
+                and not _price_context_is_premium(context)
+                and "non segmented price" not in normalized_context
+            ):
                 continue
             add(item.get("value"), f"{collection_key} {context}")
 

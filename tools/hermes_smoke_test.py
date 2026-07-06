@@ -501,6 +501,24 @@ class HermesSmokeTests(unittest.TestCase):
 
         self.assertEqual(offer.price, Decimal("17949.00"))
 
+    def test_hepsiburada_detail_prefers_premium_special_price(self):
+        html = """
+        <html><head><title>Samsung Galaxy Tab S10 FE+ Fiyatı</title></head>
+        <body>
+          <h1>Samsung Galaxy Tab S10 FE+</h1>
+          <span>Satıcı: Hepsiburada</span>
+          <div data-test-id="price-current-price">18.199,00 TL</div>
+          <div>Premium'a özel fiyat</div>
+          <div>17.949 TL</div>
+          <button>Sepete ekle</button>
+          <section>Ürün Bilgileri</section>
+        </body></html>
+        """
+
+        offer = extract_hepsiburada_offer(html)
+
+        self.assertEqual(offer.price, Decimal("17949"))
+
     def test_hepsiburada_embedded_prefers_premium_price(self):
         html = """
         <html><head><title>Samsung Galaxy Tab S10 FE+</title></head>
@@ -513,6 +531,29 @@ class HermesSmokeTests(unittest.TestCase):
                  "minimumPrices": [
                    {"name": "non-segmented-price", "value": 18199},
                    {"name": "Premium ile", "value": 17949}
+                 ]}
+              ]
+            };
+          </script>
+        </body></html>
+        """
+
+        offer = extract_hepsiburada_offer(html)
+
+        self.assertEqual(offer.price, Decimal("17949"))
+
+    def test_hepsiburada_embedded_prefers_premium_special_price(self):
+        html = """
+        <html><head><title>Samsung Galaxy Tab S10 FE+</title></head>
+        <body>
+          <script>
+            window.__HB_STATE__ = {
+              "variantListing": [
+                {"aiBasedShipmentDay": null, "listingId": "listing-hb", "merchantName": "Hepsiburada",
+                 "finalPriceOnSale": 18199,
+                 "minimumPrices": [
+                   {"name": "non-segmented-price", "value": 18199},
+                   {"name": "Premium'a özel fiyat", "value": 17949}
                  ]}
               ]
             };
