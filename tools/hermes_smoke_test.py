@@ -483,6 +483,46 @@ class HermesSmokeTests(unittest.TestCase):
         offer = extract_hepsiburada_offer(html)
         self.assertEqual(offer.price, Decimal("18999"))
 
+    def test_hepsiburada_detail_prefers_visible_premium_price(self):
+        html = """
+        <html><head><title>Samsung Galaxy Tab S10 FE+ Fiyatı</title></head>
+        <body>
+          <h1>Samsung Galaxy Tab S10 FE+</h1>
+          <span>Satıcı: Hepsiburada</span>
+          <div data-test-id="price-current-price">18.199,00 TL</div>
+          <div>Premium ile 17.949,00 TL</div>
+          <button>Sepete ekle</button>
+          <section>Ürün Bilgileri</section>
+        </body></html>
+        """
+
+        offer = extract_hepsiburada_offer(html)
+
+        self.assertEqual(offer.price, Decimal("17949.00"))
+
+    def test_hepsiburada_embedded_prefers_premium_price(self):
+        html = """
+        <html><head><title>Samsung Galaxy Tab S10 FE+</title></head>
+        <body>
+          <script>
+            window.__HB_STATE__ = {
+              "variantListing": [
+                {"aiBasedShipmentDay": null, "listingId": "listing-hb", "merchantName": "Hepsiburada",
+                 "finalPriceOnSale": 18199,
+                 "minimumPrices": [
+                   {"name": "non-segmented-price", "value": 18199},
+                   {"name": "Premium ile", "value": 17949}
+                 ]}
+              ]
+            };
+          </script>
+        </body></html>
+        """
+
+        offer = extract_hepsiburada_offer(html)
+
+        self.assertEqual(offer.price, Decimal("17949"))
+
     def test_hepsiburada_detail_offers_are_scoped_to_selected_variant(self):
         html = """
         <html><head><title>Samsung Galaxy Tab S10 FE+ Mavi Fiyatı</title></head>
@@ -557,7 +597,7 @@ class HermesSmokeTests(unittest.TestCase):
         title = title_with_variant_label("Samsung Galaxy Tab S10 FE+ 8GB 128GB SM-X620", label)
 
         self.assertEqual(label, "Gümüş")
-        self.assertTrue(title.endswith("- Gümüş"))
+        self.assertTrue(title.endswith("/ Gümüş"))
 
     def test_hepsiburada_selected_variant_label_combines_color_and_capacity(self):
         html = """
@@ -615,7 +655,8 @@ class HermesSmokeTests(unittest.TestCase):
                 ]},
                 {"sku": "HBCV512GRI", "name": "Gri 512 GB", "variantListing": [
                   {"listingId": "v512", "merchantName": "Hepsiburada",
-                   "finalPriceOnSale": 54999, "prices": [{"value": 54999}]}
+                   "finalPriceOnSale": 54999, "prices": [{"value": 54999}],
+                   "minimumPrices": [{"name": "non-segmented-price", "value": 54999}]}
                 ]},
                 {"sku": "HBCV1TBGRI", "name": "Gri 1 TB", "variantListing": [
                   {"listingId": "v1tb", "merchantName": "Hepsiburada",
@@ -635,6 +676,10 @@ class HermesSmokeTests(unittest.TestCase):
         self.assertEqual(offer.price, Decimal("54999"))
         self.assertEqual(offer.seller, "Hepsiburada")
         self.assertEqual(extract_embedded_variant_label(html, "https://www.hepsiburada.com/samsung-tablet-p-HBCV512GRI"), "Gri 512 GB")
+        self.assertNotIn(
+            "non-segmented-price",
+            extract_embedded_variant_label(html, "https://www.hepsiburada.com/samsung-tablet-p-HBCV512GRI"),
+        )
 
     def test_hepsiburada_variant_identity_keeps_same_seller_price_variants(self):
         silver_identity = service.normalize_offer_text("Gümüş 128 GB")
@@ -645,13 +690,13 @@ class HermesSmokeTests(unittest.TestCase):
                 silver_identity,
                 service.normalize_offer_text("VATAN BİLGİSAYAR"),
                 "18399",
-                service.normalize_offer_text("Samsung Galaxy Tab S10 FE+ - Gümüş 128 GB"),
+                service.normalize_offer_text("Samsung Galaxy Tab S10 FE+ / Gümüş 128 GB"),
             ),
             (
                 gray_identity,
                 service.normalize_offer_text("VATAN BİLGİSAYAR"),
                 "18399",
-                service.normalize_offer_text("Samsung Galaxy Tab S10 FE+ - Gri 128 GB"),
+                service.normalize_offer_text("Samsung Galaxy Tab S10 FE+ / Gri 128 GB"),
             ),
         )
 

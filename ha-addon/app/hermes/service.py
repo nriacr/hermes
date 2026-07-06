@@ -801,7 +801,7 @@ def _fetch_amazon_search_watch_offer(
 
 
 def _hepsiburada_variant_scan_limit(watch: WatchRule) -> int:
-    return max(1, min(int(watch.max_items_to_scan or 1), 8))
+    return max(1, min(int(watch.max_items_to_scan or 1), 100))
 
 
 def _fetch_hepsiburada_watch_offers(

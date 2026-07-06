@@ -53,6 +53,7 @@ DETAIL_STOP_MARKERS = ("urun bilgileri", "urun aciklamasi", "degerlendirmeler")
 INSTALLMENT_MARKERS = ("peşin fiyatına", "pesin fiyatina", "taksit", " x ")
 COUPON_MARKERS = ("kupon", "hepsipara", "kazan")
 CART_SPECIAL_MARKERS = ("sepete özel", "sepete ozel")
+PREMIUM_PRICE_MARKERS = ("premium ile",)
 BAD_TITLE_MARKERS = (
     "teslimat bilgisi",
     "sepete ekle",
@@ -97,6 +98,33 @@ BRAND_ANCHORS = (
     "bosch",
     "siemens",
 )
+VARIANT_LABEL_SKIP_KEYS = {
+    "variantListing",
+    "listing",
+    "listings",
+    "prices",
+    "minimumPrices",
+    "price",
+    "finalPrice",
+    "finalPriceOnSale",
+    "minimumPrice",
+    "merchantName",
+    "merchantId",
+    "listingId",
+    "url",
+    "productUrl",
+}
+VARIANT_LABEL_SKIP_KEYS_NORMALIZED = {normalize_offer_text(item) for item in VARIANT_LABEL_SKIP_KEYS}
+VARIANT_LABEL_FORBIDDEN_VALUES = {
+    "non segmented price",
+    "segmented price",
+    "minimum price",
+    "final price",
+    "merchant",
+    "merchant name",
+    "listing",
+    "listing id",
+}
 
 
 @dataclass
@@ -238,11 +266,34 @@ def _cart_special_prices(text: str) -> list[Decimal]:
     return [price for price in (_parse_price(match.group(0)) for match in PRICE_RE.finditer(segment)) if price is not None]
 
 
+def _prices_after_markers(text: str, markers: tuple[str, ...], window: int = 96) -> list[Decimal]:
+    clean = _clean_text(text)
+    prices: list[Decimal] = []
+    for marker in markers:
+        pattern = re.compile(re.escape(marker), re.IGNORECASE)
+        for match in pattern.finditer(clean):
+            position = match.start()
+            segment = clean[position : position + window]
+            for match in PRICE_RE.finditer(segment):
+                price = _parse_price(match.group(0))
+                if price is not None:
+                    prices.append(price)
+                    break
+    return prices
+
+
+def _premium_prices(text: str) -> list[Decimal]:
+    return _prices_after_markers(text, PREMIUM_PRICE_MARKERS)
+
+
 def _prices_from_card(card) -> list[Decimal]:
+    text = card.get_text(" ", strip=True)
+    premium_prices = _premium_prices(text)
+    if premium_prices:
+        return [min(premium_prices)]
     aria_price = _price_from_aria_label(card)
     if aria_price is not None:
         return [aria_price]
-    text = card.get_text(" ", strip=True)
     special_prices = _cart_special_prices(text)
     if special_prices:
         return [min(special_prices)]
@@ -513,7 +564,9 @@ def _clean_variant_value(value: str) -> str:
     if not cleaned or len(cleaned) > 48:
         return ""
     normalized = normalize_offer_text(cleaned)
-    if any(marker in normalized for marker in ("fiyat", "taksit", "sepete", "teslimat")):
+    if normalized in VARIANT_LABEL_FORBIDDEN_VALUES:
+        return ""
+    if any(marker in normalized for marker in ("fiyat", "price", "taksit", "sepete", "teslimat", "merchant", "listing")):
         return ""
     return cleaned
 
@@ -561,7 +614,7 @@ def title_with_variant_label(title: str, variant_label: str) -> str:
         return clean_title
     if normalize_offer_text(clean_label) in normalize_offer_text(clean_title):
         return clean_title
-    return f"{clean_title} - {clean_label}"
+    return f"{clean_title} / {clean_label}"
 
 
 def _detail_seller(lines: list[str]) -> str:
@@ -587,17 +640,95 @@ def _embedded_text(soup) -> str:
     return repair_mojibake(str(soup)).replace('\\"', '"')
 
 
-def _listing_mapping_price(mapping: dict) -> Optional[Decimal]:
-    price_items = mapping.get("prices")
-    if isinstance(price_items, list):
-        visible_prices = []
+def _price_context_allows(context: str) -> bool:
+    normalized = normalize_offer_text(context)
+    blocked_markers = (
+        "installment",
+        "taksit",
+        "aylik",
+        "worldcard",
+        "kupon",
+        "coupon",
+        "kargo",
+        "cargo",
+        "shipping",
+        "shipment",
+    )
+    return not any(marker in normalized for marker in blocked_markers)
+
+
+def _price_context_is_premium(context: str) -> bool:
+    return any(marker in normalize_offer_text(context) for marker in PREMIUM_PRICE_MARKERS)
+
+
+def _mapping_price_entries(mapping: dict) -> list[tuple[Decimal, str]]:
+    entries: list[tuple[Decimal, str]] = []
+
+    def add(raw_price: Any, context: str) -> None:
+        price = _number_price(raw_price)
+        if price is not None and _price_context_allows(context):
+            entries.append((price, context))
+
+    for key in (
+        "finalPriceOnSale",
+        "finalPrice",
+        "final_price",
+        "salePrice",
+        "sale_price",
+        "currentPrice",
+        "current_price",
+        "discountedPrice",
+        "price",
+        "amount",
+    ):
+        add(mapping.get(key), key)
+
+    for collection_key in ("prices", "minimumPrices"):
+        price_items = mapping.get(collection_key)
+        if not isinstance(price_items, list):
+            continue
         for item in price_items:
-            if isinstance(item, dict):
-                price = _number_price(item.get("value"))
-                if price is not None:
-                    visible_prices.append(price)
-        if visible_prices:
-            return min(visible_prices)
+            if not isinstance(item, dict):
+                continue
+            context = " ".join(str(value) for value in item.values() if isinstance(value, str))
+            normalized_context = normalize_offer_text(context)
+            if collection_key == "minimumPrices" and "premium ile" not in normalized_context and "non segmented price" not in normalized_context:
+                continue
+            add(item.get("value"), f"{collection_key} {context}")
+
+    return entries
+
+
+def _listing_mapping_price(mapping: dict) -> Optional[Decimal]:
+    entries = _mapping_price_entries(mapping)
+    premium_entries = [price for price, context in entries if _price_context_is_premium(context)]
+    if premium_entries:
+        return min(premium_entries)
+    reference_prices = [
+        price
+        for price, context in entries
+        if normalize_offer_text(context)
+        in {
+            "finalpriceonsale",
+            "finalprice",
+            "final price",
+            "saleprice",
+            "sale price",
+            "currentprice",
+            "current price",
+            "discountedprice",
+            "discounted price",
+        }
+    ]
+    if reference_prices:
+        lowest_reasonable_price = max(reference_prices) * Decimal("0.50")
+        entries = [
+            (price, context)
+            for price, context in entries
+            if price >= lowest_reasonable_price or _price_context_is_premium(context)
+        ]
+    if entries:
+        return min(price for price, _context in entries)
 
     final_price = _number_price(mapping.get("finalPriceOnSale"))
     if final_price is not None:
@@ -696,6 +827,8 @@ def _variant_label_from_mapping(mapping: dict) -> str:
         if isinstance(current, dict):
             for key, value in current.items():
                 normalized_key = normalize_offer_text(str(key))
+                if key in VARIANT_LABEL_SKIP_KEYS or normalized_key in VARIANT_LABEL_SKIP_KEYS_NORMALIZED:
+                    continue
                 if normalized_key in VARIANT_LABEL_JSON_KEYS_NORMALIZED:
                     label = _variant_label_from_value(value)
                     normalized_label = normalize_offer_text(label)
@@ -853,9 +986,13 @@ def _detail_candidate(soup) -> Optional[HepsiburadaCandidate]:
     title = extract_title(soup) or "Hepsiburada ürünü"
     lines = _visible_lines_until_details(soup)
     seller = _detail_seller(lines)
-    price = extract_price_from_selectors(soup, DETAIL_PRICE_SELECTORS)
+    line_text = "\n".join(lines[:120])
+    premium_prices = _premium_prices(line_text)
+    price = min(premium_prices) if premium_prices else None
     if price is None:
-        line_prices = _valid_prices_from_text("\n".join(lines[:120]))
+        price = extract_price_from_selectors(soup, DETAIL_PRICE_SELECTORS)
+    if price is None:
+        line_prices = _valid_prices_from_text(line_text)
         price = min(line_prices) if line_prices else None
     if price is None:
         return None
