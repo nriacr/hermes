@@ -30,6 +30,26 @@ VARIANT_LABEL_JSON_KEYS = (
     "selectedValue",
     "optionValue",
     "displayName",
+    "label",
+    "text",
+    "name",
+    "value",
+    "color",
+    "colour",
+    "renk",
+    "capacity",
+    "storage",
+    "depolama",
+)
+VARIANT_VALUE_JSON_KEYS = (
+    "variantName",
+    "variantValue",
+    "variantValueName",
+    "selectedValue",
+    "optionValue",
+    "displayName",
+    "label",
+    "text",
     "name",
     "value",
     "color",
@@ -586,6 +606,39 @@ def _clean_variant_label(value: str) -> str:
     return " / ".join(parts)
 
 
+def clean_display_title(title: str) -> str:
+    parts = [_clean_text(part) for part in re.split(r"\s*/\s*", _clean_text(title)) if _clean_text(part)]
+    if not parts:
+        return _clean_text(title)
+    base = parts[0]
+    normalized_base = normalize_offer_text(base)
+    cleaned_parts: list[str] = []
+    seen: set[str] = set()
+    for part in parts[1:]:
+        cleaned = _clean_variant_value(part)
+        normalized = normalize_offer_text(cleaned)
+        if not cleaned or normalized in seen:
+            continue
+        if _looks_like_repeated_title_fragment(normalized_base, cleaned):
+            continue
+        seen.add(normalized)
+        cleaned_parts.append(cleaned)
+    return " / ".join([base, *cleaned_parts]) if cleaned_parts else base
+
+
+def _looks_like_repeated_title_fragment(normalized_base: str, value: str) -> bool:
+    normalized = normalize_offer_text(value)
+    if len(value) < 12 or any(char.isdigit() for char in value):
+        return False
+    if normalized and normalized in normalized_base:
+        return True
+    base_words = normalized_base.split()
+    value_words = normalized.split()
+    if len(value_words) < 2 or len(base_words) < 2:
+        return False
+    return value_words[:2] == base_words[:2]
+
+
 def _variant_field_label(normalized_line: str) -> str:
     normalized = normalized_line.strip(" :")
     for label in sorted(VARIANT_FIELD_LABELS, key=len, reverse=True):
@@ -860,25 +913,57 @@ def _variant_label_from_value(value: Any) -> str:
 def _variant_label_from_mapping(mapping: dict) -> str:
     labels: list[str] = []
     seen: set[str] = set()
+
+    def add_label(value: Any) -> None:
+        label = _variant_label_from_value(value)
+        normalized_label = normalize_offer_text(label)
+        if label and normalized_label not in seen:
+            seen.add(normalized_label)
+            labels.append(label)
+
+    def add_selected_child_values(value: Any) -> None:
+        if isinstance(value, dict):
+            selected = any(
+                bool(value.get(key))
+                for key in ("selected", "isSelected", "checked", "active", "isActive")
+            )
+            if selected:
+                for key in VARIANT_VALUE_JSON_KEYS:
+                    add_label(value.get(key))
+            for nested in value.values():
+                if isinstance(nested, (dict, list)):
+                    add_selected_child_values(nested)
+        elif isinstance(value, list):
+            for item in value:
+                add_selected_child_values(item)
+
     stack: list[Any] = [mapping]
     while stack:
         current = stack.pop()
         if isinstance(current, dict):
+            field_name = ""
+            for key in ("fieldName", "attributeName", "propertyName", "optionName", "name", "label", "displayName"):
+                candidate_name = current.get(key)
+                if normalize_offer_text(str(candidate_name or "")) in VARIANT_FIELD_LABELS_NORMALIZED:
+                    field_name = str(candidate_name or "")
+                    break
+            if field_name:
+                for key in VARIANT_VALUE_JSON_KEYS:
+                    if key in {"name", "label", "displayName"} and normalize_offer_text(str(current.get(key) or "")) in VARIANT_FIELD_LABELS_NORMALIZED:
+                        continue
+                    add_label(current.get(key))
+                add_selected_child_values(current)
             for key, value in current.items():
                 normalized_key = normalize_offer_text(str(key))
                 if key in VARIANT_LABEL_SKIP_KEYS or normalized_key in VARIANT_LABEL_SKIP_KEYS_NORMALIZED:
                     continue
                 if normalized_key in VARIANT_LABEL_JSON_KEYS_NORMALIZED:
-                    label = _variant_label_from_value(value)
-                    normalized_label = normalize_offer_text(label)
-                    if label and normalized_label not in seen:
-                        seen.add(normalized_label)
-                        labels.append(label)
+                    add_label(value)
                 if isinstance(value, (dict, list)):
                     stack.append(value)
         elif isinstance(current, list):
             stack.extend(current)
-    return " / ".join(labels[:3])
+    return _clean_variant_label(" / ".join(labels[:4]))
 
 
 def extract_embedded_variant_label(html: str, source_url: str) -> str:

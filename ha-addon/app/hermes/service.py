@@ -218,9 +218,12 @@ def summary_row_from_state(watch: WatchRule, state_entry: Dict[str, Any], seller
     if price is None:
         return None
     min_price, max_price = sanitized_price_bounds(state_entry, price, watch.target_price)
+    product_title = str(state_entry.get("title") or watch.name or watch.url)
+    if watch.site == SITE_HEPSIBURADA:
+        product_title = hepsiburada_provider.clean_display_title(product_title)
     return PriceSummaryRow(
         seller=seller,
-        product_title=str(state_entry.get("title") or watch.name or watch.url),
+        product_title=product_title,
         product_url=str(state_entry.get("url") or state_entry.get("configured_url") or watch.url),
         price=price,
         target_price=watch.target_price,
@@ -829,17 +832,43 @@ def _fetch_hepsiburada_watch_offers(
     offers: List[OfferResult] = []
     errors: List[str] = []
     seen_offer_keys: set[tuple[str, str, str, str]] = set()
+
+    def lower_offer(first: OfferResult | None, second: OfferResult | None) -> OfferResult:
+        if first is None and second is None:
+            raise HermesError("Hepsiburada sayfasından fiyat bulunamadı.")
+        if first is None:
+            return second
+        if second is None:
+            return first
+        return second if second.price < first.price else first
+
     for variant_url in variant_urls or [watch.url]:
         try:
             variant_label = hepsiburada_provider.extract_embedded_variant_label(html, variant_url)
             embedded_offer = hepsiburada_provider.extract_embedded_variant_offer(html, variant_url)
             if variant_url == watch.url:
                 variant_html = html
-                offer = embedded_offer or extract_offer(SITE_HEPSIBURADA, variant_html, source_url=variant_url)
+                visible_offer = extract_offer(SITE_HEPSIBURADA, variant_html, source_url=variant_url)
+                offer = lower_offer(embedded_offer, visible_offer)
             else:
+                variant_html = ""
+                visible_offer = None
                 if embedded_offer:
                     offer = embedded_offer
-                    variant_html = ""
+                    try:
+                        variant_response = fetch_hepsiburada_page(
+                            session,
+                            variant_url,
+                            config.request_timeout_seconds,
+                        )
+                        variant_html = cleaned_html(variant_response)
+                        raise_if_age_verification(variant_html)
+                        if is_bot_protection_page(SITE_HEPSIBURADA, variant_html):
+                            raise HermesError("Hepsiburada bot korumasi nedeniyle captcha sayfasi dondu.")
+                        visible_offer = extract_offer(SITE_HEPSIBURADA, variant_html, source_url=variant_url)
+                        offer = lower_offer(embedded_offer, visible_offer)
+                    except Exception as exc:  # noqa: BLE001
+                        log(f"Hepsiburada varyasyon sayfasi premium kontrolu atlandi: {variant_url} | {exc}")
                 else:
                     variant_response = fetch_hepsiburada_page(
                         session,
@@ -962,6 +991,8 @@ def check_once(config: HermesConfig) -> None:
             offer_keys: List[str] = []
             for offer in offers:
                 offer_display_name = offer.title or watch.name or watch.url
+                if watch.site == SITE_HEPSIBURADA:
+                    offer_display_name = hepsiburada_provider.clean_display_title(offer_display_name)
                 matched_url = offer.url or watch.url
                 offer_key = normalize_item_key("watch_offer", watch.site, watch.name, matched_url)
                 offer_state_entry = state.get(offer_key, {})

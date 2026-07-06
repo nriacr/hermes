@@ -18,6 +18,7 @@ from hermes.models import PriceSummaryRow, SearchResultItem  # noqa: E402
 from hermes.providers.base import soup_from_html  # noqa: E402
 from hermes.providers.hepsiburada import (  # noqa: E402
     _embedded_detail_candidates,
+    clean_display_title,
     extract_embedded_variant_label,
     extract_embedded_variant_offer,
     extract_offer as extract_hepsiburada_offer,
@@ -650,6 +651,26 @@ class HermesSmokeTests(unittest.TestCase):
 
         self.assertEqual(title, "Nordbron Stark Deri Sırt Çantası / Antrasit")
         self.assertEqual(tablet_title, "Samsung Galaxy Tab S10 FE+ / 128 GB")
+
+    def test_hepsiburada_display_title_strips_legacy_field_names(self):
+        self.assertEqual(
+            clean_display_title(
+                "Nordbron Stark Deri Sırt Çantası Su İtici Özellikli Orta Boy Çok Gözlü Günlük Kullanım İçin / Renk / Antrasit"
+            ),
+            "Nordbron Stark Deri Sırt Çantası Su İtici Özellikli Orta Boy Çok Gözlü Günlük Kullanım İçin / Antrasit",
+        )
+        self.assertEqual(
+            clean_display_title(
+                "Nordbron Stark Deri Sırt Çantası Su İtici Özellikli Orta Boy Çok Gözlü Günlük Kullanım İçin / Nordbron Stark Sırt Çantası / Renk / Lacivert"
+            ),
+            "Nordbron Stark Deri Sırt Çantası Su İtici Özellikli Orta Boy Çok Gözlü Günlük Kullanım İçin / Lacivert",
+        )
+        self.assertEqual(
+            clean_display_title(
+                "Samsung Galaxy Tab S10 FE+ 8GB 128GB SM-X620 (Samsung Türkiye Garantili) / Kapasite / 128 GB / Renk"
+            ),
+            "Samsung Galaxy Tab S10 FE+ 8GB 128GB SM-X620 (Samsung Türkiye Garantili) / 128 GB",
+        )
 
     def test_hepsiburada_selected_variant_does_not_fall_back_to_other_variants(self):
         html = """

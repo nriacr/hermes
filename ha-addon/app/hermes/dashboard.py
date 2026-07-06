@@ -11,6 +11,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from .constants import OPTIONS_PATH, PUSHOVER_URL, STATE_PATH, SUMMARY_PATH, TELEGRAM_ERROR_EVENTS_PATH, TELEGRAM_STATUS_PATH
 from .logging_utils import log
+from .providers import hepsiburada as hepsiburada_provider
 from .storage import load_json
 from .utils import (
     detect_site_from_url,
@@ -472,7 +473,10 @@ def _collect_telegram_summary(options):
 def _render_table_row(row):
     seller_text = repair_mojibake(row.get("seller") or "-")
     seller = escape(seller_text)
-    product_title = escape(repair_mojibake(row.get("product_title") or "-"))
+    raw_title = repair_mojibake(row.get("product_title") or "-")
+    if seller_text == "Hepsiburada":
+        raw_title = hepsiburada_provider.clean_display_title(raw_title)
+    product_title = escape(raw_title)
     product_url = str(row.get("product_url") or "").strip()
     if product_url:
         label = (
