@@ -79,6 +79,7 @@ VARIANT_FIELD_LABELS = (
     "secenek",
     "seçenek",
 )
+VARIANT_FIELD_LABELS_NORMALIZED = {normalize_offer_text(item) for item in VARIANT_FIELD_LABELS}
 BRAND_ANCHORS = (
     "apple",
     "samsung",
@@ -564,11 +565,25 @@ def _clean_variant_value(value: str) -> str:
     if not cleaned or len(cleaned) > 48:
         return ""
     normalized = normalize_offer_text(cleaned)
+    if normalized in VARIANT_FIELD_LABELS_NORMALIZED:
+        return ""
     if normalized in VARIANT_LABEL_FORBIDDEN_VALUES:
         return ""
     if any(marker in normalized for marker in ("fiyat", "price", "taksit", "sepete", "teslimat", "merchant", "listing")):
         return ""
     return cleaned
+
+
+def _clean_variant_label(value: str) -> str:
+    parts: list[str] = []
+    seen: set[str] = set()
+    for raw_part in re.split(r"\s*/\s*", _clean_text(value)):
+        part = _clean_variant_value(raw_part)
+        normalized_part = normalize_offer_text(part)
+        if part and normalized_part not in seen:
+            seen.add(normalized_part)
+            parts.append(part)
+    return " / ".join(parts)
 
 
 def _variant_field_label(normalized_line: str) -> str:
@@ -604,12 +619,12 @@ def extract_selected_variant_labels(html: str) -> list[str]:
 
 
 def extract_selected_variant_label(html: str) -> str:
-    return " / ".join(extract_selected_variant_labels(html))
+    return _clean_variant_label(" / ".join(extract_selected_variant_labels(html)))
 
 
 def title_with_variant_label(title: str, variant_label: str) -> str:
     clean_title = _clean_text(title)
-    clean_label = _clean_variant_value(variant_label)
+    clean_label = _clean_variant_label(variant_label)
     if not clean_title or not clean_label:
         return clean_title
     if normalize_offer_text(clean_label) in normalize_offer_text(clean_title):
@@ -661,6 +676,29 @@ def _price_context_is_premium(context: str) -> bool:
     return any(marker in normalize_offer_text(context) for marker in PREMIUM_PRICE_MARKERS)
 
 
+def _premium_entries_from_nested_value(value: Any, parent_context: str = "") -> list[tuple[Decimal, str]]:
+    entries: list[tuple[Decimal, str]] = []
+    if isinstance(value, dict):
+        own_context = " ".join(
+            str(item)
+            for item in value.values()
+            if isinstance(item, str) and len(item) <= 120
+        )
+        context = f"{parent_context} {own_context}".strip()
+        if _price_context_is_premium(context):
+            for key in ("value", "amount", "price", "finalPrice", "finalPriceOnSale", "minimumPrice"):
+                price = _number_price(value.get(key))
+                if price is not None:
+                    entries.append((price, context))
+        for key, nested in value.items():
+            key_context = f"{context} {key}".strip()
+            entries.extend(_premium_entries_from_nested_value(nested, key_context))
+    elif isinstance(value, list):
+        for item in value:
+            entries.extend(_premium_entries_from_nested_value(item, parent_context))
+    return entries
+
+
 def _mapping_price_entries(mapping: dict) -> list[tuple[Decimal, str]]:
     entries: list[tuple[Decimal, str]] = []
 
@@ -696,6 +734,7 @@ def _mapping_price_entries(mapping: dict) -> list[tuple[Decimal, str]]:
                 continue
             add(item.get("value"), f"{collection_key} {context}")
 
+    entries.extend(_premium_entries_from_nested_value(mapping))
     return entries
 
 
@@ -847,7 +886,7 @@ def extract_embedded_variant_label(html: str, source_url: str) -> str:
     if not selected_product_id:
         return ""
     mapping = _selected_variant_mapping(_embedded_text(soup_from_html(html)), selected_product_id)
-    return _variant_label_from_mapping(mapping) if mapping else ""
+    return _clean_variant_label(_variant_label_from_mapping(mapping)) if mapping else ""
 
 
 def _embedded_listing_mappings(text: str, selected_product_id: str = "") -> Iterable[dict]:

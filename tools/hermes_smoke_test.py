@@ -523,6 +523,29 @@ class HermesSmokeTests(unittest.TestCase):
 
         self.assertEqual(offer.price, Decimal("17949"))
 
+    def test_hepsiburada_embedded_prefers_nested_premium_price(self):
+        html = """
+        <html><head><title>Samsung Galaxy Tab S10 FE+</title></head>
+        <body>
+          <script>
+            window.__HB_STATE__ = {
+              "variantListing": [
+                {"aiBasedShipmentDay": null, "listingId": "listing-hb", "merchantName": "Hepsiburada",
+                 "finalPriceOnSale": 18199,
+                 "premiumCampaign": {
+                   "label": "Premium ile",
+                   "price": {"value": 17949}
+                 }}
+              ]
+            };
+          </script>
+        </body></html>
+        """
+
+        offer = extract_hepsiburada_offer(html)
+
+        self.assertEqual(offer.price, Decimal("17949"))
+
     def test_hepsiburada_detail_offers_are_scoped_to_selected_variant(self):
         html = """
         <html><head><title>Samsung Galaxy Tab S10 FE+ Mavi Fiyatı</title></head>
@@ -615,6 +638,19 @@ class HermesSmokeTests(unittest.TestCase):
         self.assertEqual(extract_selected_variant_labels(html), ["Gri", "512 GB"])
         self.assertEqual(extract_selected_variant_label(html), "Gri / 512 GB")
 
+    def test_hepsiburada_variant_label_strips_field_names(self):
+        title = title_with_variant_label(
+            "Nordbron Stark Deri Sırt Çantası",
+            "Renk / Antrasit",
+        )
+        tablet_title = title_with_variant_label(
+            "Samsung Galaxy Tab S10 FE+",
+            "Kapasite / 128 GB / Renk",
+        )
+
+        self.assertEqual(title, "Nordbron Stark Deri Sırt Çantası / Antrasit")
+        self.assertEqual(tablet_title, "Samsung Galaxy Tab S10 FE+ / 128 GB")
+
     def test_hepsiburada_selected_variant_does_not_fall_back_to_other_variants(self):
         html = """
         <html><head><title>Samsung Galaxy Tab S11 Ultra Gri 512 GB</title></head>
@@ -679,6 +715,41 @@ class HermesSmokeTests(unittest.TestCase):
         self.assertNotIn(
             "non-segmented-price",
             extract_embedded_variant_label(html, "https://www.hepsiburada.com/samsung-tablet-p-HBCV512GRI"),
+        )
+
+    def test_hepsiburada_embedded_variant_label_uses_values_not_field_names(self):
+        html = """
+        <html><head><title>Nordbron Stark Deri Sırt Çantası</title></head>
+        <body>
+          <script>
+            window.__HB_STATE__ = {
+              "variants": [
+                {"sku": "HBCVSTARKANTRASIT", "attributes": [
+                  {"name": "Renk", "value": "Antrasit"}
+                ], "variantListing": [
+                  {"listingId": "v1", "merchantName": "Hepsiburada",
+                   "finalPriceOnSale": 4675, "prices": [{"value": 4675}]}
+                ]},
+                {"sku": "HBCVTABLET128", "attributes": [
+                  {"name": "Kapasite", "value": "128 GB"},
+                  {"name": "Renk"}
+                ], "variantListing": [
+                  {"listingId": "v2", "merchantName": "Hepsiburada",
+                   "finalPriceOnSale": 18199, "prices": [{"value": 18199}]}
+                ]}
+              ]
+            };
+          </script>
+        </body></html>
+        """
+
+        self.assertEqual(
+            extract_embedded_variant_label(html, "https://www.hepsiburada.com/nordbron-p-HBCVSTARKANTRASIT"),
+            "Antrasit",
+        )
+        self.assertEqual(
+            extract_embedded_variant_label(html, "https://www.hepsiburada.com/tablet-p-HBCVTABLET128"),
+            "128 GB",
         )
 
     def test_hepsiburada_variant_identity_keeps_same_seller_price_variants(self):
