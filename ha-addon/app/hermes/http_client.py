@@ -354,6 +354,73 @@ def _get_amazon_response_with_browser(session: requests.Session, candidate: str,
     return response
 
 
+def _get_hepsiburada_response_with_browser(session: requests.Session, candidate: str, timeout: int):
+    cache = getattr(session, "_hermes_hepsiburada_browser_cache", None)
+    if cache is None:
+        cache = {}
+        setattr(session, "_hermes_hepsiburada_browser_cache", cache)
+    if candidate in cache:
+        return cache[candidate]
+
+    browser_timeout = max(25, int(timeout) + 10)
+    with tempfile.TemporaryDirectory(prefix="hermes-hepsiburada-browser-") as profile_dir:
+        command = [
+            _chromium_binary(),
+            "--headless=new",
+            "--disable-gpu",
+            "--disable-dev-shm-usage",
+            "--disable-background-networking",
+            "--disable-default-apps",
+            "--disable-extensions",
+            "--disable-sync",
+            "--disable-setuid-sandbox",
+            "--disable-software-rasterizer",
+            "--disable-crash-reporter",
+            "--disable-features=Translate,MediaRouter,OptimizationHints",
+            "--hide-scrollbars",
+            "--no-first-run",
+            "--no-zygote",
+            "--no-sandbox",
+            "--window-size=1365,900",
+            "--lang=tr-TR",
+            f"--user-agent={AMAZON_CHROME_USER_AGENT}",
+            f"--user-data-dir={profile_dir}",
+            "--dump-dom",
+            candidate,
+        ]
+        try:
+            completed = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                timeout=browser_timeout,
+                check=False,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise HermesError("Hepsiburada tarayici modu zaman asimina ugradi.") from exc
+        except OSError as exc:
+            raise HermesError(f"Hepsiburada tarayici modu baslatilamadi: {exc}") from exc
+
+    stdout = completed.stdout or ""
+    stderr = completed.stderr or ""
+    response = _HtmlResponse(candidate, stdout)
+    if stdout and _is_usable_hepsiburada_response(response):
+        if completed.returncode != 0:
+            log(
+                "Hepsiburada tarayici modu HTML dondurdu: "
+                f"returncode={completed.returncode} | stderr={_diagnostic_snippet(stderr)} | url={candidate[:120]}"
+            )
+        cache[candidate] = response
+        return response
+
+    if completed.returncode != 0:
+        error_text = _diagnostic_snippet(stderr or stdout)
+        raise HermesError(f"Hepsiburada tarayici modu basarisiz oldu: {error_text[:160] or completed.returncode}")
+    if not stdout:
+        raise HermesError("Hepsiburada tarayici modunda bos HTML dondu.")
+    raise HermesError("Hepsiburada tarayici modunda da beklenen urun sayfasi donmedi.")
+
+
 def _amazon_error_status(exc: Exception) -> Optional[int]:
     status_code = getattr(exc, "status_code", None)
     if isinstance(status_code, int):
@@ -774,6 +841,15 @@ def fetch_hepsiburada_page(session: requests.Session, url: str, timeout: int) ->
         raise last_error
     _log_hepsiburada_diagnostics(url, attempts)
     raise HttpStatusHermesError(0, url)
+
+
+def fetch_hepsiburada_browser_page(session: requests.Session, url: str, timeout: int) -> requests.Response:
+    for candidate in hepsiburada_url_variants(url):
+        try:
+            return _get_hepsiburada_response_with_browser(session, candidate, timeout)
+        except Exception as exc:  # noqa: BLE001
+            log(f"Hepsiburada tarayici modu atlandi: {candidate[:120]} | {exc}")
+    raise HermesError("Hepsiburada tarayici modunda fiyat sayfasi okunamadi.")
 
 
 def cleaned_html(response: requests.Response) -> str:

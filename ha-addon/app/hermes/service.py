@@ -20,7 +20,13 @@ from .constants import (
     SUMMARY_PATH,
 )
 from .errors import HermesError
-from .http_client import cleaned_html, fetch_amazon_page, fetch_hepsiburada_page, fetch_with_retries
+from .http_client import (
+    cleaned_html,
+    fetch_amazon_page,
+    fetch_hepsiburada_browser_page,
+    fetch_hepsiburada_page,
+    fetch_with_retries,
+)
 from .logging_utils import log
 from .models import HermesConfig, OfferResult, PriceSummaryRow, SearchResultItem, WatchRule
 from .notifier import send_pushover
@@ -807,6 +813,37 @@ def _hepsiburada_variant_scan_limit(watch: WatchRule) -> int:
     return max(1, min(int(watch.max_items_to_scan or 1), 100))
 
 
+def _hepsiburada_browser_offer_if_lower(
+    session: requests.Session,
+    variant_url: str,
+    current_offer: OfferResult,
+    config: HermesConfig,
+) -> tuple[OfferResult, str]:
+    try:
+        response = fetch_hepsiburada_browser_page(session, variant_url, config.request_timeout_seconds)
+        html = cleaned_html(response)
+        raise_if_age_verification(html)
+        if is_bot_protection_page(SITE_HEPSIBURADA, html):
+            raise HermesError("Hepsiburada bot korumasi nedeniyle captcha sayfasi dondu.")
+        browser_offer = extract_offer(SITE_HEPSIBURADA, html, source_url=variant_url)
+    except Exception as exc:  # noqa: BLE001
+        log(f"Hepsiburada tarayici premium kontrolu atlandi: {variant_url} | {exc}")
+        return current_offer, ""
+
+    if browser_offer.price < current_offer.price:
+        log(
+            "Hepsiburada premium fiyat tarayici moduyla bulundu: "
+            f"{format_tl(browser_offer.price)} TL | onceki={format_tl(current_offer.price)} TL"
+        )
+        return browser_offer, html
+
+    log(
+        "Hepsiburada tarayici premium kontrolu: "
+        f"daha dusuk fiyat bulunamadi | okunan={format_tl(browser_offer.price)} TL"
+    )
+    return current_offer, html
+
+
 def _fetch_hepsiburada_watch_offers(
     session: requests.Session,
     watch: WatchRule,
@@ -880,6 +917,9 @@ def _fetch_hepsiburada_watch_offers(
                     if is_bot_protection_page(SITE_HEPSIBURADA, variant_html):
                         raise HermesError("Hepsiburada bot korumasi nedeniyle captcha sayfasi dondu.")
                     offer = extract_offer(SITE_HEPSIBURADA, variant_html, source_url=variant_url)
+            offer, browser_html = _hepsiburada_browser_offer_if_lower(session, variant_url, offer, config)
+            if browser_html:
+                variant_html = browser_html
             if variant_html:
                 variant_label = hepsiburada_provider.extract_selected_variant_label(variant_html) or variant_label
             offer_title = hepsiburada_provider.title_with_variant_label(offer.title, variant_label)
