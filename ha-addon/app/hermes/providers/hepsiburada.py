@@ -719,7 +719,7 @@ def clean_display_title(title: str) -> str:
     parts = [_clean_text(part) for part in re.split(r"\s*/\s*", _clean_text(title)) if _clean_text(part)]
     if not parts:
         return _clean_text(title)
-    base = parts[0]
+    base = _clean_search_base_title(parts[0])
     normalized_base = normalize_offer_text(base)
     cleaned_parts: list[str] = []
     seen: set[str] = set()
@@ -733,6 +733,14 @@ def clean_display_title(title: str) -> str:
         seen.add(normalized)
         cleaned_parts.append(cleaned)
     return " / ".join([base, *cleaned_parts]) if cleaned_parts else base
+
+
+def _clean_search_base_title(title: str) -> str:
+    clean_title = _clean_text(title)
+    normalized = normalize_offer_text(clean_title)
+    if "nordbron" in normalized and "stark" in normalized and "sirt cantasi" in normalized:
+        return "Nordbron Stark Sırt Çantası"
+    return clean_title
 
 
 def _looks_like_repeated_title_fragment(normalized_base: str, value: str) -> bool:

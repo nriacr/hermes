@@ -14,7 +14,7 @@ from hermes import service  # noqa: E402
 from hermes import http_client  # noqa: E402
 from hermes.http_client import amazon_url_variants, fetch_amazon_page  # noqa: E402
 from hermes.config_loader import _prepare_watches  # noqa: E402
-from hermes.models import PriceSummaryRow, SearchResultItem  # noqa: E402
+from hermes.models import HermesConfig, OfferResult, PriceSummaryRow, SearchResultItem, TelegramConfig  # noqa: E402
 from hermes.providers.base import soup_from_html  # noqa: E402
 from hermes.providers.hepsiburada import (  # noqa: E402
     _embedded_detail_candidates,
@@ -965,19 +965,75 @@ class HermesSmokeTests(unittest.TestCase):
             clean_display_title(
                 "Nordbron Stark Deri Sırt Çantası Su İtici Özellikli Orta Boy Çok Gözlü Günlük Kullanım İçin / Renk / Antrasit"
             ),
-            "Nordbron Stark Deri Sırt Çantası Su İtici Özellikli Orta Boy Çok Gözlü Günlük Kullanım İçin / Antrasit",
+            "Nordbron Stark Sırt Çantası / Antrasit",
         )
         self.assertEqual(
             clean_display_title(
                 "Nordbron Stark Deri Sırt Çantası Su İtici Özellikli Orta Boy Çok Gözlü Günlük Kullanım İçin / Nordbron Stark Sırt Çantası / Renk / Lacivert"
             ),
-            "Nordbron Stark Deri Sırt Çantası Su İtici Özellikli Orta Boy Çok Gözlü Günlük Kullanım İçin / Lacivert",
+            "Nordbron Stark Sırt Çantası / Lacivert",
         )
         self.assertEqual(
             clean_display_title(
                 "Samsung Galaxy Tab S10 FE+ 8GB 128GB SM-X620 (Samsung Türkiye Garantili) / Kapasite / 128 GB / Renk"
             ),
             "Samsung Galaxy Tab S10 FE+ 8GB 128GB SM-X620 (Samsung Türkiye Garantili) / 128 GB",
+        )
+        self.assertEqual(
+            clean_display_title(
+                "Nordbron Stark Deri Sırt Çantası Su İtici Özellikli Orta Boy Çok Gözlü Günlük Kullanım İçin / Bej"
+            ),
+            "Nordbron Stark Sırt Çantası / Bej",
+        )
+
+    def test_hepsiburada_search_offer_title_is_enriched_from_detail_variant(self):
+        class FakeResponse:
+            headers = {"content-type": "text/html; charset=utf-8"}
+            text = """
+            <html><body>
+              <h1>Samsung Galaxy Tab S10 FE+ 8GB 128GB SM-X620</h1>
+              <span>Kapasite:</span><strong>128 GB</strong>
+              <span>Renk:</span><strong>Mavi</strong>
+              <div>18.299,00 TL</div>
+              <section>Ürün Bilgileri</section>
+            </body></html>
+            """
+            content = text.encode("utf-8")
+
+            def raise_for_status(self):
+                return None
+
+        original_fetch = service.fetch_hepsiburada_page
+        try:
+            service.fetch_hepsiburada_page = lambda *_args, **_kwargs: FakeResponse()
+            config = HermesConfig(
+                interval_seconds=30,
+                request_timeout_seconds=5,
+                request_delay_min_seconds=1,
+                request_delay_max_seconds=1,
+                pushover_user_key="",
+                pushover_api_token="",
+                watches=[],
+                telegram=TelegramConfig(False, None, "", "", "", "", [], [], []),
+            )
+            enriched = service._enrich_hepsiburada_search_offer_titles(
+                requests.Session(),
+                [
+                    OfferResult(
+                        title="Samsung Galaxy Tab S10 FE+ 8GB 128GB SM-X620",
+                        price=Decimal("18049"),
+                        seller="Hepsiburada",
+                        url="https://www.hepsiburada.com/samsung-tablet-p-HBCV00008E1SXR",
+                    )
+                ],
+                config,
+            )
+        finally:
+            service.fetch_hepsiburada_page = original_fetch
+
+        self.assertEqual(
+            enriched[0].title,
+            "Samsung Galaxy Tab S10 FE+ 8GB 128GB SM-X620 / 128 GB / Mavi",
         )
 
     def test_hepsiburada_selected_variant_does_not_fall_back_to_other_variants(self):

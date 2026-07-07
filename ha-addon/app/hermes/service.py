@@ -812,6 +812,35 @@ def _hepsiburada_variant_scan_limit(watch: WatchRule) -> int:
     return max(1, min(int(watch.max_items_to_scan or 1), 100))
 
 
+def _enrich_hepsiburada_search_offer_titles(
+    session: requests.Session,
+    offers: List[OfferResult],
+    config: HermesConfig,
+) -> List[OfferResult]:
+    enriched: List[OfferResult] = []
+    for offer in offers:
+        if not offer.url or not hepsiburada_provider.is_product_url(offer.url):
+            enriched.append(offer)
+            continue
+        try:
+            response = fetch_hepsiburada_page(session, offer.url, config.request_timeout_seconds)
+            html = cleaned_html(response)
+            raise_if_age_verification(html)
+            if is_bot_protection_page(SITE_HEPSIBURADA, html):
+                raise HermesError("Hepsiburada bot korumasi nedeniyle captcha sayfasi dondu.")
+            variant_label = (
+                hepsiburada_provider.extract_selected_variant_label(html)
+                or hepsiburada_provider.extract_embedded_variant_label(html, offer.url)
+            )
+            title = hepsiburada_provider.title_with_variant_label(offer.title, variant_label)
+            title = hepsiburada_provider.clean_display_title(title)
+            enriched.append(OfferResult(title=title, price=offer.price, seller=offer.seller, url=offer.url))
+        except Exception as exc:  # noqa: BLE001
+            log(f"Hepsiburada arama karti varyasyon etiketi tamamlanamadi: {offer.url} | {exc}")
+            enriched.append(offer)
+    return enriched
+
+
 def _fetch_hepsiburada_watch_offers(
     session: requests.Session,
     watch: WatchRule,
@@ -829,6 +858,7 @@ def _fetch_hepsiburada_watch_offers(
             source_url=watch.url,
             limit=_hepsiburada_variant_scan_limit(watch),
         )
+        offers = _enrich_hepsiburada_search_offer_titles(session, offers, config)
         log(f"Hepsiburada arama kartlari okundu: {watch.name or watch.url} | adet={len(offers)}")
         return offers
 
@@ -1157,6 +1187,16 @@ def check_once(config: HermesConfig) -> None:
     save_json(STATE_PATH, state)
 
 
+def log_cycle_banner(config: HermesConfig) -> None:
+    line = "=" * 92
+    log(line)
+    log(
+        f">>> HERMES v{APP_VERSION} | YENI KONTROL TURU | "
+        f"Kontrol araligi: {config.interval_seconds} saniye <<<"
+    )
+    log(line)
+
+
 def run_service() -> int:
     try:
         config = load_config()
@@ -1166,20 +1206,14 @@ def run_service() -> int:
 
     run_once = os.getenv("RUN_ONCE", "").strip() == "1"
     if run_once:
-        log(
-            f"####### Hermes v{APP_VERSION} | Kontrol turu basladi. "
-            f"Kontrol araligi: {config.interval_seconds} saniye #######"
-        )
+        log_cycle_banner(config)
         check_once(config)
         return 0
 
     start_telegram_listener(config)
     log(f"Servis basladi. Hermes v{APP_VERSION} | Kontrol araligi: {config.interval_seconds} saniye")
     while True:
-        log(
-            f"####### Hermes v{APP_VERSION} | Kontrol turu basladi. "
-            f"Kontrol araligi: {config.interval_seconds} saniye #######"
-        )
+        log_cycle_banner(config)
         check_once(config)
         next_check = local_now() + timedelta(seconds=config.interval_seconds)
         log(f"Sonraki kontrol: {format_local_datetime(next_check)}")
