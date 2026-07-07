@@ -638,6 +638,66 @@ class HermesSmokeTests(unittest.TestCase):
 
         self.assertEqual(offer.price, Decimal("18049"))
 
+    def test_hepsiburada_product_url_reads_premium_price_without_tl_suffix(self):
+        html = """
+        <html><head><title>Samsung Galaxy Tab S10 FE+ Fiyatı</title></head>
+        <body>
+          <h1>Samsung Galaxy Tab S10 FE+ 8GB 128GB SM-X620</h1>
+          <span>Satıcı: Hepsiburada</span>
+          <div data-test-id="price-current-price">18.299,00 TL</div>
+          <div>Premium ile 18.049</div>
+          <script>
+            window.__HB_STATE__ = {
+              "variants": [
+                {"sku": "HBCV00008E1SXR", "variantListing": [
+                  {"aiBasedShipmentDay": null, "listingId": "listing-hb", "merchantName": "Hepsiburada",
+                   "finalPriceOnSale": 18299,
+                   "minimumPrices": [{"name": "non-segmented-price", "value": 18299}]}
+                ]}
+              ]
+            };
+          </script>
+        </body></html>
+        """
+
+        offer = extract_hepsiburada_offer(
+            html,
+            source_url="https://www.hepsiburada.com/samsung-tablet-p-HBCV00008E1SXR",
+        )
+
+        self.assertEqual(offer.price, Decimal("18049"))
+
+    def test_hepsiburada_embedded_variant_price_is_not_overridden_by_other_visible_variant(self):
+        html = """
+        <html><head><title>Samsung Galaxy Tab S10 FE+ Fiyatı</title></head>
+        <body>
+          <nav>Hepsiburada'da Satıcı Ol</nav>
+          <h1>Samsung Galaxy Tab S10 FE+ 8GB 128GB SM-X620</h1>
+          <div data-test-id="price-current-price">18.299,00 TL</div>
+          <div>Renk Mavi 18.299,00 TL</div>
+          <div>Renk Gümüş 18.349,00 TL</div>
+          <script>
+            window.__HB_STATE__ = {
+              "variants": [
+                {"sku": "HBCV00008E1QWF", "variantListing": [
+                  {"aiBasedShipmentDay": null, "listingId": "listing-hb", "merchantName": "Hepsiburada",
+                   "finalPriceOnSale": 18349,
+                   "minimumPrices": [{"name": "non-segmented-price", "value": 18349}]}
+                ]}
+              ]
+            };
+          </script>
+        </body></html>
+        """
+
+        offer = extract_hepsiburada_offer(
+            html,
+            source_url="https://www.hepsiburada.com/samsung-tablet-p-HBCV00008E1QWF",
+        )
+
+        self.assertEqual(offer.price, Decimal("18349"))
+        self.assertEqual(offer.seller, "Hepsiburada")
+
     def test_hepsiburada_product_url_ignores_premium_campaign_discount_amount(self):
         html = """
         <html><head><title>Samsung Galaxy Tab S10 FE+ Fiyatı</title></head>

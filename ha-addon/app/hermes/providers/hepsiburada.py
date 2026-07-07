@@ -18,6 +18,7 @@ PRICE_RE = re.compile(
     r"(?<![\d.,])(?:\d{1,3}(?:\.\d{3})+|\d{1,7})(?:,\d{2})?\s*TL",
     re.IGNORECASE,
 )
+PRICE_LIKE_RE = re.compile(r"(?<![\d.,])(?:\d{1,3}(?:\.\d{3})+|\d{4,7})(?:,\d{2})?(?![\d.,])")
 PRODUCT_URL_RE = re.compile(r"/(?:[^\s'\"<>]+)-(?:p|pm)-[A-Z0-9]+", re.IGNORECASE)
 PRODUCT_ID_RE = re.compile(r"-(?:p|pm)-([A-Z0-9]+)", re.IGNORECASE)
 EMBEDDED_VARIANT_RE = re.compile(
@@ -178,6 +179,7 @@ class HepsiburadaCandidate:
     url: str
     seller: str = "Hepsiburada"
     identity: str = ""
+    is_premium: bool = False
 
 
 def _absolute_url(url: str) -> str:
@@ -352,6 +354,14 @@ def _prices_after_markers(text: str, markers: tuple[str, ...], window: int = 160
                 if price is not None:
                     prices.append(price)
                     break
+            else:
+                for match in PRICE_LIKE_RE.finditer(segment):
+                    if _is_premium_campaign_amount(segment, match.start(), match.end()):
+                        continue
+                    price = _parse_price(match.group(0))
+                    if price is not None:
+                        prices.append(price)
+                        break
     return prices
 
 
@@ -748,7 +758,7 @@ def _detail_seller(lines: list[str]) -> str:
     if match:
         seller = re.split(r"(Takip et|Satıcıya sor|Değerlendirme)", match.group(1), maxsplit=1)[0]
         seller = _clean_text(seller.replace("Resmi Satıcı", ""))
-        if seller:
+        if seller and normalize_offer_text(seller) not in {"ol", "satici ol", "satici"}:
             return seller
     return "Hepsiburada"
 
@@ -1194,7 +1204,7 @@ def _detail_candidate(soup) -> Optional[HepsiburadaCandidate]:
         price = min(line_prices) if line_prices else None
     if price is None:
         return None
-    return HepsiburadaCandidate(title=title, price=price, url="", seller=seller)
+    return HepsiburadaCandidate(title=title, price=price, url="", seller=seller, is_premium=bool(premium_prices))
 
 
 def _log_candidates(candidates: list[HepsiburadaCandidate]) -> None:
@@ -1208,7 +1218,7 @@ def extract_offer(html: str, source_url: str = "") -> OfferResult:
     if selected_product_id:
         candidates = _embedded_detail_candidates(soup, source_url=source_url)
         detail = _detail_candidate(soup)
-        if detail:
+        if detail and (detail.is_premium or not candidates):
             detail.identity = f"{selected_product_id}:{normalize_offer_text(detail.seller)}"
             candidates.append(detail)
         candidates = _dedupe_candidates(candidates)
