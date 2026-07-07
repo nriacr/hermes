@@ -1195,14 +1195,20 @@ def run_service() -> int:
 
     run_once = os.getenv("RUN_ONCE", "").strip() == "1"
     if run_once:
-        log(f"Hermes v{APP_VERSION} | Kontrol turu basladi. Kontrol araligi: {config.interval_seconds} saniye")
+        log(
+            f"####### Hermes v{APP_VERSION} | Kontrol turu basladi. "
+            f"Kontrol araligi: {config.interval_seconds} saniye #######"
+        )
         check_once(config)
         return 0
 
     start_telegram_listener(config)
     log(f"Servis basladi. Hermes v{APP_VERSION} | Kontrol araligi: {config.interval_seconds} saniye")
     while True:
-        log(f"Hermes v{APP_VERSION} | Kontrol turu basladi. Kontrol araligi: {config.interval_seconds} saniye")
+        log(
+            f"####### Hermes v{APP_VERSION} | Kontrol turu basladi. "
+            f"Kontrol araligi: {config.interval_seconds} saniye #######"
+        )
         check_once(config)
         next_check = local_now() + timedelta(seconds=config.interval_seconds)
         log(f"Sonraki kontrol: {format_local_datetime(next_check)}")

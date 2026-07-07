@@ -266,6 +266,9 @@ def _chromium_binary() -> str:
     configured = os.getenv("HERMES_CHROMIUM_PATH", "").strip()
     if configured:
         return configured
+    for candidate in ("/usr/lib/chromium/chromium", "/usr/lib/chromium-browser/chromium-browser"):
+        if os.path.exists(candidate) and os.access(candidate, os.X_OK):
+            return candidate
     for candidate in ("chromium", "chromium-browser", "google-chrome", "google-chrome-stable"):
         found = shutil.which(candidate)
         if found:
