@@ -16,6 +16,7 @@ from .constants import (
     SITE_AMAZON,
     SITE_HEPSIBURADA,
     SITE_NORDBRON,
+    SITE_ZARA,
     STATE_PATH,
     SUMMARY_PATH,
 )
@@ -25,11 +26,13 @@ from .http_client import (
     fetch_amazon_page,
     fetch_hepsiburada_page,
     fetch_with_retries,
+    fetch_zara_page,
 )
 from .logging_utils import log
 from .models import HermesConfig, OfferResult, PriceSummaryRow, SearchResultItem, WatchRule
 from .notifier import send_pushover
 from .providers import hepsiburada as hepsiburada_provider
+from .providers import zara as zara_provider
 from .providers.registry import extract_offer
 from .search_amazon import (
     dedupe_results,
@@ -67,6 +70,8 @@ PRODUCT_MISSING_PRICE_MARKERS = (
     "okunabilir fiyat bulunamadı",
     "fiyat yakalanamadi",
     "fiyat yakalanamadı",
+    "stokta degil",
+    "stokta değil",
 )
 SUMMARY_DROP_MIN_DELTA = 4
 SUMMARY_DROP_RATIO_DIVISOR = 4
@@ -561,7 +566,7 @@ def reset_product_alert_after_missing(
 
 def summary_config_signature(config: HermesConfig) -> str:
     watch_part = ",".join(
-        f"{watch.site}:{watch.url}:{watch.target_price}:{watch.active}"
+        f"{watch.site}:{watch.url}:{watch.target_price}:{watch.size}:{watch.active}"
         for watch in config.watches
     )
     return f"watches={watch_part}"
@@ -959,6 +964,22 @@ def _fetch_hepsiburada_watch_offers(
     raise HermesError("Hepsiburada sayfasından fiyat bulunamadı.")
 
 
+def _fetch_zara_watch_offers(
+    session: requests.Session,
+    watch: WatchRule,
+    config: HermesConfig,
+) -> List[OfferResult]:
+    response = fetch_zara_page(session, watch.url, config.request_timeout_seconds)
+    html = cleaned_html(response)
+    raise_if_age_verification(html)
+    if is_bot_protection_page(SITE_ZARA, html):
+        raise HermesError("Zara bot korumasi nedeniyle captcha sayfasi dondu.")
+    offers = zara_provider.extract_offers(html, source_url=watch.url, size=watch.size)
+    if watch.size:
+        log(f"Zara beden kontrol edildi: {watch.name or watch.url} | beden={watch.size} | adet={len(offers)}")
+    return offers
+
+
 def _fetch_watch_offers(session: requests.Session, watch: WatchRule, config: HermesConfig) -> List[OfferResult]:
     site = watch.site
     url = watch.url
@@ -967,6 +988,8 @@ def _fetch_watch_offers(session: requests.Session, watch: WatchRule, config: Her
         return [_fetch_amazon_search_watch_offer(session, watch, config)]
     if site == SITE_HEPSIBURADA:
         return _fetch_hepsiburada_watch_offers(session, watch, config)
+    if site == SITE_ZARA:
+        return _fetch_zara_watch_offers(session, watch, config)
     elif site == SITE_AMAZON:
         response = fetch_amazon_page(session, url, timeout)
     else:
@@ -1035,7 +1058,7 @@ def check_once(config: HermesConfig) -> None:
                 if watch.site == SITE_HEPSIBURADA:
                     offer_display_name = hepsiburada_provider.clean_display_title(offer_display_name)
                 matched_url = offer.url or watch.url
-                offer_key = normalize_item_key("watch_offer", watch.site, watch.name, matched_url)
+                offer_key = normalize_item_key("watch_offer", watch.site, watch.name, matched_url, watch.size)
                 offer_state_entry = state.get(offer_key, {})
                 if not isinstance(offer_state_entry, dict):
                     offer_state_entry = {}
@@ -1101,6 +1124,7 @@ def check_once(config: HermesConfig) -> None:
                 state[offer_key]["url"] = matched_url
                 state[offer_key]["configured_url"] = watch.url
                 state[offer_key]["watch_name"] = watch.name
+                state[offer_key]["size"] = watch.size
                 state[offer_key]["site"] = watch.site
                 state[offer_key]["last_error"] = None
                 state[offer_key]["last_error_status"] = None
@@ -1110,6 +1134,7 @@ def check_once(config: HermesConfig) -> None:
                 "site": watch.site,
                 "watch_name": watch.name,
                 "configured_url": watch.url,
+                "size": watch.size,
                 "offer_keys": offer_keys,
                 "last_error": None,
                 "last_error_status": None,
@@ -1149,6 +1174,7 @@ def check_once(config: HermesConfig) -> None:
             failed["site"] = watch.site
             failed["watch_name"] = watch.name
             failed["configured_url"] = watch.url
+            failed["size"] = watch.size
             failed["offer_keys"] = []
             failed["last_error"] = str(exc)
             failed["last_error_status"] = getattr(exc, "status_code", None)
@@ -1156,7 +1182,7 @@ def check_once(config: HermesConfig) -> None:
             state[watch_key] = failed
 
     for watch in config.watches:
-        watch_key = normalize_item_key("watch", watch.site, watch.name, watch.url)
+        watch_key = normalize_item_key("watch", watch.site, watch.name, watch.url, watch.size)
         state_entry = state.get(watch_key, {})
         if not isinstance(state_entry, dict):
             state_entry = {}

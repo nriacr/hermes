@@ -29,6 +29,7 @@ from hermes.providers.hepsiburada import (  # noqa: E402
     title_with_variant_label,
 )
 from hermes.providers.nordbron import extract_offer as extract_nordbron_offer  # noqa: E402
+from hermes.providers.zara import extract_offers as extract_zara_offers  # noqa: E402
 from hermes.search_amazon import extract_result_candidates  # noqa: E402
 from hermes.utils import detect_site_from_url  # noqa: E402
 
@@ -1247,6 +1248,7 @@ class HermesSmokeTests(unittest.TestCase):
                     "url_1": "https://www.amazon.com.tr/dp/B000000001",
                     "url_2": "https://www.hepsiburada.com/ornek-urun-p-HBCV000000000",
                     "url_3": "https://nordbron.com/stark-sirt-cantasi",
+                    "size": "M",
                     "notify_once_in_24H": True,
                     "active": True,
                 }
@@ -1255,6 +1257,7 @@ class HermesSmokeTests(unittest.TestCase):
         self.assertEqual(len(watches), 3)
         self.assertEqual([item.site for item in watches], ["amazon", "hepsiburada", "nordbron"])
         self.assertTrue(all(item.name == "Ortak ürün" for item in watches))
+        self.assertTrue(all(item.size == "M" for item in watches))
 
     def test_watch_card_detects_site_from_url(self):
         watches = _prepare_watches(
@@ -1269,6 +1272,120 @@ class HermesSmokeTests(unittest.TestCase):
         )
         self.assertEqual(len(watches), 1)
         self.assertEqual(watches[0].site, "trendyol")
+
+    def test_zara_site_detection(self):
+        url = "https://www.zara.com/tr/tr/dokulu-regular-fit-polo-t-shirt-p03166301.html?v1=567184888"
+        self.assertEqual(detect_site_from_url(url), "zara")
+
+    def test_zara_size_filter_reads_only_available_size(self):
+        html = """
+        <html><body>
+          <script type="application/ld+json">
+          {
+            "@type": "Product",
+            "name": "DOKULU REGULAR FIT POLO T-SHIRT",
+            "color": "sarımsı kahverengi",
+            "hasVariant": [
+              {
+                "@type": "Product",
+                "size": "M (US M)",
+                "color": "sarımsı kahverengi",
+                "offers": {
+                  "@type": "Offer",
+                  "price": "1290",
+                  "priceCurrency": "TRY",
+                  "availability": "https://schema.org/LimitedAvailability",
+                  "url": "https://www.zara.com/tr/tr/m"
+                }
+              },
+              {
+                "@type": "Product",
+                "size": "L (US L)",
+                "color": "sarımsı kahverengi",
+                "offers": {
+                  "@type": "Offer",
+                  "price": "1290",
+                  "priceCurrency": "TRY",
+                  "availability": "https://schema.org/OutOfStock",
+                  "url": "https://www.zara.com/tr/tr/l"
+                }
+              }
+            ]
+          }
+          </script>
+        </body></html>
+        """
+
+        offers = extract_zara_offers(html, source_url="https://www.zara.com/tr/tr/product", size="M")
+
+        self.assertEqual(len(offers), 1)
+        self.assertEqual(offers[0].price, Decimal("1290"))
+        self.assertEqual(offers[0].seller, "Zara")
+        self.assertIn("M (US M)", offers[0].title)
+        self.assertIn("sarımsı kahverengi", offers[0].title)
+
+    def test_zara_size_filter_rejects_out_of_stock_size(self):
+        html = """
+        <html><body>
+          <script type="application/ld+json">
+          {
+            "@type": "Product",
+            "name": "DOKULU REGULAR FIT POLO T-SHIRT",
+            "hasVariant": [
+              {
+                "@type": "Product",
+                "size": "L (US L)",
+                "offers": {
+                  "@type": "Offer",
+                  "price": "1290",
+                  "availability": "https://schema.org/OutOfStock"
+                }
+              }
+            ]
+          }
+          </script>
+        </body></html>
+        """
+
+        with self.assertRaisesRegex(Exception, "stokta"):
+            extract_zara_offers(html, source_url="https://www.zara.com/tr/tr/product", size="L")
+
+    def test_zara_blank_size_uses_lowest_available_offer(self):
+        html = """
+        <html><body>
+          <script type="application/ld+json">
+          {
+            "@type": "Product",
+            "name": "DOKULU REGULAR FIT POLO T-SHIRT",
+            "hasVariant": [
+              {
+                "@type": "Product",
+                "size": "M (US M)",
+                "offers": {
+                  "@type": "Offer",
+                  "price": "1290",
+                  "availability": "https://schema.org/LimitedAvailability"
+                }
+              },
+              {
+                "@type": "Product",
+                "size": "S (US S)",
+                "offers": {
+                  "@type": "Offer",
+                  "price": "990",
+                  "availability": "https://schema.org/InStock"
+                }
+              }
+            ]
+          }
+          </script>
+        </body></html>
+        """
+
+        offers = extract_zara_offers(html, source_url="https://www.zara.com/tr/tr/product")
+
+        self.assertEqual(len(offers), 1)
+        self.assertEqual(offers[0].price, Decimal("990"))
 
 
 if __name__ == "__main__":

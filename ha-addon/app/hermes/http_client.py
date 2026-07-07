@@ -1,4 +1,6 @@
+import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -777,6 +779,54 @@ def fetch_hepsiburada_page(session: requests.Session, url: str, timeout: int) ->
         raise last_error
     _log_hepsiburada_diagnostics(url, attempts)
     raise HttpStatusHermesError(0, url)
+
+
+def _is_zara_interstitial(html: str) -> bool:
+    normalized = normalize_offer_text(html)
+    return "bm-verify" in normalized and "_sec/verify" in normalized
+
+
+def _zara_origin(url: str) -> str:
+    parsed = urlsplit(url)
+    return f"{parsed.scheme}://{parsed.netloc}" if parsed.scheme and parsed.netloc else "https://www.zara.com"
+
+
+def _zara_verification_payload(html: str) -> Dict[str, Any]:
+    token_match = re.search(r'["\']bm-verify["\']\s*:\s*["\']([^"\']+)["\']', html)
+    number_match = re.search(r'Number\(\s*["\'](\d+)["\']\s*\+\s*["\'](\d+)["\']\s*\)', html)
+    base_match = re.search(r"var\s+i\s*=\s*(\d+)", html)
+    if not token_match or not number_match or not base_match:
+        raise HermesError("Zara doğrulama sayfası çözümlenemedi.")
+    return {
+        "bm-verify": token_match.group(1),
+        "pow": int(base_match.group(1)) + int(number_match.group(1) + number_match.group(2)),
+    }
+
+
+def fetch_zara_page(session: requests.Session, url: str, timeout: int) -> requests.Response:
+    response = session.get(url, headers=build_headers(url), timeout=timeout, allow_redirects=True)
+    response.raise_for_status()
+    html = decode_response_text(response)
+    if not _is_zara_interstitial(html):
+        return response
+
+    payload = _zara_verification_payload(html)
+    verify_url = f"{_zara_origin(url)}/_sec/verify?provider=interstitial"
+    headers = build_headers(url)
+    headers.update({"Content-Type": "application/json", "Origin": _zara_origin(url), "Referer": url})
+    verify_response = session.post(
+        verify_url,
+        data=json.dumps(payload),
+        headers=headers,
+        timeout=timeout,
+        allow_redirects=True,
+    )
+    verify_response.raise_for_status()
+    response = session.get(url, headers=build_headers(url), timeout=timeout, allow_redirects=True)
+    response.raise_for_status()
+    if _is_zara_interstitial(decode_response_text(response)):
+        raise HermesError("Zara bot korumasi nedeniyle doğrulama sayfasi dondu.")
+    return response
 
 
 def cleaned_html(response: requests.Response) -> str:

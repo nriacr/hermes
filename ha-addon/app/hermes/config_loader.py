@@ -122,6 +122,7 @@ def _prepare_watches(raw_watches: object) -> List[WatchRule]:
         if not name:
             raise HermesError("Takip edilen kayıt için name alanı zorunlu.")
         target_price = parse_decimal(_required_value(item, "target_price", f"Takip edilen ({name})"))
+        size = str(item.get("size") or "").strip()
         max_items_to_scan = _bounded_integer(item, "max_items_to_scan", 24, 1, 100)
         check_interval_minutes = _optional_bounded_integer(item, "check_interval_minutes", 1, 1440)
         notify_once_in_24h = parse_bool(item.get("notify_once_in_24H"), default=True)
@@ -132,6 +133,7 @@ def _prepare_watches(raw_watches: object) -> List[WatchRule]:
                     site=detect_site_from_url(url),
                     url=url,
                     target_price=target_price,
+                    size=size,
                     max_items_to_scan=max_items_to_scan,
                     check_interval_minutes=check_interval_minutes,
                     notify_once_in_24h=notify_once_in_24h,

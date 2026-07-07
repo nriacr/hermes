@@ -115,6 +115,7 @@ def _watch_form(item, index, is_new=False):
         [
             _field(prefix, "name", "Ad", item.get("name", ""), required=not is_new),
             _field(prefix, "target_price", "Hedef fiyat", item.get("target_price", ""), "number", required=not is_new),
+            _field(prefix, "size", "Beden", item.get("size", "")),
             *[
                 _field(
                     prefix,
@@ -186,6 +187,7 @@ def _build_watches(form):
             continue
         name = _first(form, prefix + "name")
         target = _first(form, prefix + "target_price")
+        size = _first(form, prefix + "size")
         max_items = _first(form, prefix + "max_items_to_scan")
         interval = _first(form, prefix + "check_interval_minutes")
         urls = []
@@ -193,7 +195,7 @@ def _build_watches(form):
             url = _first(form, prefix + field_name)
             if url and url not in urls:
                 urls.append(url)
-        if not any([name, target, max_items, interval, *urls]):
+        if not any([name, target, size, max_items, interval, *urls]):
             continue
         if not name or not target or not urls:
             raise ValueError("Takip eklerken ad, hedef fiyat ve en az bir link alanı dolu olmalı.")
@@ -203,6 +205,8 @@ def _build_watches(form):
             "notify_once_in_24H": _bool_from_form(form, prefix + "notify_once_in_24H"),
             "active": _bool_from_form(form, prefix + "active"),
         }
+        if size:
+            item["size"] = size
         for url_index, url in enumerate(urls, start=1):
             item[f"url_{url_index}"] = url
         if max_items:

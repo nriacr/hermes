@@ -1,6 +1,6 @@
 from pathlib import Path
 
-APP_VERSION = "2.2.22"
+APP_VERSION = "2.2.23"
 OPTIONS_PATH = Path("/data/options.json")
 STATE_PATH = Path("/data/state.json")
 SUMMARY_PATH = Path("/data/latest_price_summary.json")
@@ -16,12 +16,14 @@ SITE_HEPSIBURADA = "hepsiburada"
 SITE_TRENDYOL = "trendyol"
 SITE_NETWORK = "network"
 SITE_NORDBRON = "nordbron"
+SITE_ZARA = "zara"
 SITE_LABELS = {
     SITE_AMAZON: "Amazon",
     SITE_HEPSIBURADA: "Hepsiburada",
     SITE_TRENDYOL: "Trendyol",
     SITE_NETWORK: "Network",
     SITE_NORDBRON: "Nordbron",
+    SITE_ZARA: "Zara",
 }
 
 AMAZON_BASE_URL = "https://www.amazon.com.tr"
