@@ -737,24 +737,28 @@ class HermesSmokeTests(unittest.TestCase):
               <a href="/samsung-galaxy-tab-s10-fe-gumus-p-HBCV00008GUMUS">
                 Samsung Galaxy Tab S10 FE+ 8GB 128GB SM-X620 (Samsung Türkiye Garantili) Gümüş
               </a>
+              <img alt="Samsung Galaxy Tab S10 FE+ 128 GB Gümüş">
               <div>Premium ile 18.099 TL</div>
             </li>
             <li class="productCard">
               <a href="/samsung-galaxy-tab-s10-fe-mavi-p-HBCV00008MAVI">
                 Samsung Galaxy Tab S10 FE+ 8GB 128GB SM-X620 (Samsung Türkiye Garantili) Mavi
               </a>
+              <img alt="Samsung Galaxy Tab S10 FE+ 128 GB Mavi">
               <div>Premium ile 18.049 TL</div>
             </li>
             <li class="productCard">
               <a href="/samsung-galaxy-tab-s10-fe-gri-p-HBCV00008GRI">
                 Samsung Galaxy Tab S10 FE+ 8GB 128GB SM-X620 (Samsung Türkiye Garantili) Gri
               </a>
+              <img alt="Samsung Galaxy Tab S10 FE+ 128 GB Gri">
               <div>18.399 TL</div>
             </li>
             <li class="productCard">
-              <a href="/samsung-galaxy-tab-s10-fe-256gb-p-HBCV00008256GB">
+              <a href="/samsung-galaxy-tab-s10-fe-mavi-256gb-p-HBCV00008256GB">
                 Samsung Galaxy Tab S10FE+ 13.1 12/256GB Tam Dokunmatik Tablet
               </a>
+              <img alt="Samsung Galaxy Tab S10 FE+ 256 GB Mavi">
               <div>22.923,32 TL</div>
             </li>
           </ul>
@@ -775,6 +779,12 @@ class HermesSmokeTests(unittest.TestCase):
             Decimal("22923.32"),
         ])
         self.assertTrue(all(offer.url and "/samsung-galaxy-tab" in offer.url for offer in offers))
+        title_by_url = {offer.url: offer.title for offer in offers}
+        self.assertTrue(title_by_url["https://www.hepsiburada.com/samsung-galaxy-tab-s10-fe-gumus-p-HBCV00008GUMUS"].endswith("/ 128 GB / Gümüş"))
+        self.assertTrue(title_by_url["https://www.hepsiburada.com/samsung-galaxy-tab-s10-fe-mavi-p-HBCV00008MAVI"].endswith("/ 128 GB / Mavi"))
+        self.assertTrue(title_by_url["https://www.hepsiburada.com/samsung-galaxy-tab-s10-fe-gri-p-HBCV00008GRI"].endswith("/ 128 GB / Gri"))
+        self.assertTrue(title_by_url["https://www.hepsiburada.com/samsung-galaxy-tab-s10-fe-mavi-256gb-p-HBCV00008256GB"].endswith("/ 256 GB / Mavi"))
+        self.assertFalse(any("/ Renk" in offer.title or "/ Kapasite" in offer.title for offer in offers))
 
     def test_hepsiburada_embedded_prefers_premium_price(self):
         html = """

@@ -3,7 +3,7 @@ import re
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any, Iterable, Optional
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import unquote, urljoin, urlsplit
 
 from ..errors import HermesError
 from ..logging_utils import log
@@ -170,6 +170,24 @@ VARIANT_LABEL_FORBIDDEN_VALUES = {
     "listing",
     "listing id",
 }
+COLOR_LABELS = (
+    ("antrasit", "Antrasit"),
+    ("lacivert", "Lacivert"),
+    ("mint yesili", "Mint Yeşili"),
+    ("gumus", "Gümüş"),
+    ("gri", "Gri"),
+    ("mavi", "Mavi"),
+    ("siyah", "Siyah"),
+    ("beyaz", "Beyaz"),
+    ("yesil", "Yeşil"),
+    ("kirmizi", "Kırmızı"),
+    ("pembe", "Pembe"),
+    ("mor", "Mor"),
+    ("sari", "Sarı"),
+    ("turuncu", "Turuncu"),
+    ("bej", "Bej"),
+)
+CAPACITY_RE = re.compile(r"(?<!\d)(?:\d+\s*/\s*)?(\d+)\s*(GB|TB)\b", re.IGNORECASE)
 
 
 @dataclass
@@ -506,9 +524,24 @@ def _seller_lookup_from_json(soup) -> dict[str, str]:
     return sellers
 
 
+def _variant_lookup_from_json(soup) -> dict[str, str]:
+    variants: dict[str, str] = {}
+    for payload in _json_payloads(soup):
+        for mapping in _iter_json_values(payload):
+            url = _first_mapping_url(mapping)
+            product_id = _product_id_from_url(url)
+            if not product_id:
+                continue
+            label = _variant_label_from_mapping(mapping)
+            if label:
+                variants[product_id] = label
+    return variants
+
+
 def _search_candidates_from_dom(soup) -> list[HepsiburadaCandidate]:
     candidates = []
     seller_lookup = _seller_lookup_from_json(soup)
+    variant_lookup = _variant_lookup_from_json(soup)
     for link in soup.select("a[href]"):
         if not _is_product_link(link):
             continue
@@ -522,7 +555,12 @@ def _search_candidates_from_dom(soup) -> list[HepsiburadaCandidate]:
         if not _is_good_title(title):
             continue
         url = _absolute_url(str(link.get("href") or ""))
-        seller = seller_lookup.get(_product_id_from_url(url)) or _infer_seller_from_title(title)
+        product_id = _product_id_from_url(url)
+        seller = seller_lookup.get(product_id) or _infer_seller_from_title(title)
+        title = _title_with_search_variant_label(
+            title,
+            _search_card_variant_label(title=title, url=url, card=card, embedded_label=variant_lookup.get(product_id, "")),
+        )
         candidates.append(
             HepsiburadaCandidate(
                 title=title,
@@ -618,6 +656,10 @@ def _search_candidates_from_json(soup) -> list[HepsiburadaCandidate]:
                 continue
             product_id = _product_id_from_url(url)
             seller = seller_lookup.get(product_id) or _infer_seller_from_title(title)
+            title = _title_with_search_variant_label(
+                title,
+                _search_card_variant_label(title=title, url=url, embedded_label=_variant_label_from_mapping(mapping)),
+            )
             candidates.append(
                 HepsiburadaCandidate(
                     title=title,
@@ -750,6 +792,106 @@ def title_with_variant_label(title: str, variant_label: str) -> str:
     if normalize_offer_text(clean_label) in normalize_offer_text(clean_title):
         return clean_title
     return f"{clean_title} / {clean_label}"
+
+
+def _values_from_variant_label(label: str) -> list[str]:
+    return [_clean_variant_value(part) for part in re.split(r"\s*/\s*", _clean_text(label)) if _clean_variant_value(part)]
+
+
+def _capacity_label_from_value(value: str) -> str:
+    matches = list(CAPACITY_RE.finditer(_clean_text(value)))
+    if not matches:
+        return ""
+    preferred = [match for match in matches if match.group(2).casefold() == "tb" or int(match.group(1)) >= 32]
+    match = (preferred or matches)[-1]
+    return f"{int(match.group(1))} {match.group(2).upper()}"
+
+
+def _color_label_from_value(value: str) -> str:
+    normalized = normalize_offer_text(unquote(_clean_text(value)).replace("-", " ").replace("_", " "))
+    for marker, label in COLOR_LABELS:
+        if re.search(rf"(^|\W){re.escape(marker)}($|\W)", normalized):
+            return label
+    return ""
+
+
+def _explicit_variant_values_from_text(text: str) -> list[str]:
+    values: list[str] = []
+    clean = _clean_text(text)
+    for label in VARIANT_FIELD_LABELS:
+        pattern = re.compile(rf"\b{re.escape(label)}\b\s*:?\s*([^/|,\n\r]{{1,48}})", re.IGNORECASE)
+        for match in pattern.finditer(clean):
+            value = _clean_variant_value(match.group(1))
+            if value:
+                values.append(value)
+    return values
+
+
+def _ordered_variant_label(values: Iterable[str], *fallback_texts: str) -> str:
+    capacities: list[str] = []
+    colors: list[str] = []
+    others: list[str] = []
+    seen: set[str] = set()
+
+    def add(bucket: list[str], value: str) -> None:
+        normalized = normalize_offer_text(value)
+        if value and normalized not in seen:
+            seen.add(normalized)
+            bucket.append(value)
+
+    for raw_value in values:
+        value = _clean_variant_value(raw_value)
+        if not value:
+            continue
+        capacity = _capacity_label_from_value(value)
+        color = _color_label_from_value(value)
+        if capacity:
+            add(capacities, capacity)
+        elif color:
+            add(colors, color)
+        else:
+            add(others, value)
+
+    fallback = " ".join(unquote(str(text or "")).replace("-", " ").replace("_", " ") for text in fallback_texts)
+    capacity = _capacity_label_from_value(fallback)
+    color = _color_label_from_value(fallback)
+    if capacity:
+        add(capacities, capacity)
+    if color:
+        add(colors, color)
+
+    return _clean_variant_label(" / ".join([*capacities[:1], *colors[:1], *others[:2]]))
+
+
+def _search_card_context(card) -> str:
+    if card is None:
+        return ""
+    values = [card.get_text(" ", strip=True)]
+    for element in card.select("[alt], [title], [aria-label]"):
+        for attribute in ("alt", "title", "aria-label"):
+            value = element.get(attribute)
+            if isinstance(value, str) and 0 < len(value) <= 180:
+                values.append(value)
+    return _clean_text(" ".join(values))
+
+
+def _search_card_variant_label(title: str, url: str, card=None, embedded_label: str = "") -> str:
+    values = _values_from_variant_label(embedded_label)
+    card_text = _search_card_context(card)
+    values.extend(_explicit_variant_values_from_text(card_text))
+    return _ordered_variant_label(values, title, url, card_text)
+
+
+def _title_with_search_variant_label(title: str, variant_label: str) -> str:
+    clean_title = _clean_text(title)
+    clean_label = _clean_variant_label(variant_label)
+    if not clean_title or not clean_label:
+        return clean_title
+    for value in _values_from_variant_label(clean_label):
+        if not _color_label_from_value(value):
+            continue
+        clean_title = re.sub(rf"[\s,/-]+{re.escape(value)}\s*$", "", clean_title, flags=re.IGNORECASE).strip()
+    return title_with_variant_label(clean_title, clean_label)
 
 
 def _detail_seller(lines: list[str]) -> str:
