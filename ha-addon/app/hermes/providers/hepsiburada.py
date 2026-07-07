@@ -75,19 +75,25 @@ COUPON_MARKERS = ("kupon", "hepsipara", "kazan")
 CART_SPECIAL_MARKERS = ("sepete özel", "sepete ozel")
 PREMIUM_PRICE_MARKERS = (
     "premium ile",
-    "premium'a özel",
     "premium'a özel fiyat",
     "premium'a ozel fiyat",
-    "premium’a özel",
     "premium’a özel fiyat",
     "premium’a ozel fiyat",
-    "premiuma özel",
     "premiuma özel fiyat",
     "premiuma ozel fiyat",
     "premium özel fiyat",
     "premium ozel fiyat",
 )
 PREMIUM_PRICE_MARKERS_NORMALIZED = {normalize_offer_text(item) for item in PREMIUM_PRICE_MARKERS}
+PREMIUM_CAMPAIGN_MARKERS_NORMALIZED = {
+    "indirim",
+    "kazanc",
+    "kazancimi",
+    "hepsipara",
+    "kupon",
+    "koruma paketi",
+    "paketlerinde",
+}
 BAD_TITLE_MARKERS = (
     "teslimat bilgisi",
     "sepete ekle",
@@ -177,6 +183,27 @@ def _absolute_url(url: str) -> str:
 
 def _clean_text(value: Any) -> str:
     return re.sub(r"\s+", " ", repair_mojibake(value)).strip()
+
+
+def _decode_escaped_fragments(value: str) -> str:
+    text = str(value or "")
+
+    def replace_unicode(match: re.Match) -> str:
+        return chr(int(match.group(1), 16))
+
+    def replace_hex(match: re.Match) -> str:
+        return chr(int(match.group(1), 16))
+
+    text = re.sub(r"\\u([0-9a-fA-F]{4})", replace_unicode, text)
+    text = re.sub(r"\\x([0-9a-fA-F]{2})", replace_hex, text)
+    return (
+        text.replace("\\/", "/")
+        .replace('\\"', '"')
+        .replace("\\'", "'")
+        .replace("\\n", " ")
+        .replace("\\r", " ")
+        .replace("\\t", " ")
+    )
 
 
 def _class_text(element) -> str:
@@ -301,7 +328,12 @@ def _cart_special_prices(text: str) -> list[Decimal]:
     return [price for price in (_parse_price(match.group(0)) for match in PRICE_RE.finditer(segment)) if price is not None]
 
 
-def _prices_after_markers(text: str, markers: tuple[str, ...], window: int = 96) -> list[Decimal]:
+def _is_premium_campaign_amount(segment: str, price_start: int, price_end: int) -> bool:
+    close_context = normalize_offer_text(segment[max(0, price_start - 56) : price_end + 56])
+    return any(marker in close_context for marker in PREMIUM_CAMPAIGN_MARKERS_NORMALIZED)
+
+
+def _prices_after_markers(text: str, markers: tuple[str, ...], window: int = 160) -> list[Decimal]:
     clean = _clean_text(text)
     searchable = clean.casefold().replace("’", "'").replace("`", "'").replace("´", "'")
     prices: list[Decimal] = []
@@ -311,6 +343,8 @@ def _prices_after_markers(text: str, markers: tuple[str, ...], window: int = 96)
             position = match.start()
             segment = clean[position : position + window]
             for match in PRICE_RE.finditer(segment):
+                if _is_premium_campaign_amount(segment, match.start(), match.end()):
+                    continue
                 price = _parse_price(match.group(0))
                 if price is not None:
                     prices.append(price)
@@ -720,7 +754,13 @@ def _number_price(raw_price: str) -> Optional[Decimal]:
 
 
 def _embedded_text(soup) -> str:
-    return repair_mojibake(str(soup)).replace('\\"', '"')
+    return repair_mojibake(_decode_escaped_fragments(str(soup)))
+
+
+def _readable_source_text(soup) -> str:
+    raw = _embedded_text(soup)
+    without_tags = re.sub(r"<[^>]+>", " ", raw)
+    return _clean_text(without_tags)
 
 
 def _price_context_allows(context: str) -> bool:
@@ -1130,8 +1170,10 @@ def _detail_candidate(soup) -> Optional[HepsiburadaCandidate]:
     title = extract_title(soup) or "Hepsiburada ürünü"
     lines = _visible_lines_until_details(soup)
     seller = _detail_seller(lines)
-    line_text = "\n".join(lines[:120])
+    line_text = "\n".join(lines)
     premium_prices = _premium_prices(line_text)
+    if not premium_prices:
+        premium_prices = _premium_prices(_readable_source_text(soup))
     price = min(premium_prices) if premium_prices else None
     if price is None:
         price = extract_price_from_selectors(soup, DETAIL_PRICE_SELECTORS)
@@ -1155,7 +1197,7 @@ def extract_offer(html: str, source_url: str = "") -> OfferResult:
         candidates = _embedded_detail_candidates(soup, source_url=source_url)
         detail = _detail_candidate(soup)
         if detail:
-            detail.identity = f"{selected_product_id}:visible-detail:{normalize_offer_text(detail.seller)}"
+            detail.identity = f"{selected_product_id}:{normalize_offer_text(detail.seller)}"
             candidates.append(detail)
         candidates = _dedupe_candidates(candidates)
     else:
