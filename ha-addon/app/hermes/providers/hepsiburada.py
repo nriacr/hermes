@@ -14,7 +14,10 @@ from .base import extract_price_from_selectors, extract_title, soup_from_html
 BASE_URL = "https://www.hepsiburada.com"
 MIN_PRICE = Decimal("50")
 MAX_PRICE = Decimal("1000000")
-PRICE_RE = re.compile(r"(?<![\d.,])\d{1,3}(?:\.\d{3})*(?:,\d{2})?\s*TL", re.IGNORECASE)
+PRICE_RE = re.compile(
+    r"(?<![\d.,])(?:\d{1,3}(?:\.\d{3})+|\d{1,7})(?:,\d{2})?\s*TL",
+    re.IGNORECASE,
+)
 PRODUCT_URL_RE = re.compile(r"/(?:[^\s'\"<>]+)-(?:p|pm)-[A-Z0-9]+", re.IGNORECASE)
 PRODUCT_ID_RE = re.compile(r"-(?:p|pm)-([A-Z0-9]+)", re.IGNORECASE)
 EMBEDDED_VARIANT_RE = re.compile(
@@ -354,6 +357,11 @@ def _prices_after_markers(text: str, markers: tuple[str, ...], window: int = 160
 
 def _premium_prices(text: str) -> list[Decimal]:
     return _prices_after_markers(text, PREMIUM_PRICE_MARKERS)
+
+
+def _has_premium_marker(text: str) -> bool:
+    normalized = normalize_offer_text(text)
+    return any(marker in normalized for marker in PREMIUM_PRICE_MARKERS_NORMALIZED)
 
 
 def _prices_from_card(card) -> list[Decimal]:
@@ -1172,8 +1180,12 @@ def _detail_candidate(soup) -> Optional[HepsiburadaCandidate]:
     seller = _detail_seller(lines)
     line_text = "\n".join(lines)
     premium_prices = _premium_prices(line_text)
+    readable_source_text = ""
     if not premium_prices:
-        premium_prices = _premium_prices(_readable_source_text(soup))
+        readable_source_text = _readable_source_text(soup)
+        premium_prices = _premium_prices(readable_source_text)
+    if not premium_prices and (_has_premium_marker(line_text) or _has_premium_marker(readable_source_text)):
+        log("Hepsiburada Premium metni bulundu ama fiyat ayrıştırılamadı.")
     price = min(premium_prices) if premium_prices else None
     if price is None:
         price = extract_price_from_selectors(soup, DETAIL_PRICE_SELECTORS)
