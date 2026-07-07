@@ -383,6 +383,7 @@ def _get_hepsiburada_response_with_browser(session: requests.Session, candidate:
             "--no-sandbox",
             "--window-size=1365,900",
             "--lang=tr-TR",
+            "--virtual-time-budget=8000",
             f"--user-agent={AMAZON_CHROME_USER_AGENT}",
             f"--user-data-dir={profile_dir}",
             "--dump-dom",
