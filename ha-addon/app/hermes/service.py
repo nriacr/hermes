@@ -824,7 +824,13 @@ def _fetch_hepsiburada_watch_offers(
         raise HermesError("Hepsiburada bot korumasi nedeniyle captcha sayfasi dondu.")
 
     if not hepsiburada_provider.is_product_url(watch.url):
-        return [extract_offer(SITE_HEPSIBURADA, html, source_url=watch.url)]
+        offers = hepsiburada_provider.extract_search_offers(
+            html,
+            source_url=watch.url,
+            limit=_hepsiburada_variant_scan_limit(watch),
+        )
+        log(f"Hepsiburada arama kartlari okundu: {watch.name or watch.url} | adet={len(offers)}")
+        return offers
 
     variant_urls = hepsiburada_provider.extract_variant_urls(
         html,

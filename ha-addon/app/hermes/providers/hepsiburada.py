@@ -1212,6 +1212,27 @@ def _log_candidates(candidates: list[HepsiburadaCandidate]) -> None:
     log(f"Hepsiburada teklifleri: {preview}")
 
 
+def extract_search_offers(html: str, source_url: str = "", limit: int = 24) -> list[OfferResult]:
+    soup = soup_from_html(html)
+    candidates = _search_candidates_from_dom(soup)
+    if not candidates:
+        candidates = _search_candidates_from_json(soup)
+    if not candidates:
+        raise HermesError("Hepsiburada arama sayfasından fiyat bulunamadı.")
+
+    candidates = candidates[: max(1, int(limit or 1))]
+    _log_candidates(candidates)
+    return [
+        OfferResult(
+            title=repair_mojibake(candidate.title),
+            price=candidate.price,
+            seller=candidate.seller,
+            url=candidate.url or source_url or None,
+        )
+        for candidate in candidates
+    ]
+
+
 def extract_offer(html: str, source_url: str = "") -> OfferResult:
     soup = soup_from_html(html)
     selected_product_id = _product_id_from_url(source_url)

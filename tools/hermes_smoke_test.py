@@ -22,6 +22,7 @@ from hermes.providers.hepsiburada import (  # noqa: E402
     extract_embedded_variant_label,
     extract_embedded_variant_offer,
     extract_offer as extract_hepsiburada_offer,
+    extract_search_offers as extract_hepsiburada_search_offers,
     extract_selected_variant_label,
     extract_selected_variant_labels,
     extract_variant_urls,
@@ -727,6 +728,53 @@ class HermesSmokeTests(unittest.TestCase):
         )
 
         self.assertEqual(offer.price, Decimal("18299"))
+
+    def test_hepsiburada_search_page_returns_each_card_as_offer(self):
+        html = """
+        <html><body>
+          <ul>
+            <li class="productCard">
+              <a href="/samsung-galaxy-tab-s10-fe-gumus-p-HBCV00008GUMUS">
+                Samsung Galaxy Tab S10 FE+ 8GB 128GB SM-X620 (Samsung Türkiye Garantili) Gümüş
+              </a>
+              <div>Premium ile 18.099 TL</div>
+            </li>
+            <li class="productCard">
+              <a href="/samsung-galaxy-tab-s10-fe-mavi-p-HBCV00008MAVI">
+                Samsung Galaxy Tab S10 FE+ 8GB 128GB SM-X620 (Samsung Türkiye Garantili) Mavi
+              </a>
+              <div>Premium ile 18.049 TL</div>
+            </li>
+            <li class="productCard">
+              <a href="/samsung-galaxy-tab-s10-fe-gri-p-HBCV00008GRI">
+                Samsung Galaxy Tab S10 FE+ 8GB 128GB SM-X620 (Samsung Türkiye Garantili) Gri
+              </a>
+              <div>18.399 TL</div>
+            </li>
+            <li class="productCard">
+              <a href="/samsung-galaxy-tab-s10-fe-256gb-p-HBCV00008256GB">
+                Samsung Galaxy Tab S10FE+ 13.1 12/256GB Tam Dokunmatik Tablet
+              </a>
+              <div>22.923,32 TL</div>
+            </li>
+          </ul>
+        </body></html>
+        """
+
+        offers = extract_hepsiburada_search_offers(
+            html,
+            source_url="https://www.hepsiburada.com/ara?q=sm-x620",
+            limit=10,
+        )
+
+        self.assertEqual(len(offers), 4)
+        self.assertEqual([offer.price for offer in offers], [
+            Decimal("18049"),
+            Decimal("18099"),
+            Decimal("18399"),
+            Decimal("22923.32"),
+        ])
+        self.assertTrue(all(offer.url and "/samsung-galaxy-tab" in offer.url for offer in offers))
 
     def test_hepsiburada_embedded_prefers_premium_price(self):
         html = """
