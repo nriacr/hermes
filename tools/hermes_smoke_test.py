@@ -1239,6 +1239,18 @@ class HermesSmokeTests(unittest.TestCase):
         self.assertFalse(service.is_bot_protection_page("nordbron", html))
         self.assertTrue(service.is_bot_protection_page("nordbron", "captcha robot"))
 
+    def test_zara_product_page_is_not_misread_as_captcha(self):
+        html = """
+        <html>
+          <body>
+            <script type="application/ld+json">{"@type":"Product","name":"Zara ürün"}</script>
+            <script>{"customerSettings":{"requireCaptchaValidation":true},"label":"robot"}</script>
+          </body>
+        </html>
+        """
+        self.assertFalse(service.is_bot_protection_page("zara", html))
+        self.assertTrue(service.is_bot_protection_page("zara", "bm-verify _sec/verify"))
+
     def test_watch_card_can_expand_to_multiple_site_links(self):
         watches = _prepare_watches(
             [

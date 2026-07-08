@@ -94,6 +94,8 @@ def raise_if_age_verification(html: str) -> None:
 def is_bot_protection_page(site: str, html: str) -> bool:
     lowered = html.lower()
     normalized = normalize_offer_text(html)
+    if site == SITE_ZARA:
+        return "bm-verify" in normalized and "_sec/verify" in normalized
     if site == SITE_HEPSIBURADA and any(
         marker in normalized
         for marker in (
