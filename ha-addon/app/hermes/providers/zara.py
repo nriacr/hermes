@@ -2,7 +2,6 @@ import json
 import re
 from decimal import Decimal
 from typing import Any, Iterable, List
-from urllib.parse import parse_qs, urlparse
 
 from ..errors import HermesError
 from ..models import OfferResult
@@ -132,47 +131,12 @@ def _variants_from_product(product: dict) -> List[dict]:
     return [product]
 
 
-def _source_product_id(source_url: str) -> str:
-    query = parse_qs(urlparse(str(source_url or "")).query)
-    return str((query.get("v1") or [""])[0]).strip()
-
-
-def _url_product_id(value: Any) -> str:
-    parsed = urlparse(str(value or ""))
-    return str((parse_qs(parsed.query).get("v1") or [""])[0]).strip()
-
-
-def _variant_matches_source(product: dict, variant: dict, source_product_id: str) -> bool:
-    if not source_product_id:
-        return True
-    offers = variant.get("offers")
-    urls = [variant.get("url"), product.get("url")]
-    if isinstance(offers, dict):
-        urls.append(offers.get("url"))
-
-    url_ids = [_url_product_id(value) for value in urls]
-    url_ids = [value for value in url_ids if value]
-    if url_ids:
-        return source_product_id in url_ids
-
-    identifiers = [variant.get("sku"), variant.get("mpn"), product.get("sku"), product.get("mpn")]
-    return any(str(value or "").startswith(f"{source_product_id}-") for value in identifiers)
-
-
-def _candidate_variants(html: str, source_url: str) -> List[tuple[dict, dict]]:
+def _candidate_variants(html: str) -> List[tuple[dict, dict]]:
     candidates: List[tuple[dict, dict]] = []
-    source_product_id = _source_product_id(source_url)
     for product in _product_payloads(html):
         for variant in _variants_from_product(product):
             candidates.append((product, variant))
-    if not source_product_id:
-        return candidates
-    matching = [
-        (product, variant)
-        for product, variant in candidates
-        if _variant_matches_source(product, variant, source_product_id)
-    ]
-    return matching or candidates
+    return candidates
 
 
 def _offer_from_variant(product: dict, variant: dict, source_url: str) -> OfferResult | None:
@@ -200,7 +164,7 @@ def extract_offers(html: str, source_url: str = "", size: str = "") -> List[Offe
     matched_size = False
     matched_available = False
 
-    for product, variant in _candidate_variants(html, source_url):
+    for product, variant in _candidate_variants(html):
         variant_size = _variant_size(variant)
         if requested_size and not _size_matches(variant_size, requested_size):
             continue

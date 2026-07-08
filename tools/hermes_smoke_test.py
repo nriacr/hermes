@@ -1410,7 +1410,7 @@ class HermesSmokeTests(unittest.TestCase):
 
         self.assertEqual(offers[0].title, "DOKULU REGULAR FIT POLO T-SHIRT / sarımsı kahverengi / M (US M)")
 
-    def test_zara_source_v1_keeps_only_matching_product_color(self):
+    def test_zara_requested_size_returns_each_available_color(self):
         html = """
         <html><body>
           <script type="application/ld+json">
@@ -1452,9 +1452,14 @@ class HermesSmokeTests(unittest.TestCase):
             size="M",
         )
 
-        self.assertEqual(len(offers), 1)
-        self.assertIn("sarımsı kahverengi", offers[0].title)
-        self.assertNotIn("Koyu pembe", offers[0].title)
+        self.assertEqual(len(offers), 2)
+        self.assertEqual(
+            [offer.title for offer in offers],
+            [
+                "DOKULU REGULAR FIT POLO T-SHIRT / sarımsı kahverengi / M (US M)",
+                "DOKULU REGULAR FIT POLO T-SHIRT / Koyu pembe / M (US M)",
+            ],
+        )
 
 
 if __name__ == "__main__":
