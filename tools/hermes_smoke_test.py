@@ -1387,6 +1387,75 @@ class HermesSmokeTests(unittest.TestCase):
         self.assertEqual(len(offers), 1)
         self.assertEqual(offers[0].price, Decimal("990"))
 
+    def test_zara_variant_only_jsonld_title_is_not_duplicated(self):
+        html = """
+        <html><body>
+          <script type="application/ld+json">
+          {
+            "@type": "Product",
+            "name": "DOKULU REGULAR FIT POLO T-SHIRT - sarımsı kahverengi - M (US M)",
+            "size": "M (US M)",
+            "color": "sarımsı kahverengi",
+            "offers": {
+              "@type": "Offer",
+              "price": "1290",
+              "availability": "https://schema.org/LimitedAvailability"
+            }
+          }
+          </script>
+        </body></html>
+        """
+
+        offers = extract_zara_offers(html, source_url="https://www.zara.com/tr/tr/product", size="M")
+
+        self.assertEqual(offers[0].title, "DOKULU REGULAR FIT POLO T-SHIRT / sarımsı kahverengi / M (US M)")
+
+    def test_zara_source_v1_keeps_only_matching_product_color(self):
+        html = """
+        <html><body>
+          <script type="application/ld+json">
+          [
+            {
+              "@type": "Product",
+              "name": "DOKULU REGULAR FIT POLO T-SHIRT - sarımsı kahverengi - M (US M)",
+              "sku": "567184888-707-3",
+              "size": "M (US M)",
+              "color": "sarımsı kahverengi",
+              "offers": {
+                "@type": "Offer",
+                "price": "1290",
+                "availability": "https://schema.org/InStock",
+                "url": "https://www.zara.com/tr/tr/product.html?v1=567184888"
+              }
+            },
+            {
+              "@type": "Product",
+              "name": "DOKULU REGULAR FIT POLO T-SHIRT - Koyu pembe - M (US M)",
+              "sku": "567184888-664-3",
+              "size": "M (US M)",
+              "color": "Koyu pembe",
+              "offers": {
+                "@type": "Offer",
+                "price": "1290",
+                "availability": "https://schema.org/InStock",
+                "url": "https://www.zara.com/tr/tr/product.html?v1=567184887"
+              }
+            }
+          ]
+          </script>
+        </body></html>
+        """
+
+        offers = extract_zara_offers(
+            html,
+            source_url="https://www.zara.com/tr/tr/product.html?v1=567184888",
+            size="M",
+        )
+
+        self.assertEqual(len(offers), 1)
+        self.assertIn("sarımsı kahverengi", offers[0].title)
+        self.assertNotIn("Koyu pembe", offers[0].title)
+
 
 if __name__ == "__main__":
     unittest.main()

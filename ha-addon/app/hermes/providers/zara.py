@@ -2,6 +2,7 @@ import json
 import re
 from decimal import Decimal
 from typing import Any, Iterable, List
+from urllib.parse import parse_qs, urlparse
 
 from ..errors import HermesError
 from ..models import OfferResult
@@ -113,6 +114,15 @@ def _title_with_parts(product_name: str, color: str, size: str = "") -> str:
     return " / ".join(parts)
 
 
+def _base_product_name(value: str, color: str, size: str) -> str:
+    title = _clean_part(value)
+    for suffix in (size, color):
+        clean_suffix = _clean_part(suffix)
+        if clean_suffix and normalize_offer_text(title).endswith(normalize_offer_text(f" - {clean_suffix}")):
+            title = title[: -len(f" - {clean_suffix}")].strip()
+    return title
+
+
 def _variants_from_product(product: dict) -> List[dict]:
     variants = product.get("hasVariant")
     if isinstance(variants, dict):
@@ -122,14 +132,59 @@ def _variants_from_product(product: dict) -> List[dict]:
     return [product]
 
 
+def _source_product_id(source_url: str) -> str:
+    query = parse_qs(urlparse(str(source_url or "")).query)
+    return str((query.get("v1") or [""])[0]).strip()
+
+
+def _url_product_id(value: Any) -> str:
+    parsed = urlparse(str(value or ""))
+    return str((parse_qs(parsed.query).get("v1") or [""])[0]).strip()
+
+
+def _variant_matches_source(product: dict, variant: dict, source_product_id: str) -> bool:
+    if not source_product_id:
+        return True
+    offers = variant.get("offers")
+    urls = [variant.get("url"), product.get("url")]
+    if isinstance(offers, dict):
+        urls.append(offers.get("url"))
+
+    url_ids = [_url_product_id(value) for value in urls]
+    url_ids = [value for value in url_ids if value]
+    if url_ids:
+        return source_product_id in url_ids
+
+    identifiers = [variant.get("sku"), variant.get("mpn"), product.get("sku"), product.get("mpn")]
+    return any(str(value or "").startswith(f"{source_product_id}-") for value in identifiers)
+
+
+def _candidate_variants(html: str, source_url: str) -> List[tuple[dict, dict]]:
+    candidates: List[tuple[dict, dict]] = []
+    source_product_id = _source_product_id(source_url)
+    for product in _product_payloads(html):
+        for variant in _variants_from_product(product):
+            candidates.append((product, variant))
+    if not source_product_id:
+        return candidates
+    matching = [
+        (product, variant)
+        for product, variant in candidates
+        if _variant_matches_source(product, variant, source_product_id)
+    ]
+    return matching or candidates
+
+
 def _offer_from_variant(product: dict, variant: dict, source_url: str) -> OfferResult | None:
     price = _offer_price(variant.get("offers")) or _offer_price(product.get("offers"))
     if price is None:
         return None
-    product_name = _clean_part(product.get("name") or variant.get("name") or "Zara ürünü")
     color = _clean_part(variant.get("color") or product.get("color"))
     size = _variant_size(variant)
-    url = _clean_part(variant.get("url") or source_url)
+    product_name = _base_product_name(product.get("name") or variant.get("name") or "Zara ürünü", color, size)
+    offers = variant.get("offers")
+    offer_url = offers.get("url") if isinstance(offers, dict) else ""
+    url = _clean_part(variant.get("url") or offer_url or source_url)
     return OfferResult(
         title=_title_with_parts(product_name, color, size),
         price=price,
@@ -145,24 +200,22 @@ def extract_offers(html: str, source_url: str = "", size: str = "") -> List[Offe
     matched_size = False
     matched_available = False
 
-    for product in _product_payloads(html):
-        variants = _variants_from_product(product)
-        for variant in variants:
-            variant_size = _variant_size(variant)
-            if requested_size and not _size_matches(variant_size, requested_size):
+    for product, variant in _candidate_variants(html, source_url):
+        variant_size = _variant_size(variant)
+        if requested_size and not _size_matches(variant_size, requested_size):
+            continue
+        if requested_size:
+            matched_size = True
+        if not _is_available(variant):
+            continue
+        matched_available = True
+        offer = _offer_from_variant(product, variant, source_url)
+        if offer:
+            offer_key = (normalize_offer_text(offer.title), str(offer.price), normalize_offer_text(offer.url or ""))
+            if offer_key in seen_offer_keys:
                 continue
-            if requested_size:
-                matched_size = True
-            if not _is_available(variant):
-                continue
-            matched_available = True
-            offer = _offer_from_variant(product, variant, source_url)
-            if offer:
-                offer_key = (normalize_offer_text(offer.title), str(offer.price), normalize_offer_text(offer.url or ""))
-                if offer_key in seen_offer_keys:
-                    continue
-                seen_offer_keys.add(offer_key)
-                offers.append(offer)
+            seen_offer_keys.add(offer_key)
+            offers.append(offer)
 
     if requested_size:
         if not matched_size:
