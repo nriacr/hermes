@@ -15,6 +15,7 @@ from .constants import (
     NOTIFY_REPEAT_SECONDS,
     SITE_AMAZON,
     SITE_HEPSIBURADA,
+    SITE_HM,
     SITE_NORDBRON,
     SITE_ZARA,
     STATE_PATH,
@@ -25,6 +26,7 @@ from .http_client import (
     cleaned_html,
     fetch_amazon_page,
     fetch_hepsiburada_page,
+    fetch_hm_page,
     fetch_with_retries,
     fetch_zara_page,
 )
@@ -32,6 +34,7 @@ from .logging_utils import log
 from .models import HermesConfig, OfferResult, PriceSummaryRow, SearchResultItem, WatchRule
 from .notifier import send_pushover
 from .providers import hepsiburada as hepsiburada_provider
+from .providers import hm as hm_provider
 from .providers import zara as zara_provider
 from .providers.registry import extract_offer
 from .search_amazon import (
@@ -96,6 +99,16 @@ def is_bot_protection_page(site: str, html: str) -> bool:
     normalized = normalize_offer_text(html)
     if site == SITE_ZARA:
         return "bm-verify" in normalized and "_sec/verify" in normalized
+    if site == SITE_HM:
+        return any(
+            marker in normalized
+            for marker in (
+                "akamai",
+                "access denied",
+                "sec-if-cpt",
+                "you don't have permission to access",
+            )
+        )
     if site == SITE_HEPSIBURADA and any(
         marker in normalized
         for marker in (
@@ -982,6 +995,22 @@ def _fetch_zara_watch_offers(
     return offers
 
 
+def _fetch_hm_watch_offers(
+    session: requests.Session,
+    watch: WatchRule,
+    config: HermesConfig,
+) -> List[OfferResult]:
+    response = fetch_hm_page(session, watch.url, config.request_timeout_seconds)
+    html = cleaned_html(response)
+    raise_if_age_verification(html)
+    if is_bot_protection_page(SITE_HM, html):
+        raise HermesError("H&M bot korumasi nedeniyle ürün verisi okunamadi.")
+    offers = hm_provider.extract_offers(html, source_url=watch.url, size=watch.size)
+    if watch.size:
+        log(f"H&M beden kontrol edildi: {watch.name or watch.url} | beden={watch.size} | adet={len(offers)}")
+    return offers
+
+
 def _fetch_watch_offers(session: requests.Session, watch: WatchRule, config: HermesConfig) -> List[OfferResult]:
     site = watch.site
     url = watch.url
@@ -992,6 +1021,8 @@ def _fetch_watch_offers(session: requests.Session, watch: WatchRule, config: Her
         return _fetch_hepsiburada_watch_offers(session, watch, config)
     if site == SITE_ZARA:
         return _fetch_zara_watch_offers(session, watch, config)
+    if site == SITE_HM:
+        return _fetch_hm_watch_offers(session, watch, config)
     elif site == SITE_AMAZON:
         response = fetch_amazon_page(session, url, timeout)
     else:

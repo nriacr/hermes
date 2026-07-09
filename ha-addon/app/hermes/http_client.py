@@ -882,5 +882,39 @@ def fetch_zara_page(session: requests.Session, url: str, timeout: int) -> reques
     return response
 
 
+def hm_headers(url: str) -> Dict[str, str]:
+    headers = build_headers(url)
+    headers.update(
+        {
+            "Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7",
+            "sec-ch-ua": '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+            "sec-ch-ua-mobile": "?0",
+            "sec-ch-ua-platform": '"Linux"',
+        }
+    )
+    return headers
+
+
+def fetch_hm_page(session: requests.Session, url: str, timeout: int) -> requests.Response:
+    if curl_requests is not None:
+        curl_session = getattr(session, "_hermes_hm_curl_session", None)
+        if curl_session is None:
+            curl_session = curl_requests.Session()
+            setattr(session, "_hermes_hm_curl_session", curl_session)
+        response = curl_session.get(
+            url,
+            headers=hm_headers(url),
+            timeout=timeout,
+            allow_redirects=True,
+            impersonate="chrome124",
+        )
+        response.raise_for_status()
+        return response
+
+    response = session.get(url, headers=hm_headers(url), timeout=timeout, allow_redirects=True)
+    response.raise_for_status()
+    return response
+
+
 def cleaned_html(response: requests.Response) -> str:
     return repair_mojibake(decode_response_text(response))

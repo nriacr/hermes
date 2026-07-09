@@ -28,6 +28,7 @@ from hermes.providers.hepsiburada import (  # noqa: E402
     extract_variant_urls,
     title_with_variant_label,
 )
+from hermes.providers.hm import extract_offers as extract_hm_offers  # noqa: E402
 from hermes.providers.nordbron import extract_offer as extract_nordbron_offer  # noqa: E402
 from hermes.providers.zara import extract_offers as extract_zara_offers  # noqa: E402
 from hermes.search_amazon import extract_result_candidates  # noqa: E402
@@ -1524,6 +1525,105 @@ class HermesSmokeTests(unittest.TestCase):
 
         self.assertEqual(len(offers), 1)
         self.assertEqual(offers[0].title, "ÇOCUK SWEATSHIRT / Lacivert / 6 yaş")
+
+    def test_hm_url_is_detected(self):
+        self.assertEqual(
+            detect_site_from_url("https://www2.hm.com/tr_tr/productpage.1285132002.html"),
+            "hm",
+        )
+
+    def test_hm_requested_size_returns_each_available_color(self):
+        html = """
+        <html><body>
+          <script type="application/json" id="hm-product-data">
+          {
+            "products": [
+              {
+                "name": "Lastik Örgülü Erkek Yaka Gömlek Loose Fit",
+                "colorName": "Turkuaz",
+                "url": "/tr_tr/productpage.1285132002.html",
+                "price": {"formattedValue": "799,99 TL"},
+                "sizes": [
+                  {"name": "XS", "available": true},
+                  {"name": "S", "available": true},
+                  {"name": "M", "available": false},
+                  {"name": "L", "availability": "Sold out"},
+                  {"name": "XL", "available": true},
+                  {"name": "XXL", "stock": 2}
+                ]
+              },
+              {
+                "name": "Lastik Örgülü Erkek Yaka Gömlek Loose Fit",
+                "colorName": "Kahverengi",
+                "url": "/tr_tr/productpage.1285132001.html",
+                "price": {"formattedValue": "799,99 TL"},
+                "sizes": [
+                  {"name": "XS", "available": true},
+                  {"name": "S", "available": true},
+                  {"name": "XL", "available": true},
+                  {"name": "XXL", "available": true}
+                ]
+              }
+            ]
+          }
+          </script>
+        </body></html>
+        """
+
+        xs_offers = extract_hm_offers(
+            html,
+            source_url="https://www2.hm.com/tr_tr/productpage.1285132002.html",
+            size="XS",
+        )
+        self.assertEqual(
+            [offer.title for offer in xs_offers],
+            [
+                "Lastik Örgülü Erkek Yaka Gömlek Loose Fit / Turkuaz / XS",
+                "Lastik Örgülü Erkek Yaka Gömlek Loose Fit / Kahverengi / XS",
+            ],
+        )
+        with self.assertRaisesRegex(Exception, "stokta değil"):
+            extract_hm_offers(
+                html,
+                source_url="https://www2.hm.com/tr_tr/productpage.1285132002.html",
+                size="M",
+            )
+
+    def test_hm_size_matrix_matches_expected_available_sizes(self):
+        html = """
+        <html><body>
+          <script type="application/json">
+          {
+            "name": "Lastik Örgülü Erkek Yaka Gömlek Loose Fit",
+            "colorName": "Turkuaz",
+            "price": "799,99 TL",
+            "sizes": [
+              {"name": "XS", "available": true},
+              {"name": "S", "available": true},
+              {"name": "M", "available": false},
+              {"name": "L", "available": false},
+              {"name": "XL", "available": true},
+              {"name": "XXL", "available": true}
+            ]
+          }
+          </script>
+        </body></html>
+        """
+
+        available_sizes = []
+        for size in ("XS", "S", "M", "L", "XL", "XXL"):
+            try:
+                offers = extract_hm_offers(
+                    html,
+                    source_url="https://www2.hm.com/tr_tr/productpage.1285132002.html",
+                    size=size,
+                )
+            except Exception:
+                offers = []
+            if offers:
+                available_sizes.append(size)
+
+        self.assertEqual(available_sizes, ["XS", "S", "XL", "XXL"])
 
 
 if __name__ == "__main__":

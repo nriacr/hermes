@@ -12,6 +12,7 @@ from .constants import (
     DEFAULT_HEADERS,
     SITE_AMAZON,
     SITE_HEPSIBURADA,
+    SITE_HM,
     SITE_LABELS,
     SITE_NETWORK,
     SITE_NORDBRON,
@@ -166,6 +167,8 @@ def detect_site_from_url(url: str) -> str:
         return SITE_NORDBRON
     if "zara" in host:
         return SITE_ZARA
+    if "hm.com" in host:
+        return SITE_HM
     if "amazon" in host:
         return SITE_AMAZON
     raise HermesError(f"Desteklenmeyen site alan adı: {host or url}")
