@@ -21,7 +21,7 @@ from .constants import (
     STATE_PATH,
     SUMMARY_PATH,
 )
-from .errors import HermesError
+from .errors import HermesError, OutOfStockHermesError
 from .http_client import (
     cleaned_html,
     fetch_amazon_page,
@@ -103,10 +103,11 @@ def is_bot_protection_page(site: str, html: str) -> bool:
         return any(
             marker in normalized
             for marker in (
-                "akamai",
                 "access denied",
                 "sec-if-cpt",
                 "you don't have permission to access",
+                "akamai bot manager",
+                "akamai security",
             )
         )
     if site == SITE_HEPSIBURADA and any(
@@ -1173,6 +1174,19 @@ def check_once(config: HermesConfig) -> None:
                 "last_error_status": None,
                 "last_checked_at": utc_now(),
             }
+        except OutOfStockHermesError as exc:
+            log(f"Stokta yok: {seller} | {watch.name or watch.url} | {exc}")
+            failed = reset_product_alert_after_missing(dict(state_entry), seller, watch.name or watch.url)
+            failed["site"] = watch.site
+            failed["watch_name"] = watch.name
+            failed["configured_url"] = watch.url
+            failed["size"] = watch.size
+            failed["offer_keys"] = []
+            failed["last_error"] = None
+            failed["last_error_status"] = None
+            failed["last_checked_at"] = utc_now()
+            failed["last_out_of_stock_at"] = utc_now()
+            state[watch_key] = failed
         except Exception as exc:  # noqa: BLE001
             log(f"Hata: {seller} | {watch.url} | {exc}")
             if watch.site == SITE_AMAZON and is_amazon_protection_error(exc):

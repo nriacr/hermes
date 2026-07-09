@@ -3,7 +3,7 @@ import re
 from decimal import Decimal
 from typing import Any, Iterable, List
 
-from ..errors import HermesError
+from ..errors import HermesError, OutOfStockHermesError
 from ..models import OfferResult
 from ..utils import normalize_offer_text, parse_decimal, repair_mojibake
 from .base import iter_json_objects, soup_from_html
@@ -189,16 +189,16 @@ def extract_offers(html: str, source_url: str = "", size: str = "") -> List[Offe
 
     if requested_size:
         if not matched_size:
-            raise HermesError(f"Zara beden bulunamadı: {requested_size}")
+            raise OutOfStockHermesError(f"Zara beden bulunamadı: {requested_size}")
         if not matched_available:
-            raise HermesError(f"Zara beden stokta değil: {requested_size}")
+            raise OutOfStockHermesError(f"Zara beden stokta değil: {requested_size}")
         if not offers:
-            raise HermesError(f"Zara beden fiyatı bulunamadı: {requested_size}")
+            raise OutOfStockHermesError(f"Zara beden fiyatı bulunamadı: {requested_size}")
         return offers
 
     if offers:
         return [min(offers, key=lambda item: item.price)]
-    raise HermesError("Zara sayfasından stokta ürün fiyatı bulunamadı.")
+    raise OutOfStockHermesError("Zara sayfasından stokta ürün fiyatı bulunamadı.")
 
 
 def extract_offer(html: str, source_url: str = "") -> OfferResult:

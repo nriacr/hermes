@@ -4,7 +4,7 @@ from decimal import Decimal
 from typing import Any, Iterable, List
 from urllib.parse import urljoin
 
-from ..errors import HermesError
+from ..errors import HermesError, OutOfStockHermesError
 from ..models import OfferResult
 from ..utils import normalize_offer_text, parse_decimal, repair_mojibake
 from .base import extract_jsonld_product, extract_price_from_meta, iter_json_objects, soup_from_html
@@ -265,7 +265,7 @@ def _offers_from_data(data: dict, source_url: str, requested_size: str = "") -> 
 def _fallback_offer(html: str, source_url: str) -> OfferResult | None:
     soup = soup_from_html(html)
     title, jsonld_price = extract_jsonld_product(soup)
-    price = jsonld_price or extract_price_from_meta(soup)
+    price = jsonld_price or extract_price_from_meta(soup) or _fallback_text_price(html)
     if price is None:
         return None
     title = title or _clean(soup.find("h1").get_text(" ", strip=True) if soup.find("h1") else "H&M ürünü")
@@ -274,6 +274,17 @@ def _fallback_offer(html: str, source_url: str) -> OfferResult | None:
     if color_element:
         color = re.sub(r"^(Renk|Colour|Color)\s*:?\s*", "", _clean(color_element), flags=re.I)
     return OfferResult(title=_display_title(title, color, ""), price=price, seller="H&M", url=source_url)
+
+
+def _fallback_text_price(html: str) -> Decimal | None:
+    text = _clean(soup_from_html(html).get_text(" ", strip=True))
+    candidates: list[Decimal] = []
+    for match in re.finditer(r"(\d{1,3}(?:\.\d{3})*(?:,\d{2})?)\s*(?:TL|₺)", text, flags=re.I):
+        try:
+            candidates.append(parse_decimal(match.group(1)))
+        except HermesError:
+            continue
+    return min(candidates) if candidates else None
 
 
 def extract_offers(html: str, source_url: str = "", size: str = "") -> List[OfferResult]:
@@ -301,10 +312,10 @@ def extract_offers(html: str, source_url: str = "", size: str = "") -> List[Offe
         return offers
     if requested_size:
         if not matched_size:
-            raise HermesError(f"H&M beden bulunamadı: {requested_size}")
+            raise OutOfStockHermesError(f"H&M beden bulunamadı: {requested_size}")
         if not matched_available:
-            raise HermesError(f"H&M beden stokta değil: {requested_size}")
-        raise HermesError(f"H&M beden fiyatı bulunamadı: {requested_size}")
+            raise OutOfStockHermesError(f"H&M beden stokta değil: {requested_size}")
+        raise OutOfStockHermesError(f"H&M beden fiyatı bulunamadı: {requested_size}")
 
     fallback = _fallback_offer(html, source_url)
     if fallback:

@@ -12,6 +12,7 @@ sys.path.insert(0, str(APP_PATH))
 
 from hermes import service  # noqa: E402
 from hermes import http_client  # noqa: E402
+from hermes.errors import OutOfStockHermesError  # noqa: E402
 from hermes.http_client import amazon_url_variants, fetch_amazon_page  # noqa: E402
 from hermes.config_loader import _prepare_watches  # noqa: E402
 from hermes.models import HermesConfig, OfferResult, PriceSummaryRow, SearchResultItem, TelegramConfig  # noqa: E402
@@ -1582,7 +1583,7 @@ class HermesSmokeTests(unittest.TestCase):
                 "Lastik Örgülü Erkek Yaka Gömlek Loose Fit / Kahverengi / XS",
             ],
         )
-        with self.assertRaisesRegex(Exception, "stokta değil"):
+        with self.assertRaisesRegex(OutOfStockHermesError, "stokta değil"):
             extract_hm_offers(
                 html,
                 source_url="https://www2.hm.com/tr_tr/productpage.1285132002.html",
@@ -1624,6 +1625,38 @@ class HermesSmokeTests(unittest.TestCase):
                 available_sizes.append(size)
 
         self.assertEqual(available_sizes, ["XS", "S", "XL", "XXL"])
+
+    def test_hm_fallback_reads_visible_text_price(self):
+        html = """
+        <html><body>
+          <h1>Lastik Örgülü Erkek Yaka Gömlek Loose Fit</h1>
+          <span>Renk: Turkuaz</span>
+          <span>799,99 TL</span>
+        </body></html>
+        """
+
+        offers = extract_hm_offers(html, source_url="https://www2.hm.com/tr_tr/productpage.1285132002.html")
+
+        self.assertEqual(offers[0].seller, "H&M")
+        self.assertEqual(offers[0].price, Decimal("799.99"))
+
+    def test_zara_out_of_stock_is_typed_as_non_technical_state(self):
+        html = """
+        <html><body>
+          <script type="application/ld+json">
+          {
+            "@type": "Product",
+            "name": "DOKULU REGULAR FIT POLO T-SHIRT - sarımsı kahverengi - L",
+            "size": "L",
+            "color": "sarımsı kahverengi",
+            "offers": {"@type": "Offer", "price": "1290", "availability": "Benzer ürünler"}
+          }
+          </script>
+        </body></html>
+        """
+
+        with self.assertRaisesRegex(OutOfStockHermesError, "stokta değil"):
+            extract_zara_offers(html, source_url="https://www.zara.com/tr/tr/product", size="L")
 
 
 if __name__ == "__main__":
