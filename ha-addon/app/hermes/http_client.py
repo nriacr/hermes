@@ -48,6 +48,7 @@ AMAZON_HARD_BLOCK_RESCUE_VARIANT_LIMIT = 3
 AMAZON_BROWSER_RESCUE_VARIANT_LIMIT = 2
 AMAZON_BROWSER_MIN_TIMEOUT_SECONDS = 25
 AMAZON_DIAGNOSTIC_SNIPPET_LENGTH = 220
+HM_BROWSER_MIN_TIMEOUT_SECONDS = 25
 
 
 class _HtmlResponse:
@@ -264,7 +265,7 @@ def _get_amazon_response_with_curl(session: requests.Session, candidate: str, ti
     return response
 
 
-def _chromium_binary() -> str:
+def _chromium_binary(site_name: str = "Hermes") -> str:
     configured = os.getenv("HERMES_CHROMIUM_PATH", "").strip()
     if configured:
         return configured
@@ -275,7 +276,7 @@ def _chromium_binary() -> str:
         found = shutil.which(candidate)
         if found:
             return found
-    raise HermesError("Amazon icin gercek tarayici modu kullanilamiyor; Chromium bulunamadi.")
+    raise HermesError(f"{site_name} icin gercek tarayici modu kullanilamiyor; Chromium bulunamadi.")
 
 
 def _get_amazon_response_with_browser(session: requests.Session, candidate: str, timeout: int, expect_search: bool):
@@ -896,23 +897,59 @@ def hm_headers(url: str) -> Dict[str, str]:
 
 
 def fetch_hm_page(session: requests.Session, url: str, timeout: int) -> requests.Response:
-    if curl_requests is not None:
-        curl_session = getattr(session, "_hermes_hm_curl_session", None)
-        if curl_session is None:
-            curl_session = curl_requests.Session()
-            setattr(session, "_hermes_hm_curl_session", curl_session)
-        response = curl_session.get(
-            url,
-            headers=hm_headers(url),
-            timeout=timeout,
-            allow_redirects=True,
-            impersonate="chrome124",
-        )
-        response.raise_for_status()
-        return response
+    cache = getattr(session, "_hermes_hm_browser_cache", None)
+    if cache is None:
+        cache = {}
+        setattr(session, "_hermes_hm_browser_cache", cache)
+    if url in cache:
+        return cache[url]
 
-    response = session.get(url, headers=hm_headers(url), timeout=timeout, allow_redirects=True)
-    response.raise_for_status()
+    browser_timeout = max(HM_BROWSER_MIN_TIMEOUT_SECONDS, int(timeout) + 10)
+    with tempfile.TemporaryDirectory(prefix="hermes-hm-browser-") as profile_dir:
+        command = [
+            _chromium_binary("H&M"),
+            "--headless=new",
+            "--disable-gpu",
+            "--disable-dev-shm-usage",
+            "--disable-background-networking",
+            "--disable-default-apps",
+            "--disable-extensions",
+            "--disable-sync",
+            "--disable-setuid-sandbox",
+            "--disable-software-rasterizer",
+            "--disable-crash-reporter",
+            "--disable-features=Translate,MediaRouter,OptimizationHints",
+            "--hide-scrollbars",
+            "--no-first-run",
+            "--no-zygote",
+            "--no-sandbox",
+            "--window-size=1365,900",
+            "--lang=tr-TR",
+            f"--user-agent={AMAZON_CHROME_USER_AGENT}",
+            f"--user-data-dir={profile_dir}",
+            "--virtual-time-budget=5000",
+            "--dump-dom",
+            url,
+        ]
+        try:
+            completed = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                timeout=browser_timeout,
+                check=False,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise HermesError("H&M tarayici modu zaman asimina ugradi.") from exc
+        except OSError as exc:
+            raise HermesError(f"H&M tarayici modu baslatilamadi: {exc}") from exc
+
+    html = completed.stdout or ""
+    if not html:
+        error_text = _diagnostic_snippet(completed.stderr or "")
+        raise HermesError(f"H&M tarayici modu bos sayfa dondurdu: {error_text}")
+    response = _HtmlResponse(url, repair_mojibake(html))
+    cache[url] = response
     return response
 
 
