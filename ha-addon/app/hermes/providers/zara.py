@@ -77,31 +77,37 @@ def _clean_part(value: Any) -> str:
     return re.sub(r"\s+", " ", repair_mojibake(str(value or ""))).strip()
 
 
+def _strip_parenthetical(value: str) -> str:
+    return _clean_part(re.sub(r"\([^)]*\)", " ", value))
+
+
 def _variant_size(variant: dict) -> str:
     for key in ("size", "skuSize", "productSize", "name"):
         value = _clean_part(variant.get(key))
         if value:
             if key == "name":
                 match = re.search(r"\b([A-Z]{1,3}\s*\([^)]*\)|[A-Z]{1,3})\b", value)
-                return match.group(1).strip() if match else ""
-            return value
+                return _strip_parenthetical(match.group(1)) if match else ""
+            return _strip_parenthetical(value)
     return ""
 
 
-def _size_head(value: str) -> str:
-    normalized = normalize_offer_text(value)
-    match = re.match(r"([a-z0-9]+)", normalized)
-    return match.group(1) if match else normalized
+def _size_tokens(value: str) -> set[str]:
+    normalized = normalize_offer_text(_strip_parenthetical(value))
+    ignored = {"eu", "us", "uk", "yas", "yaş", "yil", "yıl", "beden"}
+    return {token for token in re.findall(r"[a-z0-9]+", normalized) if token not in ignored}
 
 
 def _size_matches(variant_size: str, requested_size: str) -> bool:
-    variant = normalize_offer_text(variant_size)
-    requested = normalize_offer_text(requested_size)
+    variant = normalize_offer_text(_strip_parenthetical(variant_size))
+    requested = normalize_offer_text(_strip_parenthetical(requested_size))
     if not requested:
         return True
-    if variant == requested or requested in variant:
+    if variant == requested:
         return True
-    return _size_head(variant) == _size_head(requested)
+    variant_tokens = _size_tokens(variant)
+    requested_tokens = _size_tokens(requested)
+    return bool(requested_tokens) and requested_tokens.issubset(variant_tokens)
 
 
 def _title_with_parts(product_name: str, color: str, size: str = "") -> str:
@@ -114,7 +120,7 @@ def _title_with_parts(product_name: str, color: str, size: str = "") -> str:
 
 
 def _base_product_name(value: str, color: str, size: str) -> str:
-    title = _clean_part(value)
+    title = _strip_parenthetical(_clean_part(value))
     for suffix in (size, color):
         clean_suffix = _clean_part(suffix)
         if clean_suffix and normalize_offer_text(title).endswith(normalize_offer_text(f" - {clean_suffix}")):

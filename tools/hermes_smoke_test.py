@@ -1333,7 +1333,8 @@ class HermesSmokeTests(unittest.TestCase):
         self.assertEqual(len(offers), 1)
         self.assertEqual(offers[0].price, Decimal("1290"))
         self.assertEqual(offers[0].seller, "Zara")
-        self.assertIn("M (US M)", offers[0].title)
+        self.assertIn("M", offers[0].title)
+        self.assertNotIn("US M", offers[0].title)
         self.assertIn("sarımsı kahverengi", offers[0].title)
 
     def test_zara_size_filter_rejects_out_of_stock_size(self):
@@ -1420,7 +1421,7 @@ class HermesSmokeTests(unittest.TestCase):
 
         offers = extract_zara_offers(html, source_url="https://www.zara.com/tr/tr/product", size="M")
 
-        self.assertEqual(offers[0].title, "DOKULU REGULAR FIT POLO T-SHIRT / sarımsı kahverengi / M (US M)")
+        self.assertEqual(offers[0].title, "DOKULU REGULAR FIT POLO T-SHIRT / sarımsı kahverengi / M")
 
     def test_zara_requested_size_returns_each_available_color(self):
         html = """
@@ -1468,10 +1469,61 @@ class HermesSmokeTests(unittest.TestCase):
         self.assertEqual(
             [offer.title for offer in offers],
             [
-                "DOKULU REGULAR FIT POLO T-SHIRT / sarımsı kahverengi / M (US M)",
-                "DOKULU REGULAR FIT POLO T-SHIRT / Koyu pembe / M (US M)",
+                "DOKULU REGULAR FIT POLO T-SHIRT / sarımsı kahverengi / M",
+                "DOKULU REGULAR FIT POLO T-SHIRT / Koyu pembe / M",
             ],
         )
+
+    def test_zara_numeric_size_ignores_parenthetical_values(self):
+        html = """
+        <html><body>
+          <script type="application/ld+json">
+          [
+            {
+              "@type": "Product",
+              "name": "REGULAR FIT DENIM BERMUDA - Kahverengi - EU 44 (US 34)",
+              "size": "EU 44 (US 34)",
+              "color": "Kahverengi",
+              "offers": {"@type": "Offer", "price": "1190", "availability": "https://schema.org/InStock"}
+            },
+            {
+              "@type": "Product",
+              "name": "REGULAR FIT DENIM BERMUDA - Kahverengi - EU 46 (US 36)",
+              "size": "EU 46 (US 36)",
+              "color": "Kahverengi",
+              "offers": {"@type": "Offer", "price": "1190", "availability": "https://schema.org/InStock"}
+            }
+          ]
+          </script>
+        </body></html>
+        """
+
+        offers = extract_zara_offers(html, source_url="https://www.zara.com/tr/tr/product", size="44")
+
+        self.assertEqual(len(offers), 1)
+        self.assertEqual(offers[0].title, "REGULAR FIT DENIM BERMUDA / Kahverengi / EU 44")
+        with self.assertRaisesRegex(Exception, "bulunamadı"):
+            extract_zara_offers(html, source_url="https://www.zara.com/tr/tr/product", size="34")
+
+    def test_zara_age_size_can_be_requested_as_number(self):
+        html = """
+        <html><body>
+          <script type="application/ld+json">
+          {
+            "@type": "Product",
+            "name": "ÇOCUK SWEATSHIRT - Lacivert - 6 yaş",
+            "size": "6 yaş",
+            "color": "Lacivert",
+            "offers": {"@type": "Offer", "price": "790", "availability": "https://schema.org/InStock"}
+          }
+          </script>
+        </body></html>
+        """
+
+        offers = extract_zara_offers(html, source_url="https://www.zara.com/tr/tr/product", size="6")
+
+        self.assertEqual(len(offers), 1)
+        self.assertEqual(offers[0].title, "ÇOCUK SWEATSHIRT / Lacivert / 6 yaş")
 
 
 if __name__ == "__main__":
