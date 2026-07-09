@@ -142,7 +142,7 @@ def _price_from_value(value: Any) -> Decimal | None:
 
 
 def _price_from_product(data: dict) -> Decimal | None:
-    for key in ("price", "priceInfo", "currentPrice", "salePrice", "redPrice", "whitePrice", "offers"):
+    for key in ("prices", "price", "priceInfo", "currentPrice", "salePrice", "redPrice", "whitePrice", "offers"):
         price = _price_from_value(data.get(key))
         if price is not None:
             return price

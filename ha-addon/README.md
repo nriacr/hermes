@@ -5,7 +5,7 @@ Hermes, Home Assistant üzerinde çalışan çok siteli ürün ve Telegram fırs
 ## Özellikler
 
 - Takip edilenler: tek kayıt altında en fazla 5 link izleme
-- Linkten otomatik site algılama: Amazon, Hepsiburada, Trendyol, Network, Nordbron
+- Linkten otomatik site algılama: Amazon, Hepsiburada, Trendyol, Network, Nordbron, Zara, H&M
 - Ürün ve arama linklerini aynı takip kaydı içinde karışık kullanabilme
 - Arama linklerinde, takip adını keyword kabul ederek eşleşen sonuçlar arasından en iyi fiyatı seçme
 - Pushover bildirimleri

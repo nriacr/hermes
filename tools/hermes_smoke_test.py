@@ -1651,6 +1651,83 @@ class HermesSmokeTests(unittest.TestCase):
 
         self.assertEqual(available_sizes, ["XS", "S", "XL", "XXL"])
 
+    def test_hm_byids_api_shape_returns_requested_size_for_each_color(self):
+        html = """
+        <html><body>
+          <script type="application/json" id="hm-product-data">
+          {
+            "products": [
+              {
+                "id": "1286182003",
+                "productName": "Keten Karışımlı Erkek Yaka Gömlek Regular Fit",
+                "colorName": "Koyu bej",
+                "url": "/tr_tr/productpage.1286182003.html",
+                "prices": [
+                  {"priceType": "redPrice", "price": 579.0, "formattedPrice": "579,00 TL"},
+                  {"priceType": "whitePrice", "price": 1999.0, "formattedPrice": "1.999,00 TL"}
+                ],
+                "sizes": [
+                  {"label": "M", "stock": 0},
+                  {"label": "S", "stock": 2},
+                  {"label": "XS", "stock": 2},
+                  {"label": "XXL", "stock": 0},
+                  {"label": "XL", "stock": 0}
+                ]
+              },
+              {
+                "id": "1286182002",
+                "productName": "Keten Karışımlı Erkek Yaka Gömlek Regular Fit",
+                "colorName": "Adaçayı yeşili",
+                "url": "/tr_tr/productpage.1286182002.html",
+                "prices": [{"priceType": "redPrice", "price": 489.0, "formattedPrice": "489,00 TL"}],
+                "sizes": [
+                  {"label": "XS", "stock": 1},
+                  {"label": "S", "stock": 1},
+                  {"label": "XL", "stock": 1},
+                  {"label": "XXL", "stock": 1}
+                ]
+              },
+              {
+                "id": "1286182001",
+                "productName": "Keten Karışımlı Erkek Yaka Gömlek Regular Fit",
+                "colorName": "Krem",
+                "url": "/tr_tr/productpage.1286182001.html",
+                "prices": [{"priceType": "redPrice", "price": 1049.0, "formattedPrice": "1.049,00 TL"}],
+                "sizes": [
+                  {"label": "XS", "stock": 1},
+                  {"label": "S", "stock": 1},
+                  {"label": "XL", "stock": 1},
+                  {"label": "XXL", "stock": 1}
+                ]
+              }
+            ]
+          }
+          </script>
+        </body></html>
+        """
+
+        offers = extract_hm_offers(
+            html,
+            source_url="https://www2.hm.com/tr_tr/productpage.1286182003.html",
+            size="XL",
+        )
+
+        self.assertEqual(
+            [(offer.title, offer.price, offer.url) for offer in offers],
+            [
+                (
+                    "Keten Karışımlı Erkek Yaka Gömlek Regular Fit / Adaçayı yeşili / XL",
+                    Decimal("489.0"),
+                    "https://www2.hm.com/tr_tr/productpage.1286182002.html",
+                ),
+                (
+                    "Keten Karışımlı Erkek Yaka Gömlek Regular Fit / Krem / XL",
+                    Decimal("1049.0"),
+                    "https://www2.hm.com/tr_tr/productpage.1286182001.html",
+                ),
+            ],
+        )
+
     def test_hm_fallback_reads_visible_text_price(self):
         html = """
         <html><body>

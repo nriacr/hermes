@@ -48,7 +48,7 @@ AMAZON_HARD_BLOCK_RESCUE_VARIANT_LIMIT = 3
 AMAZON_BROWSER_RESCUE_VARIANT_LIMIT = 2
 AMAZON_BROWSER_MIN_TIMEOUT_SECONDS = 25
 AMAZON_DIAGNOSTIC_SNIPPET_LENGTH = 220
-HM_BROWSER_MIN_TIMEOUT_SECONDS = 25
+HM_API_BASE_URL = "https://api.hm.com/search-services/v1/tr_tr/search/byids"
 
 
 class _HtmlResponse:
@@ -887,7 +887,10 @@ def hm_headers(url: str) -> Dict[str, str]:
     headers = build_headers(url)
     headers.update(
         {
+            "Accept": "application/json, text/plain, */*",
             "Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7",
+            "Origin": "https://www2.hm.com",
+            "Referer": url,
             "sec-ch-ua": '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
             "sec-ch-ua-mobile": "?0",
             "sec-ch-ua-platform": '"Linux"',
@@ -896,62 +899,96 @@ def hm_headers(url: str) -> Dict[str, str]:
     return headers
 
 
+def _hm_article_id_from_url(url: str) -> str:
+    match = re.search(r"productpage\.(\d+)\.html", url)
+    if match:
+        return match.group(1)
+    raise HermesError("H&M linkinden ürün kodu okunamadı.")
+
+
+def _hm_api_url(article_ids: List[str]) -> str:
+    unique_ids = []
+    seen = set()
+    for article_id in article_ids:
+        if article_id and article_id not in seen:
+            unique_ids.append(article_id)
+            seen.add(article_id)
+    query = urlencode({"ids": "|".join(unique_ids), "touchPoint": "DESKTOP"})
+    return f"{HM_API_BASE_URL}?{query}"
+
+
+def _hm_api_get(session: requests.Session, api_url: str, source_url: str, timeout: int) -> Dict[str, Any]:
+    headers = hm_headers(source_url)
+    if curl_requests is not None:
+        response = curl_requests.get(
+            api_url,
+            headers=headers,
+            timeout=timeout,
+            impersonate="chrome124",
+        )
+    else:
+        response = session.get(api_url, headers=headers, timeout=timeout)
+    response.raise_for_status()
+    try:
+        data = response.json()
+    except ValueError as exc:
+        raise HermesError("H&M API ürün verisini JSON olarak döndürmedi.") from exc
+    if not isinstance(data, dict):
+        raise HermesError("H&M API beklenmeyen ürün verisi döndürdü.")
+    return data
+
+
+def _hm_products_from_api_data(data: Dict[str, Any]) -> List[Dict[str, Any]]:
+    articles = data.get("articles")
+    if not isinstance(articles, dict):
+        return []
+    product_list = articles.get("productList")
+    if not isinstance(product_list, list):
+        return []
+    return [item for item in product_list if isinstance(item, dict)]
+
+
+def _hm_swatch_article_ids(products: List[Dict[str, Any]]) -> List[str]:
+    article_ids: List[str] = []
+    for product in products:
+        for swatch in product.get("swatches") or []:
+            if not isinstance(swatch, dict):
+                continue
+            article_id = str(swatch.get("articleId") or "").strip()
+            if article_id:
+                article_ids.append(article_id)
+    return article_ids
+
+
 def fetch_hm_page(session: requests.Session, url: str, timeout: int) -> requests.Response:
-    cache = getattr(session, "_hermes_hm_browser_cache", None)
+    cache = getattr(session, "_hermes_hm_api_cache", None)
     if cache is None:
         cache = {}
-        setattr(session, "_hermes_hm_browser_cache", cache)
+        setattr(session, "_hermes_hm_api_cache", cache)
     if url in cache:
         return cache[url]
 
-    browser_timeout = max(HM_BROWSER_MIN_TIMEOUT_SECONDS, int(timeout) + 10)
-    chromium = _chromium_binary("H&M")
-    last_error = ""
-    with tempfile.TemporaryDirectory(prefix="hermes-hm-browser-") as profile_dir:
-        common_flags = [
-            "--no-sandbox",
-            "--disable-gpu",
-            "--disable-dev-shm-usage",
-            "--disable-setuid-sandbox",
-            "--disable-extensions",
-            "--no-first-run",
-            "--window-size=1365,900",
-            "--lang=tr-TR",
-            f"--user-agent={AMAZON_CHROME_USER_AGENT}",
-            f"--user-data-dir={profile_dir}",
-        ]
-        attempts = [
-            ["--headless=new", "--virtual-time-budget=8000"],
-            ["--headless=chrome", "--virtual-time-budget=8000"],
-            ["--headless"],
-        ]
-        for attempt_flags in attempts:
-            command = [chromium, *attempt_flags, *common_flags, "--dump-dom", url]
-            try:
-                completed = subprocess.run(
-                    command,
-                    capture_output=True,
-                    text=True,
-                    timeout=browser_timeout,
-                    check=False,
-                )
-            except subprocess.TimeoutExpired as exc:
-                last_error = "zaman asimi"
-                continue
-            except OSError as exc:
-                raise HermesError(f"H&M tarayici modu baslatilamadi: {exc}") from exc
+    article_id = _hm_article_id_from_url(url)
+    data = _hm_api_get(session, _hm_api_url([article_id]), url, timeout)
+    products = _hm_products_from_api_data(data)
+    if not products:
+        raise HermesError("H&M API ürün verisi döndürmedi.")
 
-            html = completed.stdout or ""
-            if html.strip():
-                response = _HtmlResponse(url, repair_mojibake(html))
-                cache[url] = response
-                return response
-            last_error = (
-                f"returncode={completed.returncode} | "
-                f"stderr={_diagnostic_snippet(completed.stderr or '')}"
-            )
-            log(f"H&M tarayici denemesi bos dondu: {' '.join(attempt_flags)} | {last_error}")
-    raise HermesError(f"H&M tarayici modu bos sayfa dondurdu: {last_error}")
+    swatch_ids = _hm_swatch_article_ids(products)
+    if swatch_ids:
+        data = _hm_api_get(session, _hm_api_url([article_id, *swatch_ids]), url, timeout)
+        products = _hm_products_from_api_data(data)
+        if not products:
+            raise HermesError("H&M API varyasyon verisi döndürmedi.")
+
+    html = (
+        '<html><body><script type="application/json" id="hm-product-data">'
+        f"{json.dumps({'products': products}, ensure_ascii=False)}"
+        "</script></body></html>"
+    )
+    response = _HtmlResponse(url, html)
+    cache[url] = response
+    return response
 
 
 def cleaned_html(response: requests.Response) -> str:
