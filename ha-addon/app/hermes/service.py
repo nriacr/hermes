@@ -31,7 +31,7 @@ from .http_client import (
     fetch_zara_page,
 )
 from .logging_utils import log
-from .models import HermesConfig, OfferResult, PriceSummaryRow, SearchResultItem, WatchRule
+from .models import HermesConfig, OfferResult, PriceSummaryRow, SearchResultItem, StockSummaryRow, WatchRule
 from .notifier import send_pushover
 from .providers import hepsiburada as hepsiburada_provider
 from .providers import hm as hm_provider
@@ -178,6 +178,10 @@ def sorted_summary_rows(rows: List[PriceSummaryRow]) -> List[PriceSummaryRow]:
     return sorted(rows, key=lambda row: (row.seller.casefold(), abs(row.difference), row.price))
 
 
+def sorted_stock_rows(rows: List[StockSummaryRow]) -> List[StockSummaryRow]:
+    return sorted(rows, key=lambda row: (row.seller.casefold(), row.product_title.casefold(), row.product_url))
+
+
 def _state_decimal(value: Any):
     if value is None:
         return None
@@ -294,10 +298,12 @@ def format_minutes(seconds: float | int | None) -> str:
 
 def save_price_summary(
     rows: List[PriceSummaryRow],
+    stock_rows: List[StockSummaryRow] | None = None,
     cycle_duration_seconds: float | None = None,
     scan_duration_seconds: float | None = None,
 ) -> None:
     sorted_rows = sorted_summary_rows(rows)
+    sorted_stock = sorted_stock_rows(stock_rows or [])
     previous_payload = load_json(SUMMARY_PATH, {})
     if not isinstance(previous_payload, dict):
         previous_payload = {}
@@ -308,6 +314,7 @@ def save_price_summary(
     payload = {
         "checked_at": format_local_datetime(local_now()),
         "row_count": len(sorted_rows),
+        "stock_row_count": len(sorted_stock),
         "cycle_duration_seconds": cycle_duration_seconds,
         "cycle_duration_minutes": format_minutes(cycle_duration_seconds),
         "scan_duration_seconds": scan_duration_seconds,
@@ -327,6 +334,17 @@ def save_price_summary(
                 "is_target_hit": row.price <= row.target_price,
             }
             for idx, row in enumerate(sorted_rows, start=1)
+        ],
+        "stock_rows": [
+            {
+                "no": idx,
+                "seller": row.seller,
+                "product_title": row.product_title,
+                "product_url": row.product_url,
+                "target": format_tl(row.target_price),
+                "reason": row.reason,
+            }
+            for idx, row in enumerate(sorted_stock, start=1)
         ],
     }
     save_json(SUMMARY_PATH, payload)
@@ -373,10 +391,11 @@ def log_price_summary(rows: List[PriceSummaryRow]) -> None:
 
 def publish_price_summary(
     rows: List[PriceSummaryRow],
+    stock_rows: List[StockSummaryRow] | None = None,
     cycle_duration_seconds: float | None = None,
     scan_duration_seconds: float | None = None,
 ) -> None:
-    save_price_summary(rows, cycle_duration_seconds, scan_duration_seconds)
+    save_price_summary(rows, stock_rows, cycle_duration_seconds, scan_duration_seconds)
     log_price_summary(rows)
 
 
@@ -1067,6 +1086,7 @@ def check_once(config: HermesConfig) -> None:
         state = {}
     session = requests.Session()
     summary_rows: List[PriceSummaryRow] = []
+    stock_rows: List[StockSummaryRow] = []
     amazon_empty_events: List[Dict[str, Any]] = []
     request_tasks: List[Dict[str, Any]] = []
 
@@ -1140,7 +1160,7 @@ def check_once(config: HermesConfig) -> None:
                     )
                     alert_sent = True
                     log(f"Bildirim gonderildi: {seller} | {offer_display_name}")
-                    save_price_summary(summary_rows)
+                    save_price_summary(summary_rows, stock_rows)
                 elif offer.price <= watch.target_price and watch.notify_once_in_24h:
                     log(
                         f"Bildirim atlandi, 24 saat dolmadi veya fiyat daha dusuk degil: "
@@ -1176,6 +1196,15 @@ def check_once(config: HermesConfig) -> None:
             }
         except OutOfStockHermesError as exc:
             log(f"Stokta yok: {seller} | {watch.name or watch.url} | {exc}")
+            stock_rows.append(
+                StockSummaryRow(
+                    seller=seller,
+                    product_title=watch.name or watch.url,
+                    product_url=watch.url,
+                    target_price=watch.target_price,
+                    reason=str(exc),
+                )
+            )
             failed = reset_product_alert_after_missing(dict(state_entry), seller, watch.name or watch.url)
             failed["site"] = watch.site
             failed["watch_name"] = watch.name
@@ -1254,7 +1283,7 @@ def check_once(config: HermesConfig) -> None:
     if config.watches:
         scan_duration_seconds = time.monotonic() - cycle_started_at
         cycle_duration_seconds = scan_duration_seconds + config.interval_seconds
-        publish_price_summary(summary_rows, cycle_duration_seconds, scan_duration_seconds)
+        publish_price_summary(summary_rows, stock_rows, cycle_duration_seconds, scan_duration_seconds)
         maybe_alert_summary_drop(state, summary_rows, config, session)
         maybe_alert_amazon_empty_searches(state, amazon_empty_events, config, session)
     save_json(STATE_PATH, state)

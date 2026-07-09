@@ -15,7 +15,7 @@ from hermes import http_client  # noqa: E402
 from hermes.errors import OutOfStockHermesError  # noqa: E402
 from hermes.http_client import amazon_url_variants, fetch_amazon_page  # noqa: E402
 from hermes.config_loader import _prepare_watches  # noqa: E402
-from hermes.models import HermesConfig, OfferResult, PriceSummaryRow, SearchResultItem, TelegramConfig  # noqa: E402
+from hermes.models import HermesConfig, OfferResult, PriceSummaryRow, SearchResultItem, StockSummaryRow, TelegramConfig  # noqa: E402
 from hermes.providers.base import soup_from_html  # noqa: E402
 from hermes.providers.hepsiburada import (  # noqa: E402
     _embedded_detail_candidates,
@@ -425,6 +425,31 @@ class HermesSmokeTests(unittest.TestCase):
                 final_payload = json.loads(service.SUMMARY_PATH.read_text(encoding="utf-8"))
                 self.assertEqual(final_payload["cycle_duration_seconds"], 180)
                 self.assertEqual(final_payload["scan_duration_seconds"], 120)
+            finally:
+                service.SUMMARY_PATH = original_summary_path
+
+    def test_stock_missing_rows_are_saved_separately_from_price_rows(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            original_summary_path = service.SUMMARY_PATH
+            try:
+                service.SUMMARY_PATH = Path(tmpdir) / "latest_price_summary.json"
+                service.save_price_summary(
+                    [],
+                    [
+                        StockSummaryRow(
+                            seller="Zara",
+                            product_title="Polo T-Shirt / M",
+                            product_url="https://example.com/zara",
+                            target_price=Decimal("1290"),
+                            reason="Zara beden stokta değil: M",
+                        )
+                    ],
+                )
+                payload = json.loads(service.SUMMARY_PATH.read_text(encoding="utf-8"))
+                self.assertEqual(payload["row_count"], 0)
+                self.assertEqual(payload["stock_row_count"], 1)
+                self.assertEqual(payload["stock_rows"][0]["seller"], "Zara")
+                self.assertEqual(payload["stock_rows"][0]["reason"], "Zara beden stokta değil: M")
             finally:
                 service.SUMMARY_PATH = original_summary_path
 

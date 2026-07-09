@@ -39,6 +39,15 @@ class PriceSummaryRow:
 
 
 @dataclass
+class StockSummaryRow:
+    seller: str
+    product_title: str
+    product_url: str
+    target_price: Decimal
+    reason: str
+
+
+@dataclass
 class OfferResult:
     title: str
     price: Decimal

@@ -524,10 +524,52 @@ def _render_table_section(title, rows, empty_text, extra_class=""):
     """
 
 
+def _render_stock_row(row):
+    seller_text = repair_mojibake(row.get("seller") or "-")
+    seller = escape(seller_text)
+    product_title = escape(repair_mojibake(row.get("product_title") or "-"))
+    product_url = str(row.get("product_url") or "").strip()
+    if product_url:
+        label = (
+            f'<a href="{escape(product_url, quote=True)}" target="_blank" rel="noopener noreferrer">'
+            f"<span>{product_title}</span></a>"
+        )
+    else:
+        label = f"<span>{product_title}</span>"
+    target = escape(str(row.get("target", "-")))
+    reason = escape(repair_mojibake(row.get("reason") or "Stokta yok"))
+    row_class = f' class="{_site_theme_class(seller_text)} stock-missing-row"'
+    return (
+        f'<tr{row_class}><td data-label="Satıcı" class="seller-cell">{seller}</td>'
+        f'<td data-label="Ürün" class="product-cell" title="{product_title}">{label}</td>'
+        f'<td data-label="Hedef" class="target-cell">{target}</td>'
+        f'<td data-label="Durum" class="diff-cell">{reason}</td></tr>'
+    )
+
+
+def _render_stock_section(rows):
+    if rows:
+        body = "".join(_render_stock_row(row) for row in rows)
+    else:
+        body = "<tr class='empty-row'><td colspan='4'>Stok dışında izlenen ürün yok.</td></tr>"
+    return f"""
+      <div class="table-section stock-section">
+        <h3>Stokta Olmayanlar</h3>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Satıcı</th><th>Ürün Adı</th><th>Hedef</th><th>Durum</th></tr></thead>
+            <tbody>{body}</tbody>
+          </table>
+        </div>
+      </div>
+    """
+
+
 def _render_table():
     payload = load_json(SUMMARY_PATH, {})
     rows = payload.get("rows") if isinstance(payload.get("rows"), list) else []
-    if not rows:
+    stock_rows = payload.get("stock_rows") if isinstance(payload.get("stock_rows"), list) else []
+    if not rows and not stock_rows:
         return """
         <section class="summary-panel">
           <div class="summary-head"><h2>Özet Tablo</h2><span>Henüz tablo yok</span></div>
@@ -539,6 +581,7 @@ def _render_table():
     watch_rows = [row for row in rows if not _is_target_hit(row)]
     row_count = escape(str(payload.get("row_count") or len(rows)))
     deal_count = escape(str(len(deal_rows)))
+    stock_count = escape(str(payload.get("stock_row_count") or len(stock_rows)))
     sections = _render_table_section(
         "Hedef Fiyat Altındaki Fırsatlar",
         deal_rows,
@@ -550,9 +593,10 @@ def _render_table():
         watch_rows,
         "Hedef üstünde bekleyen ürün yok.",
     )
+    sections += _render_stock_section(stock_rows)
     return f"""
     <section class="summary-panel">
-      <div class="summary-head"><h2>Özet Tablo</h2><span>{row_count} ürün · {deal_count} fırsat</span></div>
+      <div class="summary-head"><h2>Özet Tablo</h2><span>{row_count} ürün · {deal_count} fırsat · {stock_count} stokta yok</span></div>
       {sections}
     </section>
     """

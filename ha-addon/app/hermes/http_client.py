@@ -905,52 +905,53 @@ def fetch_hm_page(session: requests.Session, url: str, timeout: int) -> requests
         return cache[url]
 
     browser_timeout = max(HM_BROWSER_MIN_TIMEOUT_SECONDS, int(timeout) + 10)
+    chromium = _chromium_binary("H&M")
+    last_error = ""
     with tempfile.TemporaryDirectory(prefix="hermes-hm-browser-") as profile_dir:
-        command = [
-            _chromium_binary("H&M"),
-            "--headless=new",
+        common_flags = [
+            "--no-sandbox",
             "--disable-gpu",
             "--disable-dev-shm-usage",
-            "--disable-background-networking",
-            "--disable-default-apps",
-            "--disable-extensions",
-            "--disable-sync",
             "--disable-setuid-sandbox",
-            "--disable-software-rasterizer",
-            "--disable-crash-reporter",
-            "--disable-features=Translate,MediaRouter,OptimizationHints",
-            "--hide-scrollbars",
+            "--disable-extensions",
             "--no-first-run",
-            "--no-zygote",
-            "--no-sandbox",
             "--window-size=1365,900",
             "--lang=tr-TR",
             f"--user-agent={AMAZON_CHROME_USER_AGENT}",
             f"--user-data-dir={profile_dir}",
-            "--virtual-time-budget=5000",
-            "--dump-dom",
-            url,
         ]
-        try:
-            completed = subprocess.run(
-                command,
-                capture_output=True,
-                text=True,
-                timeout=browser_timeout,
-                check=False,
-            )
-        except subprocess.TimeoutExpired as exc:
-            raise HermesError("H&M tarayici modu zaman asimina ugradi.") from exc
-        except OSError as exc:
-            raise HermesError(f"H&M tarayici modu baslatilamadi: {exc}") from exc
+        attempts = [
+            ["--headless=new", "--virtual-time-budget=8000"],
+            ["--headless=chrome", "--virtual-time-budget=8000"],
+            ["--headless"],
+        ]
+        for attempt_flags in attempts:
+            command = [chromium, *attempt_flags, *common_flags, "--dump-dom", url]
+            try:
+                completed = subprocess.run(
+                    command,
+                    capture_output=True,
+                    text=True,
+                    timeout=browser_timeout,
+                    check=False,
+                )
+            except subprocess.TimeoutExpired as exc:
+                last_error = "zaman asimi"
+                continue
+            except OSError as exc:
+                raise HermesError(f"H&M tarayici modu baslatilamadi: {exc}") from exc
 
-    html = completed.stdout or ""
-    if not html:
-        error_text = _diagnostic_snippet(completed.stderr or "")
-        raise HermesError(f"H&M tarayici modu bos sayfa dondurdu: {error_text}")
-    response = _HtmlResponse(url, repair_mojibake(html))
-    cache[url] = response
-    return response
+            html = completed.stdout or ""
+            if html.strip():
+                response = _HtmlResponse(url, repair_mojibake(html))
+                cache[url] = response
+                return response
+            last_error = (
+                f"returncode={completed.returncode} | "
+                f"stderr={_diagnostic_snippet(completed.stderr or '')}"
+            )
+            log(f"H&M tarayici denemesi bos dondu: {' '.join(attempt_flags)} | {last_error}")
+    raise HermesError(f"H&M tarayici modu bos sayfa dondurdu: {last_error}")
 
 
 def cleaned_html(response: requests.Response) -> str:
