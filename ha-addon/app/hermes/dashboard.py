@@ -613,7 +613,7 @@ def _render_table():
     """
 
 
-def _render_telegram_panel(summary):
+def _render_telegram_panel(summary, include_recent_notifications=True):
     telegram = summary.get("telegram") or {}
     state = str(telegram.get("state") or "Pasif")
     state_class = "status-ok" if state == "Dinleniyor" else ("status-warn" if state in {"Pasif", "Kod bekleniyor"} else "status-error")
@@ -630,7 +630,11 @@ def _render_telegram_panel(summary):
         f"<section class='card {escape(str(css))}'><span>{escape(str(label))}</span><strong>{escape(str(value))}</strong></section>"
         for label, value, css in cards
     )
-    recent_html = _render_telegram_recent_notifications(telegram.get("recent_notifications") or [])
+    recent_html = (
+        _render_telegram_recent_notifications(telegram.get("recent_notifications") or [])
+        if include_recent_notifications
+        else ""
+    )
     return f"""
     <section class="summary-panel">
       <div class="summary-head"><h2>Telegram Takip</h2><span>Keyword bildirimleri</span></div>
@@ -832,7 +836,7 @@ def _render_page(path: str = "/") -> bytes:
   });
 </script>"""
     html = f"""<!doctype html>
-<html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta http-equiv="refresh" content="60"><title>Hermes</title><style>{DASHBOARD_CSS}</style></head><body><main><div class="hero"><div class="badge">Hermes</div><div class="actions"><a class="button primary" href="{log_url}" target="_top">LOG</a><a class="button secondary" href="{app_url}" target="_top">Config</a><form class="inline-form" method="post" action="./test-pushover"><button class="button test" type="submit">Pushover</button></form><form class="inline-form" method="post" action="./reset-notifications" data-confirm="Bildirim susturma hafızası sıfırlanacak ve hedef altında kalan fırsatlar için tek seferlik kontrol başlatılacak. Devam etmek istiyor musun?"><button class="button secondary" type="submit">Bildirim Sıfırla</button></form><form class="inline-form" method="post" action="./reset-price-history" data-confirm="Min/maks fiyat geçmişi temizlenecek ve güncel fiyattan yeniden başlayacak. Devam etmek istiyor musun?"><button class="button secondary" type="submit">Min/Maks Sıfırla</button></form></div>{notice_html}<div class="grid">{card_html}{error_card_html}</div>{_render_telegram_panel(summary)}{_render_table()}</div></main>{confirm_script}</body></html>"""
+<html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta http-equiv="refresh" content="60"><title>Hermes</title><style>{DASHBOARD_CSS}</style></head><body><main><div class="hero"><div class="badge">Hermes</div><div class="actions"><a class="button primary" href="{log_url}" target="_top">LOG</a><a class="button secondary" href="{app_url}" target="_top">Config</a><form class="inline-form" method="post" action="./test-pushover"><button class="button test" type="submit">Pushover</button></form><form class="inline-form" method="post" action="./reset-notifications" data-confirm="Bildirim susturma hafızası sıfırlanacak ve hedef altında kalan fırsatlar için tek seferlik kontrol başlatılacak. Devam etmek istiyor musun?"><button class="button secondary" type="submit">Bildirim Sıfırla</button></form><form class="inline-form" method="post" action="./reset-price-history" data-confirm="Min/maks fiyat geçmişi temizlenecek ve güncel fiyattan yeniden başlayacak. Devam etmek istiyor musun?"><button class="button secondary" type="submit">Min/Maks Sıfırla</button></form></div>{notice_html}<div class="grid">{card_html}{error_card_html}</div>{_render_telegram_panel(summary, include_recent_notifications=False)}{_render_table()}{_render_telegram_recent_notifications((summary.get('telegram') or {}).get('recent_notifications') or [])}</div></main>{confirm_script}</body></html>"""
     return html.encode("utf-8")
 
 

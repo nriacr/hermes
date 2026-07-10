@@ -13,6 +13,7 @@ sys.path.insert(0, str(APP_PATH))
 from hermes import service  # noqa: E402
 from hermes import http_client  # noqa: E402
 from hermes import dashboard  # noqa: E402
+from hermes import settings_ui  # noqa: E402
 from hermes.errors import HermesError, OutOfStockHermesError  # noqa: E402
 from hermes.http_client import amazon_url_variants, fetch_amazon_page  # noqa: E402
 from hermes.config_loader import _prepare_watches  # noqa: E402
@@ -1345,6 +1346,18 @@ class HermesSmokeTests(unittest.TestCase):
 
         self.assertEqual(len(unique_rows), 2)
         self.assertEqual(unique_rows[0].price, Decimal("95"))
+
+    def test_watch_settings_show_configured_groups_as_a_dropdown(self):
+        html = settings_ui._watch_form(
+            {"name": "Polo tişört", "group": "Moda"},
+            0,
+            groups=["Moda", "Teknoloji", "Market"],
+        )
+
+        self.assertIn("<select", html)
+        self.assertIn("Moda", html)
+        self.assertIn("Teknoloji", html)
+        self.assertIn("Market", html)
 
     def test_watch_card_detects_site_from_url(self):
         watches = _prepare_watches(
