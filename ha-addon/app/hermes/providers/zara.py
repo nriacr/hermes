@@ -163,19 +163,46 @@ def _offer_from_variant(product: dict, variant: dict, source_url: str) -> OfferR
     )
 
 
+def _stock_identity_from_variant(product: dict, variant: dict, source_url: str) -> tuple[str, str]:
+    color = _clean_part(variant.get("color") or product.get("color"))
+    size = _variant_size(variant)
+    product_name = _base_product_name(product.get("name") or variant.get("name") or "Zara ürünü", color, size)
+    offers = variant.get("offers")
+    offer_url = offers.get("url") if isinstance(offers, dict) else ""
+    url = _clean_part(variant.get("url") or offer_url or source_url)
+    return _title_with_parts(product_name, color, size), url or source_url
+
+
 def extract_offers(html: str, source_url: str = "", size: str = "") -> List[OfferResult]:
     requested_size = _clean_part(size)
     offers: List[OfferResult] = []
     seen_offer_keys: set[tuple[str, str, str]] = set()
     matched_size = False
     matched_available = False
+    stock_title = ""
+    stock_url = ""
+    fallback_title = ""
+    fallback_url = ""
 
     for product, variant in _candidate_variants(html):
         variant_size = _variant_size(variant)
+        if requested_size and not fallback_title:
+            color = _clean_part(variant.get("color") or product.get("color"))
+            product_name = _base_product_name(
+                product.get("name") or variant.get("name") or "Zara ürünü",
+                color,
+                requested_size,
+            )
+            fallback_title = _title_with_parts(product_name, color, requested_size)
+            raw_offers = variant.get("offers")
+            offer_url = raw_offers.get("url") if isinstance(raw_offers, dict) else ""
+            fallback_url = _clean_part(variant.get("url") or offer_url or source_url) or source_url
         if requested_size and not _size_matches(variant_size, requested_size):
             continue
         if requested_size:
             matched_size = True
+            if not stock_title:
+                stock_title, stock_url = _stock_identity_from_variant(product, variant, source_url)
         if not _is_available(variant):
             continue
         matched_available = True
@@ -188,12 +215,14 @@ def extract_offers(html: str, source_url: str = "", size: str = "") -> List[Offe
             offers.append(offer)
 
     if requested_size:
+        title = stock_title or fallback_title
+        url = stock_url or fallback_url
         if not matched_size:
-            raise OutOfStockHermesError(f"Zara beden bulunamadı: {requested_size}")
+            raise OutOfStockHermesError(f"Zara beden bulunamadı: {requested_size}", title, url)
         if not matched_available:
-            raise OutOfStockHermesError(f"Zara beden stokta değil: {requested_size}")
+            raise OutOfStockHermesError(f"Zara beden stokta değil: {requested_size}", title, url)
         if not offers:
-            raise OutOfStockHermesError(f"Zara beden fiyatı bulunamadı: {requested_size}")
+            raise OutOfStockHermesError(f"Zara beden fiyatı bulunamadı: {requested_size}", title, url)
         return offers
 
     if offers:

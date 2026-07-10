@@ -3,7 +3,10 @@ class HermesError(Exception):
 
 
 class OutOfStockHermesError(HermesError):
-    pass
+    def __init__(self, message: str, product_title: str = "", product_url: str = "") -> None:
+        self.product_title = product_title
+        self.product_url = product_url
+        super().__init__(message)
 
 
 class HttpStatusHermesError(HermesError):

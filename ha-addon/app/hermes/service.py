@@ -1184,17 +1184,19 @@ def check_once(config: HermesConfig) -> None:
                 "last_checked_at": utc_now(),
             }
         except OutOfStockHermesError as exc:
-            log(f"Stokta yok: {seller} | {watch.name or watch.url} | {exc}")
+            stock_title = getattr(exc, "product_title", "") or watch.name or watch.url
+            stock_url = getattr(exc, "product_url", "") or watch.url
+            log(f"Stokta yok: {seller} | {stock_title} | {exc}")
             stock_rows.append(
                 StockSummaryRow(
                     seller=seller,
-                    product_title=watch.name or watch.url,
-                    product_url=watch.url,
+                    product_title=stock_title,
+                    product_url=stock_url,
                     target_price=watch.target_price,
                     reason=str(exc),
                 )
             )
-            failed = reset_product_alert_after_missing(dict(state_entry), seller, watch.name or watch.url)
+            failed = reset_product_alert_after_missing(dict(state_entry), seller, stock_title)
             failed["site"] = watch.site
             failed["watch_name"] = watch.name
             failed["configured_url"] = watch.url

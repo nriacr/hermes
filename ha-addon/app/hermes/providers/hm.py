@@ -293,14 +293,27 @@ def extract_offers(html: str, source_url: str = "", size: str = "") -> List[Offe
     seen: set[tuple[str, str, str]] = set()
     matched_size = False
     matched_available = False
+    stock_title = ""
+    stock_url = ""
+    fallback_title = ""
+    fallback_url = ""
 
     for product in _product_like_objects(html):
+        base_name = _clean(_field(product, ("name", "title", "productName")) or "H&M ürünü")
+        base_color = _clean(_field(product, ("color", "colorName", "colour", "colourName", "swatchColorName")))
+        base_url = _absolute_url(_clean(_field(product, ("url", "link", "productUrl")) or source_url), source_url)
+        if requested_size and not fallback_title:
+            fallback_title = _display_title(base_name, base_color, requested_size)
+            fallback_url = base_url
         product_offers = _offers_from_data(product, source_url, requested_size)
         if requested_size and _sizes_from_product(product):
             for size_name, available in _sizes_from_product(product):
                 if _size_matches(size_name, requested_size):
                     matched_size = True
                     matched_available = matched_available or available
+                    if not stock_title:
+                        stock_title = _display_title(base_name, base_color, size_name)
+                        stock_url = base_url
         for offer in product_offers:
             key = (normalize_offer_text(offer.title), str(offer.price), normalize_offer_text(offer.url or ""))
             if key in seen:
@@ -311,11 +324,13 @@ def extract_offers(html: str, source_url: str = "", size: str = "") -> List[Offe
     if offers:
         return offers
     if requested_size:
+        title = stock_title or fallback_title
+        url = stock_url or fallback_url
         if not matched_size:
-            raise OutOfStockHermesError(f"H&M beden bulunamadı: {requested_size}")
+            raise OutOfStockHermesError(f"H&M beden bulunamadı: {requested_size}", title, url)
         if not matched_available:
-            raise OutOfStockHermesError(f"H&M beden stokta değil: {requested_size}")
-        raise OutOfStockHermesError(f"H&M beden fiyatı bulunamadı: {requested_size}")
+            raise OutOfStockHermesError(f"H&M beden stokta değil: {requested_size}", title, url)
+        raise OutOfStockHermesError(f"H&M beden fiyatı bulunamadı: {requested_size}", title, url)
 
     fallback = _fallback_offer(html, source_url)
     if fallback:

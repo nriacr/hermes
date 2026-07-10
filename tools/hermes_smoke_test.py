@@ -1418,8 +1418,10 @@ class HermesSmokeTests(unittest.TestCase):
         </body></html>
         """
 
-        with self.assertRaisesRegex(Exception, "stokta"):
+        with self.assertRaisesRegex(OutOfStockHermesError, "stokta") as caught:
             extract_zara_offers(html, source_url="https://www.zara.com/tr/tr/product", size="L")
+        self.assertEqual(caught.exception.product_title, "DOKULU REGULAR FIT POLO T-SHIRT / L")
+        self.assertEqual(caught.exception.product_url, "https://www.zara.com/tr/tr/product")
 
     def test_zara_blank_size_uses_lowest_available_offer(self):
         html = """
@@ -1639,12 +1641,16 @@ class HermesSmokeTests(unittest.TestCase):
                 "Lastik Örgülü Erkek Yaka Gömlek Loose Fit / Kahverengi / XS",
             ],
         )
-        with self.assertRaisesRegex(OutOfStockHermesError, "stokta değil"):
+        with self.assertRaisesRegex(OutOfStockHermesError, "stokta değil") as caught:
             extract_hm_offers(
                 html,
                 source_url="https://www2.hm.com/tr_tr/productpage.1285132002.html",
                 size="M",
             )
+        self.assertEqual(
+            caught.exception.product_title,
+            "Lastik Örgülü Erkek Yaka Gömlek Loose Fit / Turkuaz / M",
+        )
 
     def test_hm_size_matrix_matches_expected_available_sizes(self):
         html = """
