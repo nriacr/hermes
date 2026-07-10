@@ -1359,6 +1359,13 @@ class HermesSmokeTests(unittest.TestCase):
         self.assertIn("Teknoloji", html)
         self.assertIn("Market", html)
 
+    def test_watch_settings_keep_configured_groups_without_existing_watches(self):
+        html = settings_ui._watch_section([], ["Moda", "Teknoloji", "Market"])
+
+        self.assertIn("data-watch-group-filter='Moda'", html)
+        self.assertIn("data-watch-group-filter='Teknoloji'", html)
+        self.assertIn("data-watch-group-filter='Market'", html)
+
     def test_watch_card_detects_site_from_url(self):
         watches = _prepare_watches(
             [

@@ -178,9 +178,13 @@ def _section(title, items, renderer, section_name):
     )
 
 
-def _watch_section(items, groups):
+def _watch_section(items, configured_groups):
     safe_items = _as_list(items)
     groups = []
+    for group in configured_groups or []:
+        value = str(group or "").strip()
+        if value and value.casefold() not in {existing.casefold() for existing in groups}:
+            groups.append(value)
     for item in safe_items:
         group = _watch_group(item)
         if group.casefold() not in {value.casefold() for value in groups}:
