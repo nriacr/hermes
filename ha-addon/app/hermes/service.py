@@ -178,6 +178,20 @@ def sorted_summary_rows(rows: List[PriceSummaryRow]) -> List[PriceSummaryRow]:
     return sorted(rows, key=lambda row: (row.seller.casefold(), abs(row.difference), row.price))
 
 
+def deduplicate_summary_rows(rows: List[PriceSummaryRow]) -> List[PriceSummaryRow]:
+    """Keep one row per exact product URL without collapsing distinct variants."""
+    unique_rows: Dict[str, PriceSummaryRow] = {}
+    for row in rows:
+        url = str(row.product_url or "").strip()
+        if not url:
+            unique_rows[f"__missing_url__:{len(unique_rows)}"] = row
+            continue
+        current = unique_rows.get(url)
+        if current is None or row.price < current.price:
+            unique_rows[url] = row
+    return list(unique_rows.values())
+
+
 def sorted_stock_rows(rows: List[StockSummaryRow]) -> List[StockSummaryRow]:
     return sorted(rows, key=lambda row: (row.seller.casefold(), row.product_title.casefold(), row.product_url))
 
@@ -302,7 +316,8 @@ def save_price_summary(
     cycle_duration_seconds: float | None = None,
     scan_duration_seconds: float | None = None,
 ) -> None:
-    sorted_rows = sorted_summary_rows(rows)
+    unique_rows = deduplicate_summary_rows(rows)
+    sorted_rows = sorted_summary_rows(unique_rows)
     sorted_stock = sorted_stock_rows(stock_rows or [])
     previous_payload = load_json(SUMMARY_PATH, {})
     if not isinstance(previous_payload, dict):
@@ -351,7 +366,8 @@ def save_price_summary(
 
 
 def log_price_summary(rows: List[PriceSummaryRow]) -> None:
-    if not rows:
+    unique_rows = deduplicate_summary_rows(rows)
+    if not unique_rows:
         log("Özet: eslesen=0")
         return
     no_width = 3
@@ -374,7 +390,7 @@ def log_price_summary(rows: List[PriceSummaryRow]) -> None:
         f"{'-' * price_width}-+-"
         f"{'-' * price_width}"
     )
-    sorted_rows = sorted_summary_rows(rows)
+    sorted_rows = sorted_summary_rows(unique_rows)
     log(f"Özet: eslesen={len(sorted_rows)}")
     log(header)
     log(separator)
@@ -395,8 +411,12 @@ def publish_price_summary(
     cycle_duration_seconds: float | None = None,
     scan_duration_seconds: float | None = None,
 ) -> None:
-    save_price_summary(rows, stock_rows, cycle_duration_seconds, scan_duration_seconds)
-    log_price_summary(rows)
+    unique_rows = deduplicate_summary_rows(rows)
+    duplicate_count = len(rows) - len(unique_rows)
+    if duplicate_count:
+        log(f"Özet tablodan ayni urun linki tekrarları ayıklandı: adet={duplicate_count}")
+    save_price_summary(unique_rows, stock_rows, cycle_duration_seconds, scan_duration_seconds)
+    log_price_summary(unique_rows)
 
 
 def should_alert(
@@ -1274,6 +1294,7 @@ def check_once(config: HermesConfig) -> None:
     if config.watches:
         scan_duration_seconds = time.monotonic() - cycle_started_at
         cycle_duration_seconds = scan_duration_seconds + config.interval_seconds
+        summary_rows = deduplicate_summary_rows(summary_rows)
         publish_price_summary(summary_rows, stock_rows, cycle_duration_seconds, scan_duration_seconds)
         maybe_alert_summary_drop(state, summary_rows, config, session)
         maybe_alert_amazon_empty_searches(state, amazon_empty_events, config, session)

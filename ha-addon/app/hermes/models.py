@@ -9,6 +9,7 @@ class WatchRule:
     site: str
     url: str
     target_price: Decimal
+    group: str = ""
     size: str = ""
     max_items_to_scan: int = 24
     check_interval_minutes: Optional[int] = None

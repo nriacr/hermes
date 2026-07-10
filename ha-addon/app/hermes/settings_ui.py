@@ -24,7 +24,7 @@ h1 { margin:0 0 8px; font-size:34px; letter-spacing:-.04em; } h2 { margin:24px 0
 .actions { display:flex; flex-wrap:wrap; gap:10px; margin:18px 0; } .button { display:inline-flex; align-items:center; justify-content:center; min-height:40px; padding:0 14px; border-radius:13px; border:1px solid transparent; text-decoration:none; font-weight:800; font-size:13px; cursor:pointer; }
 .button.primary { color:#14172a; background:linear-gradient(135deg,var(--accent),var(--accent2)); } .button.secondary { color:var(--text); background:#2a2f4d; border-color:var(--line); }
 .notice { margin:14px 0; padding:11px 13px; border-radius:12px; font-weight:700; font-size:13px; } .notice-ok { color:#c6f7e6; background:rgba(127,220,184,.14); border:1px solid rgba(127,220,184,.38); } .notice-fail { color:#ffd8e3; background:rgba(255,156,181,.14); border:1px solid rgba(255,156,181,.38); }
-.settings-section { margin-top:18px; border:1px solid var(--line); border-radius:18px; padding:16px; background:var(--card); } details { border:1px solid var(--line); border-radius:14px; background:#181c32; margin:9px 0; overflow:hidden; } summary { cursor:pointer; padding:13px 14px; font-weight:900; color:#f0f2ff; list-style:none; } summary::-webkit-details-marker { display:none; } summary::before { content:'\u25b8'; display:inline-block; margin-right:8px; color:var(--accent2); } details[open] summary::before { transform:rotate(90deg); }
+.settings-section { margin-top:18px; border:1px solid var(--line); border-radius:18px; padding:16px; background:var(--card); } details { border:1px solid var(--line); border-radius:14px; background:#181c32; margin:9px 0; overflow:hidden; } summary { cursor:pointer; padding:13px 14px; font-weight:900; color:#f0f2ff; list-style:none; } summary::-webkit-details-marker { display:none; } summary::before { content:'\u25b8'; display:inline-block; margin-right:8px; color:var(--accent2); } details[open] summary::before { transform:rotate(90deg); } .watch-group-filters { display:flex; flex-wrap:wrap; gap:8px; margin:0 0 12px; } .watch-group-filter { min-height:34px; border:1px solid var(--line); border-radius:999px; padding:0 12px; background:#2a2f4d; color:var(--text); font:700 12px inherit; cursor:pointer; } .watch-group-filter[aria-pressed='false'] { color:var(--muted); background:#15182d; opacity:.72; text-decoration:line-through; } .watch-group-filter:hover { border-color:var(--accent2); }
 .form-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:12px; padding:0 14px 14px; } label { display:grid; gap:6px; color:var(--muted); font-size:12px; font-weight:700; } input[type='text'], input[type='number'], input[type='url'], textarea { width:100%; min-height:40px; border-radius:11px; border:1px solid var(--line); background:#101428; color:var(--text); padding:10px 11px; font-size:13px; font-family:inherit; } textarea { resize:vertical; line-height:1.35; }
 .checkbox-row { display:flex; align-items:center; gap:9px; min-height:40px; color:var(--text); } .danger { color:#ffd8e3; } .footer-note { margin-top:14px; border-left:4px solid #b79ad6; padding:12px 14px; background:rgba(183,154,214,.15); border-radius:10px; font-size:13px; }
 """
@@ -89,6 +89,12 @@ def _summary_name(item, fallback):
     return fallback
 
 
+def _watch_group(item):
+    if not isinstance(item, dict):
+        return "Diğer"
+    return str(item.get("group") or "").strip() or "Diğer"
+
+
 def _watch_urls_for_form(item):
     urls = []
     if isinstance(item, dict):
@@ -106,7 +112,8 @@ def _details(title, prefix, inner, open_when_empty=False):
 
 def _watch_form(item, index, is_new=False):
     prefix = f"watches_{index}_"
-    title = "Yeni takip ekle" if is_new else _summary_name(item, f"Takip {index + 1}")
+    group = _watch_group(item)
+    title = "Yeni takip ekle" if is_new else f"[{group}] {_summary_name(item, f'Takip {index + 1}')}"
     urls = _watch_urls_for_form(item)
     max_items = item.get("max_items_to_scan", 24 if is_new else "")
     notify_once = True if is_new else item.get("notify_once_in_24H", True)
@@ -114,6 +121,7 @@ def _watch_form(item, index, is_new=False):
     inner = "".join(
         [
             _field(prefix, "name", "Ad (ürün linklerinde boş bırakılabilir)", item.get("name", "")),
+            _field(prefix, "group", "Grup (ör. Moda, Teknoloji)", "" if is_new else item.get("group", "")),
             _field(prefix, "target_price", "Hedef fiyat", item.get("target_price", ""), "number", required=not is_new),
             _field(prefix, "size", "Beden", item.get("size", "")),
             *[
@@ -133,7 +141,11 @@ def _watch_form(item, index, is_new=False):
             _checkbox(prefix, "delete", "Sil", False, danger=True) if not is_new else "",
         ]
     )
-    return _details(title, prefix, inner, open_when_empty=is_new)
+    group_attribute = "" if is_new else f" data-watch-group='{escape(group, quote=True)}'"
+    return (
+        f"<details{group_attribute}{' open' if is_new else ''}>"
+        f"<summary>{escape(title)}</summary><div class='form-grid'>{inner}</div></details>"
+    )
 
 
 def _section(title, items, renderer, section_name):
@@ -145,6 +157,26 @@ def _section(title, items, renderer, section_name):
         f"<input type='hidden' name='{escape(section_name)}_count' value='{len(safe_items) + 1}'>"
         f"{''.join(rows)}</section>"
     )
+
+
+def _watch_section(items):
+    safe_items = _as_list(items)
+    groups = []
+    for item in safe_items:
+        group = _watch_group(item)
+        if group.casefold() not in {value.casefold() for value in groups}:
+            groups.append(group)
+    filters = "".join(
+        f"<button class='watch-group-filter' type='button' data-watch-group-filter='{escape(group, quote=True)}' aria-pressed='true'>{escape(group)}</button>"
+        for group in groups
+    )
+    filters_html = (
+        "<div class='watch-group-filters' aria-label='Takip edilen grup filtreleri'>"
+        f"{filters}</div>"
+        if filters
+        else ""
+    )
+    return filters_html + _section("Takip edilenler", safe_items, _watch_form, "watches")
 
 
 def _telegram_section(options):
@@ -186,6 +218,7 @@ def _build_watches(form):
         if _bool_from_form(form, prefix + "delete"):
             continue
         name = _first(form, prefix + "name")
+        group = _first(form, prefix + "group")
         target = _first(form, prefix + "target_price")
         size = _first(form, prefix + "size")
         max_items = _first(form, prefix + "max_items_to_scan")
@@ -195,7 +228,7 @@ def _build_watches(form):
             url = _first(form, prefix + field_name)
             if url and url not in urls:
                 urls.append(url)
-        if not any([name, target, size, max_items, interval, *urls]):
+        if not any([name, group, target, size, max_items, interval, *urls]):
             continue
         if not target or not urls:
             raise ValueError("Takip eklerken hedef fiyat ve en az bir link alanı dolu olmalı.")
@@ -203,6 +236,7 @@ def _build_watches(form):
             raise ValueError("Arama linkleri için Ad alanı zorunlu. Ürün linklerinde boş bırakılabilir.")
         item = {
             "name": name,
+            "group": group,
             "target_price": _number(target),
             "notify_once_in_24H": _bool_from_form(form, prefix + "notify_once_in_24H"),
             "active": _bool_from_form(form, prefix + "active"),
@@ -327,14 +361,39 @@ def render_settings_page(path="/"):
     if status in {"ok", "fail"}:
         css = "notice-ok" if status == "ok" else "notice-fail"
         notice = f"<p class='notice {css}'>{escape(message)}</p>"
+    filter_script = """
+<script>
+  const storageKey = 'hermes-hidden-watch-groups';
+  const hiddenGroups = new Set(JSON.parse(localStorage.getItem(storageKey) || '[]'));
+  const normalize = (value) => value.toLocaleLowerCase('tr-TR');
+  const refreshWatchGroups = () => {
+    document.querySelectorAll('[data-watch-group]').forEach((item) => {
+      item.hidden = hiddenGroups.has(normalize(item.dataset.watchGroup || 'Diğer'));
+    });
+    document.querySelectorAll('[data-watch-group-filter]').forEach((button) => {
+      const hidden = hiddenGroups.has(normalize(button.dataset.watchGroupFilter || 'Diğer'));
+      button.setAttribute('aria-pressed', String(!hidden));
+      button.title = hidden ? 'Grubu göster' : 'Grubu gizle';
+    });
+  };
+  document.querySelectorAll('[data-watch-group-filter]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const group = normalize(button.dataset.watchGroupFilter || 'Diğer');
+      if (hiddenGroups.has(group)) hiddenGroups.delete(group); else hiddenGroups.add(group);
+      localStorage.setItem(storageKey, JSON.stringify([...hiddenGroups]));
+      refreshWatchGroups();
+    });
+  });
+  refreshWatchGroups();
+</script>"""
     html = f"""<!doctype html>
 <html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Hermes Ayarlar</title><style>{SETTINGS_CSS}</style></head>
 <body><main><div class="hero"><h1>Hermes Ayarlar</h1><p>Listelerde yalnızca adlar görünür; satıra tıklayınca ayrıntılar açılır. Takip edilenler bölümünde aynı kayıt altına en fazla 5 link ekleyebilirsin; Hermes siteyi ve link tipini otomatik algılar.</p><div class="actions"><a class="button secondary" href="./">Ana ekran</a></div>{notice}<form method="post" action="./settings/save">
-{_section("Takip edilenler", options.get("takip_edilenler"), _watch_form, "watches")}
+{_watch_section(options.get("takip_edilenler"))}
 {_telegram_section(options)}
 <div class="actions"><button class="button primary" type="submit">Kaydet</button><a class="button secondary" href="./">Vazgeç</a></div>
 <p class="footer-note">Kaydet sonrası ekran birkaç saniye içinde “yeniden başlatılıyor” mesajı verir. Hermes yeniden başlarken sayfa kısa süre yanıt vermeyebilir; 10-20 saniye sonra yenileyebilirsin.</p>
-</form></div></main></body></html>"""
+</form></div></main>{filter_script}</body></html>"""
     return html.encode("utf-8")
 
 

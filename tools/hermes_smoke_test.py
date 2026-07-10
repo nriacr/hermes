@@ -1321,6 +1321,7 @@ class HermesSmokeTests(unittest.TestCase):
                     "url_1": "https://www.amazon.com.tr/dp/B000000001",
                     "url_2": "https://www.hepsiburada.com/ornek-urun-p-HBCV000000000",
                     "url_3": "https://nordbron.com/stark-sirt-cantasi",
+                    "group": "Moda",
                     "size": "M",
                     "notify_once_in_24H": True,
                     "active": True,
@@ -1330,7 +1331,20 @@ class HermesSmokeTests(unittest.TestCase):
         self.assertEqual(len(watches), 3)
         self.assertEqual([item.site for item in watches], ["amazon", "hepsiburada", "nordbron"])
         self.assertTrue(all(item.name == "Ortak ürün" for item in watches))
+        self.assertTrue(all(item.group == "Moda" for item in watches))
         self.assertTrue(all(item.size == "M" for item in watches))
+
+    def test_summary_keeps_one_row_for_an_identical_product_link(self):
+        rows = [
+            PriceSummaryRow("Amazon", "Ürün", "https://example.test/product", Decimal("100"), Decimal("90"), Decimal("100"), Decimal("100")),
+            PriceSummaryRow("Amazon", "Ürün", "https://example.test/product", Decimal("95"), Decimal("90"), Decimal("95"), Decimal("100")),
+            PriceSummaryRow("Amazon", "Farklı varyasyon", "https://example.test/product?color=blue", Decimal("96"), Decimal("90"), Decimal("96"), Decimal("96")),
+        ]
+
+        unique_rows = service.deduplicate_summary_rows(rows)
+
+        self.assertEqual(len(unique_rows), 2)
+        self.assertEqual(unique_rows[0].price, Decimal("95"))
 
     def test_watch_card_detects_site_from_url(self):
         watches = _prepare_watches(
