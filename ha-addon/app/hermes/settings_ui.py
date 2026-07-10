@@ -7,10 +7,10 @@ import urllib.request
 from html import escape
 
 from .config_loader import DEFAULT_TELEGRAM_CHANNELS
-from .constants import OPTIONS_PATH
+from .constants import OPTIONS_PATH, SITE_HM, SITE_ZARA
 from .logging_utils import log
 from .storage import load_json, save_json
-from .utils import parse_bool, watch_name_required_for_url
+from .utils import detect_site_from_url, parse_bool, watch_name_required_for_url
 
 ADDON_SLUG = "hermes"
 SUPERVISOR_BASE_URL = "http://supervisor"
@@ -108,7 +108,12 @@ def _summary_name(item, fallback):
 def _watch_group(item):
     if not isinstance(item, dict):
         return "Diğer"
-    return str(item.get("group") or "").strip() or "Diğer"
+    group = str(item.get("group") or "").strip()
+    if group:
+        return group
+    if any(detect_site_from_url(url) in {SITE_ZARA, SITE_HM} for url in _watch_urls_for_form(item)):
+        return "Moda"
+    return "Diğer"
 
 
 def _watch_urls_for_form(item):
@@ -137,10 +142,13 @@ def _watch_form(item, index, is_new=False, groups=None):
     max_items = item.get("max_items_to_scan", 24 if is_new else "")
     notify_once = True if is_new else item.get("notify_once_in_24H", True)
     active = True if is_new else item.get("active", True)
+    selected_group = "" if is_new else str(item.get("group") or "").strip()
+    if not selected_group and group == "Moda":
+        selected_group = "Moda"
     inner = "".join(
         [
             _field(prefix, "name", "Ad (ürün linklerinde boş bırakılabilir)", item.get("name", "")),
-            _select(prefix, "group", "Grup", "" if is_new else item.get("group", ""), group_choices),
+            _select(prefix, "group", "Grup", selected_group, group_choices),
             _field(prefix, "target_price", "Hedef fiyat", item.get("target_price", ""), "number", required=not is_new),
             _field(prefix, "size", "Beden", item.get("size", "")),
             *[
@@ -238,6 +246,13 @@ def _bool_from_form(form, key, default=False):
     return key in form if key in form else default
 
 
+def _watch_form_context(index, name, urls):
+    identity = name or (urls[0] if urls else "yeni kayıt")
+    if len(identity) > 96:
+        identity = f"{identity[:93]}..."
+    return f"Takip {index + 1} ({identity})"
+
+
 def _build_watches(form):
     watches = []
     count = int(_first(form, "watches_count", "0") or 0)
@@ -256,12 +271,22 @@ def _build_watches(form):
             url = _first(form, prefix + field_name)
             if url and url not in urls:
                 urls.append(url)
-        if not any([name, group, target, size, max_items, interval, *urls]):
+        if not group and any(detect_site_from_url(url) in {SITE_ZARA, SITE_HM} for url in urls):
+            group = "Moda"
+        if not any([name, target, size, max_items, interval, *urls]):
             continue
+        context = _watch_form_context(index, name, urls)
         if not target or not urls:
-            raise ValueError("Takip eklerken hedef fiyat ve en az bir link alanı dolu olmalı.")
+            missing = []
+            if not target:
+                missing.append("hedef fiyat")
+            if not urls:
+                missing.append("en az bir link")
+            raise ValueError(f"{context}: {', '.join(missing)} alanı zorunlu.")
         if not name and any(watch_name_required_for_url(url) for url in urls):
-            raise ValueError("Arama linkleri için Ad alanı zorunlu. Ürün linklerinde boş bırakılabilir.")
+            raise ValueError(
+                f"{context}: arama linkleri için Ad alanı zorunlu. Ürün linklerinde boş bırakılabilir."
+            )
         item = {
             "name": name,
             "group": group,

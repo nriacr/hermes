@@ -5,6 +5,8 @@ from .constants import (
     DEFAULT_REQUEST_DELAY_MIN_SECONDS,
     DEFAULT_REQUEST_TIMEOUT_SECONDS,
     OPTIONS_PATH,
+    SITE_HM,
+    SITE_ZARA,
 )
 from .errors import HermesError
 from .models import HermesConfig, TelegramConfig, WatchRule
@@ -124,6 +126,8 @@ def _prepare_watches(raw_watches: object) -> List[WatchRule]:
         context_name = name or "adsız ürün"
         target_price = parse_decimal(_required_value(item, "target_price", f"Takip edilen ({context_name})"))
         group = str(item.get("group") or "").strip()
+        if not group and any(detect_site_from_url(url) in {SITE_ZARA, SITE_HM} for url in urls):
+            group = "Moda"
         size = str(item.get("size") or "").strip()
         max_items_to_scan = _bounded_integer(item, "max_items_to_scan", 24, 1, 100)
         check_interval_minutes = _optional_bounded_integer(item, "check_interval_minutes", 1, 1440)

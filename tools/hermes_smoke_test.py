@@ -1366,6 +1366,49 @@ class HermesSmokeTests(unittest.TestCase):
         self.assertIn("data-watch-group-filter='Teknoloji'", html)
         self.assertIn("data-watch-group-filter='Market'", html)
 
+    def test_existing_zara_and_hm_watches_default_to_moda_group(self):
+        watches = _prepare_watches(
+            [
+                {
+                    "target_price": 1000,
+                    "url_1": "https://www.zara.com/tr/tr/ornek-p03166301.html",
+                    "active": True,
+                },
+                {
+                    "target_price": 1000,
+                    "url_1": "https://www2.hm.com/tr_tr/productpage.1286182003.html",
+                    "active": True,
+                },
+                {
+                    "target_price": 1000,
+                    "url_1": "https://www.amazon.com.tr/dp/B000000001",
+                    "active": True,
+                },
+            ]
+        )
+
+        self.assertEqual([watch.group for watch in watches], ["Moda", "Moda", ""])
+
+    def test_settings_ignores_empty_new_watch_with_only_a_group_selected(self):
+        watches = settings_ui._build_watches(
+            {
+                "watches_count": ["1"],
+                "watches_0_group": ["Moda"],
+            }
+        )
+
+        self.assertEqual(watches, [])
+
+    def test_settings_error_identifies_watch_with_missing_required_fields(self):
+        with self.assertRaisesRegex(ValueError, r"Takip 1 \(Eksik ürün\): en az bir link"):
+            settings_ui._build_watches(
+                {
+                    "watches_count": ["1"],
+                    "watches_0_name": ["Eksik ürün"],
+                    "watches_0_target_price": ["1000"],
+                }
+            )
+
     def test_watch_card_detects_site_from_url(self):
         watches = _prepare_watches(
             [
