@@ -10,7 +10,7 @@ from .config_loader import DEFAULT_TELEGRAM_CHANNELS
 from .constants import OPTIONS_PATH
 from .logging_utils import log
 from .storage import load_json, save_json
-from .utils import parse_bool
+from .utils import parse_bool, watch_name_required_for_url
 
 ADDON_SLUG = "hermes"
 SUPERVISOR_BASE_URL = "http://supervisor"
@@ -113,7 +113,7 @@ def _watch_form(item, index, is_new=False):
     active = True if is_new else item.get("active", True)
     inner = "".join(
         [
-            _field(prefix, "name", "Ad", item.get("name", ""), required=not is_new),
+            _field(prefix, "name", "Ad (ürün linklerinde boş bırakılabilir)", item.get("name", "")),
             _field(prefix, "target_price", "Hedef fiyat", item.get("target_price", ""), "number", required=not is_new),
             _field(prefix, "size", "Beden", item.get("size", "")),
             *[
@@ -197,8 +197,10 @@ def _build_watches(form):
                 urls.append(url)
         if not any([name, target, size, max_items, interval, *urls]):
             continue
-        if not name or not target or not urls:
-            raise ValueError("Takip eklerken ad, hedef fiyat ve en az bir link alanı dolu olmalı.")
+        if not target or not urls:
+            raise ValueError("Takip eklerken hedef fiyat ve en az bir link alanı dolu olmalı.")
+        if not name and any(watch_name_required_for_url(url) for url in urls):
+            raise ValueError("Arama linkleri için Ad alanı zorunlu. Ürün linklerinde boş bırakılabilir.")
         item = {
             "name": name,
             "target_price": _number(target),

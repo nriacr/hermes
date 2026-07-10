@@ -9,7 +9,7 @@ from .constants import (
 from .errors import HermesError
 from .models import HermesConfig, TelegramConfig, WatchRule
 from .storage import load_json
-from .utils import detect_site_from_url, parse_bool, parse_decimal
+from .utils import detect_site_from_url, parse_bool, parse_decimal, watch_name_required_for_url
 
 WATCH_URL_FIELDS = ("url_1", "url_2", "url_3", "url_4", "url_5")
 
@@ -119,9 +119,10 @@ def _prepare_watches(raw_watches: object) -> List[WatchRule]:
         if not urls:
             continue
         name = str(item.get("name") or "").strip()
-        if not name:
-            raise HermesError("Takip edilen kayıt için name alanı zorunlu.")
-        target_price = parse_decimal(_required_value(item, "target_price", f"Takip edilen ({name})"))
+        if not name and any(watch_name_required_for_url(url) for url in urls):
+            raise HermesError("Arama linkleri için name alanı zorunlu. Ürün linklerinde boş bırakılabilir.")
+        context_name = name or "adsız ürün"
+        target_price = parse_decimal(_required_value(item, "target_price", f"Takip edilen ({context_name})"))
         size = str(item.get("size") or "").strip()
         max_items_to_scan = _bounded_integer(item, "max_items_to_scan", 24, 1, 100)
         check_interval_minutes = _optional_bounded_integer(item, "check_interval_minutes", 1, 1440)

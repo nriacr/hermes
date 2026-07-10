@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from html import unescape
 from typing import Any, Dict
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from .constants import (
     AMAZON_BASE_URL,
@@ -24,6 +24,10 @@ from .errors import HermesError
 
 MOJIBAKE_MARKERS = ("Ã", "Ä", "Å", "Â", "�")
 ASIN_URL_PATTERN = re.compile(r"/(?:dp|gp/product)/([A-Z0-9]{10})")
+HEPSIBURADA_PRODUCT_URL_PATTERN = re.compile(
+    r"/(?:[^\s'\"<>]+)-(?:p|pm)-[A-Z0-9]+",
+    re.IGNORECASE,
+)
 
 
 def utc_now() -> str:
@@ -145,6 +149,35 @@ def make_amazon_absolute_url(raw_url: str) -> str:
 def extract_asin_from_url(url: str):
     match = ASIN_URL_PATTERN.search(url)
     return match.group(1) if match else None
+
+
+def is_amazon_search_url(url: str) -> bool:
+    parsed = urlparse(str(url or ""))
+    host = parsed.netloc.casefold()
+    if "amazon." not in host:
+        return False
+    if parsed.path.rstrip("/") == "/s":
+        return True
+    query = parse_qs(parsed.query)
+    return "k" in query and not any(part in parsed.path for part in ("/dp/", "/gp/product/"))
+
+
+def is_hepsiburada_product_url(url: str) -> bool:
+    parsed = urlparse(str(url or ""))
+    if "hepsiburada" not in parsed.netloc.casefold():
+        return False
+    return HEPSIBURADA_PRODUCT_URL_PATTERN.search(parsed.path) is not None
+
+
+def is_hepsiburada_search_url(url: str) -> bool:
+    parsed = urlparse(str(url or ""))
+    if "hepsiburada" not in parsed.netloc.casefold():
+        return False
+    return not is_hepsiburada_product_url(url)
+
+
+def watch_name_required_for_url(url: str) -> bool:
+    return is_amazon_search_url(url) or is_hepsiburada_search_url(url)
 
 
 def canonical_amazon_product_url(raw_url: str, fallback_asin: str = "") -> str:

@@ -296,14 +296,15 @@ def _context_for_watch_url(item, url):
     except Exception:  # noqa: BLE001
         site = str(item.get("site") or "urun").strip().lower()
         seller = _site_name(site, False)
-    name = str(item.get("name") or url).strip()
+    name = str(item.get("name") or "").strip()
+    display_name = name or url
     key = normalize_item_key("watch", site, name, url)
     return key, {
-        "title": f"{seller}: {name}",
-        "meta": f"Takip edilen: {name}",
+        "title": f"{seller}: {display_name}",
+        "meta": f"Takip edilen: {display_name}",
         "url": url,
         "urls": [url],
-        "keywords": [name],
+        "keywords": [name] if name else [],
     }
 
 

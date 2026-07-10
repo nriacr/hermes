@@ -4,7 +4,6 @@ import time
 from datetime import timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, List
-from urllib.parse import parse_qs, urlparse
 
 import requests
 
@@ -49,6 +48,7 @@ from .utils import (
     format_local_datetime,
     format_signed_tl,
     format_tl,
+    is_amazon_search_url,
     local_now,
     log_cell,
     normalize_item_key,
@@ -775,17 +775,6 @@ def maybe_alert_amazon_empty_searches(
     except Exception as exc:  # noqa: BLE001
         log(f"Amazon bos arama uyarisi gonderilemedi: {exc}")
     state["_meta"] = meta
-
-
-def is_amazon_search_url(url: str) -> bool:
-    parsed = urlparse(str(url or ""))
-    host = parsed.netloc.casefold()
-    if "amazon." not in host:
-        return False
-    if parsed.path.rstrip("/") == "/s":
-        return True
-    query = parse_qs(parsed.query)
-    return "k" in query and not any(part in parsed.path for part in ("/dp/", "/gp/product/"))
 
 
 def best_offer_from_amazon_search_results(results: List[SearchResultItem], product_name: str) -> OfferResult:

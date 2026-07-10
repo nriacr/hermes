@@ -12,7 +12,7 @@ sys.path.insert(0, str(APP_PATH))
 
 from hermes import service  # noqa: E402
 from hermes import http_client  # noqa: E402
-from hermes.errors import OutOfStockHermesError  # noqa: E402
+from hermes.errors import HermesError, OutOfStockHermesError  # noqa: E402
 from hermes.http_client import amazon_url_variants, fetch_amazon_page  # noqa: E402
 from hermes.config_loader import _prepare_watches  # noqa: E402
 from hermes.models import HermesConfig, OfferResult, PriceSummaryRow, SearchResultItem, StockSummaryRow, TelegramConfig  # noqa: E402
@@ -1311,6 +1311,37 @@ class HermesSmokeTests(unittest.TestCase):
         )
         self.assertEqual(len(watches), 1)
         self.assertEqual(watches[0].site, "trendyol")
+
+    def test_watch_name_is_optional_for_product_links(self):
+        watches = _prepare_watches(
+            [
+                {
+                    "target_price": 1000,
+                    "url_1": "https://www.hepsiburada.com/ornek-urun-p-HBCV000000000",
+                    "url_2": "https://www2.hm.com/tr_tr/productpage.1286182003.html",
+                    "active": True,
+                }
+            ]
+        )
+        self.assertEqual(len(watches), 2)
+        self.assertTrue(all(item.name == "" for item in watches))
+
+    def test_watch_name_is_required_for_search_links(self):
+        for url in (
+            "https://www.amazon.com.tr/s?k=ipad",
+            "https://www.hepsiburada.com/ara?q=sm-x620",
+        ):
+            with self.subTest(url=url):
+                with self.assertRaisesRegex(HermesError, "Arama linkleri"):
+                    _prepare_watches(
+                        [
+                            {
+                                "target_price": 1000,
+                                "url_1": url,
+                                "active": True,
+                            }
+                        ]
+                    )
 
     def test_zara_site_detection(self):
         url = "https://www.zara.com/tr/tr/dokulu-regular-fit-polo-t-shirt-p03166301.html?v1=567184888"
