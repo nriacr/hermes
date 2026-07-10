@@ -797,12 +797,14 @@ def maybe_alert_amazon_empty_searches(
     state["_meta"] = meta
 
 
-def best_offer_from_amazon_search_results(results: List[SearchResultItem], product_name: str) -> OfferResult:
+def offers_from_amazon_search_results(results: List[SearchResultItem], product_name: str) -> List[OfferResult]:
     matches = filter_matching_results(results, product_name) if product_name else results
     if not matches:
         raise HermesError("Amazon arama sayfasında ürün adına uyan fiyatlı ürün bulunamadı.")
-    best = min(matches, key=lambda item: item.price)
-    return OfferResult(title=best.title, price=best.price, seller="Amazon", url=best.url)
+    return [
+        OfferResult(title=item.title, price=item.price, seller="Amazon", url=item.url)
+        for item in matches
+    ]
 
 
 def _amazon_detail_result_cache(session: requests.Session) -> Dict[str, SearchResultItem]:
@@ -813,11 +815,11 @@ def _amazon_detail_result_cache(session: requests.Session) -> Dict[str, SearchRe
     return cache
 
 
-def _fetch_amazon_search_watch_offer(
+def _fetch_amazon_search_watch_offers(
     session: requests.Session,
     watch: WatchRule,
     config: HermesConfig,
-) -> OfferResult:
+) -> List[OfferResult]:
     response = fetch_amazon_page(
         session,
         watch.url,
@@ -849,12 +851,12 @@ def _fetch_amazon_search_watch_offer(
         log(f"Amazon product arama detay fiyatı atlandı: eslesmeyen_urun={skipped_detail_count}")
     if not results:
         raise HermesError("Amazon arama sayfasında okunabilir fiyat bulunamadı.")
-    offer = best_offer_from_amazon_search_results(dedupe_results(results), watch.name)
+    offers = offers_from_amazon_search_results(dedupe_results(results), watch.name)
     log(
         "Amazon arama linki okundu: "
-        f"{watch.name or watch.url} | eslesen_fiyat={offer.price} TL"
+        f"{watch.name or watch.url} | eslesen_urun={len(offers)}"
     )
-    return offer
+    return offers
 
 
 def _hepsiburada_variant_scan_limit(watch: WatchRule) -> int:
@@ -1045,7 +1047,7 @@ def _fetch_watch_offers(session: requests.Session, watch: WatchRule, config: Her
     url = watch.url
     timeout = config.request_timeout_seconds
     if site == SITE_AMAZON and is_amazon_search_url(url):
-        return [_fetch_amazon_search_watch_offer(session, watch, config)]
+        return _fetch_amazon_search_watch_offers(session, watch, config)
     if site == SITE_HEPSIBURADA:
         return _fetch_hepsiburada_watch_offers(session, watch, config)
     if site == SITE_ZARA:

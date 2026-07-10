@@ -380,7 +380,7 @@ class HermesSmokeTests(unittest.TestCase):
         self.assertTrue(service.is_amazon_search_url("https://www.amazon.com.tr/s?k=juo+q3"))
         self.assertFalse(service.is_amazon_search_url("https://www.amazon.com.tr/dp/B000000001"))
 
-    def test_product_amazon_search_uses_lowest_matching_offer(self):
+    def test_product_amazon_search_returns_all_matching_offers(self):
         results = [
             SearchResultItem(
                 title="Juo Q3 Masa Lambası Siyah",
@@ -398,9 +398,39 @@ class HermesSmokeTests(unittest.TestCase):
                 price=Decimal("999.00"),
             ),
         ]
-        offer = service.best_offer_from_amazon_search_results(results, "juo q3")
-        self.assertEqual(offer.price, Decimal("2037.00"))
-        self.assertEqual(offer.url, "https://www.amazon.com.tr/dp/B000000001")
+        offers = service.offers_from_amazon_search_results(results, "juo q3")
+        self.assertEqual([offer.price for offer in offers], [Decimal("2037.00"), Decimal("2099.00")])
+        self.assertEqual(
+            [offer.url for offer in offers],
+            [
+                "https://www.amazon.com.tr/dp/B000000001",
+                "https://www.amazon.com.tr/dp/B000000002",
+            ],
+        )
+
+    def test_amazon_search_keeps_distinct_variation_links(self):
+        html = """
+        <div class="s-main-slot">
+          <div data-component-type="s-search-result" data-asin="B000000001">
+            <h2><a href="/dp/B000000001?th=1"><span>Juo Q3 Yeşil</span></a></h2>
+            <span class="a-price"><span class="a-offscreen">2.037,00 TL</span></span>
+          </div>
+          <div data-component-type="s-search-result" data-asin="B000000001">
+            <h2><a href="/dp/B000000001?th=2"><span>Juo Q3 Kırmızı</span></a></h2>
+            <span class="a-price"><span class="a-offscreen">2.099,00 TL</span></span>
+          </div>
+        </div>
+        """
+        items = extract_result_candidates(html, 10)
+
+        self.assertEqual(len(items), 2)
+        self.assertEqual(
+            [item.url for item in items],
+            [
+                "https://www.amazon.com.tr/dp/B000000001?th=1",
+                "https://www.amazon.com.tr/dp/B000000001?th=2",
+            ],
+        )
 
     def test_request_order_spreads_same_site_requests(self):
         items = [

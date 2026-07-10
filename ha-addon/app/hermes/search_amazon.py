@@ -2,13 +2,14 @@ import re
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any, List, Optional
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from bs4 import BeautifulSoup
 
 from .errors import HermesError
 from .models import SearchResultItem
 from .providers.amazon_common import extract_secondary_offer_price
-from .utils import canonical_amazon_product_url, normalize_offer_text, parse_decimal, repair_mojibake
+from .utils import canonical_amazon_product_url, make_amazon_absolute_url, normalize_offer_text, parse_decimal, repair_mojibake
 
 AMAZON_SEARCH_CARD_SELECTORS = [
     "div.s-main-slot div[data-component-type='s-search-result'][data-asin]",
@@ -31,6 +32,10 @@ AMAZON_SEARCH_STOP_SECTION_MARKERS = (
     "baktiginiz urunlere gore belirlenen urunler",
     "tarama gecmisinizdeki urunleri goruntuleyen musteriler ayrica sunlari da goruntuledi",
 )
+
+# These parameters choose a concrete Amazon variation or offer. Keep them in
+# search-result links so different colors are not merged into one row.
+AMAZON_SEARCH_RESULT_VARIATION_PARAMS = {"smid", "psc", "th"}
 
 
 @dataclass
@@ -99,7 +104,17 @@ def _extract_card_url(card: BeautifulSoup, fallback_asin: str = ""):
     href = str(link.get("href", "")).strip()
     if not href:
         return None
-    return canonical_amazon_product_url(href, fallback_asin)
+    absolute_url = make_amazon_absolute_url(href)
+    canonical_url = canonical_amazon_product_url(absolute_url, fallback_asin)
+    parsed = urlsplit(absolute_url)
+    variation_params = [
+        (key, value)
+        for key, value in parse_qsl(parsed.query, keep_blank_values=True)
+        if key in AMAZON_SEARCH_RESULT_VARIATION_PARAMS
+    ]
+    if not variation_params:
+        return canonical_url
+    return urlunsplit(("https", "www.amazon.com.tr", urlsplit(canonical_url).path, urlencode(variation_params), ""))
 
 
 def _is_hidden_element(element: Any) -> bool:
