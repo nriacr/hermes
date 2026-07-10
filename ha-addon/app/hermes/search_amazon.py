@@ -25,6 +25,8 @@ AMAZON_CARD_TITLE_SELECTORS = [
 ]
 
 AMAZON_SEARCH_STOP_SECTION_MARKERS = (
+    "all departments icindeki sonuclar",
+    "all departments icindeki sonuclar gosteriliyor",
     "yardima mi ihtiyaciniz var",
     "baktiginiz urunlere gore belirlenen urunler",
     "tarama gecmisinizdeki urunleri goruntuleyen musteriler ayrica sunlari da goruntuledi",

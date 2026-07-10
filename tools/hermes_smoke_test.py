@@ -357,6 +357,24 @@ class HermesSmokeTests(unittest.TestCase):
         item = extract_result_candidates(html, 10)[0]
         self.assertEqual(item.price, Decimal("10448.99"))
 
+    def test_amazon_search_ignores_all_departments_fallback_section(self):
+        html = """
+        <div class="s-main-slot">
+          <div data-component-type="s-search-result" data-asin="B000000001">
+            <h2><a href="/dp/B000000001"><span>Depo sonucu iPad</span></a></h2>
+            <span class="a-price"><span class="a-offscreen">30.000,00 TL</span></span>
+          </div>
+          <div>All Departments içindeki sonuçlar gösteriliyor</div>
+          <div data-component-type="s-search-result" data-asin="B000000002">
+            <h2><a href="/dp/B000000002"><span>Alakasız stok dışı ürün</span></a></h2>
+            <span class="a-price"><span class="a-offscreen">1.000,00 TL</span></span>
+          </div>
+        </div>
+        """
+        items = extract_result_candidates(html, 10)
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0].title, "Depo sonucu iPad")
+
     def test_amazon_search_url_can_be_used_as_product_url(self):
         self.assertTrue(service.is_amazon_search_url("https://www.amazon.com.tr/s?k=juo+q3"))
         self.assertFalse(service.is_amazon_search_url("https://www.amazon.com.tr/dp/B000000001"))
