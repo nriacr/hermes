@@ -7,7 +7,7 @@ import urllib.request
 from html import escape
 
 from .config_loader import DEFAULT_TELEGRAM_CHANNELS
-from .constants import OPTIONS_PATH, SITE_HM, SITE_ZARA
+from .constants import OPTIONS_PATH, SITE_HM, SITE_ZARA, STATE_PATH, SUMMARY_PATH
 from .logging_utils import log
 from .storage import load_json, save_json
 from .utils import detect_site_from_url, parse_bool, watch_name_required_for_url
@@ -98,13 +98,6 @@ def _checkbox(prefix, name, label, checked=True, danger=False):
     )
 
 
-def _summary_name(item, fallback):
-    if isinstance(item, dict):
-        value = str(item.get("name") or fallback).strip()
-        return value or fallback
-    return fallback
-
-
 def _watch_group(item):
     if not isinstance(item, dict):
         return "Diğer"
@@ -126,15 +119,51 @@ def _watch_urls_for_form(item):
     return urls[: len(WATCH_URL_FIELDS)]
 
 
+def _stored_watch_titles():
+    """Map configured URLs to titles already learned during price checks."""
+    titles = {}
+
+    def remember(url, title):
+        url = str(url or "").strip()
+        title = str(title or "").strip()
+        if url and title and url not in titles:
+            titles[url] = title
+
+    summary = load_json(SUMMARY_PATH, {})
+    if isinstance(summary, dict):
+        for row in _as_list(summary.get("rows")):
+            if isinstance(row, dict):
+                remember(row.get("product_url"), row.get("product_title"))
+
+    state = load_json(STATE_PATH, {})
+    if isinstance(state, dict):
+        for entry in state.values():
+            if isinstance(entry, dict):
+                remember(entry.get("configured_url"), entry.get("title"))
+    return titles
+
+
+def _watch_display_name(item, index, known_titles):
+    if isinstance(item, dict):
+        name = str(item.get("name") or "").strip()
+        if name:
+            return name
+        for url in _watch_urls_for_form(item):
+            title = str(known_titles.get(url) or "").strip()
+            if title:
+                return title
+    return f"Takip {index + 1}"
+
+
 def _details(title, prefix, inner, open_when_empty=False):
     open_attr = " open" if open_when_empty else ""
     return f"<details{open_attr}><summary>{escape(title)}</summary><div class='form-grid'>{inner}</div></details>"
 
 
-def _watch_form(item, index, is_new=False, groups=None):
+def _watch_form(item, index, is_new=False, groups=None, known_titles=None):
     prefix = f"watches_{index}_"
     group = _watch_group(item)
-    title = "Yeni takip ekle" if is_new else f"[{group}] {_summary_name(item, f'Takip {index + 1}')}"
+    title = "Yeni takip ekle" if is_new else f"[{group}] {_watch_display_name(item, index, known_titles or {})}"
     group_choices = list(groups or [])
     if not is_new and group != "Diğer" and group not in group_choices:
         group_choices.append(group)
@@ -186,7 +215,7 @@ def _section(title, items, renderer, section_name):
     )
 
 
-def _watch_section(items, configured_groups):
+def _watch_section(items, configured_groups, known_titles=None):
     safe_items = _as_list(items)
     groups = []
     for group in configured_groups or []:
@@ -207,7 +236,13 @@ def _watch_section(items, configured_groups):
         if filters
         else ""
     )
-    renderer = lambda item, index, is_new=False: _watch_form(item, index, is_new, groups=groups)
+    renderer = lambda item, index, is_new=False: _watch_form(
+        item,
+        index,
+        is_new,
+        groups=groups,
+        known_titles=known_titles,
+    )
     return (
         filters_html
         + _section("Takip edilenler", safe_items, renderer, "watches")
@@ -412,6 +447,7 @@ def render_settings_page(path="/"):
         {"groups": ["\n".join(str(group) for group in _as_list(options.get("gruplar")))]},
         "groups",
     )
+    known_titles = _stored_watch_titles()
     params = urllib.parse.parse_qs(urllib.parse.urlparse(path).query)
     status = params.get("saved", [""])[0]
     message = params.get("msg", [""])[0]
@@ -447,7 +483,7 @@ def render_settings_page(path="/"):
     html = f"""<!doctype html>
 <html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Hermes Ayarlar</title><style>{SETTINGS_CSS}</style></head>
 <body><main><div class="hero"><h1>Hermes Ayarlar</h1><p>Listelerde yalnızca adlar görünür; satıra tıklayınca ayrıntılar açılır. Takip edilenler bölümünde aynı kayıt altına en fazla 5 link ekleyebilirsin; Hermes siteyi ve link tipini otomatik algılar.</p><div class="actions"><a class="button secondary" href="./">Ana ekran</a></div>{notice}<form method="post" action="./settings/save">
-{_watch_section(options.get("takip_edilenler"), groups)}
+{_watch_section(options.get("takip_edilenler"), groups, known_titles)}
 {_telegram_section(options)}
 <div class="actions"><button class="button primary" type="submit">Kaydet</button><a class="button secondary" href="./">Vazgeç</a></div>
 <p class="footer-note">Kaydet sonrası ekran birkaç saniye içinde “yeniden başlatılıyor” mesajı verir. Hermes yeniden başlarken sayfa kısa süre yanıt vermeyebilir; 10-20 saniye sonra yenileyebilirsin.</p>
