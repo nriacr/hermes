@@ -1421,6 +1421,31 @@ class HermesSmokeTests(unittest.TestCase):
 
         self.assertIn("[Moda] DOKULU REGULAR FIT POLO T-SHIRT", html)
 
+    def test_watch_settings_match_learned_titles_without_url_query_parameters(self):
+        html = settings_ui._watch_form(
+            {"url_1": "https://www.zara.com/tr/tr/dokulu-p03166301.html?v1=567"},
+            8,
+            groups=["Moda"],
+            known_titles={
+                "https://www.zara.com/tr/tr/dokulu-p03166301.html": "Dokulu Regular Fit Polo T-Shirt"
+            },
+        )
+
+        self.assertIn("[Moda] Dokulu Regular Fit Polo T-Shirt", html)
+
+    def test_settings_preserve_selected_watch_group(self):
+        watches = settings_ui._build_watches(
+            {
+                "watches_count": ["1"],
+                "watches_0_name": ["Gömlek"],
+                "watches_0_group": ["Moda"],
+                "watches_0_target_price": ["1000"],
+                "watches_0_url_1": ["https://www.zara.com/tr/tr/gomlek-p01234567.html"],
+            }
+        )
+
+        self.assertEqual(watches[0]["group"], "Moda")
+
     def test_watch_card_detects_site_from_url(self):
         watches = _prepare_watches(
             [

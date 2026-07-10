@@ -119,6 +119,25 @@ def _watch_urls_for_form(item):
     return urls[: len(WATCH_URL_FIELDS)]
 
 
+def _watch_url_keys(url):
+    raw_url = str(url or "").strip()
+    if not raw_url:
+        return []
+    parsed = urllib.parse.urlparse(raw_url)
+    canonical = urllib.parse.urlunparse((parsed.scheme, parsed.netloc, parsed.path, "", "", ""))
+    return [raw_url] if canonical == raw_url else [raw_url, canonical]
+
+
+def _title_from_url(url):
+    parsed = urllib.parse.urlparse(str(url or "").strip())
+    slug = parsed.path.rstrip("/").rsplit("/", 1)[-1]
+    slug = slug.split("-p", 1)[0].replace(".html", "").replace("-", " ").strip()
+    if slug and not slug.startswith("productpage."):
+        return " ".join(part.capitalize() for part in slug.split())
+    host = parsed.netloc.removeprefix("www.").split(".", 1)[0]
+    return f"{host.upper() or 'Ürün'} ürünü"
+
+
 def _stored_watch_titles():
     """Map configured URLs to titles already learned during price checks."""
     titles = {}
@@ -126,8 +145,10 @@ def _stored_watch_titles():
     def remember(url, title):
         url = str(url or "").strip()
         title = str(title or "").strip()
-        if url and title and url not in titles:
-            titles[url] = title
+        if not title:
+            return
+        for key in _watch_url_keys(url):
+            titles.setdefault(key, title)
 
     summary = load_json(SUMMARY_PATH, {})
     if isinstance(summary, dict):
@@ -149,9 +170,13 @@ def _watch_display_name(item, index, known_titles):
         if name:
             return name
         for url in _watch_urls_for_form(item):
-            title = str(known_titles.get(url) or "").strip()
-            if title:
-                return title
+            for key in _watch_url_keys(url):
+                title = str(known_titles.get(key) or "").strip()
+                if title:
+                    return title
+        urls = _watch_urls_for_form(item)
+        if urls:
+            return _title_from_url(urls[0])
     return f"Takip {index + 1}"
 
 
