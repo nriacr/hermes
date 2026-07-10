@@ -1394,6 +1394,9 @@ class HermesSmokeTests(unittest.TestCase):
             {
                 "watches_count": ["1"],
                 "watches_0_group": ["Moda"],
+                "watches_0_max_items_to_scan": ["24"],
+                "watches_0_notify_once_in_24H": ["1"],
+                "watches_0_active": ["1"],
             }
         )
 
@@ -1445,6 +1448,79 @@ class HermesSmokeTests(unittest.TestCase):
         )
 
         self.assertEqual(watches[0]["group"], "Moda")
+
+    def test_settings_separate_existing_updates_from_new_watch_additions(self):
+        existing_options = {
+            "takip_edilenler": [
+                {
+                    "name": "Mevcut tablet",
+                    "group": "Diğer",
+                    "target_price": 1000,
+                    "url_1": "https://www.amazon.com.tr/dp/B000000001",
+                }
+            ]
+        }
+        options, message = settings_ui._apply_settings_operation(
+            existing_options,
+            {
+                "operation": ["update_existing"],
+                "watches_count": ["1"],
+                "watches_0_name": ["Mevcut tablet"],
+                "watches_0_group": ["Teknoloji"],
+                "watches_0_target_price": ["1000"],
+                "watches_0_url_1": ["https://www.amazon.com.tr/dp/B000000001"],
+            },
+        )
+
+        self.assertEqual(options["takip_edilenler"][0]["group"], "Teknoloji")
+        self.assertIn("güncellendi", message)
+
+        added_options, add_message = settings_ui._apply_settings_operation(
+            options,
+            {
+                "operation": ["add_watch"],
+                "watches_count": ["1"],
+                "watches_0_name": ["Yeni gömlek"],
+                "watches_0_group": ["Moda"],
+                "watches_0_target_price": ["2000"],
+                "watches_0_url_1": ["https://www.zara.com/tr/tr/gomlek-p01234567.html"],
+            },
+        )
+
+        self.assertEqual(len(added_options["takip_edilenler"]), 2)
+        self.assertEqual(added_options["takip_edilenler"][1]["group"], "Moda")
+        self.assertIn("eklendi", add_message)
+
+    def test_settings_use_out_of_stock_summary_title_for_blank_hm_watch_name(self):
+        original_load_json = settings_ui.load_json
+
+        def fake_load_json(path, _default):
+            if path == settings_ui.SUMMARY_PATH:
+                return {
+                    "stock_rows": [
+                        {
+                            "product_url": "https://www2.hm.com/tr_tr/productpage.1286182003.html?color=009",
+                            "product_title": "Keten Karışımlı Erkek Yaka Gömlek Regular Fit / Kahverengi / XL",
+                        }
+                    ]
+                }
+            return {}
+
+        settings_ui.load_json = fake_load_json
+        try:
+            titles = settings_ui._stored_watch_titles()
+        finally:
+            settings_ui.load_json = original_load_json
+
+        html = settings_ui._watch_form(
+            {"url_1": "https://www2.hm.com/tr_tr/productpage.1286182003.html"},
+            3,
+            groups=["Moda"],
+            known_titles=titles,
+        )
+
+        self.assertIn("Keten Karışımlı Erkek Yaka Gömlek Regular Fit", html)
+        self.assertNotIn("WWW2 ürünü", html)
 
     def test_watch_card_detects_site_from_url(self):
         watches = _prepare_watches(

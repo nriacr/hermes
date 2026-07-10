@@ -10,7 +10,7 @@ from .config_loader import DEFAULT_TELEGRAM_CHANNELS
 from .constants import OPTIONS_PATH, SITE_HM, SITE_ZARA, STATE_PATH, SUMMARY_PATH
 from .logging_utils import log
 from .storage import load_json, save_json
-from .utils import detect_site_from_url, parse_bool, watch_name_required_for_url
+from .utils import detect_site_from_url, parse_bool, site_label, watch_name_required_for_url
 
 ADDON_SLUG = "hermes"
 SUPERVISOR_BASE_URL = "http://supervisor"
@@ -134,6 +134,10 @@ def _title_from_url(url):
     slug = slug.split("-p", 1)[0].replace(".html", "").replace("-", " ").strip()
     if slug and not slug.startswith("productpage."):
         return " ".join(part.capitalize() for part in slug.split())
+    try:
+        return f"{site_label(detect_site_from_url(url))} ürünü"
+    except Exception:  # noqa: BLE001
+        pass
     host = parsed.netloc.removeprefix("www.").split(".", 1)[0]
     return f"{host.upper() or 'Ürün'} ürünü"
 
@@ -152,9 +156,10 @@ def _stored_watch_titles():
 
     summary = load_json(SUMMARY_PATH, {})
     if isinstance(summary, dict):
-        for row in _as_list(summary.get("rows")):
-            if isinstance(row, dict):
-                remember(row.get("product_url"), row.get("product_title"))
+        for row_set in (summary.get("rows"), summary.get("stock_rows")):
+            for row in _as_list(row_set):
+                if isinstance(row, dict):
+                    remember(row.get("product_url"), row.get("product_title"))
 
     state = load_json(STATE_PATH, {})
     if isinstance(state, dict):
@@ -229,13 +234,15 @@ def _watch_form(item, index, is_new=False, groups=None, known_titles=None):
     )
 
 
-def _section(title, items, renderer, section_name):
+def _section(title, items, renderer, section_name, include_new=False):
     safe_items = _as_list(items)
     rows = [renderer(item if isinstance(item, dict) else {}, index) for index, item in enumerate(safe_items)]
-    rows.append(renderer({}, len(safe_items), is_new=True))
+    if include_new:
+        rows.append(renderer({}, len(safe_items), is_new=True))
+    count = len(safe_items) + (1 if include_new else 0)
     return (
         f"<section class='settings-section'><h2>{escape(title)}</h2>"
-        f"<input type='hidden' name='{escape(section_name)}_count' value='{len(safe_items) + 1}'>"
+        f"<input type='hidden' name='{escape(section_name)}_count' value='{count}'>"
         f"{''.join(rows)}</section>"
     )
 
@@ -272,6 +279,15 @@ def _watch_section(items, configured_groups, known_titles=None):
         filters_html
         + _section("Takip edilenler", safe_items, renderer, "watches")
         + "<p class='footer-note'>Grup seçeneklerini Home Assistant Configuration ekranındaki <strong>gruplar</strong> listesinde tanımlayabilirsin. Buradan seçilen grup yalnızca düzenleme ve filtreleme içindir; takip kurallarını değiştirmez.</p>"
+    )
+
+
+def _new_watch_section(groups, known_titles=None):
+    return (
+        "<section class='settings-section'><h2>Yeni takip ekle</h2>"
+        "<input type='hidden' name='watches_count' value='1'>"
+        f"{_watch_form({}, 0, is_new=True, groups=groups, known_titles=known_titles)}"
+        "</section>"
     )
 
 
@@ -333,7 +349,9 @@ def _build_watches(form):
                 urls.append(url)
         if not group and any(detect_site_from_url(url) in {SITE_ZARA, SITE_HM} for url in urls):
             group = "Moda"
-        if not any([name, target, size, max_items, interval, *urls]):
+        # The always-visible new-watch form sends default values such as max_items=24.
+        # A row without an actual product detail must never block saving existing watches.
+        if not any([name, target, size, *urls]):
             continue
         context = _watch_form_context(index, name, urls)
         if not target or not urls:
@@ -364,6 +382,31 @@ def _build_watches(form):
             item["check_interval_minutes"] = _number(interval)
         watches.append(item)
     return watches
+
+
+def _apply_settings_operation(existing_options, form):
+    source_options = existing_options if isinstance(existing_options, dict) else {}
+    existing_watches = [
+        dict(item) for item in _as_list(source_options.get("takip_edilenler")) if isinstance(item, dict)
+    ]
+    options = _clean_editable_options(source_options)
+    operation = _first(form, "operation", "update_existing")
+
+    if operation == "update_existing":
+        options["takip_edilenler"] = _build_watches(form)
+        _update_telegram_options(options, form)
+        return options, f"{len(options['takip_edilenler'])} mevcut takip kaydı güncellendi."
+
+    if operation == "add_watch":
+        new_watches = _build_watches(form)
+        if not new_watches:
+            raise ValueError("Yeni takip eklemek için hedef fiyat ve en az bir link alanı zorunlu.")
+        if len(new_watches) != 1:
+            raise ValueError("Yeni takip ekleme formunda yalnızca bir kayıt bulunmalı.")
+        options["takip_edilenler"] = existing_watches + new_watches
+        return options, "Yeni takip kaydı eklendi."
+
+    raise ValueError("Bilinmeyen ayar kaydetme işlemi.")
 
 
 def _list_from_form(form, key):
@@ -507,12 +550,17 @@ def render_settings_page(path="/"):
 </script>"""
     html = f"""<!doctype html>
 <html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Hermes Ayarlar</title><style>{SETTINGS_CSS}</style></head>
-<body><main><div class="hero"><h1>Hermes Ayarlar</h1><p>Listelerde yalnızca adlar görünür; satıra tıklayınca ayrıntılar açılır. Takip edilenler bölümünde aynı kayıt altına en fazla 5 link ekleyebilirsin; Hermes siteyi ve link tipini otomatik algılar.</p><div class="actions"><a class="button secondary" href="./">Ana ekran</a></div>{notice}<form method="post" action="./settings/save">
+<body><main><div class="hero"><h1>Hermes Ayarlar</h1><p>Mevcut takipleri güncelleme ve yeni takip ekleme işlemleri ayrı çalışır. Listelerde yalnızca adlar görünür; satıra tıklayınca ayrıntılar açılır.</p><div class="actions"><a class="button secondary" href="./">Ana ekran</a></div>{notice}<form method="post" action="./settings/save">
 {_watch_section(options.get("takip_edilenler"), groups, known_titles)}
 {_telegram_section(options)}
-<div class="actions"><button class="button primary" type="submit">Kaydet</button><a class="button secondary" href="./">Vazgeç</a></div>
-<p class="footer-note">Kaydet sonrası ekran birkaç saniye içinde “yeniden başlatılıyor” mesajı verir. Hermes yeniden başlarken sayfa kısa süre yanıt vermeyebilir; 10-20 saniye sonra yenileyebilirsin.</p>
-</form></div></main>{filter_script}</body></html>"""
+<input type="hidden" name="operation" value="update_existing">
+<div class="actions"><button class="button primary" type="submit">Güncellemeleri Kaydet</button><a class="button secondary" href="./">Vazgeç</a></div>
+</form><form method="post" action="./settings/save">
+{_new_watch_section(groups, known_titles)}
+<input type="hidden" name="operation" value="add_watch">
+<div class="actions"><button class="button primary" type="submit">Yeni Takibi Ekle</button></div>
+</form><p class="footer-note">Kayıt sonrası Hermes yeniden başlatılır. Sayfa kısa süre yanıt vermeyebilir; 10-20 saniye sonra otomatik olarak hazır olur.</p>
+</div></main>{filter_script}</body></html>"""
     return html.encode("utf-8")
 
 
@@ -522,13 +570,11 @@ def handle_settings_save(body):
         options = load_json(OPTIONS_PATH, {})
         if not isinstance(options, dict):
             options = {}
-        options = _clean_editable_options(options)
-        options["takip_edilenler"] = _build_watches(form)
-        _update_telegram_options(options, form)
+        options, change_message = _apply_settings_operation(options, form)
         _save_options_to_supervisor(options)
         save_json(OPTIONS_PATH, options)
         log("Ayarlar Home Assistant config'e kaydedildi; Hermes yeniden başlatılacak.")
         _restart_addon_later()
-        return True, "Ayarlar Home Assistant config'e kaydedildi. Hermes yeniden başlatılıyor; 10-20 saniye sonra sayfayı yenileyebilirsin."
+        return True, f"{change_message} Hermes yeniden başlatılıyor; 10-20 saniye sonra sayfayı yenileyebilirsin."
     except Exception as exc:  # noqa: BLE001
         return False, f"Ayarlar kaydedilemedi: {exc}"
