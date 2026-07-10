@@ -12,6 +12,7 @@ sys.path.insert(0, str(APP_PATH))
 
 from hermes import service  # noqa: E402
 from hermes import http_client  # noqa: E402
+from hermes import dashboard  # noqa: E402
 from hermes.errors import HermesError, OutOfStockHermesError  # noqa: E402
 from hermes.http_client import amazon_url_variants, fetch_amazon_page  # noqa: E402
 from hermes.config_loader import _prepare_watches  # noqa: E402
@@ -37,6 +38,21 @@ from hermes.utils import detect_site_from_url  # noqa: E402
 
 
 class HermesSmokeTests(unittest.TestCase):
+    def test_dashboard_site_theme_classes_are_distinct_for_supported_providers(self):
+        expected = {
+            "Amazon": "site-amazon",
+            "Hepsiburada": "site-hepsiburada",
+            "Trendyol": "site-trendyol",
+            "Network": "site-network",
+            "Nordbron": "site-nordbron",
+            "Zara": "site-zara",
+            "H&M": "site-hm",
+        }
+        self.assertEqual(
+            {seller: dashboard._site_theme_class(seller) for seller in expected},
+            expected,
+        )
+
     def test_amazon_page_fetch_is_cached_per_session(self):
         class FakeResponse:
             status_code = 200
