@@ -638,20 +638,46 @@ def _render_stock_row(row):
     )
 
 
-def _render_stock_section(rows):
-    if rows:
-        body = "".join(_render_stock_row(row) for row in rows)
-    else:
-        body = "<tr class='empty-row'><td colspan='4'>Stok dışında izlenen ürün yok.</td></tr>"
+def _render_stock_rows_table(rows, empty_text=""):
+    body = "".join(_render_stock_row(row) for row in rows)
+    if not body and empty_text:
+        body = f"<tr class='empty-row'><td colspan='4'>{escape(empty_text)}</td></tr>"
     return f"""
-      <div class="table-section stock-section">
-        <h3>Stokta Olmayanlar</h3>
         <div class="table-wrap">
           <table>
             <thead><tr><th>Satıcı</th><th>Ürün Adı</th><th>Hedef</th><th>Durum</th></tr></thead>
             <tbody>{body}</tbody>
           </table>
         </div>
+    """
+
+
+def _split_stock_rows_by_site(rows):
+    grouped = {}
+    for row in rows:
+        seller = repair_mojibake(row.get("seller") or "Diğer")
+        grouped.setdefault(seller, []).append(row)
+    return sorted(grouped.items(), key=lambda item: item[0].casefold())
+
+
+def _render_stock_site_group(seller, rows):
+    return f"""
+      <details class="search-result-group stock-site-group">
+        <summary><strong>{escape(seller)}</strong><span>{len(rows)} ürün</span></summary>
+        {_render_stock_rows_table(rows)}
+      </details>
+    """
+
+
+def _render_stock_section(rows):
+    if rows:
+        body = "".join(_render_stock_site_group(seller, site_rows) for seller, site_rows in _split_stock_rows_by_site(rows))
+    else:
+        body = _render_stock_rows_table([], "Stok dışında izlenen ürün yok.")
+    return f"""
+      <div class="table-section stock-section">
+        <h3>Stokta Olmayanlar</h3>
+        {body}
       </div>
     """
 

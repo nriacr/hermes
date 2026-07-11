@@ -763,6 +763,19 @@ class HermesSmokeTests(unittest.TestCase):
             finally:
                 service.SUMMARY_PATH = original_summary_path
 
+    def test_stock_missing_rows_are_collapsed_by_site(self):
+        html = dashboard._render_stock_section(
+            [
+                {"seller": "Zara", "product_title": "Polo / M", "target": "1.500 TL"},
+                {"seller": "Zara", "product_title": "Gömlek / XL", "target": "1.500 TL"},
+                {"seller": "H&M", "product_title": "Pantolon / L", "target": "1.200 TL"},
+            ]
+        )
+
+        self.assertEqual(html.count('class="search-result-group stock-site-group"'), 2)
+        self.assertIn("Zara</strong><span>2 ürün", html)
+        self.assertIn("H&amp;M</strong><span>1 ürün", html)
+
     def test_absurd_current_price_does_not_overwrite_history(self):
         state_entry = {
             "last_price": "10448.99",
