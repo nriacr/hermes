@@ -77,8 +77,10 @@ PRODUCT_MISSING_PRICE_MARKERS = (
     "stokta degil",
     "stokta değil",
 )
-SUMMARY_DROP_MIN_DELTA = 4
-SUMMARY_DROP_RATIO_DIVISOR = 4
+# Search pages can fluctuate by a few products between normal cycles. Alert
+# only when both the absolute loss and the relative loss are meaningful.
+SUMMARY_DROP_MIN_DELTA = 6
+SUMMARY_DROP_RATIO_DIVISOR = 3
 SUMMARY_DROP_ALERT_COOLDOWN_SECONDS = 60 * 60
 SUMMARY_DROP_QUIET_START_HOUR = 22
 SUMMARY_DROP_QUIET_END_HOUR = 8

@@ -55,6 +55,12 @@ class HermesSmokeTests(unittest.TestCase):
             expected,
         )
 
+    def test_summary_drop_alert_requires_a_meaningful_product_loss(self):
+        self.assertEqual(service.summary_drop_threshold(18), 6)
+        self.assertEqual(service.summary_drop_threshold(23), 8)
+        self.assertFalse(18 - 14 >= service.summary_drop_threshold(18))
+        self.assertTrue(18 - 11 >= service.summary_drop_threshold(18))
+
     def test_dashboard_collapses_multi_result_search_groups(self):
         rows = [
             {
