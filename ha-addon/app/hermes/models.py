@@ -33,6 +33,8 @@ class PriceSummaryRow:
     target_price: Decimal
     min_price: Decimal
     max_price: Decimal
+    search_group: str = ""
+    search_group_label: str = ""
 
     @property
     def difference(self) -> Decimal:

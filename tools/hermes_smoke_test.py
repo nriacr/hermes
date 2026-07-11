@@ -54,6 +54,43 @@ class HermesSmokeTests(unittest.TestCase):
             expected,
         )
 
+    def test_dashboard_collapses_multi_result_search_groups(self):
+        rows = [
+            {
+                "seller": "Amazon",
+                "product_title": "Juo Q3 Yeşil",
+                "product_url": "https://example.test/green",
+                "price": "2.037,00",
+                "target": "2.000,00",
+                "difference": "+37,00",
+                "price_range": "2.037,00 / 2.037,00",
+                "search_group": "amazon_juo_q3",
+                "search_group_label": "Juo Q3",
+            },
+            {
+                "seller": "Amazon",
+                "product_title": "Juo Q3 Kırmızı",
+                "product_url": "https://example.test/red",
+                "price": "2.099,00",
+                "target": "2.000,00",
+                "difference": "+99,00",
+                "price_range": "2.099,00 / 2.099,00",
+                "search_group": "amazon_juo_q3",
+                "search_group_label": "Juo Q3",
+            },
+        ]
+
+        rendered = dashboard._render_table_section(
+            "Hedefin Üstünde Kalan Ürünler",
+            rows,
+            "Boş",
+            collapse_search_results=True,
+        )
+
+        self.assertIn('<details class="search-result-group">', rendered)
+        self.assertIn("Juo Q3", rendered)
+        self.assertIn("2 sonuç", rendered)
+
     def test_amazon_page_fetch_is_cached_per_session(self):
         class FakeResponse:
             status_code = 200

@@ -49,6 +49,7 @@ from .utils import (
     format_signed_tl,
     format_tl,
     is_amazon_search_url,
+    is_hepsiburada_search_url,
     local_now,
     log_cell,
     normalize_item_key,
@@ -257,6 +258,19 @@ def watch_check_due(watch: WatchRule, state_entry: Dict[str, Any], global_interv
     return elapsed_seconds >= interval_seconds
 
 
+def search_result_group_for_watch(watch: WatchRule) -> tuple[str, str]:
+    is_search_watch = (
+        (watch.site == SITE_AMAZON and is_amazon_search_url(watch.url))
+        or (watch.site == SITE_HEPSIBURADA and is_hepsiburada_search_url(watch.url))
+    )
+    if not is_search_watch or not watch.name:
+        return "", ""
+    return (
+        normalize_item_key("search_result_group", watch.site, watch.name, watch.url),
+        watch.name,
+    )
+
+
 def summary_row_from_state(watch: WatchRule, state_entry: Dict[str, Any], seller: str):
     price = _state_decimal(state_entry.get("last_price"))
     if price is None:
@@ -265,6 +279,7 @@ def summary_row_from_state(watch: WatchRule, state_entry: Dict[str, Any], seller
     product_title = str(state_entry.get("title") or watch.name or watch.url)
     if watch.site == SITE_HEPSIBURADA:
         product_title = hepsiburada_provider.clean_display_title(product_title)
+    search_group, search_group_label = search_result_group_for_watch(watch)
     return PriceSummaryRow(
         seller=seller,
         product_title=product_title,
@@ -273,6 +288,8 @@ def summary_row_from_state(watch: WatchRule, state_entry: Dict[str, Any], seller
         target_price=watch.target_price,
         min_price=min_price,
         max_price=max_price,
+        search_group=search_group,
+        search_group_label=search_group_label,
     )
 
 
@@ -347,6 +364,8 @@ def save_price_summary(
                 "max_price": format_tl(row.max_price),
                 "price_range": f"{format_tl(row.min_price)} / {format_tl(row.max_price)}",
                 "is_target_hit": row.price <= row.target_price,
+                "search_group": row.search_group,
+                "search_group_label": row.search_group_label,
             }
             for idx, row in enumerate(sorted_rows, start=1)
         ],
@@ -1118,6 +1137,7 @@ def check_once(config: HermesConfig) -> None:
             wait_before_request(request_log_label(seller, display_name), config)
             offers = _fetch_watch_offers(session, watch, config)
             offer_keys: List[str] = []
+            search_group, search_group_label = search_result_group_for_watch(watch)
             for offer in offers:
                 offer_display_name = offer.title or watch.name or watch.url
                 if watch.site == SITE_HEPSIBURADA:
@@ -1144,6 +1164,8 @@ def check_once(config: HermesConfig) -> None:
                         target_price=watch.target_price,
                         min_price=min_price,
                         max_price=max_price,
+                        search_group=search_group,
+                        search_group_label=search_group_label,
                     )
                 )
                 log(

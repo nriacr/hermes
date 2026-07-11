@@ -42,6 +42,7 @@ p { margin:0; color:var(--muted); line-height:1.5; font-size:13px; }
 .summary-panel { margin-top:18px; border:1px solid var(--line); border-radius:18px; padding:16px; background:var(--card); } .summary-head { display:flex; align-items:flex-end; justify-content:space-between; gap:12px; margin-bottom:12px; } .summary-head h2 { font-size:18px; margin:0; } .summary-head span { color:var(--muted); font-size:12px; white-space:nowrap; } .table-section + .table-section { margin-top:18px; } .table-section h3 { margin:0 0 9px; font-size:14px; color:#d8dcff; } .deals-section h3 { color:#b7f0dc; }
 .telegram-recent { margin-top:14px; border:1px solid rgba(199,166,255,.22); border-radius:14px; padding:13px; background:rgba(15,18,34,.36); } .telegram-recent h3 { margin:0 0 10px; font-size:13px; color:#d8dcff; } .telegram-recent p { color:var(--muted); } .telegram-recent ul { display:grid; gap:8px; margin:0; padding:0; list-style:none; } .telegram-recent li { display:grid; gap:4px; padding:10px 11px; border:1px solid rgba(142,214,210,.20); border-radius:12px; background:rgba(142,214,210,.07); } .telegram-recent li a,.telegram-recent li strong { color:#bfe3ff; font-size:13px; font-weight:850; text-decoration:none; overflow-wrap:anywhere; } .telegram-recent li a:hover { color:#d8c3ff; text-decoration:underline; } .telegram-recent li span { color:var(--muted); font-size:11px; } .telegram-recent li em { color:#dce0f8; font-size:12px; font-style:normal; line-height:1.35; overflow-wrap:anywhere; }
 .table-wrap { overflow-x:auto; border:1px solid var(--line); border-radius:14px; } table { width:100%; border-collapse:collapse; min-width:860px; } th,td { padding:8px 8px; border-bottom:1px solid var(--line); text-align:right; white-space:nowrap; } th { color:#c8d0ff; background:var(--head); font-size:10px; text-transform:uppercase; letter-spacing:.035em; } td { color:var(--text); font-size:12px; font-variant-numeric:tabular-nums; } tr:last-child td { border-bottom:none; } th:nth-child(1),td:nth-child(1) { width:104px; } th:nth-child(1),td:nth-child(1),th:nth-child(2),td:nth-child(2) { text-align:left; } th:not(:nth-child(2)),td:not(:nth-child(2)) { width:100px; } th:nth-child(6),td:nth-child(6) { width:148px; } .empty-row td { color:var(--muted); text-align:left; background:rgba(255,255,255,.025); }
+.search-result-group { margin:10px 0; overflow:hidden; border:1px solid rgba(143,185,255,.38); border-radius:14px; background:rgba(143,185,255,.07); } .search-result-group summary { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:12px 14px; color:#dce7ff; font-size:13px; font-weight:850; cursor:pointer; list-style:none; } .search-result-group summary::-webkit-details-marker { display:none; } .search-result-group summary::before { content:'▸'; display:inline-block; margin-right:8px; color:#9ec0ff; font-size:16px; transition:transform .16s ease; } .search-result-group[open] summary::before { transform:rotate(90deg); } .search-result-group summary strong { margin-right:auto; } .search-result-group summary span { color:var(--muted); font-size:11px; font-weight:750; white-space:nowrap; } .search-result-group[open] summary { border-bottom:1px solid rgba(143,185,255,.25); background:rgba(143,185,255,.10); } .search-result-group .table-wrap { border:0; border-radius:0; }
 tbody tr.site-amazon { --site-bg:rgba(247,197,109,.13); --site-bg-strong:rgba(247,197,109,.24); --site-line:rgba(247,197,109,.84); --site-link:#ffd482; }
 tbody tr.site-hepsiburada { --site-bg:rgba(255,154,111,.13); --site-bg-strong:rgba(255,154,111,.25); --site-line:rgba(255,154,111,.86); --site-link:#ffad82; }
 tbody tr.site-trendyol { --site-bg:rgba(246,163,199,.13); --site-bg-strong:rgba(246,163,199,.25); --site-line:rgba(246,163,199,.84); --site-link:#f8b4d0; }
@@ -84,6 +85,9 @@ tbody tr.site-other { --site-bg:rgba(183,177,222,.13); --site-bg-strong:rgba(183
   .public .summary-head span { font-size:16px; line-height:1.3; color:#9ed8ff; font-weight:800; }
   .table-section h3 { font-size:13px; }
   .table-wrap { overflow:visible; border:0; border-radius:0; }
+  .search-result-group { margin:8px 0; border-radius:13px; }
+  .search-result-group summary { min-height:48px; padding:12px; font-size:13px; }
+  .search-result-group summary span { font-size:11px; }
   table { min-width:0; }
   thead { display:none; }
   table, tbody, td { display:block; width:100%; }
@@ -517,20 +521,67 @@ def _render_table_row(row):
     )
 
 
-def _render_table_section(title, rows, empty_text, extra_class=""):
+def _render_rows_table(rows, empty_text):
     if rows:
         body = "".join(_render_table_row(row) for row in rows)
     else:
         body = f"<tr class='empty-row'><td colspan='6'>{escape(empty_text)}</td></tr>"
     return f"""
-      <div class="table-section {extra_class}">
-        <h3>{escape(title)}</h3>
         <div class="table-wrap">
           <table>
             <thead><tr><th>Satıcı</th><th>Ürün Adı</th><th>Güncel</th><th>Hedef</th><th>Fark</th><th>Min / Maks</th></tr></thead>
             <tbody>{body}</tbody>
           </table>
         </div>
+    """
+
+
+def _split_search_result_groups(rows):
+    grouped = {}
+    ungrouped = []
+    for row in rows:
+        group_key = str(row.get("search_group") or "").strip()
+        if not group_key:
+            ungrouped.append(row)
+            continue
+        grouped.setdefault(group_key, []).append(row)
+
+    collapsible_groups = []
+    for group_rows in grouped.values():
+        if len(group_rows) < 2:
+            ungrouped.extend(group_rows)
+            continue
+        label = str(group_rows[0].get("search_group_label") or "Arama sonuçları").strip()
+        collapsible_groups.append((label, group_rows))
+    return ungrouped, collapsible_groups
+
+
+def _render_collapsible_search_group(label, rows):
+    count = len(rows)
+    return f"""
+      <details class="search-result-group">
+        <summary><strong>{escape(label)}</strong><span>{count} sonuç</span></summary>
+        {_render_rows_table(rows, "")}
+      </details>
+    """
+
+
+def _render_table_section(title, rows, empty_text, extra_class="", collapse_search_results=False):
+    if not rows:
+        body = _render_rows_table([], empty_text)
+    elif not collapse_search_results:
+        body = _render_rows_table(rows, empty_text)
+    else:
+        ungrouped, collapsible_groups = _split_search_result_groups(rows)
+        pieces = []
+        if ungrouped:
+            pieces.append(_render_rows_table(ungrouped, empty_text))
+        pieces.extend(_render_collapsible_search_group(label, group_rows) for label, group_rows in collapsible_groups)
+        body = "".join(pieces)
+    return f"""
+      <div class="table-section {extra_class}">
+        <h3>{escape(title)}</h3>
+        {body}
       </div>
     """
 
@@ -603,6 +654,7 @@ def _render_table():
         "Hedefin Üstünde Kalan Ürünler",
         watch_rows,
         "Hedef üstünde bekleyen ürün yok.",
+        collapse_search_results=True,
     )
     sections += _render_stock_section(stock_rows)
     return f"""
