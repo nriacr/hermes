@@ -421,7 +421,7 @@ def _error_detail_key(detail):
     return "|".join(str(detail.get(field) or "") for field in fields) + "|" + link_key
 
 
-def _collect_summary():
+def _collect_summary(error_detail_limit: int | None = 4):
     options = load_json(OPTIONS_PATH, {})
     state = load_json(STATE_PATH, {})
     latest_summary = load_json(SUMMARY_PATH, {})
@@ -465,7 +465,7 @@ def _collect_summary():
         ),
         "last_update": _relative_time_text(latest_summary.get("checked_at")),
         "errors": error_count,
-        "error_details": error_details[:4],
+        "error_details": error_details if error_detail_limit is None else error_details[:error_detail_limit],
         "configured": bool(options),
         "telegram": _collect_telegram_summary(options if isinstance(options, dict) else {}),
     }
@@ -948,8 +948,8 @@ def _render_error_details(error_details):
     return "".join(items)
 
 
-def _render_page(path: str = "/") -> bytes:
-    summary = _collect_summary()
+def _render_page(path: str = "/", error_detail_limit: int | None = 4) -> bytes:
+    summary = _collect_summary(error_detail_limit)
     log_url, app_url = _addon_urls()
     params = urllib.parse.parse_qs(urllib.parse.urlparse(path).query)
     test_status = params.get("test", [""])[0]

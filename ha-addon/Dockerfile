@@ -10,8 +10,7 @@ RUN apt-get update \
 COPY app/requirements.txt /app/requirements.txt
 RUN python3 -m venv /opt/venv \
     && /opt/venv/bin/pip install --no-cache-dir --upgrade pip \
-    && /opt/venv/bin/pip install --no-cache-dir -r /app/requirements.txt \
-    && (/opt/venv/bin/pip install --no-cache-dir curl_cffi || true)
+    && /opt/venv/bin/pip install --no-cache-dir -r /app/requirements.txt
 
 COPY app /app
 COPY run.sh /run.sh

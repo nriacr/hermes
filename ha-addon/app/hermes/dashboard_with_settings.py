@@ -1,13 +1,11 @@
 import urllib.parse
-from datetime import datetime, timedelta
 from http.server import ThreadingHTTPServer
 
-from . import dashboard as dashboard_module
-from .constants import OPTIONS_PATH, STATE_PATH, SUMMARY_PATH
 from .dashboard import (
     WEB_PORT,
     _StatusHandler,
     _public_dashboard_allowed,
+    _render_page,
     _render_public_page,
     _reset_notifications_async,
     _reset_price_history,
@@ -20,63 +18,6 @@ from .settings_ui import (
     render_settings_restart_script,
     render_settings_script,
 )
-from .storage import load_json
-from .utils import parse_iso_datetime
-
-
-def _collect_summary_all_errors():
-    options = load_json(OPTIONS_PATH, {})
-    state = load_json(STATE_PATH, {})
-    latest_summary = load_json(SUMMARY_PATH, {})
-    if not isinstance(latest_summary, dict):
-        latest_summary = {}
-    watches = options.get("takip_edilenler") if isinstance(options.get("takip_edilenler"), list) else []
-    contexts = dashboard_module._error_contexts(options if isinstance(options, dict) else {})
-
-    error_cutoff = timedelta(hours=24)
-    now = datetime.now().astimezone()
-    last_checks = []
-    error_count = 0
-    error_details = []
-    seen_details = set()
-
-    if isinstance(state, dict):
-        for key, value in state.items():
-            if key == "_meta" or not isinstance(value, dict):
-                continue
-            checked_at = parse_iso_datetime(value.get("last_checked_at"))
-            if checked_at:
-                checked_local = checked_at.astimezone()
-                last_checks.append(checked_local)
-                if value.get("last_error") and now - checked_local <= error_cutoff:
-                    error_count += 1
-                    detail = dashboard_module._error_detail(key, value, contexts)
-                    detail_key = dashboard_module._error_detail_key(detail)
-                    if detail_key not in seen_details:
-                        seen_details.add(detail_key)
-                        error_details.append(detail)
-    interval_seconds = int(options.get("interval_seconds") or 60)
-    last_check = max(last_checks) if last_checks else None
-    return {
-        "interval": interval_seconds,
-        "watches": len(watches),
-        "last_check": last_check.strftime("%Y-%m-%d %H:%M:%S") if last_check else "-",
-        "next_check": (last_check + timedelta(seconds=interval_seconds)).strftime("%Y-%m-%d %H:%M:%S") if last_check else "-",
-        "cycle_duration": dashboard_module._duration_text(
-            latest_summary.get("cycle_duration_seconds"),
-            latest_summary.get("cycle_duration_minutes") or "-",
-        ),
-        "last_update": dashboard_module._relative_time_text(latest_summary.get("checked_at")),
-        "errors": error_count,
-        "error_details": error_details,
-        "configured": bool(options),
-        "telegram": dashboard_module._collect_telegram_summary(options if isinstance(options, dict) else {}),
-    }
-
-
-def _render_page_with_all_errors(path: str) -> bytes:
-    dashboard_module._collect_summary = _collect_summary_all_errors
-    return dashboard_module._render_page(path)
 
 
 def _public_settings_context(path: str):
@@ -165,7 +106,7 @@ class SettingsDashboardHandler(_StatusHandler):
             status, payload = _render_public_page(self.path)
             content_type = "text/html; charset=utf-8" if status == 200 else "text/plain; charset=utf-8"
         else:
-            payload = _render_page_with_all_errors(self.path).replace(
+            payload = _render_page(self.path, error_detail_limit=None).replace(
                 b'<form class="inline-form" method="post" action="./test-pushover">',
                 b'<a class="button secondary" href="./settings">Ayarlar</a><form class="inline-form" method="post" action="./test-pushover">',
                 1,

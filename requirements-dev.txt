@@ -1,0 +1,2 @@
+# Local and CI-only quality tools. These are not installed in the add-on image.
+ruff==0.15.21

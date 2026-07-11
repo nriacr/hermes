@@ -392,14 +392,15 @@ def _watch_section(items, configured_groups, known_titles=None):
         "<input id='watch-search' type='search' placeholder='Ürün adında ara' autocomplete='off'>"
         "</label>"
     )
-    renderer = lambda item, index, is_new=False: _watch_form(
-        item,
-        index,
-        is_new,
-        groups=groups,
-        known_titles=known_titles,
-    )
-    watches_html = "".join(renderer(item if isinstance(item, dict) else {}, index) for index, item in enumerate(safe_items))
+    def render_watch(item, index):
+        return _watch_form(
+            item if isinstance(item, dict) else {},
+            index,
+            groups=groups,
+            known_titles=known_titles,
+        )
+
+    watches_html = "".join(render_watch(item, index) for index, item in enumerate(safe_items))
     return (
         "<section class='settings-section watch-tools'>"
         f"{search_html}{filters_html}</section>"

@@ -5,6 +5,7 @@ import tempfile
 import unittest
 from decimal import Decimal
 from pathlib import Path
+from unittest.mock import patch
 
 
 APP_PATH = Path(__file__).resolve().parents[1] / "ha-addon" / "app"
@@ -36,7 +37,7 @@ from hermes.providers.hm import extract_offers as extract_hm_offers  # noqa: E40
 from hermes.providers.nordbron import extract_offer as extract_nordbron_offer  # noqa: E402
 from hermes.providers.zara import extract_offers as extract_zara_offers  # noqa: E402
 from hermes.search_amazon import extract_result_candidates  # noqa: E402
-from hermes.utils import detect_site_from_url, parse_decimal  # noqa: E402
+from hermes.utils import detect_site_from_url, parse_decimal, utc_now  # noqa: E402
 
 
 class HermesSmokeTests(unittest.TestCase):
@@ -54,6 +55,34 @@ class HermesSmokeTests(unittest.TestCase):
             {seller: dashboard._site_theme_class(seller) for seller in expected},
             expected,
         )
+
+    def test_dashboard_summary_can_show_all_recent_errors_without_global_override(self):
+        options = {"interval_seconds": 60, "takip_edilenler": []}
+        state = {
+            "first": {
+                "site": "amazon",
+                "last_checked_at": utc_now(),
+                "last_error": "İlk hata",
+            },
+            "second": {
+                "site": "hepsiburada",
+                "last_checked_at": utc_now(),
+                "last_error": "İkinci hata",
+            },
+        }
+
+        def fake_load_json(path, default):
+            if path == dashboard.OPTIONS_PATH:
+                return options
+            if path == dashboard.STATE_PATH:
+                return state
+            return default
+
+        with patch.object(dashboard, "load_json", side_effect=fake_load_json):
+            summary = dashboard._collect_summary(error_detail_limit=None)
+
+        self.assertEqual(summary["errors"], 2)
+        self.assertEqual(len(summary["error_details"]), 2)
 
     def test_summary_drop_alert_requires_a_meaningful_product_loss(self):
         self.assertEqual(service.summary_drop_threshold(18), 6)
