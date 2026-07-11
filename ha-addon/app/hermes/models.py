@@ -11,7 +11,7 @@ class WatchRule:
     target_price: Decimal
     group: str = ""
     size: str = ""
-    max_items_to_scan: int = 24
+    max_items_to_scan: int = 60
     check_interval_minutes: Optional[int] = None
     notify_once_in_24h: bool = True
     active: bool = True

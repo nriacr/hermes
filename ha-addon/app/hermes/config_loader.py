@@ -4,6 +4,7 @@ from .constants import (
     DEFAULT_REQUEST_DELAY_MAX_SECONDS,
     DEFAULT_REQUEST_DELAY_MIN_SECONDS,
     DEFAULT_REQUEST_TIMEOUT_SECONDS,
+    DEFAULT_SEARCH_MAX_ITEMS_TO_SCAN,
     OPTIONS_PATH,
     SITE_HM,
     SITE_ZARA,
@@ -129,7 +130,6 @@ def _prepare_watches(raw_watches: object) -> List[WatchRule]:
         if not group and any(detect_site_from_url(url) in {SITE_ZARA, SITE_HM} for url in urls):
             group = "Moda"
         size = str(item.get("size") or "").strip()
-        max_items_to_scan = _bounded_integer(item, "max_items_to_scan", 24, 1, 100)
         check_interval_minutes = _optional_bounded_integer(item, "check_interval_minutes", 1, 1440)
         notify_once_in_24h = parse_bool(item.get("notify_once_in_24H"), default=True)
         for url in urls:
@@ -141,7 +141,7 @@ def _prepare_watches(raw_watches: object) -> List[WatchRule]:
                     target_price=target_price,
                     group=group,
                     size=size,
-                    max_items_to_scan=max_items_to_scan,
+                    max_items_to_scan=DEFAULT_SEARCH_MAX_ITEMS_TO_SCAN,
                     check_interval_minutes=check_interval_minutes,
                     notify_once_in_24h=notify_once_in_24h,
                     active=True,

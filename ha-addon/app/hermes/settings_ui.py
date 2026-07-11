@@ -296,7 +296,6 @@ def _watch_form(item, index, is_new=False, groups=None, known_titles=None):
     if not is_new and group != "Diğer" and group not in group_choices:
         group_choices.append(group)
     urls = _watch_urls_for_form(item)
-    max_items = item.get("max_items_to_scan", 24 if is_new else "")
     notify_once = True if is_new else item.get("notify_once_in_24H", True)
     active = True if is_new else item.get("active", True)
     selected_group = "" if is_new else str(item.get("group") or "").strip()
@@ -318,7 +317,6 @@ def _watch_form(item, index, is_new=False, groups=None, known_titles=None):
                 )
                 for url_index, field_name in enumerate(WATCH_URL_FIELDS, start=1)
             ],
-            _field(prefix, "max_items_to_scan", "Arama linklerinde taranacak maksimum ürün", max_items, "number"),
             _field(prefix, "check_interval_minutes", "Özel kontrol aralığı (dk)", item.get("check_interval_minutes", ""), "number"),
             _checkbox(prefix, "notify_once_in_24H", "24 saat içinde aynı bildirimi tekrar gönderme", notify_once),
             _checkbox(prefix, "active", "Aktif", active),
@@ -449,7 +447,6 @@ def _build_watch(form, index):
     group = _first(form, prefix + "group")
     target = _first(form, prefix + "target_price")
     size = _first(form, prefix + "size")
-    max_items = _first(form, prefix + "max_items_to_scan")
     interval = _first(form, prefix + "check_interval_minutes")
     urls = []
     for field_name in WATCH_URL_FIELDS:
@@ -484,8 +481,6 @@ def _build_watch(form, index):
         item["size"] = size
     for url_index, url in enumerate(urls, start=1):
         item[f"url_{url_index}"] = url
-    if max_items:
-        item["max_items_to_scan"] = _number(max_items)
     if interval:
         item["check_interval_minutes"] = _number(interval)
     return item

@@ -61,6 +61,21 @@ class HermesSmokeTests(unittest.TestCase):
         self.assertFalse(18 - 14 >= service.summary_drop_threshold(18))
         self.assertTrue(18 - 11 >= service.summary_drop_threshold(18))
 
+    def test_watches_always_use_the_fixed_search_scan_limit(self):
+        watches = _prepare_watches(
+            [
+                {
+                    "name": "Juo Q3",
+                    "target_price": 2000,
+                    "url_1": "https://www.amazon.com.tr/s?k=juo+q3",
+                    "max_items_to_scan": 24,
+                }
+            ]
+        )
+
+        self.assertEqual(len(watches), 1)
+        self.assertEqual(watches[0].max_items_to_scan, 60)
+
     def test_summary_drop_alert_requires_five_consecutive_cycles(self):
         meta = {}
         for expected_streak in range(1, service.SUMMARY_DROP_CONSECUTIVE_CYCLES + 1):
@@ -230,6 +245,7 @@ class HermesSmokeTests(unittest.TestCase):
                 self.assertIn("name='update_watch_index'", page)
                 self.assertIn("name='watch_index'", page)
                 self.assertNotIn("Güncellemeleri Kaydet", page)
+                self.assertNotIn("Arama linklerinde taranacak maksimum ürün", page)
                 self.assertIn("value='100'", page)
             finally:
                 settings_ui.OPTIONS_PATH = original_options_path
@@ -1733,7 +1749,6 @@ class HermesSmokeTests(unittest.TestCase):
             {
                 "watches_count": ["1"],
                 "watches_0_group": ["Moda"],
-                "watches_0_max_items_to_scan": ["24"],
                 "watches_0_notify_once_in_24H": ["1"],
                 "watches_0_active": ["1"],
             }
