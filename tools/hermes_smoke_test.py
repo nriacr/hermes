@@ -13,6 +13,7 @@ sys.path.insert(0, str(APP_PATH))
 from hermes import service  # noqa: E402
 from hermes import http_client  # noqa: E402
 from hermes import dashboard  # noqa: E402
+from hermes import dashboard_with_settings  # noqa: E402
 from hermes import settings_ui  # noqa: E402
 from hermes.errors import HermesError, OutOfStockHermesError  # noqa: E402
 from hermes.http_client import amazon_url_variants, fetch_amazon_page  # noqa: E402
@@ -90,6 +91,42 @@ class HermesSmokeTests(unittest.TestCase):
         self.assertIn('<details class="search-result-group">', rendered)
         self.assertIn("Juo Q3", rendered)
         self.assertIn("2 sonuç", rendered)
+
+    def test_public_settings_restart_paths_keep_the_public_token(self):
+        context = dashboard_with_settings._public_settings_context("/public/secret-token/settings/save")
+
+        self.assertEqual(context["settings_path"], "/public/secret-token/settings")
+        self.assertEqual(context["restart_path"], "/public/secret-token/settings/restarting")
+        self.assertEqual(context["health_path"], "/public/secret-token/health")
+
+        page = dashboard_with_settings._render_restart_page(
+            "Ayarlar kaydedildi.",
+            settings_path=context["settings_path"],
+            health_path=context["health_path"],
+        ).decode("utf-8")
+        self.assertIn("/public/secret-token/settings", page)
+        self.assertIn("/public/secret-token/health", page)
+
+    def test_settings_page_shows_saving_overlay_for_each_save_form(self):
+        original_options_path = settings_ui.OPTIONS_PATH
+        original_state_path = settings_ui.STATE_PATH
+        original_summary_path = settings_ui.SUMMARY_PATH
+        with tempfile.TemporaryDirectory() as tmpdir:
+            try:
+                settings_ui.OPTIONS_PATH = Path(tmpdir) / "options.json"
+                settings_ui.STATE_PATH = Path(tmpdir) / "state.json"
+                settings_ui.SUMMARY_PATH = Path(tmpdir) / "summary.json"
+                settings_ui.OPTIONS_PATH.write_text(json.dumps({"takip_edilenler": []}))
+
+                page = settings_ui.render_settings_page("/public/secret-token/settings").decode("utf-8")
+
+                self.assertIn('id="saving-overlay"', page)
+                self.assertEqual(page.count('method="post" action="./settings/save" data-settings-save'), 2)
+                self.assertIn("Ayarlar kaydediliyor", page)
+            finally:
+                settings_ui.OPTIONS_PATH = original_options_path
+                settings_ui.STATE_PATH = original_state_path
+                settings_ui.SUMMARY_PATH = original_summary_path
 
     def test_amazon_page_fetch_is_cached_per_session(self):
         class FakeResponse:

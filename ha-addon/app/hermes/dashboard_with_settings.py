@@ -8,6 +8,7 @@ from .constants import OPTIONS_PATH, STATE_PATH, SUMMARY_PATH
 from .dashboard import (
     WEB_PORT,
     _StatusHandler,
+    _public_dashboard_allowed,
     _render_public_page,
     _reset_notifications_async,
     _reset_price_history,
@@ -73,7 +74,21 @@ def _render_page_with_all_errors(path: str) -> bytes:
     return dashboard_module._render_page(path)
 
 
-def _render_restart_page(message: str) -> bytes:
+def _public_settings_context(path: str):
+    parsed = urllib.parse.urlparse(path)
+    parts = [urllib.parse.unquote(part) for part in parsed.path.split("/") if part]
+    if len(parts) < 3 or parts[0] != "public" or parts[2] != "settings":
+        return None
+    token = urllib.parse.quote(parts[1], safe="")
+    base_path = f"/public/{token}"
+    return {
+        "settings_path": f"{base_path}/settings",
+        "restart_path": f"{base_path}/settings/restarting",
+        "health_path": f"{base_path}/health",
+    }
+
+
+def _render_restart_page(message: str, settings_path: str = "../settings", health_path: str = "../health") -> bytes:
     html = """<!doctype html>
 <html lang="tr">
 <head>
@@ -89,7 +104,7 @@ def _render_restart_page(message: str) -> bytes:
       <p class="notice notice-ok">__MESSAGE__</p>
       <p>Değişiklikler Home Assistant config kaydına yazıldı. Hermes yeniden başlarken bu sayfa kısa süre bekleyecek; hazır olduğunda ayarlar ekranı otomatik yenilenecek.</p>
       <p class="footer-note" id="restart-status">Hazırlanıyor... Birkaç saniye içinde bağlantı kontrolü başlayacak.</p>
-      <div class="actions"><a class="button secondary" href="../settings">Ayarlar ekranına dön</a></div>
+      <div class="actions"><a class="button secondary" href="__SETTINGS_PATH__">Ayarlar ekranına dön</a></div>
     </div>
   </main>
   <script>
@@ -99,10 +114,10 @@ def _render_restart_page(message: str) -> bytes:
       attempts += 1;
       statusBox.textContent = 'Hermes kontrol ediliyor... Deneme ' + attempts;
       try {
-        const response = await fetch('../health?ts=' + Date.now(), { cache: 'no-store' });
+        const response = await fetch('__HEALTH_PATH__?ts=' + Date.now(), { cache: 'no-store' });
         if (response.ok) {
           statusBox.textContent = 'Hermes hazır. Ayarlar ekranı yenileniyor...';
-          window.location.href = '../settings?saved=ok&msg=' + encodeURIComponent('Hermes hazır. Ayarlar güncellendi.');
+          window.location.href = '__SETTINGS_PATH__?saved=ok&msg=' + encodeURIComponent('Hermes hazır. Ayarlar güncellendi.');
           return;
         }
       } catch (error) {
@@ -114,7 +129,12 @@ def _render_restart_page(message: str) -> bytes:
   </script>
 </body>
 </html>"""
-    html = html.replace("__SETTINGS_CSS__", SETTINGS_CSS).replace("__MESSAGE__", escape(message))
+    html = (
+        html.replace("__SETTINGS_CSS__", SETTINGS_CSS)
+        .replace("__MESSAGE__", escape(message))
+        .replace("__SETTINGS_PATH__", escape(settings_path, quote=True))
+        .replace("__HEALTH_PATH__", escape(health_path, quote=True))
+    )
     return html.encode("utf-8")
 
 
@@ -125,14 +145,45 @@ class SettingsDashboardHandler(_StatusHandler):
         if path == "/health":
             payload = b"ok\n"
             content_type = "text/plain; charset=utf-8"
+        elif path.startswith("/public/") and path.endswith("/health"):
+            if _public_dashboard_allowed(self.path):
+                payload = b"ok\n"
+                content_type = "text/plain; charset=utf-8"
+            else:
+                status = 404
+                payload = b"not found\n"
+                content_type = "text/plain; charset=utf-8"
         elif path == "/settings":
             payload = render_settings_page(self.path)
             content_type = "text/html; charset=utf-8"
+        elif path.startswith("/public/") and path.endswith("/settings"):
+            if _public_dashboard_allowed(self.path):
+                payload = render_settings_page(self.path)
+                content_type = "text/html; charset=utf-8"
+            else:
+                status = 404
+                payload = b"not found\n"
+                content_type = "text/plain; charset=utf-8"
         elif path == "/settings/restarting":
             params = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
             message = params.get("msg", ["Ayarlar kaydedildi. Hermes yeniden başlatılıyor."])[0]
             payload = _render_restart_page(message)
             content_type = "text/html; charset=utf-8"
+        elif path.startswith("/public/") and path.endswith("/settings/restarting"):
+            if _public_dashboard_allowed(self.path):
+                params = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+                message = params.get("msg", ["Ayarlar kaydedildi. Hermes yeniden başlatılıyor."])[0]
+                context = _public_settings_context(self.path)
+                payload = _render_restart_page(
+                    message,
+                    settings_path=context["settings_path"],
+                    health_path=context["health_path"],
+                )
+                content_type = "text/html; charset=utf-8"
+            else:
+                status = 404
+                payload = b"not found\n"
+                content_type = "text/plain; charset=utf-8"
         elif path == "/public" or path.startswith("/public/"):
             status, payload = _render_public_page(self.path)
             content_type = "text/html; charset=utf-8" if status == 200 else "text/plain; charset=utf-8"
@@ -154,12 +205,19 @@ class SettingsDashboardHandler(_StatusHandler):
         path = urllib.parse.urlparse(self.path).path.rstrip("/")
         content_length = int(self.headers.get("Content-Length", "0") or 0)
         body = self.rfile.read(content_length) if content_length else b""
-        if path == "/settings/save":
+        public_context = _public_settings_context(self.path)
+        is_public_settings_save = bool(public_context and path.endswith("/settings/save"))
+        if path == "/settings/save" or is_public_settings_save:
+            if is_public_settings_save and not _public_dashboard_allowed(self.path):
+                self.send_error(404)
+                return
             ok, message = handle_settings_save(body)
+            restart_path = public_context["restart_path"] if public_context else "../settings/restarting"
+            settings_path = public_context["settings_path"] if public_context else "../settings"
             if ok:
-                location = f"../settings/restarting?msg={urllib.parse.quote(message)}"
+                location = f"{restart_path}?msg={urllib.parse.quote(message)}"
             else:
-                location = f"../settings?saved=fail&msg={urllib.parse.quote(message)}"
+                location = f"{settings_path}?saved=fail&msg={urllib.parse.quote(message)}"
             self.send_response(303)
             self.send_header("Location", location)
             self.send_header("Cache-Control", "no-store")
