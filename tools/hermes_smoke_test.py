@@ -197,10 +197,28 @@ class HermesSmokeTests(unittest.TestCase):
                 page = settings_ui.render_settings_page().decode("utf-8")
 
                 self.assertLess(page.index("Yeni takip ekle"), page.index("Takip edilenler"))
+                self.assertIn("id='watch-search'", page)
+                self.assertIn("data-watch-search='Mevcut'", page)
+                self.assertIn("class='button danger'", page)
+                self.assertIn("name='delete_watch_index'", page)
             finally:
                 settings_ui.OPTIONS_PATH = original_options_path
                 settings_ui.STATE_PATH = original_state_path
                 settings_ui.SUMMARY_PATH = original_summary_path
+
+    def test_direct_watch_delete_keeps_other_watches_unchanged(self):
+        options, message = settings_ui._apply_settings_operation(
+            {
+                "takip_edilenler": [
+                    {"name": "Silinecek", "target_price": 100, "url_1": "https://www.amazon.com.tr/dp/B000000001"},
+                    {"name": "Kalacak", "target_price": 200, "url_1": "https://www.amazon.com.tr/dp/B000000002"},
+                ]
+            },
+            {"operation": ["update_existing"], "delete_watch_index": ["0"]},
+        )
+
+        self.assertEqual(message, "Silinecek takip kaydı silindi.")
+        self.assertEqual([item["name"] for item in options["takip_edilenler"]], ["Kalacak"])
 
     def test_amazon_page_fetch_is_cached_per_session(self):
         class FakeResponse:

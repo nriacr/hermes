@@ -22,9 +22,9 @@ SETTINGS_CSS = """
 main { max-width:980px; margin:0 auto; padding:28px 18px 44px; } .hero { border:1px solid var(--line); border-radius:22px; padding:22px; background:var(--panel); box-shadow:0 18px 42px rgba(0,0,0,.35); }
 h1 { margin:0 0 8px; font-size:34px; letter-spacing:-.04em; } h2 { margin:24px 0 10px; font-size:18px; } p { margin:0; color:var(--muted); line-height:1.5; font-size:13px; }
 .actions { display:flex; flex-wrap:wrap; gap:10px; margin:18px 0; } .button { display:inline-flex; align-items:center; justify-content:center; min-height:40px; padding:0 14px; border-radius:13px; border:1px solid transparent; text-decoration:none; font-weight:800; font-size:13px; cursor:pointer; }
-.button.primary { color:#14172a; background:linear-gradient(135deg,var(--accent),var(--accent2)); } .button.secondary { color:var(--text); background:#2a2f4d; border-color:var(--line); }
+.button.primary { color:#14172a; background:linear-gradient(135deg,var(--accent),var(--accent2)); } .button.secondary { color:var(--text); background:#2a2f4d; border-color:var(--line); } .button.danger { color:#fff5f7; background:#b9364d; border-color:#ed7288; } .button.danger:hover { background:#cf465f; }
 .notice { margin:14px 0; padding:11px 13px; border-radius:12px; font-weight:700; font-size:13px; } .notice-ok { color:#c6f7e6; background:rgba(127,220,184,.14); border:1px solid rgba(127,220,184,.38); } .notice-fail { color:#ffd8e3; background:rgba(255,156,181,.14); border:1px solid rgba(255,156,181,.38); }
-.settings-section { margin-top:18px; border:1px solid var(--line); border-radius:18px; padding:16px; background:var(--card); } details { border:1px solid var(--line); border-radius:14px; background:#181c32; margin:9px 0; overflow:hidden; } summary { cursor:pointer; padding:13px 14px; font-weight:900; color:#f0f2ff; list-style:none; } summary::-webkit-details-marker { display:none; } summary::before { content:'\u25b8'; display:inline-block; margin-right:8px; color:var(--accent2); } details[open] summary::before { transform:rotate(90deg); } .watch-group-filters { display:flex; flex-wrap:wrap; gap:8px; margin:0 0 12px; } .watch-group-filter { min-height:34px; border:1px solid var(--line); border-radius:999px; padding:0 12px; background:#2a2f4d; color:var(--text); font:700 12px inherit; cursor:pointer; } .watch-group-filter[aria-pressed='false'] { color:var(--muted); background:#15182d; opacity:.72; text-decoration:line-through; } .watch-group-filter:hover { border-color:var(--accent2); }
+.settings-section { margin-top:18px; border:1px solid var(--line); border-radius:18px; padding:16px; background:var(--card); } details { border:1px solid var(--line); border-radius:14px; background:#181c32; margin:9px 0; overflow:hidden; } summary { cursor:pointer; padding:13px 14px; font-weight:900; color:#f0f2ff; list-style:none; } summary::-webkit-details-marker { display:none; } summary::before { content:'\u25b8'; display:inline-block; margin-right:8px; color:var(--accent2); } details[open] summary::before { transform:rotate(90deg); } .watch-search { display:grid; gap:6px; max-width:440px; margin:0 0 12px; color:var(--muted); font-size:12px; font-weight:750; } .watch-search input { width:100%; min-height:40px; border:1px solid var(--line); border-radius:11px; padding:10px 11px; background:#101428; color:var(--text); font:inherit; } .watch-group-filters { display:flex; flex-wrap:wrap; gap:8px; margin:0 0 12px; } .watch-group-filter { min-height:34px; border:1px solid var(--line); border-radius:999px; padding:0 12px; background:#2a2f4d; color:var(--text); font:700 12px inherit; cursor:pointer; } .watch-group-filter[aria-pressed='false'] { color:var(--muted); background:#15182d; opacity:.72; text-decoration:line-through; } .watch-group-filter:hover { border-color:var(--accent2); }
 .saving-overlay { position:fixed; inset:0; z-index:20; display:grid; place-items:center; padding:20px; background:rgba(7,9,19,.78); backdrop-filter:blur(5px); } .saving-overlay[hidden] { display:none; } .saving-dialog { width:min(100%,430px); border:1px solid rgba(142,214,210,.45); border-radius:18px; padding:22px; background:#1e2139; box-shadow:0 22px 50px rgba(0,0,0,.5); } .saving-dialog h2 { margin:0 0 9px; font-size:20px; } .saving-dialog p { font-size:14px; } .saving-spinner { width:28px; height:28px; margin:0 0 14px; border:4px solid rgba(142,214,210,.22); border-top-color:var(--accent2); border-radius:50%; animation:hermes-spin .8s linear infinite; } @keyframes hermes-spin { to { transform:rotate(360deg); } }
 .form-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:12px; padding:0 14px 14px; } label { display:grid; gap:6px; color:var(--muted); font-size:12px; font-weight:700; } input[type='text'], input[type='number'], input[type='url'], select, textarea { width:100%; min-height:40px; border-radius:11px; border:1px solid var(--line); background:#101428; color:var(--text); padding:10px 11px; font-size:13px; font-family:inherit; } textarea { resize:vertical; line-height:1.35; }
 .checkbox-row { display:flex; align-items:center; gap:9px; min-height:40px; color:var(--text); } .danger { color:#ffd8e3; } .footer-note { margin-top:14px; border-left:4px solid #b79ad6; padding:12px 14px; background:rgba(183,154,214,.15); border-radius:10px; font-size:13px; }
@@ -194,7 +194,8 @@ def _details(title, prefix, inner, open_when_empty=False):
 def _watch_form(item, index, is_new=False, groups=None, known_titles=None):
     prefix = f"watches_{index}_"
     group = _watch_group(item)
-    title = "Yeni takip ekle" if is_new else f"[{group}] {_watch_display_name(item, index, known_titles or {})}"
+    display_name = _watch_display_name(item, index, known_titles or {})
+    title = "Yeni takip ekle" if is_new else f"[{group}] {display_name}"
     group_choices = list(groups or [])
     if not is_new and group != "Diğer" and group not in group_choices:
         group_choices.append(group)
@@ -225,12 +226,18 @@ def _watch_form(item, index, is_new=False, groups=None, known_titles=None):
             _field(prefix, "check_interval_minutes", "Özel kontrol aralığı (dk)", item.get("check_interval_minutes", ""), "number"),
             _checkbox(prefix, "notify_once_in_24H", "24 saat içinde aynı bildirimi tekrar gönderme", notify_once),
             _checkbox(prefix, "active", "Aktif", active),
-            _checkbox(prefix, "delete", "Sil", False, danger=True) if not is_new else "",
+            (
+                f"<button class='button danger' type='submit' name='delete_watch_index' value='{index}' "
+                "data-delete-watch='true'>Sil</button>"
+                if not is_new
+                else ""
+            ),
         ]
     )
     group_attribute = "" if is_new else f" data-watch-group='{escape(group, quote=True)}'"
+    search_attribute = "" if is_new else f" data-watch-search='{escape(display_name, quote=True)}'"
     return (
-        f"<details{group_attribute}{' open' if is_new else ''}>"
+        f"<details{group_attribute}{search_attribute}{' open' if is_new else ''}>"
         f"<summary>{escape(title)}</summary><div class='form-grid'>{inner}</div></details>"
     )
 
@@ -269,6 +276,11 @@ def _watch_section(items, configured_groups, known_titles=None):
         if filters
         else ""
     )
+    search_html = (
+        "<label class='watch-search'>Takip edilenlerde ara"
+        "<input id='watch-search' type='search' placeholder='Ürün adında ara' autocomplete='off'>"
+        "</label>"
+    )
     renderer = lambda item, index, is_new=False: _watch_form(
         item,
         index,
@@ -277,7 +289,8 @@ def _watch_section(items, configured_groups, known_titles=None):
         known_titles=known_titles,
     )
     return (
-        filters_html
+        search_html
+        + filters_html
         + _section("Takip edilenler", safe_items, renderer, "watches")
         + "<p class='footer-note'>Grup seçeneklerini Home Assistant Configuration ekranındaki <strong>gruplar</strong> listesinde tanımlayabilirsin. Buradan seçilen grup yalnızca düzenleme ve filtreleme içindir; takip kurallarını değiştirmez.</p>"
     )
@@ -393,6 +406,19 @@ def _apply_settings_operation(existing_options, form):
     ]
     options = _clean_editable_options(source_options)
     operation = _first(form, "operation", "update_existing")
+    delete_index = _first(form, "delete_watch_index")
+
+    if delete_index != "":
+        try:
+            index = int(delete_index)
+        except ValueError as exc:
+            raise ValueError("Silinecek takip kaydı geçersiz.") from exc
+        if index < 0 or index >= len(existing_watches):
+            raise ValueError("Silinecek takip kaydı bulunamadı.")
+        removed = existing_watches.pop(index)
+        removed_name = str(removed.get("name") or "").strip() or f"Takip {index + 1}"
+        options["takip_edilenler"] = existing_watches
+        return options, f"{removed_name} takip kaydı silindi."
 
     if operation == "update_existing":
         options["takip_edilenler"] = _build_watches(form)
@@ -530,9 +556,14 @@ def render_settings_page(path="/"):
   const storageKey = 'hermes-hidden-watch-groups';
   const hiddenGroups = new Set(JSON.parse(localStorage.getItem(storageKey) || '[]'));
   const normalize = (value) => value.toLocaleLowerCase('tr-TR');
+  const watchSearch = document.getElementById('watch-search');
   const refreshWatchGroups = () => {
+    const searchText = normalize(watchSearch ? watchSearch.value.trim() : '');
     document.querySelectorAll('[data-watch-group]').forEach((item) => {
-      item.hidden = hiddenGroups.has(normalize(item.dataset.watchGroup || 'Diğer'));
+      const groupHidden = hiddenGroups.has(normalize(item.dataset.watchGroup || 'Diğer'));
+      const productName = normalize(item.dataset.watchSearch || '');
+      const searchHidden = Boolean(searchText) && !productName.includes(searchText);
+      item.hidden = groupHidden || searchHidden;
     });
     document.querySelectorAll('[data-watch-group-filter]').forEach((button) => {
       const hidden = hiddenGroups.has(normalize(button.dataset.watchGroupFilter || 'Diğer'));
@@ -548,16 +579,24 @@ def render_settings_page(path="/"):
       refreshWatchGroups();
     });
   });
+  if (watchSearch) watchSearch.addEventListener('input', refreshWatchGroups);
   refreshWatchGroups();
 
   const savingOverlay = document.getElementById('saving-overlay');
+  const savingTitle = document.getElementById('saving-title');
+  const savingMessage = document.getElementById('saving-message');
   document.querySelectorAll('form[data-settings-save]').forEach((form) => {
-    form.addEventListener('submit', () => {
-      const button = form.querySelector('button[type="submit"]');
+    form.addEventListener('submit', (event) => {
+      const button = event.submitter;
+      const isDelete = button && button.dataset.deleteWatch === 'true';
       if (button) {
         button.disabled = true;
-        button.textContent = 'Kaydediliyor...';
+        button.textContent = isDelete ? 'Siliniyor...' : 'Kaydediliyor...';
       }
+      savingTitle.textContent = isDelete ? 'Takip siliniyor' : 'Ayarlar kaydediliyor';
+      savingMessage.textContent = isDelete
+        ? 'Takip kaydı kaldırılıyor. Hermes yeniden başlatılacak; hazır olduğunda ayarlara otomatik dönülecek.'
+        : 'Hermes değişiklikleri Home Assistant'a yazıyor. Ardından kısa bir yeniden başlatma yapılacak; hazır olduğunda ayarlara otomatik dönülecek.';
       savingOverlay.hidden = false;
     });
   });
@@ -574,7 +613,7 @@ def render_settings_page(path="/"):
 <input type="hidden" name="operation" value="update_existing">
 <div class="actions"><button class="button primary" type="submit">Güncellemeleri Kaydet</button><a class="button secondary" href="./">Vazgeç</a></div>
 </form><p class="footer-note">Kayıt sonrası Hermes yeniden başlatılır. Sayfa kısa süre yanıt vermeyebilir; 10-20 saniye sonra otomatik olarak hazır olur.</p>
-</div></main><div id="saving-overlay" class="saving-overlay" hidden><div class="saving-dialog"><div class="saving-spinner"></div><h2>Ayarlar kaydediliyor</h2><p>Hermes değişiklikleri Home Assistant'a yazıyor. Ardından kısa bir yeniden başlatma yapılacak; hazır olduğunda ayarlara otomatik dönülecek.</p></div></div>{filter_script}</body></html>"""
+</div></main><div id="saving-overlay" class="saving-overlay" hidden><div class="saving-dialog"><div class="saving-spinner"></div><h2 id="saving-title">Ayarlar kaydediliyor</h2><p id="saving-message">Hermes değişiklikleri Home Assistant'a yazıyor. Ardından kısa bir yeniden başlatma yapılacak; hazır olduğunda ayarlara otomatik dönülecek.</p></div></div>{filter_script}</body></html>"""
     return html.encode("utf-8")
 
 
