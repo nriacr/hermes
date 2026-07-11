@@ -426,7 +426,6 @@ def _telegram_section(options):
     return (
         "<section class='settings-section'><h2>Telegram takip</h2>"
         f"<details><summary>Telegram ayarları</summary><div class='form-grid'>{inner}</div></details>"
-        "<p class='footer-note'>Telegram takip aktifse api_id, api_hash, telefon numarası, kanal ve keyword alanları dolu olmalı. Mesajda keyword geçerse ve exclude filtresine takılmazsa bildirim gönderilir.</p>"
         "</section>"
     )
 
@@ -708,7 +707,7 @@ def render_settings_page(path="/"):
         notice = f"<p class='notice {css}'>{escape(message)}</p>"
     html = f"""<!doctype html>
 <html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Hermes Ayarlar</title><style>{SETTINGS_CSS}</style></head>
-<body><main><div class="hero"><h1>Hermes Ayarlar</h1><p>Her takip kartı kendi başına güncellenir veya silinir.</p><div class="actions"><a class="button secondary" href="./">Ana ekran</a></div>{notice}
+<body><main><div class="hero"><h1>Hermes Ayarlar</h1><div class="actions"><a class="button secondary" href="./">Ana ekran</a></div>{notice}
 {_new_watch_section(groups, known_titles)}
 {_watch_section(options.get("takip_edilenler"), groups, known_titles)}
 <form method="post" action="./settings/save" data-settings-save>{_telegram_section(options)}
