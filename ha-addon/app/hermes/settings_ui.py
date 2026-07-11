@@ -364,7 +364,8 @@ def _build_watches(form):
             raise ValueError(f"{context}: {', '.join(missing)} alanı zorunlu.")
         if not name and any(watch_name_required_for_url(url) for url in urls):
             raise ValueError(
-                f"{context}: arama linkleri için Ad alanı zorunlu. Ürün linklerinde boş bırakılabilir."
+                f"{context}: bu bağlantı bir arama sayfası. Arama sonuçlarını doğru filtrelemek için "
+                "Ad alanı zorunlu; örneğin ürün modelini yazmalısın."
             )
         item = {
             "name": name,
@@ -564,14 +565,14 @@ def render_settings_page(path="/"):
     html = f"""<!doctype html>
 <html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Hermes Ayarlar</title><style>{SETTINGS_CSS}</style></head>
 <body><main><div class="hero"><h1>Hermes Ayarlar</h1><p>Mevcut takipleri güncelleme ve yeni takip ekleme işlemleri ayrı çalışır. Listelerde yalnızca adlar görünür; satıra tıklayınca ayrıntılar açılır.</p><div class="actions"><a class="button secondary" href="./">Ana ekran</a></div>{notice}<form method="post" action="./settings/save" data-settings-save>
+{_new_watch_section(groups, known_titles)}
+<input type="hidden" name="operation" value="add_watch">
+<div class="actions"><button class="button primary" type="submit">Yeni Takibi Ekle</button></div>
+</form><form method="post" action="./settings/save" data-settings-save>
 {_watch_section(options.get("takip_edilenler"), groups, known_titles)}
 {_telegram_section(options)}
 <input type="hidden" name="operation" value="update_existing">
 <div class="actions"><button class="button primary" type="submit">Güncellemeleri Kaydet</button><a class="button secondary" href="./">Vazgeç</a></div>
-</form><form method="post" action="./settings/save" data-settings-save>
-{_new_watch_section(groups, known_titles)}
-<input type="hidden" name="operation" value="add_watch">
-<div class="actions"><button class="button primary" type="submit">Yeni Takibi Ekle</button></div>
 </form><p class="footer-note">Kayıt sonrası Hermes yeniden başlatılır. Sayfa kısa süre yanıt vermeyebilir; 10-20 saniye sonra otomatik olarak hazır olur.</p>
 </div></main><div id="saving-overlay" class="saving-overlay" hidden><div class="saving-dialog"><div class="saving-spinner"></div><h2>Ayarlar kaydediliyor</h2><p>Hermes değişiklikleri Home Assistant'a yazıyor. Ardından kısa bir yeniden başlatma yapılacak; hazır olduğunda ayarlara otomatik dönülecek.</p></div></div>{filter_script}</body></html>"""
     return html.encode("utf-8")

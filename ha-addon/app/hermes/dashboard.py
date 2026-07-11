@@ -15,6 +15,8 @@ from .providers import hepsiburada as hepsiburada_provider
 from .storage import load_json
 from .utils import (
     detect_site_from_url,
+    is_amazon_search_url,
+    is_hepsiburada_search_url,
     normalize_item_key,
     parse_bool,
     parse_iso_datetime,
@@ -627,10 +629,64 @@ def _render_stock_section(rows):
     """
 
 
+def _is_search_result_source(site: str, configured_url: str) -> bool:
+    return (
+        (site == "amazon" and is_amazon_search_url(configured_url))
+        or (site == "hepsiburada" and is_hepsiburada_search_url(configured_url))
+    )
+
+
+def _search_result_groups_from_state(state):
+    groups = {}
+    if not isinstance(state, dict):
+        return groups
+    for entry in state.values():
+        if not isinstance(entry, dict):
+            continue
+        configured_url = str(entry.get("configured_url") or "").strip()
+        result_url = str(entry.get("url") or "").strip()
+        watch_name = str(entry.get("watch_name") or "").strip()
+        site = str(entry.get("site") or "").strip()
+        if not configured_url or not result_url or not watch_name:
+            continue
+        if not site:
+            try:
+                site = detect_site_from_url(configured_url)
+            except Exception:  # noqa: BLE001
+                continue
+        if not _is_search_result_source(site, configured_url):
+            continue
+        groups[result_url] = {
+            "search_group": normalize_item_key("search_result_group", site, watch_name, configured_url),
+            "search_group_label": watch_name,
+        }
+    return groups
+
+
+def _attach_legacy_search_groups(rows, state):
+    groups = _search_result_groups_from_state(state)
+    if not groups:
+        return rows
+    enriched = []
+    for row in rows:
+        if not isinstance(row, dict) or row.get("search_group"):
+            enriched.append(row)
+            continue
+        metadata = groups.get(str(row.get("product_url") or "").strip())
+        if not metadata:
+            enriched.append(row)
+            continue
+        enriched_row = dict(row)
+        enriched_row.update(metadata)
+        enriched.append(enriched_row)
+    return enriched
+
+
 def _render_table():
     payload = load_json(SUMMARY_PATH, {})
     rows = payload.get("rows") if isinstance(payload.get("rows"), list) else []
     stock_rows = payload.get("stock_rows") if isinstance(payload.get("stock_rows"), list) else []
+    rows = _attach_legacy_search_groups(rows, load_json(STATE_PATH, {}))
     if not rows and not stock_rows:
         return """
         <section class="summary-panel">

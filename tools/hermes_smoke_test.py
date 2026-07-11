@@ -98,6 +98,31 @@ class HermesSmokeTests(unittest.TestCase):
         self.assertIn("Juo Q3", rendered)
         self.assertIn("2 sonuç", rendered)
 
+    def test_dashboard_rebuilds_missing_search_groups_from_state(self):
+        rows = [
+            {"product_url": "https://www.amazon.com.tr/dp/GREEN", "product_title": "Juo Q3 Yeşil"},
+            {"product_url": "https://www.amazon.com.tr/dp/RED", "product_title": "Juo Q3 Kırmızı"},
+        ]
+        state = {
+            "first": {
+                "site": "amazon",
+                "configured_url": "https://www.amazon.com.tr/s?k=juo+q3",
+                "url": "https://www.amazon.com.tr/dp/GREEN",
+                "watch_name": "Juo Q3",
+            },
+            "second": {
+                "site": "amazon",
+                "configured_url": "https://www.amazon.com.tr/s?k=juo+q3",
+                "url": "https://www.amazon.com.tr/dp/RED",
+                "watch_name": "Juo Q3",
+            },
+        }
+
+        enriched = dashboard._attach_legacy_search_groups(rows, state)
+
+        self.assertTrue(all(row["search_group"] for row in enriched))
+        self.assertEqual([row["search_group_label"] for row in enriched], ["Juo Q3", "Juo Q3"])
+
     def test_public_settings_restart_paths_keep_the_public_token(self):
         context = dashboard_with_settings._public_settings_context("/public/secret-token/settings/save")
 
@@ -129,6 +154,49 @@ class HermesSmokeTests(unittest.TestCase):
                 self.assertIn('id="saving-overlay"', page)
                 self.assertEqual(page.count('method="post" action="./settings/save" data-settings-save'), 2)
                 self.assertIn("Ayarlar kaydediliyor", page)
+            finally:
+                settings_ui.OPTIONS_PATH = original_options_path
+                settings_ui.STATE_PATH = original_state_path
+                settings_ui.SUMMARY_PATH = original_summary_path
+
+    def test_new_search_watch_without_a_name_is_rejected(self):
+        form = {
+            "watches_count": ["1"],
+            "watches_0_target_price": ["2000"],
+            "watches_0_url_1": ["https://www.amazon.com.tr/s?k=juo+q3"],
+            "watches_0_notify_once_in_24H": ["1"],
+            "watches_0_active": ["1"],
+        }
+
+        with self.assertRaisesRegex(ValueError, "arama sayfası"):
+            settings_ui._build_watches(form)
+
+    def test_new_watch_form_is_rendered_before_existing_watches(self):
+        original_options_path = settings_ui.OPTIONS_PATH
+        original_state_path = settings_ui.STATE_PATH
+        original_summary_path = settings_ui.SUMMARY_PATH
+        with tempfile.TemporaryDirectory() as tmpdir:
+            try:
+                settings_ui.OPTIONS_PATH = Path(tmpdir) / "options.json"
+                settings_ui.STATE_PATH = Path(tmpdir) / "state.json"
+                settings_ui.SUMMARY_PATH = Path(tmpdir) / "summary.json"
+                settings_ui.OPTIONS_PATH.write_text(
+                    json.dumps(
+                        {
+                            "takip_edilenler": [
+                                {
+                                    "name": "Mevcut",
+                                    "target_price": 100,
+                                    "url_1": "https://www.amazon.com.tr/dp/B000000001",
+                                }
+                            ]
+                        }
+                    )
+                )
+
+                page = settings_ui.render_settings_page().decode("utf-8")
+
+                self.assertLess(page.index("Yeni takip ekle"), page.index("Takip edilenler"))
             finally:
                 settings_ui.OPTIONS_PATH = original_options_path
                 settings_ui.STATE_PATH = original_state_path
