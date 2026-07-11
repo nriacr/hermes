@@ -130,7 +130,7 @@ class HermesSmokeTests(unittest.TestCase):
         self.assertEqual(context["restart_path"], "/public/secret-token/settings/restarting")
         self.assertEqual(context["health_path"], "/public/secret-token/health")
 
-        page = dashboard_with_settings._render_restart_page(
+        page = settings_ui.render_settings_restart_page(
             "Ayarlar kaydedildi.",
             settings_path=context["settings_path"],
             health_path=context["health_path"],
@@ -219,6 +219,50 @@ class HermesSmokeTests(unittest.TestCase):
 
         self.assertEqual(message, "Silinecek takip kaydı silindi.")
         self.assertEqual([item["name"] for item in options["takip_edilenler"]], ["Kalacak"])
+
+    def test_settings_mutations_preserve_required_supervisor_options(self):
+        source = {
+            "interval_seconds": 10,
+            "request_delay_min_seconds": 1,
+            "request_delay_max_seconds": 2,
+            "pushover_user_key": "user",
+            "pushover_api_token": "token",
+            "telegram_enabled": True,
+            "api_id": "123",
+            "api_hash": "hash",
+            "phone_number": "+900000000000",
+            "verification_code": "",
+            "session_name": "telegram_keyword_alert",
+            "channels": ["@example"],
+            "keywords": ["fırsat"],
+            "exclude_keywords": ["hariç"],
+            "gruplar": ["Moda"],
+            "takip_edilenler": [
+                {"name": "Silinecek", "target_price": 100, "url_1": "https://www.amazon.com.tr/dp/B000000001"},
+            ],
+        }
+
+        options, _ = settings_ui._apply_settings_operation(
+            source,
+            {"operation": ["update_existing"], "delete_watch_index": ["0"]},
+        )
+
+        self.assertEqual(options["channels"], ["@example"])
+        self.assertEqual(options["keywords"], ["fırsat"])
+        self.assertTrue(options["telegram_enabled"])
+        self.assertEqual(options["takip_edilenler"], [])
+
+    def test_settings_assets_are_external_and_shared_by_both_surfaces(self):
+        page = settings_ui.render_settings_page().decode("utf-8")
+        restart_page = settings_ui.render_settings_restart_page("Kaydedildi.").decode("utf-8")
+        interaction_script = settings_ui.render_settings_script().decode("utf-8")
+        restart_script = settings_ui.render_settings_restart_script().decode("utf-8")
+
+        self.assertIn('<script src="./settings.js" defer>', page)
+        self.assertIn('src="./restart.js" defer', restart_page)
+        self.assertIn("watchSearch?.addEventListener('input', refreshWatchList)", interaction_script)
+        self.assertIn("data-watch-group-filter", interaction_script)
+        self.assertIn("waitForHermes", restart_script)
 
     def test_amazon_page_fetch_is_cached_per_session(self):
         class FakeResponse:

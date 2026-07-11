@@ -1,6 +1,5 @@
 import urllib.parse
 from datetime import datetime, timedelta
-from html import escape
 from http.server import ThreadingHTTPServer
 
 from . import dashboard as dashboard_module
@@ -14,7 +13,13 @@ from .dashboard import (
     _reset_price_history,
     _send_test_notification,
 )
-from .settings_ui import SETTINGS_CSS, handle_settings_save, render_settings_page
+from .settings_ui import (
+    handle_settings_save,
+    render_settings_page,
+    render_settings_restart_page,
+    render_settings_restart_script,
+    render_settings_script,
+)
 from .storage import load_json
 from .utils import parse_iso_datetime
 
@@ -88,56 +93,6 @@ def _public_settings_context(path: str):
     }
 
 
-def _render_restart_page(message: str, settings_path: str = "../settings", health_path: str = "../health") -> bytes:
-    html = """<!doctype html>
-<html lang="tr">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Hermes yeniden başlatılıyor</title>
-  <style>__SETTINGS_CSS__</style>
-</head>
-<body>
-  <main>
-    <div class="hero">
-      <h1>Hermes yeniden başlatılıyor</h1>
-      <p class="notice notice-ok">__MESSAGE__</p>
-      <p>Değişiklikler Home Assistant config kaydına yazıldı. Hermes yeniden başlarken bu sayfa kısa süre bekleyecek; hazır olduğunda ayarlar ekranı otomatik yenilenecek.</p>
-      <p class="footer-note" id="restart-status">Hazırlanıyor... Birkaç saniye içinde bağlantı kontrolü başlayacak.</p>
-      <div class="actions"><a class="button secondary" href="__SETTINGS_PATH__">Ayarlar ekranına dön</a></div>
-    </div>
-  </main>
-  <script>
-    const statusBox = document.getElementById('restart-status');
-    let attempts = 0;
-    async function waitForHermes() {
-      attempts += 1;
-      statusBox.textContent = 'Hermes kontrol ediliyor... Deneme ' + attempts;
-      try {
-        const response = await fetch('__HEALTH_PATH__?ts=' + Date.now(), { cache: 'no-store' });
-        if (response.ok) {
-          statusBox.textContent = 'Hermes hazır. Ayarlar ekranı yenileniyor...';
-          window.location.href = '__SETTINGS_PATH__?saved=ok&msg=' + encodeURIComponent('Hermes hazır. Ayarlar güncellendi.');
-          return;
-        }
-      } catch (error) {
-        statusBox.textContent = 'Hermes yeniden başlıyor, bağlantı bekleniyor...';
-      }
-      setTimeout(waitForHermes, 2000);
-    }
-    setTimeout(waitForHermes, 6000);
-  </script>
-</body>
-</html>"""
-    html = (
-        html.replace("__SETTINGS_CSS__", SETTINGS_CSS)
-        .replace("__MESSAGE__", escape(message))
-        .replace("__SETTINGS_PATH__", escape(settings_path, quote=True))
-        .replace("__HEALTH_PATH__", escape(health_path, quote=True))
-    )
-    return html.encode("utf-8")
-
-
 class SettingsDashboardHandler(_StatusHandler):
     def do_GET(self) -> None:
         path = urllib.parse.urlparse(self.path).path.rstrip("/")
@@ -153,9 +108,31 @@ class SettingsDashboardHandler(_StatusHandler):
                 status = 404
                 payload = b"not found\n"
                 content_type = "text/plain; charset=utf-8"
+        elif path == "/settings.js":
+            payload = render_settings_script()
+            content_type = "application/javascript; charset=utf-8"
+        elif path == "/settings/restart.js":
+            payload = render_settings_restart_script()
+            content_type = "application/javascript; charset=utf-8"
         elif path == "/settings":
             payload = render_settings_page(self.path)
             content_type = "text/html; charset=utf-8"
+        elif path.startswith("/public/") and path.endswith("/settings.js"):
+            if _public_dashboard_allowed(self.path):
+                payload = render_settings_script()
+                content_type = "application/javascript; charset=utf-8"
+            else:
+                status = 404
+                payload = b"not found\n"
+                content_type = "text/plain; charset=utf-8"
+        elif path.startswith("/public/") and path.endswith("/settings/restart.js"):
+            if _public_dashboard_allowed(self.path):
+                payload = render_settings_restart_script()
+                content_type = "application/javascript; charset=utf-8"
+            else:
+                status = 404
+                payload = b"not found\n"
+                content_type = "text/plain; charset=utf-8"
         elif path.startswith("/public/") and path.endswith("/settings"):
             if _public_dashboard_allowed(self.path):
                 payload = render_settings_page(self.path)
@@ -167,14 +144,14 @@ class SettingsDashboardHandler(_StatusHandler):
         elif path == "/settings/restarting":
             params = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
             message = params.get("msg", ["Ayarlar kaydedildi. Hermes yeniden başlatılıyor."])[0]
-            payload = _render_restart_page(message)
+            payload = render_settings_restart_page(message)
             content_type = "text/html; charset=utf-8"
         elif path.startswith("/public/") and path.endswith("/settings/restarting"):
             if _public_dashboard_allowed(self.path):
                 params = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
                 message = params.get("msg", ["Ayarlar kaydedildi. Hermes yeniden başlatılıyor."])[0]
                 context = _public_settings_context(self.path)
-                payload = _render_restart_page(
+                payload = render_settings_restart_page(
                     message,
                     settings_path=context["settings_path"],
                     health_path=context["health_path"],

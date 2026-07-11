@@ -4,6 +4,7 @@ import threading
 import urllib.error
 import urllib.parse
 import urllib.request
+from copy import deepcopy
 from html import escape
 
 from .config_loader import DEFAULT_TELEGRAM_CHANNELS
@@ -29,6 +30,88 @@ h1 { margin:0 0 8px; font-size:34px; letter-spacing:-.04em; } h2 { margin:24px 0
 .form-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:12px; padding:0 14px 14px; } label { display:grid; gap:6px; color:var(--muted); font-size:12px; font-weight:700; } input[type='text'], input[type='number'], input[type='url'], select, textarea { width:100%; min-height:40px; border-radius:11px; border:1px solid var(--line); background:#101428; color:var(--text); padding:10px 11px; font-size:13px; font-family:inherit; } textarea { resize:vertical; line-height:1.35; }
 .checkbox-row { display:flex; align-items:center; gap:9px; min-height:40px; color:var(--text); } .danger { color:#ffd8e3; } .footer-note { margin-top:14px; border-left:4px solid #b79ad6; padding:12px 14px; background:rgba(183,154,214,.15); border-radius:10px; font-size:13px; }
 """
+
+SETTINGS_SCRIPT = """
+(() => {
+  const storageKey = 'hermes-hidden-watch-groups';
+  const hiddenGroups = new Set(JSON.parse(localStorage.getItem(storageKey) || '[]'));
+  const normalize = (value) => String(value || '').toLocaleLowerCase('tr-TR');
+  const watchSearch = document.getElementById('watch-search');
+
+  const refreshWatchList = () => {
+    const searchText = normalize(watchSearch?.value.trim());
+    document.querySelectorAll('[data-watch-group]').forEach((item) => {
+      const groupHidden = hiddenGroups.has(normalize(item.dataset.watchGroup || 'Diğer'));
+      const productName = normalize(item.dataset.watchSearch);
+      const searchHidden = Boolean(searchText) && !productName.includes(searchText);
+      item.hidden = groupHidden || searchHidden;
+    });
+    document.querySelectorAll('[data-watch-group-filter]').forEach((button) => {
+      const hidden = hiddenGroups.has(normalize(button.dataset.watchGroupFilter || 'Diğer'));
+      button.setAttribute('aria-pressed', String(!hidden));
+      button.title = hidden ? 'Grubu göster' : 'Grubu gizle';
+    });
+  };
+
+  document.querySelectorAll('[data-watch-group-filter]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const group = normalize(button.dataset.watchGroupFilter || 'Diğer');
+      if (hiddenGroups.has(group)) hiddenGroups.delete(group); else hiddenGroups.add(group);
+      localStorage.setItem(storageKey, JSON.stringify([...hiddenGroups]));
+      refreshWatchList();
+    });
+  });
+  watchSearch?.addEventListener('input', refreshWatchList);
+  refreshWatchList();
+
+  const savingOverlay = document.getElementById('saving-overlay');
+  const savingTitle = document.getElementById('saving-title');
+  const savingMessage = document.getElementById('saving-message');
+  document.querySelectorAll('form[data-settings-save]').forEach((form) => {
+    form.addEventListener('submit', (event) => {
+      const button = event.submitter;
+      const isDelete = button?.dataset.deleteWatch === 'true';
+      if (button) {
+        button.disabled = true;
+        button.textContent = isDelete ? 'Siliniyor...' : 'Kaydediliyor...';
+      }
+      savingTitle.textContent = isDelete ? 'Takip siliniyor' : 'Ayarlar kaydediliyor';
+      savingMessage.textContent = isDelete
+        ? 'Takip kaydı kaldırılıyor. Hermes yeniden başlatılacak; hazır olduğunda ayarlara otomatik dönülecek.'
+        : 'Hermes değişiklikleri Home Assistant’a yazıyor. Ardından kısa bir yeniden başlatma yapılacak; hazır olduğunda ayarlara otomatik dönülecek.';
+      savingOverlay.hidden = false;
+    });
+  });
+})();
+""".strip()
+
+SETTINGS_RESTART_SCRIPT = """
+(() => {
+  const script = document.getElementById('hermes-restart-script');
+  const settingsPath = script?.dataset.settingsPath || '../settings';
+  const healthPath = script?.dataset.healthPath || '../health';
+  const statusBox = document.getElementById('restart-status');
+  let attempts = 0;
+
+  const waitForHermes = async () => {
+    attempts += 1;
+    statusBox.textContent = `Hermes kontrol ediliyor... Deneme ${attempts}`;
+    try {
+      const response = await fetch(`${healthPath}?ts=${Date.now()}`, { cache: 'no-store' });
+      if (response.ok) {
+        statusBox.textContent = 'Hermes hazır. Ayarlar ekranı yenileniyor...';
+        window.location.href = `${settingsPath}?saved=ok&msg=${encodeURIComponent('Hermes hazır. Ayarlar güncellendi.')}`;
+        return;
+      }
+    } catch (_error) {
+      statusBox.textContent = 'Hermes yeniden başlıyor, bağlantı bekleniyor...';
+    }
+    window.setTimeout(waitForHermes, 2000);
+  };
+
+  window.setTimeout(waitForHermes, 6000);
+})();
+""".strip()
 
 
 def _as_list(value):
@@ -404,7 +487,7 @@ def _apply_settings_operation(existing_options, form):
     existing_watches = [
         dict(item) for item in _as_list(source_options.get("takip_edilenler")) if isinstance(item, dict)
     ]
-    options = _clean_editable_options(source_options)
+    options = _options_for_save(source_options)
     operation = _first(form, "operation", "update_existing")
     delete_index = _first(form, "delete_watch_index")
 
@@ -464,18 +547,32 @@ def _update_telegram_options(options, form):
     options["exclude_keywords"] = _list_from_form(form, "exclude_keywords")
 
 
-def _clean_editable_options(options):
-    keep_keys = (
-        "interval_seconds",
-        "request_delay_min_seconds",
-        "request_delay_max_seconds",
-        "pushover_user_key",
-        "pushover_api_token",
-        "public_dashboard_enabled",
-        "public_dashboard_token",
-        "gruplar",
-    )
-    return {key: options[key] for key in keep_keys if key in options}
+def _options_for_save(options):
+    """Preserve every existing add-on option while supplying schema defaults."""
+    saved = deepcopy(options) if isinstance(options, dict) else {}
+    defaults = {
+        "interval_seconds": 60,
+        "request_delay_min_seconds": 3,
+        "request_delay_max_seconds": 8,
+        "pushover_user_key": "",
+        "pushover_api_token": "",
+        "public_dashboard_enabled": False,
+        "public_dashboard_token": "",
+        "telegram_enabled": False,
+        "api_id": "",
+        "api_hash": "",
+        "phone_number": "",
+        "verification_code": "",
+        "session_name": "telegram_keyword_alert",
+        "channels": list(DEFAULT_TELEGRAM_CHANNELS),
+        "keywords": [],
+        "exclude_keywords": [],
+        "gruplar": [],
+        "takip_edilenler": [],
+    }
+    for key, value in defaults.items():
+        saved.setdefault(key, deepcopy(value))
+    return saved
 
 
 def _current_addon_slug():
@@ -535,6 +632,27 @@ def _restart_addon_later(delay_seconds=2.0):
     timer.start()
 
 
+def render_settings_script():
+    return SETTINGS_SCRIPT.encode("utf-8")
+
+
+def render_settings_restart_script():
+    return SETTINGS_RESTART_SCRIPT.encode("utf-8")
+
+
+def render_settings_restart_page(message, settings_path="../settings", health_path="../health"):
+    html = f"""<!doctype html>
+<html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hermes yeniden başlatılıyor</title><style>{SETTINGS_CSS}</style></head>
+<body><main><div class="hero"><h1>Hermes yeniden başlatılıyor</h1>
+<p class="notice notice-ok">{escape(message)}</p>
+<p>Değişiklikler Home Assistant yapılandırmasına kaydedildi. Hermes yeniden başlarken bu sayfa kısa süre bekleyecek; hazır olduğunda ayarlar ekranı otomatik yenilenecek.</p>
+<p class="footer-note" id="restart-status">Hazırlanıyor... Birkaç saniye içinde bağlantı kontrolü başlayacak.</p>
+<div class="actions"><a class="button secondary" href="{escape(settings_path, quote=True)}">Ayarlar ekranına dön</a></div>
+</div></main><script id="hermes-restart-script" src="./restart.js" defer data-settings-path="{escape(settings_path, quote=True)}" data-health-path="{escape(health_path, quote=True)}"></script></body></html>"""
+    return html.encode("utf-8")
+
+
 def render_settings_page(path="/"):
     options = load_json(OPTIONS_PATH, {})
     if not isinstance(options, dict):
@@ -551,56 +669,6 @@ def render_settings_page(path="/"):
     if status in {"ok", "fail"}:
         css = "notice-ok" if status == "ok" else "notice-fail"
         notice = f"<p class='notice {css}'>{escape(message)}</p>"
-    filter_script = """
-<script>
-  const storageKey = 'hermes-hidden-watch-groups';
-  const hiddenGroups = new Set(JSON.parse(localStorage.getItem(storageKey) || '[]'));
-  const normalize = (value) => value.toLocaleLowerCase('tr-TR');
-  const watchSearch = document.getElementById('watch-search');
-  const refreshWatchGroups = () => {
-    const searchText = normalize(watchSearch ? watchSearch.value.trim() : '');
-    document.querySelectorAll('[data-watch-group]').forEach((item) => {
-      const groupHidden = hiddenGroups.has(normalize(item.dataset.watchGroup || 'Diğer'));
-      const productName = normalize(item.dataset.watchSearch || '');
-      const searchHidden = Boolean(searchText) && !productName.includes(searchText);
-      item.hidden = groupHidden || searchHidden;
-    });
-    document.querySelectorAll('[data-watch-group-filter]').forEach((button) => {
-      const hidden = hiddenGroups.has(normalize(button.dataset.watchGroupFilter || 'Diğer'));
-      button.setAttribute('aria-pressed', String(!hidden));
-      button.title = hidden ? 'Grubu göster' : 'Grubu gizle';
-    });
-  };
-  document.querySelectorAll('[data-watch-group-filter]').forEach((button) => {
-    button.addEventListener('click', () => {
-      const group = normalize(button.dataset.watchGroupFilter || 'Diğer');
-      if (hiddenGroups.has(group)) hiddenGroups.delete(group); else hiddenGroups.add(group);
-      localStorage.setItem(storageKey, JSON.stringify([...hiddenGroups]));
-      refreshWatchGroups();
-    });
-  });
-  if (watchSearch) watchSearch.addEventListener('input', refreshWatchGroups);
-  refreshWatchGroups();
-
-  const savingOverlay = document.getElementById('saving-overlay');
-  const savingTitle = document.getElementById('saving-title');
-  const savingMessage = document.getElementById('saving-message');
-  document.querySelectorAll('form[data-settings-save]').forEach((form) => {
-    form.addEventListener('submit', (event) => {
-      const button = event.submitter;
-      const isDelete = button && button.dataset.deleteWatch === 'true';
-      if (button) {
-        button.disabled = true;
-        button.textContent = isDelete ? 'Siliniyor...' : 'Kaydediliyor...';
-      }
-      savingTitle.textContent = isDelete ? 'Takip siliniyor' : 'Ayarlar kaydediliyor';
-      savingMessage.textContent = isDelete
-        ? 'Takip kaydı kaldırılıyor. Hermes yeniden başlatılacak; hazır olduğunda ayarlara otomatik dönülecek.'
-        : 'Hermes değişiklikleri Home Assistant'a yazıyor. Ardından kısa bir yeniden başlatma yapılacak; hazır olduğunda ayarlara otomatik dönülecek.';
-      savingOverlay.hidden = false;
-    });
-  });
-</script>"""
     html = f"""<!doctype html>
 <html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Hermes Ayarlar</title><style>{SETTINGS_CSS}</style></head>
 <body><main><div class="hero"><h1>Hermes Ayarlar</h1><p>Mevcut takipleri güncelleme ve yeni takip ekleme işlemleri ayrı çalışır. Listelerde yalnızca adlar görünür; satıra tıklayınca ayrıntılar açılır.</p><div class="actions"><a class="button secondary" href="./">Ana ekran</a></div>{notice}<form method="post" action="./settings/save" data-settings-save>
@@ -613,7 +681,7 @@ def render_settings_page(path="/"):
 <input type="hidden" name="operation" value="update_existing">
 <div class="actions"><button class="button primary" type="submit">Güncellemeleri Kaydet</button><a class="button secondary" href="./">Vazgeç</a></div>
 </form><p class="footer-note">Kayıt sonrası Hermes yeniden başlatılır. Sayfa kısa süre yanıt vermeyebilir; 10-20 saniye sonra otomatik olarak hazır olur.</p>
-</div></main><div id="saving-overlay" class="saving-overlay" hidden><div class="saving-dialog"><div class="saving-spinner"></div><h2 id="saving-title">Ayarlar kaydediliyor</h2><p id="saving-message">Hermes değişiklikleri Home Assistant'a yazıyor. Ardından kısa bir yeniden başlatma yapılacak; hazır olduğunda ayarlara otomatik dönülecek.</p></div></div>{filter_script}</body></html>"""
+</div></main><div id="saving-overlay" class="saving-overlay" hidden><div class="saving-dialog"><div class="saving-spinner"></div><h2 id="saving-title">Ayarlar kaydediliyor</h2><p id="saving-message">Hermes değişiklikleri Home Assistant'a yazıyor. Ardından kısa bir yeniden başlatma yapılacak; hazır olduğunda ayarlara otomatik dönülecek.</p></div></div><script src="./settings.js" defer></script></body></html>"""
     return html.encode("utf-8")
 
 

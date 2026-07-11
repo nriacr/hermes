@@ -9,7 +9,13 @@ from .dashboard import (
     _reset_price_history,
     _send_test_notification,
 )
-from .settings_ui import handle_settings_save, render_settings_page
+from .settings_ui import (
+    handle_settings_save,
+    render_settings_page,
+    render_settings_restart_page,
+    render_settings_restart_script,
+    render_settings_script,
+)
 
 PUBLIC_WEB_PORT = 8100
 
@@ -39,6 +45,12 @@ class _PublicDashboardHandler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
 
+    def _redirect(self, target_path: str) -> None:
+        self.send_response(303)
+        self.send_header("Location", target_path)
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+
     def do_GET(self) -> None:
         path = urllib.parse.urlparse(self.path).path.rstrip("/")
         if path == "/health":
@@ -52,9 +64,28 @@ class _PublicDashboardHandler(BaseHTTPRequestHandler):
                 self._send_payload(404, b"not found\n", "text/plain; charset=utf-8")
                 return
             suffix = _public_suffix(self.path)
-            if suffix == "/settings":
+            base_path = _public_base_path(self.path)
+            if suffix == "/settings.js":
+                status = 200
+                payload = render_settings_script()
+                content_type = "application/javascript; charset=utf-8"
+            elif suffix == "/settings/restart.js":
+                status = 200
+                payload = render_settings_restart_script()
+                content_type = "application/javascript; charset=utf-8"
+            elif suffix == "/settings":
                 status = 200
                 payload = render_settings_page(self.path)
+                content_type = "text/html; charset=utf-8"
+            elif suffix == "/settings/restarting":
+                params = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+                message = params.get("msg", ["Ayarlar kaydedildi. Hermes yeniden başlatılıyor."])[0]
+                status = 200
+                payload = render_settings_restart_page(
+                    message,
+                    settings_path=f"{base_path}/settings",
+                    health_path=f"{base_path}/health",
+                )
                 content_type = "text/html; charset=utf-8"
             else:
                 status, payload = _render_public_page(self.path)
@@ -77,7 +108,10 @@ class _PublicDashboardHandler(BaseHTTPRequestHandler):
         suffix = _public_suffix(self.path)
         if suffix == "/settings/save":
             ok, message = handle_settings_save(body)
-            self._redirect_with_message(f"{base_path}/settings", "settings", ok, message)
+            if ok:
+                self._redirect(f"{base_path}/settings/restarting?msg={urllib.parse.quote(message)}")
+            else:
+                self._redirect_with_message(f"{base_path}/settings", "saved", False, message)
             return
         if suffix == "/reset-notifications":
             ok, message = _reset_notifications_async()
