@@ -36,7 +36,7 @@ from hermes.providers.hm import extract_offers as extract_hm_offers  # noqa: E40
 from hermes.providers.nordbron import extract_offer as extract_nordbron_offer  # noqa: E402
 from hermes.providers.zara import extract_offers as extract_zara_offers  # noqa: E402
 from hermes.search_amazon import extract_result_candidates  # noqa: E402
-from hermes.utils import detect_site_from_url  # noqa: E402
+from hermes.utils import detect_site_from_url, parse_decimal  # noqa: E402
 
 
 class HermesSmokeTests(unittest.TestCase):
@@ -152,7 +152,7 @@ class HermesSmokeTests(unittest.TestCase):
                 page = settings_ui.render_settings_page("/public/secret-token/settings").decode("utf-8")
 
                 self.assertIn('id="saving-overlay"', page)
-                self.assertEqual(page.count('method="post" action="./settings/save" data-settings-save'), 2)
+                self.assertEqual(page.count("data-settings-save"), 2)
                 self.assertIn("Ayarlar kaydediliyor", page)
             finally:
                 settings_ui.OPTIONS_PATH = original_options_path
@@ -201,6 +201,9 @@ class HermesSmokeTests(unittest.TestCase):
                 self.assertIn("data-watch-search='Mevcut'", page)
                 self.assertIn("class='button danger'", page)
                 self.assertIn("name='delete_watch_index'", page)
+                self.assertIn("name='update_watch_index'", page)
+                self.assertNotIn("Güncellemeleri Kaydet", page)
+                self.assertIn("value='100'", page)
             finally:
                 settings_ui.OPTIONS_PATH = original_options_path
                 settings_ui.STATE_PATH = original_state_path
@@ -219,6 +222,38 @@ class HermesSmokeTests(unittest.TestCase):
 
         self.assertEqual(message, "Silinecek takip kaydı silindi.")
         self.assertEqual([item["name"] for item in options["takip_edilenler"]], ["Kalacak"])
+
+    def test_card_update_only_changes_the_selected_watch(self):
+        options, message = settings_ui._apply_settings_operation(
+            {
+                "takip_edilenler": [
+                    {"name": "İlk", "group": "Diğer", "target_price": 100, "url_1": "https://www.amazon.com.tr/dp/B000000001"},
+                    {"name": "İkinci", "group": "Moda", "target_price": 200, "url_1": "https://www.zara.com/tr/tr/ornek-p03166301.html"},
+                ]
+            },
+            {
+                "operation": ["update_watch"],
+                "update_watch_index": ["1"],
+                "watches_1_name": ["İkinci"],
+                "watches_1_group": ["Teknoloji"],
+                "watches_1_target_price": ["1.500"],
+                "watches_1_url_1": ["https://www.zara.com/tr/tr/ornek-p03166301.html"],
+                "watches_1_notify_once_in_24H": ["1"],
+                "watches_1_active": ["1"],
+            },
+        )
+
+        self.assertIn("güncellendi", message)
+        self.assertEqual(options["takip_edilenler"][0]["target_price"], 100)
+        self.assertEqual(options["takip_edilenler"][1]["group"], "Teknoloji")
+        self.assertEqual(options["takip_edilenler"][1]["target_price"], 1500)
+
+    def test_displayed_prices_use_whole_lira_with_tl_suffix(self):
+        self.assertEqual(parse_decimal("1.500"), Decimal("1500"))
+        self.assertEqual(settings_ui._price_input_value("3000,0"), "3.000")
+        self.assertEqual(dashboard._display_tl("1.500,75"), "1.500 TL")
+        self.assertEqual(dashboard._display_tl("+125,90", signed=True), "+125 TL")
+        self.assertEqual(dashboard._display_tl_range("1.500,75 / 2.000,01"), "1.500 TL / 2.000 TL")
 
     def test_settings_mutations_preserve_required_supervisor_options(self):
         source = {

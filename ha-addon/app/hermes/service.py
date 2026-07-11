@@ -359,12 +359,12 @@ def save_price_summary(
                 "seller": row.seller,
                 "product_title": row.product_title,
                 "product_url": row.product_url,
-                "price": format_tl(row.price),
-                "target": format_tl(row.target_price),
-                "difference": format_signed_tl(row.difference),
-                "min_price": format_tl(row.min_price),
-                "max_price": format_tl(row.max_price),
-                "price_range": f"{format_tl(row.min_price)} / {format_tl(row.max_price)}",
+                "price": format_tl(row.price, with_currency=True),
+                "target": format_tl(row.target_price, with_currency=True),
+                "difference": format_signed_tl(row.difference, with_currency=True),
+                "min_price": format_tl(row.min_price, with_currency=True),
+                "max_price": format_tl(row.max_price, with_currency=True),
+                "price_range": f"{format_tl(row.min_price, with_currency=True)} / {format_tl(row.max_price, with_currency=True)}",
                 "is_target_hit": row.price <= row.target_price,
                 "search_group": row.search_group,
                 "search_group_label": row.search_group_label,
@@ -377,7 +377,7 @@ def save_price_summary(
                 "seller": row.seller,
                 "product_title": row.product_title,
                 "product_url": row.product_url,
-                "target": format_tl(row.target_price),
+                "target": format_tl(row.target_price, with_currency=True),
                 "reason": row.reason,
             }
             for idx, row in enumerate(sorted_stock, start=1)
@@ -394,7 +394,7 @@ def log_price_summary(rows: List[PriceSummaryRow]) -> None:
     no_width = 3
     seller_width = 12
     product_width = 40
-    price_width = 10
+    price_width = 13
     header = (
         f"{'No':>{no_width}} | "
         f"{log_cell('Satıcı', seller_width)} | "
@@ -420,9 +420,9 @@ def log_price_summary(rows: List[PriceSummaryRow]) -> None:
             f"{idx:>{no_width}} | "
             f"{log_cell(row.seller, seller_width)} | "
             f"{log_cell(row.product_title, product_width)} | "
-            f"{format_tl(row.price):>{price_width}} | "
-            f"{format_tl(row.target_price):>{price_width}} | "
-            f"{format_signed_tl(row.difference):>{price_width}}"
+            f"{format_tl(row.price, with_currency=True):>{price_width}} | "
+            f"{format_tl(row.target_price, with_currency=True):>{price_width}} | "
+            f"{format_signed_tl(row.difference, with_currency=True):>{price_width}}"
         )
 
 
@@ -1008,7 +1008,7 @@ def _fetch_hepsiburada_watch_offers(
             if dedupe_key in seen_offer_keys:
                 log(
                     "Hepsiburada varyasyon kopyasi atlandi: "
-                    f"{variant_label or offer_title} | {offer.seller or '-'} | {offer.price} TL"
+                    f"{variant_label or offer_title} | {offer.seller or '-'} | {format_tl(offer.price, with_currency=True)}"
                 )
                 continue
             seen_offer_keys.add(dedupe_key)
@@ -1103,7 +1103,7 @@ def _fetch_amazon_detail_result(session: requests.Session, candidate, config: He
     url = offer.url or candidate.url
     log(
         "Amazon arama fiyatı ürün detayından tamamlandı: "
-        f"{log_cell(title, 60)} | fiyat={offer.price} TL"
+        f"{log_cell(title, 60)} | fiyat={format_tl(offer.price, with_currency=True)}"
     )
     result = SearchResultItem(title=title, url=url, price=offer.price)
     if cache_key:
@@ -1171,8 +1171,8 @@ def check_once(config: HermesConfig) -> None:
                     )
                 )
                 log(
-                    f"Kontrol edildi: {seller} | {offer_display_name} | fiyat={offer.price} TL | "
-                    f"hedef={watch.target_price} TL"
+                    f"Kontrol edildi: {seller} | {offer_display_name} | fiyat={format_tl(offer.price, with_currency=True)} | "
+                    f"hedef={format_tl(watch.target_price, with_currency=True)}"
                 )
 
                 alert_sent = False
@@ -1181,8 +1181,8 @@ def check_once(config: HermesConfig) -> None:
                     message = (
                         f"Site: {seller}\n"
                         f"{offer_display_name}\n"
-                        f"Guncel fiyat: {offer.price} TL{seller_note}\n"
-                        f"Hedef fiyat: {watch.target_price} TL"
+                        f"Guncel fiyat: {format_tl(offer.price, with_currency=True)}{seller_note}\n"
+                        f"Hedef fiyat: {format_tl(watch.target_price, with_currency=True)}"
                     )
                     send_pushover(
                         session,

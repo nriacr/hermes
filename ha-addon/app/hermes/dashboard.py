@@ -5,7 +5,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta
-from decimal import Decimal, InvalidOperation
+from decimal import ROUND_DOWN, Decimal, InvalidOperation
 from html import escape
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -120,6 +120,27 @@ def _parse_turkish_money(value):
         return Decimal(text)
     except InvalidOperation:
         return None
+
+
+def _display_tl(value, signed=False):
+    text = str(value or "").strip()
+    amount = _parse_turkish_money(text)
+    if amount is None:
+        return text or "-"
+    sign = ""
+    if signed:
+        sign = "-" if amount < 0 or text.startswith("-") else "+"
+    whole_lira = abs(amount).quantize(Decimal("1"), rounding=ROUND_DOWN)
+    formatted = f"{whole_lira:,}".replace(",", ".")
+    return f"{sign}{formatted} TL"
+
+
+def _display_tl_range(value, fallback_min="-", fallback_max="-"):
+    raw_range = str(value or f"{fallback_min} / {fallback_max}").strip()
+    parts = [part.strip() for part in raw_range.split("/") if part.strip()]
+    if not parts:
+        return "-"
+    return " / ".join(_display_tl(part) for part in parts)
 
 
 def _relative_time_text(value) -> str:
@@ -505,10 +526,16 @@ def _render_table_row(row):
         )
     else:
         label = f"<span>{product_title}</span>"
-    price = escape(str(row.get("price", "-")))
-    target = escape(str(row.get("target", "-")))
-    difference = escape(str(row.get("difference", "-")))
-    price_range = escape(str(row.get("price_range") or f"{row.get('min_price', '-')} / {row.get('max_price', '-') }"))
+    price = escape(_display_tl(row.get("price", "-")))
+    target = escape(_display_tl(row.get("target", "-")))
+    difference = escape(_display_tl(row.get("difference", "-"), signed=True))
+    price_range = escape(
+        _display_tl_range(
+            row.get("price_range"),
+            row.get("min_price", "-"),
+            row.get("max_price", "-"),
+        )
+    )
     row_classes = [_site_theme_class(seller_text)]
     if _is_target_hit(row):
         row_classes.append("deal-row")
@@ -600,7 +627,7 @@ def _render_stock_row(row):
         )
     else:
         label = f"<span>{product_title}</span>"
-    target = escape(str(row.get("target", "-")))
+    target = escape(_display_tl(row.get("target", "-")))
     reason = escape(repair_mojibake(row.get("reason") or "Stokta yok"))
     row_class = f' class="{_site_theme_class(seller_text)} stock-missing-row"'
     return (

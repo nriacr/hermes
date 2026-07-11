@@ -1358,7 +1358,7 @@ def _detail_candidate(soup) -> Optional[HepsiburadaCandidate]:
 
 
 def _log_candidates(candidates: list[HepsiburadaCandidate]) -> None:
-    preview = " | ".join(f"{item.seller}={format_tl(item.price)}" for item in candidates[:8])
+    preview = " | ".join(f"{item.seller}={format_tl(item.price, with_currency=True)}" for item in candidates[:8])
     log(f"Hepsiburada teklifleri: {preview}")
 
 

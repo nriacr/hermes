@@ -11,7 +11,7 @@ from .config_loader import DEFAULT_TELEGRAM_CHANNELS
 from .constants import OPTIONS_PATH, SITE_HM, SITE_ZARA, STATE_PATH, SUMMARY_PATH
 from .logging_utils import log
 from .storage import load_json, save_json
-from .utils import detect_site_from_url, parse_bool, site_label, watch_name_required_for_url
+from .utils import detect_site_from_url, format_tl, parse_bool, parse_decimal, site_label, watch_name_required_for_url
 
 ADDON_SLUG = "hermes"
 SUPERVISOR_BASE_URL = "http://supervisor"
@@ -25,7 +25,7 @@ h1 { margin:0 0 8px; font-size:34px; letter-spacing:-.04em; } h2 { margin:24px 0
 .actions { display:flex; flex-wrap:wrap; gap:10px; margin:18px 0; } .button { display:inline-flex; align-items:center; justify-content:center; min-height:40px; padding:0 14px; border-radius:13px; border:1px solid transparent; text-decoration:none; font-weight:800; font-size:13px; cursor:pointer; }
 .button.primary { color:#14172a; background:linear-gradient(135deg,var(--accent),var(--accent2)); } .button.secondary { color:var(--text); background:#2a2f4d; border-color:var(--line); } .button.danger { color:#fff5f7; background:#b9364d; border-color:#ed7288; } .button.danger:hover { background:#cf465f; }
 .notice { margin:14px 0; padding:11px 13px; border-radius:12px; font-weight:700; font-size:13px; } .notice-ok { color:#c6f7e6; background:rgba(127,220,184,.14); border:1px solid rgba(127,220,184,.38); } .notice-fail { color:#ffd8e3; background:rgba(255,156,181,.14); border:1px solid rgba(255,156,181,.38); }
-.settings-section { margin-top:18px; border:1px solid var(--line); border-radius:18px; padding:16px; background:var(--card); } details { border:1px solid var(--line); border-radius:14px; background:#181c32; margin:9px 0; overflow:hidden; } summary { cursor:pointer; padding:13px 14px; font-weight:900; color:#f0f2ff; list-style:none; } summary::-webkit-details-marker { display:none; } summary::before { content:'\u25b8'; display:inline-block; margin-right:8px; color:var(--accent2); } details[open] summary::before { transform:rotate(90deg); } .watch-search { display:grid; gap:6px; max-width:440px; margin:0 0 12px; color:var(--muted); font-size:12px; font-weight:750; } .watch-search input { width:100%; min-height:40px; border:1px solid var(--line); border-radius:11px; padding:10px 11px; background:#101428; color:var(--text); font:inherit; } .watch-group-filters { display:flex; flex-wrap:wrap; gap:8px; margin:0 0 12px; } .watch-group-filter { min-height:34px; border:1px solid var(--line); border-radius:999px; padding:0 12px; background:#2a2f4d; color:var(--text); font:700 12px inherit; cursor:pointer; } .watch-group-filter[aria-pressed='false'] { color:var(--muted); background:#15182d; opacity:.72; text-decoration:line-through; } .watch-group-filter:hover { border-color:var(--accent2); }
+.settings-section { margin-top:18px; border:1px solid var(--line); border-radius:18px; padding:16px; background:var(--card); } details { border:1px solid var(--line); border-radius:14px; background:#181c32; margin:9px 0; overflow:hidden; } summary { cursor:pointer; padding:13px 14px; font-weight:900; color:#f0f2ff; list-style:none; } summary::-webkit-details-marker { display:none; } summary::before { content:'\u25b8'; display:inline-block; margin-right:8px; color:var(--accent2); } details[open] summary::before { transform:rotate(90deg); } .watch-tools { display:grid; gap:12px; } .watch-search { display:grid; gap:6px; max-width:440px; margin:0; color:var(--muted); font-size:12px; font-weight:750; } .watch-search input { width:100%; min-height:40px; border:1px solid var(--line); border-radius:11px; padding:10px 11px; background:#101428; color:var(--text); font:inherit; } .watch-group-filters { display:flex; flex-wrap:wrap; gap:8px; margin:0; } .watch-group-filter { min-height:34px; border:1px solid var(--line); border-radius:999px; padding:0 12px; background:#2a2f4d; color:var(--text); font:700 12px inherit; cursor:pointer; } .watch-group-filter[aria-pressed='false'] { color:var(--muted); background:#15182d; opacity:.72; text-decoration:line-through; } .watch-group-filter:hover { border-color:var(--accent2); } .watch-actions { display:flex; align-items:center; gap:8px; min-height:40px; }
 .saving-overlay { position:fixed; inset:0; z-index:20; display:grid; place-items:center; padding:20px; background:rgba(7,9,19,.78); backdrop-filter:blur(5px); } .saving-overlay[hidden] { display:none; } .saving-dialog { width:min(100%,430px); border:1px solid rgba(142,214,210,.45); border-radius:18px; padding:22px; background:#1e2139; box-shadow:0 22px 50px rgba(0,0,0,.5); } .saving-dialog h2 { margin:0 0 9px; font-size:20px; } .saving-dialog p { font-size:14px; } .saving-spinner { width:28px; height:28px; margin:0 0 14px; border:4px solid rgba(142,214,210,.22); border-top-color:var(--accent2); border-radius:50%; animation:hermes-spin .8s linear infinite; } @keyframes hermes-spin { to { transform:rotate(360deg); } }
 .form-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:12px; padding:0 14px 14px; } label { display:grid; gap:6px; color:var(--muted); font-size:12px; font-weight:700; } input[type='text'], input[type='number'], input[type='url'], select, textarea { width:100%; min-height:40px; border-radius:11px; border:1px solid var(--line); background:#101428; color:var(--text); padding:10px 11px; font-size:13px; font-family:inherit; } textarea { resize:vertical; line-height:1.35; }
 .checkbox-row { display:flex; align-items:center; gap:9px; min-height:40px; color:var(--text); } .danger { color:#ffd8e3; } .footer-note { margin-top:14px; border-left:4px solid #b79ad6; padding:12px 14px; background:rgba(183,154,214,.15); border-radius:10px; font-size:13px; }
@@ -133,6 +133,23 @@ def _number(value):
         return int(text) if text.isdigit() else float(text)
     except ValueError:
         return text
+
+
+def _price_input_value(value):
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    try:
+        return format_tl(parse_decimal(text))
+    except Exception:  # noqa: BLE001
+        return text
+
+
+def _price_from_form(value):
+    try:
+        return int(parse_decimal(value))
+    except Exception as exc:  # noqa: BLE001
+        raise ValueError(f"Hedef fiyat geçersiz: {value!r}") from exc
 
 
 def _field(prefix, name, label, value="", field_type="text", required=False):
@@ -269,11 +286,6 @@ def _watch_display_name(item, index, known_titles):
     return f"Takip {index + 1}"
 
 
-def _details(title, prefix, inner, open_when_empty=False):
-    open_attr = " open" if open_when_empty else ""
-    return f"<details{open_attr}><summary>{escape(title)}</summary><div class='form-grid'>{inner}</div></details>"
-
-
 def _watch_form(item, index, is_new=False, groups=None, known_titles=None):
     prefix = f"watches_{index}_"
     group = _watch_group(item)
@@ -293,7 +305,7 @@ def _watch_form(item, index, is_new=False, groups=None, known_titles=None):
         [
             _field(prefix, "name", "Ad (ürün linklerinde boş bırakılabilir)", item.get("name", "")),
             _select(prefix, "group", "Grup", selected_group, group_choices),
-            _field(prefix, "target_price", "Hedef fiyat", item.get("target_price", ""), "number", required=not is_new),
+            _field(prefix, "target_price", "Hedef fiyat (TL)", _price_input_value(item.get("target_price", ""))),
             _field(prefix, "size", "Beden", item.get("size", "")),
             *[
                 _field(
@@ -310,31 +322,33 @@ def _watch_form(item, index, is_new=False, groups=None, known_titles=None):
             _checkbox(prefix, "notify_once_in_24H", "24 saat içinde aynı bildirimi tekrar gönderme", notify_once),
             _checkbox(prefix, "active", "Aktif", active),
             (
-                f"<button class='button danger' type='submit' name='delete_watch_index' value='{index}' "
-                "data-delete-watch='true'>Sil</button>"
-                if not is_new
-                else ""
+                "<div class='watch-actions'>"
+                "<button class='button primary' type='submit'>Yeni Takibi Ekle</button>"
+                "</div>"
+                if is_new
+                else (
+                    "<div class='watch-actions'>"
+                    f"<button class='button primary' type='submit' name='update_watch_index' value='{index}' "
+                    "data-update-watch='true'>Güncelle</button>"
+                    f"<button class='button danger' type='submit' name='delete_watch_index' value='{index}' "
+                    "data-delete-watch='true' formnovalidate>Sil</button>"
+                    "</div>"
+                )
             ),
         ]
     )
     group_attribute = "" if is_new else f" data-watch-group='{escape(group, quote=True)}'"
     search_attribute = "" if is_new else f" data-watch-search='{escape(display_name, quote=True)}'"
-    return (
-        f"<details{group_attribute}{search_attribute}{' open' if is_new else ''}>"
+    details = (
+        f"<details{group_attribute}{search_attribute}>"
         f"<summary>{escape(title)}</summary><div class='form-grid'>{inner}</div></details>"
     )
-
-
-def _section(title, items, renderer, section_name, include_new=False):
-    safe_items = _as_list(items)
-    rows = [renderer(item if isinstance(item, dict) else {}, index) for index, item in enumerate(safe_items)]
-    if include_new:
-        rows.append(renderer({}, len(safe_items), is_new=True))
-    count = len(safe_items) + (1 if include_new else 0)
+    if is_new:
+        return details
     return (
-        f"<section class='settings-section'><h2>{escape(title)}</h2>"
-        f"<input type='hidden' name='{escape(section_name)}_count' value='{count}'>"
-        f"{''.join(rows)}</section>"
+        "<form method='post' action='./settings/save' data-settings-save>"
+        "<input type='hidden' name='operation' value='update_watch'>"
+        f"{details}</form>"
     )
 
 
@@ -371,19 +385,21 @@ def _watch_section(items, configured_groups, known_titles=None):
         groups=groups,
         known_titles=known_titles,
     )
+    watches_html = "".join(renderer(item if isinstance(item, dict) else {}, index) for index, item in enumerate(safe_items))
     return (
-        search_html
-        + filters_html
-        + _section("Takip edilenler", safe_items, renderer, "watches")
-        + "<p class='footer-note'>Grup seçeneklerini Home Assistant Configuration ekranındaki <strong>gruplar</strong> listesinde tanımlayabilirsin. Buradan seçilen grup yalnızca düzenleme ve filtreleme içindir; takip kurallarını değiştirmez.</p>"
+        "<section class='settings-section watch-tools'>"
+        f"{search_html}{filters_html}</section>"
+        "<section class='settings-section'><h2>Takip edilenler</h2>"
+        f"{watches_html}</section>"
     )
 
 
 def _new_watch_section(groups, known_titles=None):
     return (
-        "<section class='settings-section'><h2>Yeni takip ekle</h2>"
-        "<input type='hidden' name='watches_count' value='1'>"
+        "<section class='settings-section'><form method='post' action='./settings/save' data-settings-save>"
+        "<input type='hidden' name='operation' value='add_watch'><input type='hidden' name='watches_count' value='1'>"
         f"{_watch_form({}, 0, is_new=True, groups=groups, known_titles=known_titles)}"
+        "</form>"
         "</section>"
     )
 
@@ -426,59 +442,61 @@ def _watch_form_context(index, name, urls):
     return f"Takip {index + 1} ({identity})"
 
 
+def _build_watch(form, index):
+    prefix = f"watches_{index}_"
+    name = _first(form, prefix + "name")
+    group = _first(form, prefix + "group")
+    target = _first(form, prefix + "target_price")
+    size = _first(form, prefix + "size")
+    max_items = _first(form, prefix + "max_items_to_scan")
+    interval = _first(form, prefix + "check_interval_minutes")
+    urls = []
+    for field_name in WATCH_URL_FIELDS:
+        url = _first(form, prefix + field_name)
+        if url and url not in urls:
+            urls.append(url)
+    if not group and any(detect_site_from_url(url) in {SITE_ZARA, SITE_HM} for url in urls):
+        group = "Moda"
+    if not any([name, target, size, *urls]):
+        return None
+    context = _watch_form_context(index, name, urls)
+    if not target or not urls:
+        missing = []
+        if not target:
+            missing.append("hedef fiyat")
+        if not urls:
+            missing.append("en az bir link")
+        raise ValueError(f"{context}: {', '.join(missing)} alanı zorunlu.")
+    if not name and any(watch_name_required_for_url(url) for url in urls):
+        raise ValueError(
+            f"{context}: bu bağlantı bir arama sayfası. Arama sonuçlarını doğru filtrelemek için "
+            "Ad alanı zorunlu; örneğin ürün modelini yazmalısın."
+        )
+    item = {
+        "name": name,
+        "group": group,
+        "target_price": _price_from_form(target),
+        "notify_once_in_24H": _bool_from_form(form, prefix + "notify_once_in_24H"),
+        "active": _bool_from_form(form, prefix + "active"),
+    }
+    if size:
+        item["size"] = size
+    for url_index, url in enumerate(urls, start=1):
+        item[f"url_{url_index}"] = url
+    if max_items:
+        item["max_items_to_scan"] = _number(max_items)
+    if interval:
+        item["check_interval_minutes"] = _number(interval)
+    return item
+
+
 def _build_watches(form):
     watches = []
     count = int(_first(form, "watches_count", "0") or 0)
     for index in range(count):
-        prefix = f"watches_{index}_"
-        if _bool_from_form(form, prefix + "delete"):
-            continue
-        name = _first(form, prefix + "name")
-        group = _first(form, prefix + "group")
-        target = _first(form, prefix + "target_price")
-        size = _first(form, prefix + "size")
-        max_items = _first(form, prefix + "max_items_to_scan")
-        interval = _first(form, prefix + "check_interval_minutes")
-        urls = []
-        for field_name in WATCH_URL_FIELDS:
-            url = _first(form, prefix + field_name)
-            if url and url not in urls:
-                urls.append(url)
-        if not group and any(detect_site_from_url(url) in {SITE_ZARA, SITE_HM} for url in urls):
-            group = "Moda"
-        # The always-visible new-watch form sends default values such as max_items=24.
-        # A row without an actual product detail must never block saving existing watches.
-        if not any([name, target, size, *urls]):
-            continue
-        context = _watch_form_context(index, name, urls)
-        if not target or not urls:
-            missing = []
-            if not target:
-                missing.append("hedef fiyat")
-            if not urls:
-                missing.append("en az bir link")
-            raise ValueError(f"{context}: {', '.join(missing)} alanı zorunlu.")
-        if not name and any(watch_name_required_for_url(url) for url in urls):
-            raise ValueError(
-                f"{context}: bu bağlantı bir arama sayfası. Arama sonuçlarını doğru filtrelemek için "
-                "Ad alanı zorunlu; örneğin ürün modelini yazmalısın."
-            )
-        item = {
-            "name": name,
-            "group": group,
-            "target_price": _number(target),
-            "notify_once_in_24H": _bool_from_form(form, prefix + "notify_once_in_24H"),
-            "active": _bool_from_form(form, prefix + "active"),
-        }
-        if size:
-            item["size"] = size
-        for url_index, url in enumerate(urls, start=1):
-            item[f"url_{url_index}"] = url
-        if max_items:
-            item["max_items_to_scan"] = _number(max_items)
-        if interval:
-            item["check_interval_minutes"] = _number(interval)
-        watches.append(item)
+        item = _build_watch(form, index)
+        if item:
+            watches.append(item)
     return watches
 
 
@@ -490,6 +508,7 @@ def _apply_settings_operation(existing_options, form):
     options = _options_for_save(source_options)
     operation = _first(form, "operation", "update_existing")
     delete_index = _first(form, "delete_watch_index")
+    update_index = _first(form, "update_watch_index")
 
     if delete_index != "":
         try:
@@ -502,6 +521,20 @@ def _apply_settings_operation(existing_options, form):
         removed_name = str(removed.get("name") or "").strip() or f"Takip {index + 1}"
         options["takip_edilenler"] = existing_watches
         return options, f"{removed_name} takip kaydı silindi."
+
+    if update_index != "":
+        try:
+            index = int(update_index)
+        except ValueError as exc:
+            raise ValueError("Güncellenecek takip kaydı geçersiz.") from exc
+        if index < 0 or index >= len(existing_watches):
+            raise ValueError("Güncellenecek takip kaydı bulunamadı.")
+        updated = _build_watch(form, index)
+        if not updated:
+            raise ValueError(f"Takip {index + 1}: hedef fiyat ve en az bir link alanı zorunlu.")
+        existing_watches[index] = updated
+        options["takip_edilenler"] = existing_watches
+        return options, f"{_watch_display_name(updated, index, {})} takip kaydı güncellendi."
 
     if operation == "update_existing":
         options["takip_edilenler"] = _build_watches(form)
@@ -516,6 +549,10 @@ def _apply_settings_operation(existing_options, form):
             raise ValueError("Yeni takip ekleme formunda yalnızca bir kayıt bulunmalı.")
         options["takip_edilenler"] = existing_watches + new_watches
         return options, "Yeni takip kaydı eklendi."
+
+    if operation == "update_telegram":
+        _update_telegram_options(options, form)
+        return options, "Telegram ayarları güncellendi."
 
     raise ValueError("Bilinmeyen ayar kaydetme işlemi.")
 
@@ -671,16 +708,12 @@ def render_settings_page(path="/"):
         notice = f"<p class='notice {css}'>{escape(message)}</p>"
     html = f"""<!doctype html>
 <html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Hermes Ayarlar</title><style>{SETTINGS_CSS}</style></head>
-<body><main><div class="hero"><h1>Hermes Ayarlar</h1><p>Mevcut takipleri güncelleme ve yeni takip ekleme işlemleri ayrı çalışır. Listelerde yalnızca adlar görünür; satıra tıklayınca ayrıntılar açılır.</p><div class="actions"><a class="button secondary" href="./">Ana ekran</a></div>{notice}<form method="post" action="./settings/save" data-settings-save>
+<body><main><div class="hero"><h1>Hermes Ayarlar</h1><p>Her takip kartı kendi başına güncellenir veya silinir.</p><div class="actions"><a class="button secondary" href="./">Ana ekran</a></div>{notice}
 {_new_watch_section(groups, known_titles)}
-<input type="hidden" name="operation" value="add_watch">
-<div class="actions"><button class="button primary" type="submit">Yeni Takibi Ekle</button></div>
-</form><form method="post" action="./settings/save" data-settings-save>
 {_watch_section(options.get("takip_edilenler"), groups, known_titles)}
-{_telegram_section(options)}
-<input type="hidden" name="operation" value="update_existing">
-<div class="actions"><button class="button primary" type="submit">Güncellemeleri Kaydet</button><a class="button secondary" href="./">Vazgeç</a></div>
-</form><p class="footer-note">Kayıt sonrası Hermes yeniden başlatılır. Sayfa kısa süre yanıt vermeyebilir; 10-20 saniye sonra otomatik olarak hazır olur.</p>
+<form method="post" action="./settings/save" data-settings-save>{_telegram_section(options)}
+<input type="hidden" name="operation" value="update_telegram">
+<div class="actions"><button class="button primary" type="submit">Telegram Ayarlarını Güncelle</button></div></form>
 </div></main><div id="saving-overlay" class="saving-overlay" hidden><div class="saving-dialog"><div class="saving-spinner"></div><h2 id="saving-title">Ayarlar kaydediliyor</h2><p id="saving-message">Hermes değişiklikleri Home Assistant'a yazıyor. Ardından kısa bir yeniden başlatma yapılacak; hazır olduğunda ayarlara otomatik dönülecek.</p></div></div><script src="./settings.js" defer></script></body></html>"""
     return html.encode("utf-8")
 

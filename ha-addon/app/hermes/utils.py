@@ -2,7 +2,7 @@ import random
 import re
 import unicodedata
 from datetime import datetime, timezone
-from decimal import Decimal, InvalidOperation
+from decimal import ROUND_DOWN, Decimal, InvalidOperation
 from html import unescape
 from typing import Any, Dict
 from urllib.parse import parse_qs, urlparse
@@ -64,6 +64,10 @@ def parse_decimal(raw_value: str) -> Decimal:
             cleaned = cleaned.replace(",", "")
     elif "," in cleaned:
         cleaned = cleaned.replace(".", "").replace(",", ".")
+    elif "." in cleaned:
+        groups = cleaned.split(".")
+        if len(groups) > 1 and all(len(group) == 3 for group in groups[1:]):
+            cleaned = "".join(groups)
     try:
         return Decimal(cleaned)
     except InvalidOperation as exc:
@@ -116,14 +120,15 @@ def normalize_item_key(*parts: str) -> str:
     return normalize_key("_".join(parts))
 
 
-def format_tl(value: Decimal) -> str:
-    formatted = f"{value:,.2f}"
-    return formatted.replace(",", "_").replace(".", ",").replace("_", ".")
+def format_tl(value: Decimal, with_currency: bool = False) -> str:
+    amount = Decimal(str(value)).quantize(Decimal("1"), rounding=ROUND_DOWN)
+    formatted = f"{amount:,}".replace(",", ".")
+    return f"{formatted} TL" if with_currency else formatted
 
 
-def format_signed_tl(value: Decimal) -> str:
+def format_signed_tl(value: Decimal, with_currency: bool = False) -> str:
     sign = "+" if value >= 0 else "-"
-    return f"{sign}{format_tl(abs(value))}"
+    return f"{sign}{format_tl(abs(value), with_currency=with_currency)}"
 
 
 def shorten_log_text(value: str, max_length: int = 90) -> str:
