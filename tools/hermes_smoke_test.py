@@ -61,6 +61,32 @@ class HermesSmokeTests(unittest.TestCase):
         self.assertFalse(18 - 14 >= service.summary_drop_threshold(18))
         self.assertTrue(18 - 11 >= service.summary_drop_threshold(18))
 
+    def test_summary_drop_alert_requires_five_consecutive_cycles(self):
+        meta = {}
+        for expected_streak in range(1, service.SUMMARY_DROP_CONSECUTIVE_CYCLES + 1):
+            streak = service.next_summary_drop_streak(meta, True)
+            self.assertEqual(streak, expected_streak)
+            meta["summary_drop_consecutive_cycles"] = streak
+
+        self.assertEqual(service.next_summary_drop_streak(meta, False), 0)
+
+    def test_empty_amazon_search_result_is_not_an_operational_error(self):
+        self.assertTrue(
+            service.is_normal_amazon_search_result_absence(
+                HermesError("Amazon arama sayfasında ürün adına uyan fiyatlı ürün bulunamadı.")
+            )
+        )
+        self.assertTrue(
+            service.is_normal_amazon_search_result_absence(
+                HermesError("Amazon arama sayfasında okunabilir fiyat bulunamadı.")
+            )
+        )
+        self.assertFalse(
+            service.is_normal_amazon_search_result_absence(
+                HermesError("Amazon bot korumasi nedeniyle captcha sayfasi dondu.")
+            )
+        )
+
     def test_dashboard_collapses_multi_result_search_groups(self):
         rows = [
             {

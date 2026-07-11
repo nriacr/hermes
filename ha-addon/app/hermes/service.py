@@ -81,6 +81,7 @@ PRODUCT_MISSING_PRICE_MARKERS = (
 # only when both the absolute loss and the relative loss are meaningful.
 SUMMARY_DROP_MIN_DELTA = 6
 SUMMARY_DROP_RATIO_DIVISOR = 3
+SUMMARY_DROP_CONSECUTIVE_CYCLES = 5
 SUMMARY_DROP_ALERT_COOLDOWN_SECONDS = 60 * 60
 SUMMARY_DROP_QUIET_START_HOUR = 22
 SUMMARY_DROP_QUIET_END_HOUR = 8
@@ -89,6 +90,10 @@ AMAZON_EMPTY_ALERT_MIN_FAILED_LINKS = 3
 PRICE_HISTORY_SPIKE_RATIO = Decimal("5")
 PRICE_HISTORY_SPIKE_ABSOLUTE_TL = Decimal("50000")
 PRICE_HISTORY_KEYS = ("min_price", "max_price", "min_price_at", "max_price_at")
+AMAZON_NORMAL_EMPTY_SEARCH_MARKERS = (
+    "amazon arama sayfasinda urun adina uyan fiyatli urun bulunamadi",
+    "amazon arama sayfasinda okunabilir fiyat bulunamadi",
+)
 
 
 def raise_if_age_verification(html: str) -> None:
@@ -627,6 +632,17 @@ def should_reset_product_alert_on_error(exc: Exception) -> bool:
     return any(marker in normalized for marker in PRODUCT_MISSING_PRICE_MARKERS)
 
 
+def is_normal_amazon_search_result_absence(exc: Exception) -> bool:
+    """Return true only for a valid Amazon search page with no priced match.
+
+    An empty result set is common for marketplace/warehouse searches and is not
+    an operational failure. Access, protection and parser errors intentionally
+    stay outside this classification so they remain visible to the user.
+    """
+    normalized = normalize_offer_text(str(exc)).rstrip(".")
+    return any(marker in normalized for marker in AMAZON_NORMAL_EMPTY_SEARCH_MARKERS)
+
+
 def reset_product_alert_after_missing(
     state_entry: Dict[str, Any], seller: str, product_name: str
 ) -> Dict[str, Any]:
@@ -665,6 +681,16 @@ def summary_drop_cooldown_passed(meta: Dict[str, Any], now) -> bool:
     return elapsed >= SUMMARY_DROP_ALERT_COOLDOWN_SECONDS
 
 
+def next_summary_drop_streak(meta: Dict[str, Any], is_unexpected_drop: bool) -> int:
+    if not is_unexpected_drop:
+        return 0
+    previous = meta.get("summary_drop_consecutive_cycles", 0)
+    try:
+        return max(0, int(previous)) + 1
+    except (TypeError, ValueError):
+        return 1
+
+
 def amazon_empty_alert_cooldown_passed(meta: Dict[str, Any], now) -> bool:
     last_alerted = parse_iso_datetime(meta.get("last_amazon_empty_search_alert_at"))
     if not last_alerted:
@@ -683,6 +709,7 @@ def maybe_alert_summary_drop(
         meta["summary_config_signature"] = signature
         meta["summary_expected_row_count"] = current_count
         meta["summary_last_row_count"] = current_count
+        meta["summary_drop_consecutive_cycles"] = 0
         state["_meta"] = meta
         log(f"Özet takip referansı güncellendi: beklenen_urun={current_count}")
         return
@@ -692,21 +719,29 @@ def maybe_alert_summary_drop(
     drop_count = expected_count - current_count
     is_unexpected_drop = expected_count > 0 and drop_count >= threshold
     now = local_now()
+    drop_streak = next_summary_drop_streak(meta, is_unexpected_drop)
+    meta["summary_drop_consecutive_cycles"] = drop_streak
 
     if is_unexpected_drop:
-        if summary_drop_quiet_hours(now):
+        if drop_streak < SUMMARY_DROP_CONSECUTIVE_CYCLES:
             log(
-                "Özet ürün sayısı beklenenden düşük, sessiz saat nedeniyle bildirim atlandı: "
+                "Özet ürün sayısı beklenenden düşük, kalıcılık izleniyor: "
+                f"beklenen={expected_count} | bu_tur={current_count} | fark={drop_count} | "
+                f"tur={drop_streak}/{SUMMARY_DROP_CONSECUTIVE_CYCLES}"
+            )
+        elif summary_drop_quiet_hours(now):
+            log(
+                "Özet ürün sayısı düşüşü 5 tur sürdü, sessiz saat nedeniyle bildirim atlandı: "
                 f"beklenen={expected_count} | bu_tur={current_count} | fark={drop_count}"
             )
         elif not summary_drop_cooldown_passed(meta, now):
             log(
-                "Özet ürün sayısı beklenenden düşük, 1 saatlik sınır nedeniyle bildirim atlandı: "
+                "Özet ürün sayısı düşüşü 5 tur sürdü, 1 saatlik sınır nedeniyle bildirim atlandı: "
                 f"beklenen={expected_count} | bu_tur={current_count} | fark={drop_count}"
             )
         elif config.pushover_user_key and config.pushover_api_token:
             message = (
-                "Özet tablodaki ürün sayısı beklenenden fazla düştü.\n"
+                "Özet tablodaki ürün sayısı 5 ardışık tur boyunca beklenenden fazla düştü.\n"
                 f"Beklenen ürün sayısı: {expected_count}\n"
                 f"Bu tur bulunan ürün sayısı: {current_count}\n"
                 f"Fark: -{drop_count}\n"
@@ -725,7 +760,7 @@ def maybe_alert_summary_drop(
                 )
                 meta["last_summary_drop_alert_at"] = utc_now()
                 log(
-                    "Özet ürün sayısı uyarısı gönderildi: "
+                    "Özet ürün sayısı uyarısı gönderildi, düşüş 5 tur sürdü: "
                     f"beklenen={expected_count} | bu_tur={current_count} | fark={drop_count}"
                 )
             except Exception as exc:  # noqa: BLE001
@@ -1254,15 +1289,19 @@ def check_once(config: HermesConfig) -> None:
             failed["last_out_of_stock_at"] = utc_now()
             state[watch_key] = failed
         except Exception as exc:  # noqa: BLE001
-            log(f"Hata: {seller} | {watch.url} | {exc}")
+            normal_empty_search = is_amazon_search_watch and is_normal_amazon_search_result_absence(exc)
+            if normal_empty_search:
+                log(f"Amazon arama sonucu boş: {watch.name or watch.url} | {exc}")
+            else:
+                log(f"Hata: {seller} | {watch.url} | {exc}")
             if watch.site == SITE_AMAZON and is_amazon_protection_error(exc):
                 note_amazon_protection(state, watch_key, watch.name or watch.url, exc)
-            if is_amazon_search_watch:
+            if is_amazon_search_watch and not normal_empty_search:
                 amazon_empty_events.append({"page": watch.name, "failed_links": 1, "full_empty": True})
             failed = dict(state_entry)
             if should_reset_product_alert_on_error(exc):
                 failed = reset_product_alert_after_missing(failed, seller, watch.name or watch.url)
-            if is_amazon_search_watch and should_send_search_error_notification(failed):
+            if is_amazon_search_watch and not normal_empty_search and should_send_search_error_notification(failed):
                 try:
                     message = (
                         f"Amazon arama: {watch.name}\n"
@@ -1289,8 +1328,8 @@ def check_once(config: HermesConfig) -> None:
             failed["configured_url"] = watch.url
             failed["size"] = watch.size
             failed["offer_keys"] = []
-            failed["last_error"] = str(exc)
-            failed["last_error_status"] = getattr(exc, "status_code", None)
+            failed["last_error"] = None if normal_empty_search else str(exc)
+            failed["last_error_status"] = None if normal_empty_search else getattr(exc, "status_code", None)
             failed["last_checked_at"] = utc_now()
             state[watch_key] = failed
 
