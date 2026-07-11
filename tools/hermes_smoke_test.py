@@ -228,6 +228,7 @@ class HermesSmokeTests(unittest.TestCase):
                 self.assertIn("class='button danger'", page)
                 self.assertIn("name='delete_watch_index'", page)
                 self.assertIn("name='update_watch_index'", page)
+                self.assertIn("name='watch_index'", page)
                 self.assertNotIn("Güncellemeleri Kaydet", page)
                 self.assertIn("value='100'", page)
             finally:
@@ -273,6 +274,30 @@ class HermesSmokeTests(unittest.TestCase):
         self.assertEqual(options["takip_edilenler"][0]["target_price"], 100)
         self.assertEqual(options["takip_edilenler"][1]["group"], "Teknoloji")
         self.assertEqual(options["takip_edilenler"][1]["target_price"], 1500)
+
+    def test_card_update_uses_hidden_index_when_submit_button_index_is_missing(self):
+        options, message = settings_ui._apply_settings_operation(
+            {
+                "takip_edilenler": [
+                    {"name": "İlk", "group": "Diğer", "target_price": 100, "url_1": "https://www.amazon.com.tr/dp/B000000001"},
+                    {"name": "İkinci", "group": "Moda", "target_price": 200, "url_1": "https://www.zara.com/tr/tr/ornek-p03166301.html"},
+                ]
+            },
+            {
+                "operation": ["update_watch"],
+                "watch_index": ["1"],
+                "watches_1_name": ["İkinci"],
+                "watches_1_group": ["Teknoloji"],
+                "watches_1_target_price": ["1.500"],
+                "watches_1_url_1": ["https://www.zara.com/tr/tr/ornek-p03166301.html"],
+                "watches_1_notify_once_in_24H": ["1"],
+                "watches_1_active": ["1"],
+            },
+        )
+
+        self.assertIn("güncellendi", message)
+        self.assertEqual(options["takip_edilenler"][0]["group"], "Diğer")
+        self.assertEqual(options["takip_edilenler"][1]["group"], "Teknoloji")
 
     def test_displayed_prices_use_whole_lira_with_tl_suffix(self):
         self.assertEqual(parse_decimal("1.500"), Decimal("1500"))

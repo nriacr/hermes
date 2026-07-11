@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import threading
 import urllib.error
 import urllib.parse
@@ -348,6 +349,7 @@ def _watch_form(item, index, is_new=False, groups=None, known_titles=None):
     return (
         "<form method='post' action='./settings/save' data-settings-save>"
         "<input type='hidden' name='operation' value='update_watch'>"
+        f"<input type='hidden' name='watch_index' value='{index}'>"
         f"{details}</form>"
     )
 
@@ -499,6 +501,16 @@ def _build_watches(form):
     return watches
 
 
+def _posted_watch_index(form):
+    """Find the one watch card present in a standalone update form."""
+    posted_indices = {
+        match.group(1)
+        for field_name in form
+        if (match := re.match(r"^watches_(\d+)_", str(field_name)))
+    }
+    return posted_indices.pop() if len(posted_indices) == 1 else ""
+
+
 def _apply_settings_operation(existing_options, form):
     source_options = existing_options if isinstance(existing_options, dict) else {}
     existing_watches = [
@@ -507,7 +519,9 @@ def _apply_settings_operation(existing_options, form):
     options = _options_for_save(source_options)
     operation = _first(form, "operation", "update_existing")
     delete_index = _first(form, "delete_watch_index")
-    update_index = _first(form, "update_watch_index")
+    update_index = _first(form, "update_watch_index", _first(form, "watch_index"))
+    if update_index == "" and operation == "update_watch":
+        update_index = _posted_watch_index(form)
 
     if delete_index != "":
         try:
