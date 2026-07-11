@@ -252,6 +252,30 @@ class HermesSmokeTests(unittest.TestCase):
                 settings_ui.STATE_PATH = original_state_path
                 settings_ui.SUMMARY_PATH = original_summary_path
 
+    def test_all_watch_cards_use_the_compact_three_row_layout(self):
+        new_html = settings_ui._watch_form({}, 0, is_new=True, groups=["Moda"])
+        existing_html = settings_ui._watch_form(
+            {
+                "name": "Mevcut ürün",
+                "group": "Teknoloji",
+                "target_price": 1500,
+                "url_1": "https://www.amazon.com.tr/dp/B000000001",
+            },
+            1,
+            groups=["Moda", "Teknoloji"],
+        )
+
+        for html in (new_html, existing_html):
+            self.assertIn("watch-layout", html)
+            self.assertIn("watch-top", html)
+            self.assertIn("watch-links", html)
+            self.assertIn("watch-bottom", html)
+            self.assertLess(html.index(">Grup<"), html.index(">Ad<"))
+            self.assertLess(html.index(">Ad<"), html.index(">Fiyat (TL)<"))
+            self.assertLess(html.index(">Fiyat (TL)<"), html.index(">Beden<"))
+            for link_number in range(1, 6):
+                self.assertIn(f">Link {link_number}<", html)
+
     def test_direct_watch_delete_keeps_other_watches_unchanged(self):
         options, message = settings_ui._apply_settings_operation(
             {

@@ -19,17 +19,18 @@ SUPERVISOR_BASE_URL = "http://supervisor"
 WATCH_URL_FIELDS = ("url_1", "url_2", "url_3", "url_4", "url_5")
 
 SETTINGS_CSS = """
-:root { color-scheme: dark; --bg:#0f1222; --panel:#171a30; --card:#1e2139; --line:#313658; --text:#e8eaf8; --muted:#a6abd1; --accent:#c7a6ff; --accent2:#8ed6d2; --ok:#7fdcb8; --bad:#ff9cb5; }
-* { box-sizing:border-box; } body { margin:0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; background:radial-gradient(circle at top left,#1f2240,var(--bg) 56%); color:var(--text); font-size:14px; }
+:root { color-scheme:dark; --bg:#111315; --panel:#1a1c1f; --card:#24272b; --line:#3c4147; --text:#f5f7fa; --muted:#b0b6be; --accent:#ffd166; --accent2:#73d4e4; --ok:#86dfb7; --bad:#ff9caf; }
+* { box-sizing:border-box; } body { margin:0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; background:radial-gradient(circle at top left,#373b40,var(--bg) 58%); color:var(--text); font-size:14px; }
 main { max-width:980px; margin:0 auto; padding:28px 18px 44px; } .hero { border:1px solid var(--line); border-radius:22px; padding:22px; background:var(--panel); box-shadow:0 18px 42px rgba(0,0,0,.35); }
-h1 { margin:0 0 8px; font-size:34px; letter-spacing:-.04em; } h2 { margin:24px 0 10px; font-size:18px; } p { margin:0; color:var(--muted); line-height:1.5; font-size:13px; }
+h1 { margin:0 0 8px; color:#73d4e4; font-size:34px; letter-spacing:-.04em; } h2 { margin:24px 0 10px; font-size:18px; } p { margin:0; color:var(--muted); line-height:1.5; font-size:13px; }
 .actions { display:flex; flex-wrap:wrap; gap:10px; margin:18px 0; } .button { display:inline-flex; align-items:center; justify-content:center; min-height:40px; padding:0 14px; border-radius:13px; border:1px solid transparent; text-decoration:none; font-weight:800; font-size:13px; cursor:pointer; }
 .button.primary { color:#14172a; background:linear-gradient(135deg,var(--accent),var(--accent2)); } .button.secondary { color:var(--text); background:#2a2f4d; border-color:var(--line); } .button.danger { color:#fff5f7; background:#b9364d; border-color:#ed7288; } .button.danger:hover { background:#cf465f; }
 .notice { margin:14px 0; padding:11px 13px; border-radius:12px; font-weight:700; font-size:13px; } .notice-ok { color:#c6f7e6; background:rgba(127,220,184,.14); border:1px solid rgba(127,220,184,.38); } .notice-fail { color:#ffd8e3; background:rgba(255,156,181,.14); border:1px solid rgba(255,156,181,.38); }
-.settings-section { margin-top:18px; border:1px solid var(--line); border-radius:18px; padding:16px; background:var(--card); } details { border:1px solid var(--line); border-radius:14px; background:#181c32; margin:9px 0; overflow:hidden; } summary { cursor:pointer; padding:13px 14px; font-weight:900; color:#f0f2ff; list-style:none; } summary::-webkit-details-marker { display:none; } summary::before { content:'\u25b8'; display:inline-block; margin-right:8px; color:var(--accent2); } details[open] summary::before { transform:rotate(90deg); } .watch-tools { display:grid; gap:12px; } .watch-search { display:grid; gap:6px; max-width:440px; margin:0; color:var(--muted); font-size:12px; font-weight:750; } .watch-search input { width:100%; min-height:40px; border:1px solid var(--line); border-radius:11px; padding:10px 11px; background:#101428; color:var(--text); font:inherit; } .watch-group-filters { display:flex; flex-wrap:wrap; gap:8px; margin:0; } .watch-group-filter { min-height:34px; border:1px solid var(--line); border-radius:999px; padding:0 12px; background:#2a2f4d; color:var(--text); font:700 12px inherit; cursor:pointer; } .watch-group-filter[aria-pressed='false'] { color:var(--muted); background:#15182d; opacity:.72; text-decoration:line-through; } .watch-group-filter:hover { border-color:var(--accent2); } .watch-actions { display:flex; align-items:center; gap:8px; min-height:40px; }
+.settings-section { margin-top:18px; border:1px solid var(--line); border-radius:18px; padding:16px; background:var(--card); } details { border:1px solid var(--line); border-radius:14px; background:#1e2125; margin:9px 0; overflow:hidden; } summary { cursor:pointer; padding:13px 14px; font-weight:900; color:#f5f7fa; list-style:none; } summary::-webkit-details-marker { display:none; } summary::before { content:'\u25b8'; display:inline-block; margin-right:8px; color:var(--accent2); } details[open] summary::before { transform:rotate(90deg); } .watch-tools { display:grid; gap:12px; } .watch-search { display:grid; gap:6px; max-width:440px; margin:0; color:var(--muted); font-size:12px; font-weight:750; } .watch-search input { width:100%; min-height:40px; border:1px solid var(--line); border-radius:11px; padding:10px 11px; background:#141619; color:var(--text); font:inherit; } .watch-group-filters { display:flex; flex-wrap:wrap; gap:8px; margin:0; } .watch-group-filter { min-height:34px; border:1px solid var(--line); border-radius:999px; padding:0 12px; background:#34383d; color:var(--text); font:700 12px inherit; cursor:pointer; } .watch-group-filter[aria-pressed='false'] { color:var(--muted); background:#181a1d; opacity:.72; text-decoration:line-through; } .watch-group-filter:hover { border-color:var(--accent2); } .watch-actions { display:flex; align-items:center; gap:8px; min-height:40px; }
 .saving-overlay { position:fixed; inset:0; z-index:20; display:grid; place-items:center; padding:20px; background:rgba(7,9,19,.78); backdrop-filter:blur(5px); } .saving-overlay[hidden] { display:none; } .saving-dialog { width:min(100%,430px); border:1px solid rgba(142,214,210,.45); border-radius:18px; padding:22px; background:#1e2139; box-shadow:0 22px 50px rgba(0,0,0,.5); } .saving-dialog h2 { margin:0 0 9px; font-size:20px; } .saving-dialog p { font-size:14px; } .saving-spinner { width:28px; height:28px; margin:0 0 14px; border:4px solid rgba(142,214,210,.22); border-top-color:var(--accent2); border-radius:50%; animation:hermes-spin .8s linear infinite; } @keyframes hermes-spin { to { transform:rotate(360deg); } }
-.form-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:12px; padding:0 14px 14px; } label { display:grid; gap:6px; color:var(--muted); font-size:12px; font-weight:700; } input[type='text'], input[type='number'], input[type='url'], select, textarea { width:100%; min-height:40px; border-radius:11px; border:1px solid var(--line); background:#101428; color:var(--text); padding:10px 11px; font-size:13px; font-family:inherit; } textarea { resize:vertical; line-height:1.35; }
+.form-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:12px; padding:0 14px 14px; } label { display:grid; gap:6px; color:var(--muted); font-size:12px; font-weight:700; } input[type='text'], input[type='number'], input[type='url'], select, textarea { width:100%; min-height:40px; border-radius:11px; border:1px solid var(--line); background:#141619; color:var(--text); padding:10px 11px; font-size:13px; font-family:inherit; } textarea { resize:vertical; line-height:1.35; }
 .checkbox-row { display:flex; align-items:center; gap:9px; min-height:40px; color:var(--text); } .danger { color:#ffd8e3; } .footer-note { margin-top:14px; border-left:4px solid #b79ad6; padding:12px 14px; background:rgba(183,154,214,.15); border-radius:10px; font-size:13px; }
+.watch-layout { grid-column:1 / -1; display:grid; gap:12px; } .watch-top { display:grid; grid-template-columns:minmax(120px,.8fr) minmax(240px,2.3fr) minmax(110px,.7fr) minmax(100px,.65fr); gap:12px; align-items:end; } .watch-links { display:grid; gap:10px; } .watch-bottom { display:flex; flex-wrap:wrap; align-items:end; gap:12px; } .watch-bottom > label:first-child { flex:0 1 205px; max-width:205px; } .watch-bottom .checkbox-row { flex:0 0 auto; padding-bottom:1px; } .watch-bottom .watch-actions { margin-left:auto; } @media (max-width:700px) { .watch-top { grid-template-columns:repeat(2,minmax(0,1fr)); } .watch-bottom > label:first-child { flex:1 1 100%; max-width:none; } .watch-bottom .watch-actions { width:100%; margin-left:0; } .watch-bottom .watch-actions .button { width:100%; } } @media (max-width:420px) { .watch-top { grid-template-columns:1fr; } }
 """
 
 SETTINGS_SCRIPT = """
@@ -301,40 +302,53 @@ def _watch_form(item, index, is_new=False, groups=None, known_titles=None):
     selected_group = "" if is_new else str(item.get("group") or "").strip()
     if not selected_group and group == "Moda":
         selected_group = "Moda"
-    inner = "".join(
+    link_fields = "".join(
+        _field(
+            prefix,
+            field_name,
+            f"Link {url_index}",
+            urls[url_index - 1] if len(urls) >= url_index else "",
+            "url",
+        )
+        for url_index, field_name in enumerate(WATCH_URL_FIELDS, start=1)
+    )
+    interval_field = _field(
+        prefix,
+        "check_interval_minutes",
+        "Özel kontrol aralığı (dk)",
+        item.get("check_interval_minutes", ""),
+        "number",
+    )
+    notification_fields = "".join(
         [
-            _field(prefix, "name", "Ad (ürün linklerinde boş bırakılabilir)", item.get("name", "")),
-            _select(prefix, "group", "Grup", selected_group, group_choices),
-            _field(prefix, "target_price", "Hedef fiyat (TL)", _price_input_value(item.get("target_price", ""))),
-            _field(prefix, "size", "Beden", item.get("size", "")),
-            *[
-                _field(
-                    prefix,
-                    field_name,
-                    f"Link {url_index}",
-                    urls[url_index - 1] if len(urls) >= url_index else "",
-                    "url",
-                )
-                for url_index, field_name in enumerate(WATCH_URL_FIELDS, start=1)
-            ],
-            _field(prefix, "check_interval_minutes", "Özel kontrol aralığı (dk)", item.get("check_interval_minutes", ""), "number"),
             _checkbox(prefix, "notify_once_in_24H", "24 saat içinde aynı bildirimi tekrar gönderme", notify_once),
             _checkbox(prefix, "active", "Aktif", active),
-            (
-                "<div class='watch-actions'>"
-                "<button class='button primary' type='submit'>Yeni Takibi Ekle</button>"
-                "</div>"
-                if is_new
-                else (
-                    "<div class='watch-actions'>"
-                    f"<button class='button primary' type='submit' name='update_watch_index' value='{index}' "
-                    "data-update-watch='true'>Güncelle</button>"
-                    f"<button class='button danger' type='submit' name='delete_watch_index' value='{index}' "
-                    "data-delete-watch='true' formnovalidate>Sil</button>"
-                    "</div>"
-                )
-            ),
         ]
+    )
+    action_fields = (
+        "<div class='watch-actions'><button class='button primary' type='submit'>Yeni Takibi Ekle</button></div>"
+        if is_new
+        else (
+            "<div class='watch-actions'>"
+            f"<button class='button primary' type='submit' name='update_watch_index' value='{index}' "
+            "data-update-watch='true'>Güncelle</button>"
+            f"<button class='button danger' type='submit' name='delete_watch_index' value='{index}' "
+            "data-delete-watch='true' formnovalidate>Sil</button>"
+            "</div>"
+        )
+    )
+    inner = (
+        "<div class='watch-layout'>"
+        "<div class='watch-top'>"
+        f"{_select(prefix, 'group', 'Grup', selected_group, group_choices)}"
+        f"{_field(prefix, 'name', 'Ad', item.get('name', ''))}"
+        f"{_field(prefix, 'target_price', 'Fiyat (TL)', _price_input_value(item.get('target_price', '')))}"
+        f"{_field(prefix, 'size', 'Beden', item.get('size', ''))}"
+        "</div>"
+        f"<div class='watch-links'>{link_fields}</div>"
+        "<div class='watch-bottom'>"
+        f"{interval_field}{notification_fields}{action_fields}"
+        "</div></div>"
     )
     group_attribute = "" if is_new else f" data-watch-group='{escape(group, quote=True)}'"
     search_attribute = "" if is_new else f" data-watch-search='{escape(display_name, quote=True)}'"
