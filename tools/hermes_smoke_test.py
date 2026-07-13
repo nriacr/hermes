@@ -15,6 +15,7 @@ from hermes import service  # noqa: E402
 from hermes import http_client  # noqa: E402
 from hermes import dashboard  # noqa: E402
 from hermes import dashboard_with_settings  # noqa: E402
+from hermes import public_dashboard  # noqa: E402
 from hermes import settings_ui  # noqa: E402
 from hermes.errors import HermesError, OutOfStockHermesError  # noqa: E402
 from hermes.http_client import amazon_url_variants, fetch_amazon_page  # noqa: E402
@@ -41,6 +42,10 @@ from hermes.utils import detect_site_from_url, parse_decimal, utc_now  # noqa: E
 
 
 class HermesSmokeTests(unittest.TestCase):
+    def test_ingress_and_public_settings_share_the_same_save_handler(self):
+        self.assertIs(dashboard_with_settings.handle_settings_save, settings_ui.handle_settings_save)
+        self.assertIs(public_dashboard.handle_settings_save, settings_ui.handle_settings_save)
+
     def test_dashboard_site_theme_classes_are_distinct_for_supported_providers(self):
         expected = {
             "Amazon": "site-amazon",
@@ -319,6 +324,21 @@ class HermesSmokeTests(unittest.TestCase):
         self.assertEqual(message, "Silinecek takip kaydı silindi.")
         self.assertEqual([item["name"] for item in options["takip_edilenler"]], ["Kalacak"])
 
+    def test_mobile_delete_operation_does_not_depend_on_submit_button_value(self):
+        """Mobile Safari may omit a submit button after client-side visual locking."""
+        options, message = settings_ui._apply_settings_operation(
+            {
+                "takip_edilenler": [
+                    {"name": "Silinecek", "target_price": 100, "url_1": "https://www.amazon.com.tr/dp/B000000001"},
+                    {"name": "Kalacak", "target_price": 200, "url_1": "https://www.amazon.com.tr/dp/B000000002"},
+                ]
+            },
+            {"operation": ["delete_watch"], "watch_index": ["0"]},
+        )
+
+        self.assertEqual(message, "Silinecek takip kaydı silindi.")
+        self.assertEqual([item["name"] for item in options["takip_edilenler"]], ["Kalacak"])
+
     def test_card_update_only_changes_the_selected_watch(self):
         options, message = settings_ui._apply_settings_operation(
             {
@@ -418,6 +438,8 @@ class HermesSmokeTests(unittest.TestCase):
         self.assertIn("watchSearch?.addEventListener('input', refreshWatchList)", interaction_script)
         self.assertIn("data-watch-group-filter", interaction_script)
         self.assertIn("waitForHermes", restart_script)
+        self.assertIn("operation.value = isDelete ? 'delete_watch' : 'update_watch'", interaction_script)
+        self.assertNotIn("button.disabled = true", interaction_script)
 
     def test_amazon_page_fetch_is_cached_per_session(self):
         class FakeResponse:

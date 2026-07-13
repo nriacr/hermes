@@ -24,7 +24,7 @@ SETTINGS_CSS = """
 main { max-width:980px; margin:0 auto; padding:28px 18px 44px; } .hero { border:1px solid var(--line); border-radius:22px; padding:22px; background:var(--panel); box-shadow:0 18px 42px rgba(0,0,0,.35); }
 h1 { margin:0 0 8px; color:#ffd166; font-size:34px; letter-spacing:-.04em; } h2 { margin:24px 0 10px; font-size:18px; } p { margin:0; color:var(--muted); line-height:1.5; font-size:13px; }
 .actions { display:flex; flex-wrap:wrap; gap:10px; margin:18px 0; } .button { display:inline-flex; align-items:center; justify-content:center; min-height:40px; padding:0 14px; border-radius:13px; border:1px solid transparent; text-decoration:none; font-weight:800; font-size:13px; cursor:pointer; }
-.button.primary { color:#181a1c; background:linear-gradient(135deg,var(--accent),var(--accent2)); } .button.secondary { color:var(--text); background:#35393d; border-color:var(--line); } .button.danger { color:#fff5f7; background:#b9364d; border-color:#ed7288; } .button.danger:hover { background:#cf465f; }
+.button.primary { color:#181a1c; background:linear-gradient(135deg,var(--accent),var(--accent2)); } .button.secondary { color:var(--text); background:#35393d; border-color:var(--line); } .button.danger { color:#fff5f7; background:#b9364d; border-color:#ed7288; } .button.danger:hover { background:#cf465f; } .button.is-submitting { pointer-events:none; opacity:.7; }
 .notice { margin:14px 0; padding:11px 13px; border-radius:12px; font-weight:700; font-size:13px; } .notice-ok { color:#c6f7e6; background:rgba(127,220,184,.14); border:1px solid rgba(127,220,184,.38); } .notice-fail { color:#ffd8e3; background:rgba(255,156,181,.14); border:1px solid rgba(255,156,181,.38); }
 .settings-section { margin-top:18px; border:1px solid var(--line); border-radius:18px; padding:16px; background:var(--card); } details { border:1px solid var(--line); border-radius:14px; background:#1e2125; margin:9px 0; overflow:hidden; } summary { cursor:pointer; padding:13px 14px; font-weight:900; color:#f5f7fa; list-style:none; } summary::-webkit-details-marker { display:none; } summary::before { content:'\u25b8'; display:inline-block; margin-right:8px; color:#d6d8d7; } details[open] summary::before { transform:rotate(90deg); } .watch-tools { display:grid; gap:12px; } .watch-search { display:grid; gap:6px; max-width:440px; margin:0; color:var(--muted); font-size:12px; font-weight:750; } .watch-search input { width:100%; min-height:40px; border:1px solid var(--line); border-radius:11px; padding:10px 11px; background:#141619; color:var(--text); font:inherit; } .watch-group-filters { display:flex; flex-wrap:wrap; gap:8px; margin:0; } .watch-group-filter { min-height:34px; border:1px solid var(--line); border-radius:999px; padding:0 12px; background:#34383d; color:var(--text); font:700 12px inherit; cursor:pointer; } .watch-group-filter[aria-pressed='false'] { color:var(--muted); background:#181a1d; opacity:.72; text-decoration:line-through; } .watch-group-filter:hover { border-color:#d6d8d7; } .watch-actions { display:flex; align-items:center; gap:8px; min-height:40px; }
 .saving-overlay { position:fixed; inset:0; z-index:20; display:grid; place-items:center; padding:20px; background:rgba(7,8,9,.78); backdrop-filter:blur(5px); } .saving-overlay[hidden] { display:none; } .saving-dialog { width:min(100%,430px); border:1px solid rgba(214,216,215,.45); border-radius:18px; padding:22px; background:#24272b; box-shadow:0 22px 50px rgba(0,0,0,.5); } .saving-dialog h2 { margin:0 0 9px; font-size:20px; } .saving-dialog p { font-size:14px; } .saving-spinner { width:28px; height:28px; margin:0 0 14px; border:4px solid rgba(214,216,215,.22); border-top-color:#d6d8d7; border-radius:50%; animation:hermes-spin .8s linear infinite; } @keyframes hermes-spin { to { transform:rotate(360deg); } }
@@ -73,8 +73,15 @@ SETTINGS_SCRIPT = """
     form.addEventListener('submit', (event) => {
       const button = event.submitter;
       const isDelete = button?.dataset.deleteWatch === 'true';
+      const operation = form.querySelector('input[name="operation"]');
+      if (operation) {
+        operation.value = isDelete ? 'delete_watch' : 'update_watch';
+      }
       if (button) {
-        button.disabled = true;
+        // Do not disable the submitter here: mobile Safari then excludes its
+        // name/value from the submitted form and turns a delete into an update.
+        button.classList.add('is-submitting');
+        button.setAttribute('aria-disabled', 'true');
         button.textContent = isDelete ? 'Siliniyor...' : 'Kaydediliyor...';
       }
       savingTitle.textContent = isDelete ? 'Takip siliniyor' : 'Ayarlar kaydediliyor';
@@ -530,6 +537,8 @@ def _apply_settings_operation(existing_options, form):
     operation = _first(form, "operation", "update_existing")
     delete_index = _first(form, "delete_watch_index")
     update_index = _first(form, "update_watch_index", _first(form, "watch_index"))
+    if operation == "delete_watch" and delete_index == "":
+        delete_index = _first(form, "watch_index")
     if update_index == "" and operation == "update_watch":
         update_index = _posted_watch_index(form)
 
