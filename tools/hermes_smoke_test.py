@@ -880,6 +880,47 @@ class HermesSmokeTests(unittest.TestCase):
             finally:
                 service.SUMMARY_PATH = original_summary_path
 
+    def test_incremental_summary_keeps_rows_waiting_for_the_cycle(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            original_summary_path = service.SUMMARY_PATH
+            try:
+                service.SUMMARY_PATH = Path(tmpdir) / "latest_price_summary.json"
+                service.save_price_summary(
+                    [
+                        PriceSummaryRow(
+                            "Amazon",
+                            "Daha once okunan urun",
+                            "https://example.com/old",
+                            Decimal("200"),
+                            Decimal("180"),
+                            Decimal("200"),
+                            Decimal("220"),
+                        )
+                    ]
+                )
+
+                service.save_incremental_price_summary(
+                    [
+                        PriceSummaryRow(
+                            "Hepsiburada",
+                            "Bildirim gonderen urun",
+                            "https://example.com/fresh",
+                            Decimal("90"),
+                            Decimal("100"),
+                            Decimal("90"),
+                            Decimal("120"),
+                        )
+                    ]
+                )
+
+                payload = json.loads(service.SUMMARY_PATH.read_text(encoding="utf-8"))
+                self.assertEqual(payload["row_count"], 2)
+                prices_by_url = {row["product_url"]: row["price"] for row in payload["rows"]}
+                self.assertEqual(prices_by_url["https://example.com/old"], "200 TL")
+                self.assertEqual(prices_by_url["https://example.com/fresh"], "90 TL")
+            finally:
+                service.SUMMARY_PATH = original_summary_path
+
     def test_stock_missing_rows_are_saved_separately_from_price_rows(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             original_summary_path = service.SUMMARY_PATH

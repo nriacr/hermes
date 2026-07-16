@@ -55,6 +55,7 @@ from .utils import (
     normalize_item_key,
     normalize_key,
     normalize_offer_text,
+    parse_decimal,
     parse_iso_datetime,
     site_label,
     utc_now,
@@ -389,6 +390,93 @@ def save_price_summary(
         ],
     }
     save_json(SUMMARY_PATH, payload)
+
+
+def _summary_rows_from_payload(payload: Dict[str, Any]) -> List[PriceSummaryRow]:
+    """Restore the published rows so an alert can update only its fresh results."""
+    raw_rows = payload.get("rows", []) if isinstance(payload, dict) else []
+    if not isinstance(raw_rows, list):
+        return []
+
+    rows = []
+    for raw_row in raw_rows:
+        if not isinstance(raw_row, dict):
+            continue
+        try:
+            rows.append(
+                PriceSummaryRow(
+                    seller=str(raw_row.get("seller") or ""),
+                    product_title=str(raw_row.get("product_title") or ""),
+                    product_url=str(raw_row.get("product_url") or ""),
+                    price=parse_decimal(str(raw_row.get("price") or "")),
+                    target_price=parse_decimal(str(raw_row.get("target") or "")),
+                    min_price=parse_decimal(str(raw_row.get("min_price") or raw_row.get("price") or "")),
+                    max_price=parse_decimal(str(raw_row.get("max_price") or raw_row.get("price") or "")),
+                    search_group=str(raw_row.get("search_group") or ""),
+                    search_group_label=str(raw_row.get("search_group_label") or ""),
+                )
+            )
+        except HermesError:
+            continue
+    return rows
+
+
+def _stock_rows_from_payload(payload: Dict[str, Any]) -> List[StockSummaryRow]:
+    raw_rows = payload.get("stock_rows", []) if isinstance(payload, dict) else []
+    if not isinstance(raw_rows, list):
+        return []
+
+    rows = []
+    for raw_row in raw_rows:
+        if not isinstance(raw_row, dict):
+            continue
+        try:
+            rows.append(
+                StockSummaryRow(
+                    seller=str(raw_row.get("seller") or ""),
+                    product_title=str(raw_row.get("product_title") or ""),
+                    product_url=str(raw_row.get("product_url") or ""),
+                    target_price=parse_decimal(str(raw_row.get("target") or "")),
+                    reason=str(raw_row.get("reason") or ""),
+                )
+            )
+        except HermesError:
+            continue
+    return rows
+
+
+def _row_urls(rows: List[PriceSummaryRow] | List[StockSummaryRow]) -> set[str]:
+    return {str(row.product_url or "").strip() for row in rows if str(row.product_url or "").strip()}
+
+
+def save_incremental_price_summary(
+    fresh_rows: List[PriceSummaryRow],
+    fresh_stock_rows: List[StockSummaryRow] | None = None,
+) -> None:
+    """Publish fresh rows immediately without hiding rows pending later in the cycle."""
+    previous_payload = load_json(SUMMARY_PATH, {})
+    if not isinstance(previous_payload, dict):
+        previous_payload = {}
+
+    previous_rows = _summary_rows_from_payload(previous_payload)
+    previous_stock_rows = _stock_rows_from_payload(previous_payload)
+    fresh_stock_rows = fresh_stock_rows or []
+    fresh_price_urls = _row_urls(fresh_rows)
+    fresh_stock_urls = _row_urls(fresh_stock_rows)
+
+    merged_rows = [
+        row
+        for row in previous_rows
+        if row.product_url not in fresh_price_urls and row.product_url not in fresh_stock_urls
+    ]
+    merged_rows.extend(fresh_rows)
+    merged_stock_rows = [
+        row
+        for row in previous_stock_rows
+        if row.product_url not in fresh_price_urls and row.product_url not in fresh_stock_urls
+    ]
+    merged_stock_rows.extend(fresh_stock_rows)
+    save_price_summary(merged_rows, merged_stock_rows)
 
 
 def log_price_summary(rows: List[PriceSummaryRow]) -> None:
@@ -1210,8 +1298,8 @@ def check_once(config: HermesConfig) -> None:
                     f"hedef={format_tl(watch.target_price, with_currency=True)}"
                 )
 
-                alert_sent = False
-                if should_alert(offer_state_entry, offer.price, watch.target_price, watch.notify_once_in_24h):
+                alert_sent = should_alert(offer_state_entry, offer.price, watch.target_price, watch.notify_once_in_24h)
+                if alert_sent:
                     seller_note = f" ({offer.seller})" if offer.seller and watch.site == SITE_HEPSIBURADA else ""
                     message = (
                         f"Site: {seller}\n"
@@ -1228,9 +1316,6 @@ def check_once(config: HermesConfig) -> None:
                         matched_url,
                         config.request_timeout_seconds,
                     )
-                    alert_sent = True
-                    log(f"Bildirim gonderildi: {seller} | {offer_display_name}")
-                    save_price_summary(summary_rows, stock_rows)
                 elif offer.price <= watch.target_price and watch.notify_once_in_24h:
                     log(
                         f"Bildirim atlandi, 24 saat dolmadi veya fiyat daha dusuk degil: "
@@ -1252,6 +1337,11 @@ def check_once(config: HermesConfig) -> None:
                 state[offer_key]["site"] = watch.site
                 state[offer_key]["last_error"] = None
                 state[offer_key]["last_error_status"] = None
+
+                if alert_sent:
+                    log(f"Bildirim gonderildi: {seller} | {offer_display_name}")
+                    # Keep all previous successful rows visible while this cycle continues.
+                    save_incremental_price_summary(summary_rows, stock_rows)
 
             state[watch_key] = {
                 **dict(state_entry),
