@@ -746,7 +746,7 @@ def reset_product_alert_after_missing(
 
 def summary_config_signature(config: HermesConfig) -> str:
     watch_part = ",".join(
-        f"{watch.site}:{watch.url}:{watch.target_price}:{watch.size}:{watch.active}"
+        f"{watch.site}:{watch.url}:{watch.target_price}:{watch.minimum_price}:{watch.excluded_terms}:{watch.size}:{watch.active}"
         for watch in config.watches
     )
     return f"watches={watch_part}"
@@ -777,6 +777,20 @@ def next_summary_drop_streak(meta: Dict[str, Any], is_unexpected_drop: bool) -> 
         return max(0, int(previous)) + 1
     except (TypeError, ValueError):
         return 1
+
+
+def skipped_offer_reason(watch: WatchRule, offer: OfferResult, display_name: str) -> str:
+    if watch.minimum_price is not None and offer.price < watch.minimum_price:
+        return (
+            f"minimum fiyat filtresi: {format_tl(offer.price, with_currency=True)} < "
+            f"{format_tl(watch.minimum_price, with_currency=True)}"
+        )
+
+    normalized_title = normalize_offer_text(display_name)
+    for excluded_term in watch.excluded_terms:
+        if normalize_offer_text(excluded_term) in normalized_title:
+            return f"hariç tut filtresi: {excluded_term}"
+    return ""
 
 
 def amazon_empty_alert_cooldown_passed(meta: Dict[str, Any], now) -> bool:
@@ -1267,6 +1281,10 @@ def check_once(config: HermesConfig) -> None:
                 offer_display_name = offer.title or watch.name or watch.url
                 if watch.site == SITE_HEPSIBURADA:
                     offer_display_name = hepsiburada_provider.clean_display_title(offer_display_name)
+                skip_reason = skipped_offer_reason(watch, offer, offer_display_name)
+                if skip_reason:
+                    log(f"Sonuç dikkate alınmadı: {seller} | {offer_display_name} | {skip_reason}")
+                    continue
                 matched_url = offer.url or watch.url
                 offer_key = normalize_item_key("watch_offer", watch.site, watch.name, matched_url, watch.size)
                 offer_state_entry = state.get(offer_key, {})

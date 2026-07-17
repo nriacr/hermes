@@ -30,7 +30,7 @@ h1 { margin:0 0 8px; color:#ffd166; font-size:34px; letter-spacing:-.04em; } h2 
 .saving-overlay { position:fixed; inset:0; z-index:20; display:grid; place-items:center; padding:20px; background:rgba(7,8,9,.78); backdrop-filter:blur(5px); } .saving-overlay[hidden] { display:none; } .saving-dialog { width:min(100%,430px); border:1px solid rgba(214,216,215,.45); border-radius:18px; padding:22px; background:#24272b; box-shadow:0 22px 50px rgba(0,0,0,.5); } .saving-dialog h2 { margin:0 0 9px; font-size:20px; } .saving-dialog p { font-size:14px; } .saving-spinner { width:28px; height:28px; margin:0 0 14px; border:4px solid rgba(214,216,215,.22); border-top-color:#d6d8d7; border-radius:50%; animation:hermes-spin .8s linear infinite; } @keyframes hermes-spin { to { transform:rotate(360deg); } }
 .form-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:12px; padding:0 14px 14px; } label { display:grid; gap:6px; color:var(--muted); font-size:12px; font-weight:700; } input[type='text'], input[type='number'], input[type='url'], select, textarea { width:100%; min-height:40px; border-radius:11px; border:1px solid var(--line); background:#141619; color:var(--text); padding:10px 11px; font-size:13px; font-family:inherit; } textarea { resize:vertical; line-height:1.35; }
 .checkbox-row { display:flex; align-items:center; gap:9px; min-height:40px; color:var(--text); } .danger { color:#ffd8e3; } .footer-note { margin-top:14px; border-left:4px solid #a9adaf; padding:12px 14px; background:rgba(169,173,175,.14); border-radius:10px; font-size:13px; }
-.watch-layout { grid-column:1 / -1; display:grid; gap:12px; } .watch-top { display:grid; grid-template-columns:minmax(120px,.8fr) minmax(240px,2.3fr) minmax(110px,.7fr) minmax(100px,.65fr); gap:12px; align-items:end; } .watch-links { display:grid; gap:10px; } .watch-bottom { display:flex; flex-wrap:wrap; align-items:end; gap:12px; } .watch-bottom > label:first-child { flex:0 1 205px; max-width:205px; } .watch-bottom .checkbox-row { flex:0 0 auto; padding-bottom:1px; } .watch-bottom .watch-actions { margin-left:auto; } @media (max-width:700px) { .watch-top { grid-template-columns:repeat(2,minmax(0,1fr)); } .watch-bottom > label:first-child { flex:1 1 100%; max-width:none; } .watch-bottom .watch-actions { width:100%; margin-left:0; } .watch-bottom .watch-actions .button { width:100%; } } @media (max-width:420px) { .watch-top { grid-template-columns:1fr; } }
+.watch-layout { grid-column:1 / -1; display:grid; gap:12px; } .watch-top { display:grid; grid-template-columns:minmax(105px,.7fr) minmax(210px,2fr) minmax(100px,.65fr) minmax(115px,.75fr) minmax(90px,.6fr); gap:12px; align-items:end; } .watch-links { display:grid; gap:10px; } .watch-bottom { display:flex; flex-wrap:wrap; align-items:end; gap:12px; } .watch-bottom > label:first-child { flex:0 1 205px; max-width:205px; } .watch-exclude { flex:1 1 240px; } .watch-bottom .checkbox-row { flex:0 0 auto; padding-bottom:1px; } .watch-bottom .watch-actions { margin-left:auto; } @media (max-width:900px) { .watch-top { grid-template-columns:repeat(2,minmax(0,1fr)); } } @media (max-width:700px) { .watch-bottom > label:first-child { flex:1 1 100%; max-width:none; } .watch-bottom .watch-actions { width:100%; margin-left:0; } .watch-bottom .watch-actions .button { width:100%; } } @media (max-width:420px) { .watch-top { grid-template-columns:1fr; } }
 """
 
 SETTINGS_SCRIPT = """
@@ -309,6 +309,9 @@ def _watch_form(item, index, is_new=False, groups=None, known_titles=None):
     selected_group = "" if is_new else str(item.get("group") or "").strip()
     if not selected_group and group == "Moda":
         selected_group = "Moda"
+    exclude_terms = item.get("exclude_terms", "") if isinstance(item, dict) else ""
+    if isinstance(exclude_terms, list):
+        exclude_terms = ", ".join(str(term).strip() for term in exclude_terms if str(term).strip())
     link_fields = "".join(
         _field(
             prefix,
@@ -326,6 +329,12 @@ def _watch_form(item, index, is_new=False, groups=None, known_titles=None):
         item.get("check_interval_minutes", ""),
         "number",
     )
+    exclude_field = _field(
+        prefix,
+        "exclude_terms",
+        "Hariç tut (virgülle ayır)",
+        exclude_terms,
+    ).replace("<label>", "<label class='watch-exclude'>", 1)
     notification_fields = "".join(
         [
             _checkbox(prefix, "notify_once_in_24H", "24 saat içinde aynı bildirimi tekrar gönderme", notify_once),
@@ -350,11 +359,12 @@ def _watch_form(item, index, is_new=False, groups=None, known_titles=None):
         f"{_select(prefix, 'group', 'Grup', selected_group, group_choices)}"
         f"{_field(prefix, 'name', 'Ad', item.get('name', ''))}"
         f"{_field(prefix, 'target_price', 'Fiyat (TL)', _price_input_value(item.get('target_price', '')))}"
+        f"{_field(prefix, 'minimum_price', 'Min. hedef (TL)', _price_input_value(item.get('minimum_price', '')))}"
         f"{_field(prefix, 'size', 'Beden', item.get('size', ''))}"
         "</div>"
         f"<div class='watch-links'>{link_fields}</div>"
         "<div class='watch-bottom'>"
-        f"{interval_field}{notification_fields}{action_fields}"
+        f"{interval_field}{exclude_field}{notification_fields}{action_fields}"
         "</div></div>"
     )
     group_attribute = "" if is_new else f" data-watch-group='{escape(group, quote=True)}'"
@@ -468,7 +478,9 @@ def _build_watch(form, index):
     name = _first(form, prefix + "name")
     group = _first(form, prefix + "group")
     target = _first(form, prefix + "target_price")
+    minimum_price = _first(form, prefix + "minimum_price")
     size = _first(form, prefix + "size")
+    exclude_terms = _first(form, prefix + "exclude_terms")
     interval = _first(form, prefix + "check_interval_minutes")
     urls = []
     for field_name in WATCH_URL_FIELDS:
@@ -499,6 +511,10 @@ def _build_watch(form, index):
         "notify_once_in_24H": _bool_from_form(form, prefix + "notify_once_in_24H"),
         "active": _bool_from_form(form, prefix + "active"),
     }
+    if minimum_price:
+        item["minimum_price"] = _price_from_form(minimum_price)
+    if exclude_terms:
+        item["exclude_terms"] = exclude_terms
     if size:
         item["size"] = size
     for url_index, url in enumerate(urls, start=1):

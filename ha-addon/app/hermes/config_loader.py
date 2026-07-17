@@ -1,3 +1,4 @@
+from decimal import Decimal
 from typing import Dict, List, Optional
 
 from .constants import (
@@ -74,11 +75,11 @@ DEFAULT_TELEGRAM_CHANNELS = [
 
 
 def _string_list(value: object) -> List[str]:
-    if isinstance(value, list):
-        return [str(item).strip() for item in value if str(item or "").strip()]
-    if isinstance(value, str):
-        return [line.strip() for line in value.replace(",", "\n").splitlines() if line.strip()]
-    return []
+    raw_values = value if isinstance(value, list) else [value]
+    values = []
+    for raw_value in raw_values:
+        values.extend(str(raw_value or "").replace(",", "\n").splitlines())
+    return [item.strip() for item in values if item.strip()]
 
 
 def _optional_int(value: object, field_name: str) -> Optional[int]:
@@ -88,6 +89,13 @@ def _optional_int(value: object, field_name: str) -> Optional[int]:
         return int(str(value).strip())
     except (TypeError, ValueError) as exc:
         raise HermesError(f"{field_name} tam sayı olmalı.") from exc
+
+
+def _optional_price(item: Dict[str, object], field_name: str) -> Optional[Decimal]:
+    raw_value = item.get(field_name)
+    if raw_value is None or str(raw_value).strip() == "":
+        return None
+    return parse_decimal(str(raw_value))
 
 
 def _prepare_telegram_config(payload: Dict[str, object]) -> TelegramConfig:
@@ -126,6 +134,10 @@ def _prepare_watches(raw_watches: object) -> List[WatchRule]:
             raise HermesError("Arama linkleri için name alanı zorunlu. Ürün linklerinde boş bırakılabilir.")
         context_name = name or "adsız ürün"
         target_price = parse_decimal(_required_value(item, "target_price", f"Takip edilen ({context_name})"))
+        minimum_price = _optional_price(item, "minimum_price")
+        if minimum_price is not None and minimum_price > target_price:
+            raise HermesError(f"Takip edilen ({context_name}) için minimum fiyat hedef fiyattan büyük olamaz.")
+        excluded_terms = _string_list(item.get("exclude_terms"))
         group = str(item.get("group") or "").strip()
         if not group and any(detect_site_from_url(url) in {SITE_ZARA, SITE_HM} for url in urls):
             group = "Moda"
@@ -139,6 +151,8 @@ def _prepare_watches(raw_watches: object) -> List[WatchRule]:
                     site=detect_site_from_url(url),
                     url=url,
                     target_price=target_price,
+                    minimum_price=minimum_price,
+                    excluded_terms=excluded_terms,
                     group=group,
                     size=size,
                     max_items_to_scan=DEFAULT_SEARCH_MAX_ITEMS_TO_SCAN,

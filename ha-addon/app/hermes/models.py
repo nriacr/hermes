@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import List, Optional
 
@@ -9,6 +9,8 @@ class WatchRule:
     site: str
     url: str
     target_price: Decimal
+    minimum_price: Optional[Decimal] = None
+    excluded_terms: List[str] = field(default_factory=list)
     group: str = ""
     size: str = ""
     max_items_to_scan: int = 60

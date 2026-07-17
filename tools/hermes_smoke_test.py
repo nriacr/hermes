@@ -110,6 +110,40 @@ class HermesSmokeTests(unittest.TestCase):
         self.assertEqual(len(watches), 1)
         self.assertEqual(watches[0].max_items_to_scan, 60)
 
+    def test_watch_filters_support_minimum_price_and_comma_separated_terms(self):
+        watches = _prepare_watches(
+            [
+                {
+                    "name": "Samsung S11",
+                    "target_price": 40000,
+                    "minimum_price": "10.000",
+                    "exclude_terms": "kılıf, koruyucu, çizilmez, temperli",
+                    "url_1": "https://www.amazon.com.tr/s?k=samsung+s11",
+                }
+            ]
+        )
+
+        self.assertEqual(watches[0].minimum_price, Decimal("10000"))
+        self.assertEqual(watches[0].excluded_terms, ["kılıf", "koruyucu", "çizilmez", "temperli"])
+        self.assertIn(
+            "minimum fiyat filtresi",
+            service.skipped_offer_reason(
+                watches[0], OfferResult("Samsung S11", Decimal("1000")), "Samsung S11"
+            ),
+        )
+        self.assertIn(
+            "hariç tut filtresi: kılıf",
+            service.skipped_offer_reason(
+                watches[0], OfferResult("Samsung S11 koruyucu kılıf", Decimal("20000")), "Samsung S11 koruyucu kılıf"
+            ),
+        )
+        self.assertEqual(
+            service.skipped_offer_reason(
+                watches[0], OfferResult("Samsung S11 tablet", Decimal("20000")), "Samsung S11 tablet"
+            ),
+            "",
+        )
+
     def test_summary_drop_alert_requires_five_consecutive_cycles(self):
         meta = {}
         for expected_streak in range(1, service.SUMMARY_DROP_CONSECUTIVE_CYCLES + 1):
