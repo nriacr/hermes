@@ -110,6 +110,23 @@ class HermesSmokeTests(unittest.TestCase):
         self.assertEqual(len(watches), 1)
         self.assertEqual(watches[0].max_items_to_scan, 60)
 
+    def test_unsupported_watch_url_is_skipped_without_stopping_valid_watches(self):
+        with patch("hermes.config_loader.log") as mocked_log:
+            watches = _prepare_watches(
+                [
+                    {
+                        "name": "iPad",
+                        "target_price": 40000,
+                        "url_1": "https://www.amazon.com.tr/dp/B000000001",
+                        "url_2": "https://amzn.eu/d/example",
+                    }
+                ]
+            )
+
+        self.assertEqual(len(watches), 1)
+        self.assertEqual(watches[0].site, "amazon")
+        self.assertIn("amzn.eu", mocked_log.call_args.args[0])
+
     def test_watch_filters_support_minimum_price_and_comma_separated_terms(self):
         watches = _prepare_watches(
             [
@@ -786,7 +803,7 @@ class HermesSmokeTests(unittest.TestCase):
             <h2><a href="/dp/B000000001"><span>Depo sonucu iPad</span></a></h2>
             <span class="a-price"><span class="a-offscreen">30.000,00 TL</span></span>
           </div>
-          <div>All Departments içindeki sonuçlar gösteriliyor</div>
+          <div class="fallback-section"><span>All Departments içindeki sonuçlar gösteriliyor</span></div>
           <div data-component-type="s-search-result" data-asin="B000000002">
             <h2><a href="/dp/B000000002"><span>Alakasız stok dışı ürün</span></a></h2>
             <span class="a-price"><span class="a-offscreen">1.000,00 TL</span></span>

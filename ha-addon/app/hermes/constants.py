@@ -1,6 +1,6 @@
 from pathlib import Path
 
-APP_VERSION = "2.2.66"
+APP_VERSION = "2.2.67"
 OPTIONS_PATH = Path("/data/options.json")
 STATE_PATH = Path("/data/state.json")
 SUMMARY_PATH = Path("/data/latest_price_summary.json")

@@ -149,8 +149,10 @@ def _filter_cards_before_stop(cards: List[Any], soup: BeautifulSoup):
     marker = _find_stop_marker(soup)
     if marker is None:
         return cards
-    after_marker_ids = {id(el) for el in marker.next_elements if getattr(el, "name", None)}
-    return [card for card in cards if id(card) not in after_marker_ids]
+    # Compare document order rather than DOM nesting: Amazon can place the
+    # fallback heading inside a wrapper separate from the result cards.
+    before_marker_ids = {id(el) for el in marker.previous_elements if getattr(el, "name", None)}
+    return [card for card in cards if id(card) in before_marker_ids]
 
 
 def _match_phrase(value: str) -> str:

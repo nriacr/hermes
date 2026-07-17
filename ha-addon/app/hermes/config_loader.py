@@ -11,6 +11,7 @@ from .constants import (
     SITE_ZARA,
 )
 from .errors import HermesError
+from .logging_utils import log
 from .models import HermesConfig, TelegramConfig, WatchRule
 from .storage import load_json
 from .utils import detect_site_from_url, parse_bool, parse_decimal, watch_name_required_for_url
@@ -57,6 +58,19 @@ def _watch_urls(item: Dict[str, object]) -> List[str]:
         if raw_url and raw_url not in urls:
             urls.append(raw_url)
     return urls
+
+
+def _supported_watch_urls(urls: List[str], context_name: str) -> List[tuple[str, str]]:
+    """Keep an invalid link from preventing every other watch from starting."""
+    supported_urls: List[tuple[str, str]] = []
+    for url in urls:
+        try:
+            site = detect_site_from_url(url)
+        except HermesError as exc:
+            log(f"Desteklenmeyen takip linki atlandı: {context_name} | {url} | {exc}")
+            continue
+        supported_urls.append((url, site))
+    return supported_urls
 
 
 DEFAULT_TELEGRAM_CHANNELS = [
@@ -130,25 +144,28 @@ def _prepare_watches(raw_watches: object) -> List[WatchRule]:
         if not urls:
             continue
         name = str(item.get("name") or "").strip()
-        if not name and any(watch_name_required_for_url(url) for url in urls):
-            raise HermesError("Arama linkleri için name alanı zorunlu. Ürün linklerinde boş bırakılabilir.")
         context_name = name or "adsız ürün"
+        supported_urls = _supported_watch_urls(urls, context_name)
+        if not supported_urls:
+            continue
+        if not name and any(watch_name_required_for_url(url) for url, _ in supported_urls):
+            raise HermesError("Arama linkleri için name alanı zorunlu. Ürün linklerinde boş bırakılabilir.")
         target_price = parse_decimal(_required_value(item, "target_price", f"Takip edilen ({context_name})"))
         minimum_price = _optional_price(item, "minimum_price")
         if minimum_price is not None and minimum_price > target_price:
             raise HermesError(f"Takip edilen ({context_name}) için minimum fiyat hedef fiyattan büyük olamaz.")
         excluded_terms = _string_list(item.get("exclude_terms"))
         group = str(item.get("group") or "").strip()
-        if not group and any(detect_site_from_url(url) in {SITE_ZARA, SITE_HM} for url in urls):
+        if not group and any(site in {SITE_ZARA, SITE_HM} for _, site in supported_urls):
             group = "Moda"
         size = str(item.get("size") or "").strip()
         check_interval_minutes = _optional_bounded_integer(item, "check_interval_minutes", 1, 1440)
         notify_once_in_24h = parse_bool(item.get("notify_once_in_24H"), default=True)
-        for url in urls:
+        for url, site in supported_urls:
             watches.append(
                 WatchRule(
                     name=name,
-                    site=detect_site_from_url(url),
+                    site=site,
                     url=url,
                     target_price=target_price,
                     minimum_price=minimum_price,
