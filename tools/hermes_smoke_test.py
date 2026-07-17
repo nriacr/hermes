@@ -2012,6 +2012,31 @@ class HermesSmokeTests(unittest.TestCase):
         self.assertEqual(added_options["takip_edilenler"][1]["group"], "Moda")
         self.assertIn("eklendi", add_message)
 
+    def test_cached_new_watch_submission_cannot_overwrite_an_existing_watch(self):
+        options, message = settings_ui._apply_settings_operation(
+            {
+                "takip_edilenler": [
+                    {
+                        "name": "Nordbron çanta",
+                        "target_price": 4500,
+                        "url_1": "https://nordbron.com/stark-sirt-cantasi",
+                    }
+                ]
+            },
+            {
+                # This mirrors the faulty old browser script: the new-card
+                # form is mislabeled as update_watch and has no watch_index.
+                "operation": ["update_watch"],
+                "watches_count": ["1"],
+                "watches_0_name": ["Belkin şarj"],
+                "watches_0_target_price": ["4000"],
+                "watches_0_url_1": ["https://www.amazon.com.tr/dp/B000000001"],
+            },
+        )
+
+        self.assertIn("eklendi", message)
+        self.assertEqual([item["name"] for item in options["takip_edilenler"]], ["Nordbron çanta", "Belkin şarj"])
+
     def test_settings_use_out_of_stock_summary_title_for_blank_hm_watch_name(self):
         original_load_json = settings_ui.load_json
 

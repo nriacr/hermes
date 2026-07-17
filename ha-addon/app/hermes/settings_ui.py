@@ -74,7 +74,9 @@ SETTINGS_SCRIPT = """
       const button = event.submitter;
       const isDelete = button?.dataset.deleteWatch === 'true';
       const operation = form.querySelector('input[name="operation"]');
-      if (operation) {
+      // New-watch and Telegram forms already declare their own operation.
+      // Only an existing watch card can switch between update and delete.
+      if (operation?.value === 'update_watch') {
         operation.value = isDelete ? 'delete_watch' : 'update_watch';
       }
       if (button) {
@@ -553,6 +555,13 @@ def _apply_settings_operation(existing_options, form):
     operation = _first(form, "operation", "update_existing")
     delete_index = _first(form, "delete_watch_index")
     update_index = _first(form, "update_watch_index", _first(form, "watch_index"))
+
+    # A cached pre-fix settings script could mistakenly submit a new-watch
+    # form as an update. It has no persisted watch_index, so preserve all
+    # existing cards and treat it as the addition it was intended to be.
+    if operation == "update_watch" and update_index == "" and _first(form, "watch_index") == "":
+        operation = "add_watch"
+
     if operation == "delete_watch" and delete_index == "":
         delete_index = _first(form, "watch_index")
     if update_index == "" and operation == "update_watch":
