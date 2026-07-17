@@ -972,6 +972,70 @@ class HermesSmokeTests(unittest.TestCase):
             finally:
                 service.SUMMARY_PATH = original_summary_path
 
+    def test_incremental_summary_removes_stale_rows_for_a_failed_watch(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            original_summary_path = service.SUMMARY_PATH
+            try:
+                service.SUMMARY_PATH = Path(tmpdir) / "latest_price_summary.json"
+                stale_url = "https://nordbron.com/stark-sirt-cantasi"
+                service.save_price_summary(
+                    [
+                        PriceSummaryRow(
+                            "Nordbron",
+                            "Stark Sırt Çantası",
+                            stale_url,
+                            Decimal("4850"),
+                            Decimal("4500"),
+                            Decimal("4850"),
+                            Decimal("4850"),
+                        ),
+                        PriceSummaryRow(
+                            "Amazon",
+                            "Güncel kalan ürün",
+                            "https://example.com/current",
+                            Decimal("300"),
+                            Decimal("250"),
+                            Decimal("300"),
+                            Decimal("300"),
+                        ),
+                    ]
+                )
+
+                service.save_incremental_price_summary([], removed_price_urls={stale_url})
+
+                payload = json.loads(service.SUMMARY_PATH.read_text(encoding="utf-8"))
+                self.assertEqual(payload["row_count"], 1)
+                self.assertEqual(payload["rows"][0]["product_url"], "https://example.com/current")
+            finally:
+                service.SUMMARY_PATH = original_summary_path
+
+    def test_public_dashboard_renders_recent_errors_after_the_summary(self):
+        summary = {
+            "errors": 1,
+            "error_details": [
+                {
+                    "title": "Nordbron",
+                    "meta": "Takip edilen link kontrol edilirken hata oluştu.",
+                    "message": "Nordbron bot korumasi nedeniyle captcha sayfasi dondu.",
+                    "url": "https://nordbron.com/stark-sirt-cantasi",
+                    "failed_links": [],
+                }
+            ],
+        }
+        with (
+            patch.object(dashboard, "_public_dashboard_allowed", return_value=True),
+            patch.object(dashboard, "_collect_summary", return_value=summary),
+            patch.object(dashboard, "load_json", return_value={}),
+            patch.object(dashboard, "_render_table", return_value="<section id='summary-table'></section>"),
+        ):
+            status, payload = dashboard._render_public_page("/public/demo-token")
+
+        html = payload.decode("utf-8")
+        self.assertEqual(status, 200)
+        self.assertIn("Hata sayısı (son 24 saat)", html)
+        self.assertIn("Nordbron bot korumasi nedeniyle captcha sayfasi dondu.", html)
+        self.assertGreater(html.index("Hata sayısı (son 24 saat)"), html.index("summary-table"))
+
     def test_stock_missing_rows_are_saved_separately_from_price_rows(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             original_summary_path = service.SUMMARY_PATH
