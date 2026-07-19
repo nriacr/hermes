@@ -956,48 +956,7 @@ def _render_error_details(error_details):
 
 
 def _render_page(path: str = "/", error_detail_limit: int | None = 4) -> bytes:
-    summary = _collect_summary(error_detail_limit)
-    log_url, app_url = _addon_urls()
-    params = urllib.parse.parse_qs(urllib.parse.urlparse(path).query)
-    test_status = params.get("test", [""])[0]
-    reset_status = params.get("reset", [""])[0]
-    history_status = params.get("history", [""])[0]
-    test_message = params.get("msg", [""])[0]
-    status = "Çalışıyor" if summary["configured"] else "Ayar bekliyor"
-    status_class = "status-ok" if summary["configured"] else "status-warn"
-
-    cards = [
-        ("Durum", status, status_class),
-        ("Kontrol aralığı", f"{summary['interval']} saniye", ""),
-        ("Çevrim süresi", summary["cycle_duration"], ""),
-        ("Son güncelleme", summary.get("last_update", "-"), ""),
-        ("Takip edilenler", summary["watches"], ""),
-    ]
-    card_html = "".join(
-        f"<section class='card {escape(str(css))}'><span>{escape(str(label))}</span><strong>{escape(str(value))}</strong></section>"
-        for label, value, css in cards
-    )
-    error_card_html = _render_error_card(summary)
-    notice_html = ""
-    if test_status in {"ok", "fail"} or reset_status in {"ok", "fail"} or history_status in {"ok", "fail"}:
-        notice_status = test_status if test_status in {"ok", "fail"} else (reset_status if reset_status in {"ok", "fail"} else history_status)
-        notice_class = "notice-ok" if notice_status == "ok" else "notice-fail"
-        notice_html = f"<p class='notice {notice_class}'>{escape(test_message)}</p>"
-
-    confirm_script = """
-<script>
-  document.querySelectorAll('form[data-confirm]').forEach((form) => {
-    form.addEventListener('submit', (event) => {
-      const message = form.getAttribute('data-confirm') || 'Bu işlemi yapmak istediğine emin misin?';
-      if (!window.confirm(message)) {
-        event.preventDefault();
-      }
-    });
-  });
-</script>"""
-    html = f"""<!doctype html>
-<html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta http-equiv="refresh" content="60"><title>Hermes</title><style>{DASHBOARD_CSS}</style></head><body><main><div class="hero"><div class="badge">Hermes</div><div class="actions"><a class="button primary" href="{log_url}" target="_top">LOG</a><a class="button secondary" href="{app_url}" target="_top">Config</a><a class="button secondary" href="./link-test">Test</a><form class="inline-form" method="post" action="./test-pushover"><button class="button test" type="submit">Pushover</button></form><form class="inline-form" method="post" action="./reset-notifications" data-confirm="Bildirim susturma hafızası sıfırlanacak ve hedef altında kalan fırsatlar için tek seferlik kontrol başlatılacak. Devam etmek istiyor musun?"><button class="button secondary" type="submit">Bildirim Sıfırla</button></form><form class="inline-form" method="post" action="./reset-price-history" data-confirm="Min/maks fiyat geçmişi temizlenecek ve güncel fiyattan yeniden başlayacak. Devam etmek istiyor musun?"><button class="button secondary" type="submit">Min/Maks Sıfırla</button></form></div>{notice_html}<div class="grid">{card_html}{error_card_html}</div>{_render_telegram_panel(summary, include_recent_notifications=False)}{_render_table()}{_render_telegram_recent_notifications((summary.get('telegram') or {}).get('recent_notifications') or [])}</div></main>{confirm_script}</body></html>"""
-    return html.encode("utf-8")
+    return _render_dashboard_page(path, ".", error_detail_limit)
 
 
 def _render_error_card(summary, extra_class: str = "") -> str:
@@ -1040,9 +999,7 @@ def _public_dashboard_allowed(path: str) -> bool:
     return _public_token_from_path(path) == expected_token
 
 
-def _render_public_page(path: str):
-    if not _public_dashboard_allowed(path):
-        return 404, b"not found\n"
+def _render_dashboard_page(path: str, base_path: str, error_detail_limit: int | None = None) -> bytes:
     payload = load_json(SUMMARY_PATH, {})
     params = urllib.parse.parse_qs(urllib.parse.urlparse(path).query)
     action_status = ""
@@ -1057,13 +1014,16 @@ def _render_public_page(path: str):
     if action_status:
         notice_class = "notice-ok" if action_status == "ok" else "notice-fail"
         notice_html = f"<p class='notice {notice_class}'>{escape(action_message)}</p>"
-    base_path = escape(_public_base_path(path), quote=True)
+    base_path = escape(base_path, quote=True)
     options = load_json(OPTIONS_PATH, {})
     telegram_summary = _collect_telegram_summary(options if isinstance(options, dict) else {})
     telegram_recent_html = _render_telegram_recent_notifications(
         telegram_summary.get("recent_notifications") or []
     )
-    error_card_html = _render_error_card(_collect_summary(error_detail_limit=None), "public-error-card")
+    error_card_html = _render_error_card(
+        _collect_summary(error_detail_limit=error_detail_limit),
+        "public-error-card",
+    )
     cycle_duration = "-"
     last_update = "-"
     if isinstance(payload, dict):
@@ -1090,7 +1050,13 @@ def _render_public_page(path: str):
 </script>"""
     html = f"""<!doctype html>
 <html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="theme-color" content="#111315"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Hermes"><meta http-equiv="refresh" content="60"><title>Hermes</title><style>{DASHBOARD_CSS}</style></head><body class="public"><main><div class="hero"><div class="badge">Hermes</div><div class="actions public-actions"><a class="button secondary" href="{base_path}/settings">Ayarlar</a><a class="button secondary" href="{base_path}/link-test">Test</a><form class="inline-form" method="post" action="{base_path}/test-pushover"><button class="button test" type="submit">Pushover</button></form><form class="inline-form" method="post" action="{base_path}/reset-notifications" data-confirm="Bildirim susturma hafızası sıfırlanacak ve hedef altında kalan fırsatlar için tek seferlik kontrol başlatılacak. Devam etmek istiyor musun?"><button class="button secondary" type="submit">Bildirim Sıfırla</button></form><form class="inline-form" method="post" action="{base_path}/reset-price-history" data-confirm="Min/maks fiyat geçmişi temizlenecek ve güncel fiyattan yeniden başlayacak. Devam etmek istiyor musun?"><button class="button secondary" type="submit">Min/Maks Sıfırla</button></form></div>{public_cycle_row}{notice_html}{_render_table()}{telegram_recent_html}{error_card_html}<p class="footer">iPhone'da Safari paylaş menüsünden “Ana Ekrana Ekle” diyerek uygulama gibi kullanabilirsin.</p></div></main>{confirm_script}</body></html>"""
-    return 200, html.encode("utf-8")
+    return html.encode("utf-8")
+
+
+def _render_public_page(path: str):
+    if not _public_dashboard_allowed(path):
+        return 404, b"not found\n"
+    return 200, _render_dashboard_page(path, _public_base_path(path), error_detail_limit=None)
 
 
 class _StatusHandler(BaseHTTPRequestHandler):

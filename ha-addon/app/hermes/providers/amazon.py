@@ -86,6 +86,20 @@ def _normalized_variation_url(raw_url: str, asin: str = "") -> str:
     return urlunsplit(("https", "www.amazon.com.tr", urlsplit(canonical_url).path, urlencode(stable_params), ""))
 
 
+def is_same_color_variation(first_url: str, second_url: str) -> bool:
+    """Compare product variations without tracking-only Amazon URL differences."""
+    first = color_variation_identity(first_url)
+    second = color_variation_identity(second_url)
+    if first and second:
+        return first == second
+    return False
+
+
+def color_variation_identity(url: str) -> str:
+    """Return the stable identifier used to avoid duplicate color variations."""
+    return _normalized_variation_url(url, extract_asin_from_url(url) or "")
+
+
 def _variation_url_from_element(element) -> str:
     link = element.select_one("a[href]")
     raw_url = str(link.get("href") or "") if link else ""

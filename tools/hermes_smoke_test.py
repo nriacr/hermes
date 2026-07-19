@@ -5,6 +5,7 @@ import tempfile
 import unittest
 from decimal import Decimal
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 
@@ -22,7 +23,7 @@ from hermes import link_test_ui  # noqa: E402
 from hermes.errors import HermesError, OutOfStockHermesError  # noqa: E402
 from hermes.http_client import amazon_url_variants, fetch_amazon_page  # noqa: E402
 from hermes.config_loader import _prepare_watches  # noqa: E402
-from hermes.models import HermesConfig, OfferResult, PriceSummaryRow, SearchResultItem, StockSummaryRow, TelegramConfig  # noqa: E402
+from hermes.models import HermesConfig, OfferResult, PriceSummaryRow, SearchResultItem, StockSummaryRow, TelegramConfig, WatchRule  # noqa: E402
 from hermes.providers.base import soup_from_html  # noqa: E402
 from hermes.providers.hepsiburada import (  # noqa: E402
     _embedded_detail_candidates,
@@ -125,6 +126,99 @@ class HermesSmokeTests(unittest.TestCase):
                 ("BEYAZ", "https://www.amazon.com.tr/dp/B000000002?psc=1"),
             ],
         )
+
+    def test_real_amazon_watch_reads_all_enabled_color_variations(self):
+        """The saved watch path must use the same variation behavior as Link Test."""
+        watch = WatchRule(
+            name="Tablet",
+            site="amazon",
+            url="https://www.amazon.com.tr/dp/B000000001?th=1",
+            target_price=Decimal("20000"),
+            include_variations=True,
+        )
+        config = SimpleNamespace(request_timeout_seconds=20)
+        source_url = watch.url
+        variation_urls = [
+            source_url,
+            "https://www.amazon.com.tr/dp/B000000002?psc=1",
+            "https://www.amazon.com.tr/dp/B000000003?psc=1",
+        ]
+        variations = [
+            SimpleNamespace(label="Antrasit", url=variation_urls[0]),
+            SimpleNamespace(label="Mavi", url=variation_urls[1]),
+            SimpleNamespace(label="Pembe", url=variation_urls[2]),
+        ]
+
+        def offer_for_url(site, html, source_url):
+            return OfferResult(
+                title="Örnek tablet",
+                price=Decimal("18999"),
+                seller="Amazon",
+                url=source_url,
+            )
+
+        with (
+            patch.object(service, "fetch_amazon_page", side_effect=lambda _session, url, _timeout: url) as fetch_page,
+            patch.object(service, "cleaned_html", side_effect=lambda value: value),
+            patch.object(service, "extract_offer", side_effect=offer_for_url),
+            patch.object(service, "wait_before_request"),
+            patch.object(service.amazon_provider, "extract_color_variations", return_value=variations),
+        ):
+            offers = service._fetch_amazon_product_watch_offers(object(), watch, config)
+
+        self.assertEqual([offer.url for offer in offers], variation_urls)
+        self.assertEqual([offer.title for offer in offers], [
+            "Örnek tablet / Antrasit",
+            "Örnek tablet / Mavi",
+            "Örnek tablet / Pembe",
+        ])
+        self.assertEqual(fetch_page.call_args_list[0].args[1], source_url)
+        self.assertEqual(fetch_page.call_count, 3)
+
+    def test_amazon_variation_watch_rows_are_grouped_above_the_target(self):
+        watch = WatchRule(
+            name="Tablet",
+            site="amazon",
+            url="https://www.amazon.com.tr/dp/B000000001?th=1",
+            target_price=Decimal("20000"),
+            include_variations=True,
+        )
+
+        group, label = service.search_result_group_for_watch(watch)
+
+        self.assertTrue(group)
+        self.assertEqual(label, "Tablet")
+
+    def test_updating_a_watch_keeps_the_variation_setting_for_the_real_check_loop(self):
+        existing_options = {
+            "takip_edilenler": [
+                {
+                    "name": "Tablet",
+                    "target_price": 20000,
+                    "url_1": "https://www.amazon.com.tr/dp/B000000001?th=1",
+                    "include_variations": False,
+                    "notify_once_in_24H": True,
+                    "active": True,
+                }
+            ]
+        }
+        form = {
+            "operation": ["update_watch"],
+            "watch_index": ["0"],
+            "update_watch_index": ["0"],
+            "watches_0_name": ["Tablet"],
+            "watches_0_target_price": ["20000"],
+            "watches_0_url_1": ["https://www.amazon.com.tr/dp/B000000001?th=1"],
+            "watches_0_include_variations": ["on"],
+            "watches_0_notify_once_in_24H": ["on"],
+            "watches_0_active": ["on"],
+        }
+
+        updated_options, _message = settings_ui._apply_settings_operation(existing_options, form)
+        watches = _prepare_watches(updated_options["takip_edilenler"])
+
+        self.assertEqual(len(watches), 1)
+        self.assertTrue(watches[0].include_variations)
     def test_telegram_quick_add_extracts_a_supported_product_url(self):
         message = "Buna bakar mısın? https://www.amazon.com.tr/dp/B0B2PSDNV1?th=1"
         self.assertEqual(
@@ -153,6 +247,13 @@ class HermesSmokeTests(unittest.TestCase):
     def test_ingress_and_public_settings_share_the_same_save_handler(self):
         self.assertIs(dashboard_with_settings.handle_settings_save, settings_ui.handle_settings_save)
         self.assertIs(public_dashboard.handle_settings_save, settings_ui.handle_settings_save)
+
+    def test_ingress_dashboard_uses_the_shared_public_layout_renderer(self):
+        with patch.object(dashboard, "_render_dashboard_page", return_value=b"same-layout") as render_page:
+            payload = dashboard._render_page("/", error_detail_limit=None)
+
+        self.assertEqual(payload, b"same-layout")
+        render_page.assert_called_once_with("/", ".", None)
 
     def test_dashboard_site_theme_classes_are_distinct_for_supported_providers(self):
         expected = {

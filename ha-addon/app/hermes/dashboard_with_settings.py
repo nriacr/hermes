@@ -20,6 +20,7 @@ from .settings_ui import (
     render_settings_restart_page,
     render_settings_restart_script,
     render_settings_script,
+    should_return_to_main_after_save,
 )
 
 
@@ -100,7 +101,10 @@ class SettingsDashboardHandler(_StatusHandler):
         elif path == "/settings/restarting":
             params = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
             message = params.get("msg", ["Ayarlar kaydedildi. Hermes yeniden başlatılıyor."])[0]
-            payload = render_settings_restart_page(message)
+            payload = render_settings_restart_page(
+                message,
+                return_path="../" if params.get("return_to_main", [""])[0] == "1" else None,
+            )
             content_type = "text/html; charset=utf-8"
         elif path.startswith("/public/") and path.endswith("/settings/restarting"):
             if _public_dashboard_allowed(self.path):
@@ -111,6 +115,9 @@ class SettingsDashboardHandler(_StatusHandler):
                     message,
                     settings_path=context["settings_path"],
                     health_path=context["health_path"],
+                    return_path=_public_base_path(self.path)
+                    if params.get("return_to_main", [""])[0] == "1"
+                    else None,
                 )
                 content_type = "text/html; charset=utf-8"
             else:
@@ -121,11 +128,7 @@ class SettingsDashboardHandler(_StatusHandler):
             status, payload = _render_public_page(self.path)
             content_type = "text/html; charset=utf-8" if status == 200 else "text/plain; charset=utf-8"
         else:
-            payload = _render_page(self.path, error_detail_limit=None).replace(
-                b'<form class="inline-form" method="post" action="./test-pushover">',
-                b'<a class="button secondary" href="./settings">Ayarlar</a><form class="inline-form" method="post" action="./test-pushover">',
-                1,
-            )
+            payload = _render_page(self.path, error_detail_limit=None)
             content_type = "text/html; charset=utf-8"
         self.send_response(status)
         self.send_header("Content-Type", content_type)
@@ -164,7 +167,8 @@ class SettingsDashboardHandler(_StatusHandler):
             restart_path = public_context["restart_path"] if public_context else "../settings/restarting"
             settings_path = public_context["settings_path"] if public_context else "../settings"
             if ok:
-                location = f"{restart_path}?msg={urllib.parse.quote(message)}"
+                return_flag = "&return_to_main=1" if should_return_to_main_after_save(body) else ""
+                location = f"{restart_path}?msg={urllib.parse.quote(message)}{return_flag}"
             else:
                 location = f"{settings_path}?saved=fail&msg={urllib.parse.quote(message)}"
             self.send_response(303)

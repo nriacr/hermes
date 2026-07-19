@@ -17,6 +17,7 @@ from .settings_ui import (
     render_settings_restart_page,
     render_settings_restart_script,
     render_settings_script,
+    should_return_to_main_after_save,
 )
 
 PUBLIC_WEB_PORT = 8100
@@ -91,6 +92,7 @@ class _PublicDashboardHandler(BaseHTTPRequestHandler):
                     message,
                     settings_path=f"{base_path}/settings",
                     health_path=f"{base_path}/health",
+                    return_path=base_path if params.get("return_to_main", [""])[0] == "1" else None,
                 )
                 content_type = "text/html; charset=utf-8"
             else:
@@ -115,7 +117,8 @@ class _PublicDashboardHandler(BaseHTTPRequestHandler):
         if suffix == "/settings/save":
             ok, message = handle_settings_save(body)
             if ok:
-                self._redirect(f"{base_path}/settings/restarting?msg={urllib.parse.quote(message)}")
+                return_flag = "&return_to_main=1" if should_return_to_main_after_save(body) else ""
+                self._redirect(f"{base_path}/settings/restarting?msg={urllib.parse.quote(message)}{return_flag}")
             else:
                 self._redirect_with_message(f"{base_path}/settings", "saved", False, message)
             return

@@ -100,6 +100,7 @@ SETTINGS_RESTART_SCRIPT = """
 (() => {
   const script = document.getElementById('hermes-restart-script');
   const settingsPath = script?.dataset.settingsPath || '../settings';
+  const returnPath = script?.dataset.returnPath || settingsPath;
   const healthPath = script?.dataset.healthPath || '../health';
   const statusBox = document.getElementById('restart-status');
   let attempts = 0;
@@ -110,8 +111,9 @@ SETTINGS_RESTART_SCRIPT = """
     try {
       const response = await fetch(`${healthPath}?ts=${Date.now()}`, { cache: 'no-store' });
       if (response.ok) {
-        statusBox.textContent = 'Hermes hazır. Ayarlar ekranı yenileniyor...';
-        window.location.href = `${settingsPath}?saved=ok&msg=${encodeURIComponent('Hermes hazır. Ayarlar güncellendi.')}`;
+        statusBox.textContent = 'Hermes hazır. Sayfa yenileniyor...';
+        const separator = returnPath.includes('?') ? '&' : '?';
+        window.location.href = `${returnPath}${separator}saved=ok&msg=${encodeURIComponent('Hermes hazır. Ayarlar güncellendi.')}`;
         return;
       }
     } catch (_error) {
@@ -134,6 +136,14 @@ def _first(form, key, default=""):
     if not values:
         return default
     return str(values[0]).strip()
+
+
+def should_return_to_main_after_save(body) -> bool:
+    """Existing watch cards request a return to the dashboard after restart."""
+    if not isinstance(body, (bytes, bytearray)):
+        return False
+    form = urllib.parse.parse_qs(body.decode("utf-8", errors="replace"), keep_blank_values=True)
+    return _first(form, "return_to_main") == "1"
 
 
 def _number(value):
@@ -383,6 +393,7 @@ def _watch_form(item, index, is_new=False, groups=None, known_titles=None):
         "<form method='post' action='./settings/save' data-settings-save>"
         "<input type='hidden' name='operation' value='update_watch'>"
         f"<input type='hidden' name='watch_index' value='{index}'>"
+        "<input type='hidden' name='return_to_main' value='1'>"
         f"{details}</form>"
     )
 
@@ -756,16 +767,19 @@ def render_settings_restart_script():
     return SETTINGS_RESTART_SCRIPT.encode("utf-8")
 
 
-def render_settings_restart_page(message, settings_path="../settings", health_path="../health"):
+def render_settings_restart_page(message, settings_path="../settings", health_path="../health", return_path=None):
+    destination = return_path or settings_path
+    destination_label = "Ana ekrana dön" if return_path else "Ayarlar ekranına dön"
+    destination_note = "ana ekran" if return_path else "ayarlar ekranı"
     html = f"""<!doctype html>
 <html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Hermes yeniden başlatılıyor</title><style>{SETTINGS_CSS}</style></head>
 <body><main><div class="hero"><h1>Hermes yeniden başlatılıyor</h1>
 <p class="notice notice-ok">{escape(message)}</p>
-<p>Değişiklikler Home Assistant yapılandırmasına kaydedildi. Hermes yeniden başlarken bu sayfa kısa süre bekleyecek; hazır olduğunda ayarlar ekranı otomatik yenilenecek.</p>
+<p>Değişiklikler Home Assistant yapılandırmasına kaydedildi. Hermes yeniden başlarken bu sayfa kısa süre bekleyecek; hazır olduğunda {destination_note} otomatik yenilenecek.</p>
 <p class="footer-note" id="restart-status">Hazırlanıyor... Birkaç saniye içinde bağlantı kontrolü başlayacak.</p>
-<div class="actions"><a class="button secondary" href="{escape(settings_path, quote=True)}">Ayarlar ekranına dön</a></div>
-</div></main><script id="hermes-restart-script" src="./restart.js" defer data-settings-path="{escape(settings_path, quote=True)}" data-health-path="{escape(health_path, quote=True)}"></script></body></html>"""
+<div class="actions"><a class="button secondary" href="{escape(destination, quote=True)}">{destination_label}</a></div>
+</div></main><script id="hermes-restart-script" src="./restart.js" defer data-settings-path="{escape(settings_path, quote=True)}" data-return-path="{escape(destination, quote=True)}" data-health-path="{escape(health_path, quote=True)}"></script></body></html>"""
     return html.encode("utf-8")
 
 

@@ -273,10 +273,16 @@ def search_result_group_for_watch(watch: WatchRule) -> tuple[str, str]:
         (watch.site == SITE_AMAZON and is_amazon_search_url(watch.url))
         or (watch.site == SITE_HEPSIBURADA and is_hepsiburada_search_url(watch.url))
     )
-    if not is_search_watch or not watch.name:
+    is_amazon_variation_watch = (
+        watch.site == SITE_AMAZON
+        and not is_amazon_search_url(watch.url)
+        and watch.include_variations
+    )
+    if not (is_search_watch or is_amazon_variation_watch) or not watch.name:
         return "", ""
+    group_kind = "search_result_group" if is_search_watch else "variation_result_group"
     return (
-        normalize_item_key("search_result_group", watch.site, watch.name, watch.url),
+        normalize_item_key(group_kind, watch.site, watch.name, watch.url),
         watch.name,
     )
 
@@ -1050,20 +1056,25 @@ def _fetch_amazon_product_watch_offers(
 
     variations = amazon_provider.extract_color_variations(html, watch.url, watch.max_items_to_scan)
     if len(variations) <= 1:
+        log(
+            "Amazon varyasyon taramasi: "
+            f"{watch.name or watch.url} | ayar=acik | bulunan={len(variations)} | tek urunle devam edildi"
+        )
         offer = extract_offer(SITE_AMAZON, html, source_url=watch.url)
         return [OfferResult(title=offer.title, price=offer.price, seller=offer.seller, url=watch.url)]
 
     log(f"Amazon renk varyasyonları bulundu: {watch.name or watch.url} | adet={len(variations)}")
     offers: List[OfferResult] = []
     errors: List[str] = []
-    seen_urls: set[str] = set()
+    seen_variation_ids: set[str] = set()
     source_url = str(watch.url).strip()
     for variation in variations:
-        if variation.url in seen_urls:
+        variation_id = amazon_provider.color_variation_identity(variation.url)
+        if not variation_id or variation_id in seen_variation_ids:
             continue
-        seen_urls.add(variation.url)
+        seen_variation_ids.add(variation_id)
         try:
-            if variation.url == source_url:
+            if amazon_provider.is_same_color_variation(variation.url, source_url):
                 variation_html = html
             else:
                 wait_before_request(request_log_label("Amazon varyasyon", variation.label), config)
@@ -1086,6 +1097,10 @@ def _fetch_amazon_product_watch_offers(
             log(f"Amazon renk varyasyonu okunamadi: {variation.label or variation.url} | {exc}")
 
     if offers:
+        log(
+            "Amazon varyasyon taramasi: "
+            f"{watch.name or watch.url} | ayar=acik | bulunan={len(variations)} | okunan={len(offers)} | hatali={len(errors)}"
+        )
         return offers
     if errors:
         raise HermesError(errors[-1])
