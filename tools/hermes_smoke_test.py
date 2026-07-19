@@ -102,6 +102,29 @@ class HermesSmokeTests(unittest.TestCase):
         )
         self.assertEqual(title_with_color("Örnek ürün", "Mavi"), "Örnek ürün / Mavi")
         self.assertEqual(title_with_color("Örnek ürün Mavi", "Mavi"), "Örnek ürün Mavi")
+
+    def test_amazon_product_color_variations_read_modern_twister_state(self):
+        html = '''
+        <script type="a-state" data-a-state='{"key":"desktop-twister-sort-filter-data"}'>
+        {"sortedDimValuesForAllDims":{"color_name":[
+          {"defaultAsin":"B000000001","dimensionValueState":"SELECTED","dimensionValueDisplayText":"ANTRASİT"},
+          {"defaultAsin":"B000000002","dimensionValueState":"AVAILABLE","dimensionValueDisplayText":"BEYAZ","pageLoadURL":"/dp/B000000002/ref=twister?psc=1"},
+          {"defaultAsin":"B000000003","dimensionValueState":"UNAVAILABLE","dimensionValueDisplayText":"PEMBE","pageLoadURL":"/dp/B000000003?psc=1"}
+        ]}}
+        </script>
+        '''
+        variations = extract_color_variations(
+            html,
+            "https://www.amazon.com.tr/dp/B000000001?smid=A1&th=1",
+            60,
+        )
+        self.assertEqual(
+            [(item.label, item.url) for item in variations],
+            [
+                ("ANTRASİT", "https://www.amazon.com.tr/dp/B000000001?smid=A1&th=1"),
+                ("BEYAZ", "https://www.amazon.com.tr/dp/B000000002?psc=1"),
+            ],
+        )
     def test_telegram_quick_add_extracts_a_supported_product_url(self):
         message = "Buna bakar mısın? https://www.amazon.com.tr/dp/B0B2PSDNV1?th=1"
         self.assertEqual(

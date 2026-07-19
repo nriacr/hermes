@@ -1,3 +1,4 @@
+import json
 import re
 from dataclasses import dataclass
 from typing import Optional
@@ -55,6 +56,8 @@ BUYING_OPTION_PRICE_PATTERNS = [
 
 AMAZON_VARIATION_QUERY_PARAMS = {"smid", "psc", "th"}
 AMAZON_COLOR_VARIATION_SELECTORS = (
+    "#inline-twister-row-color_name li",
+    "[id*='inline-twister-row-color'] li",
     "#variation_color_name li",
     "#variation_color li",
     "[id*='variation_color'] li",
@@ -126,9 +129,59 @@ def _color_label_from_element(element) -> str:
     return ""
 
 
+def _load_json(value: str) -> dict:
+    try:
+        loaded = json.loads(value)
+    except (TypeError, ValueError):
+        return {}
+    return loaded if isinstance(loaded, dict) else {}
+
+
+def _script_color_variations(soup, source_url: str, limit: int) -> list[AmazonColorVariation]:
+    """Read Amazon's current Twister state when color swatches are rendered dynamically."""
+    for script in soup.select("script[type='a-state'][data-a-state]"):
+        state = _load_json(str(script.get("data-a-state") or ""))
+        if "twister" not in normalize_offer_text(str(state.get("key") or "")):
+            continue
+
+        payload = _load_json(script.get_text("", strip=True))
+        dimensions = payload.get("sortedDimValuesForAllDims")
+        colors = dimensions.get("color_name") if isinstance(dimensions, dict) else None
+        if not isinstance(colors, list):
+            continue
+
+        variations: list[AmazonColorVariation] = []
+        seen_urls: set[str] = set()
+        for color in colors:
+            if not isinstance(color, dict) or len(variations) >= max(1, limit):
+                continue
+            state_name = normalize_offer_text(str(color.get("dimensionValueState") or ""))
+            if state_name not in {"available", "selected"}:
+                continue
+
+            label = _clean_color_label(str(color.get("dimensionValueDisplayText") or ""))
+            asin = str(color.get("defaultAsin") or "").strip()
+            raw_url = str(color.get("pageLoadURL") or "")
+            if not raw_url and state_name == "selected":
+                raw_url = source_url
+            url = _normalized_variation_url(raw_url, asin)
+            if not label or not url or url in seen_urls:
+                continue
+            seen_urls.add(url)
+            variations.append(AmazonColorVariation(label=label, url=url))
+
+        if variations:
+            return variations
+    return []
+
+
 def extract_color_variations(html: str, source_url: str, limit: int) -> list[AmazonColorVariation]:
     """Return concrete Amazon color URLs from the product-page twister."""
     soup = soup_from_html(html)
+    variations = _script_color_variations(soup, source_url, limit)
+    if variations:
+        return variations[: max(1, limit)]
+
     variations: list[AmazonColorVariation] = []
     seen_urls: set[str] = set()
     for selector in AMAZON_COLOR_VARIATION_SELECTORS:
