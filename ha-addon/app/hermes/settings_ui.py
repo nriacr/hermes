@@ -447,6 +447,12 @@ def _telegram_section(options):
     inner = "".join(
         [
             _checkbox("", "telegram_enabled", "Telegram takip aktif", options.get("telegram_enabled", False)),
+            _checkbox(
+                "",
+                "telegram_saved_messages_enabled",
+                "Kayıtlı Mesajlar'dan hızlı takip ekleme aktif",
+                options.get("telegram_saved_messages_enabled", True),
+            ),
             _field("", "api_id", "Telegram API ID", options.get("api_id", "")),
             _field("", "api_hash", "Telegram API Hash", options.get("api_hash", "")),
             _field("", "phone_number", "Telefon numarası", options.get("phone_number", "")),
@@ -631,6 +637,9 @@ def _list_from_form(form, key):
 
 def _update_telegram_options(options, form):
     options["telegram_enabled"] = _bool_from_form(form, "telegram_enabled")
+    options["telegram_saved_messages_enabled"] = _bool_from_form(
+        form, "telegram_saved_messages_enabled", default=True
+    )
     options["api_id"] = _first(form, "api_id")
     options["api_hash"] = _first(form, "api_hash")
     options["phone_number"] = _first(form, "phone_number")
@@ -653,6 +662,7 @@ def _options_for_save(options):
         "public_dashboard_enabled": False,
         "public_dashboard_token": "",
         "telegram_enabled": False,
+        "telegram_saved_messages_enabled": True,
         "api_id": "",
         "api_hash": "",
         "phone_number": "",
@@ -726,6 +736,15 @@ def _restart_addon_later(delay_seconds=2.0):
     timer.start()
 
 
+def save_options_and_restart(options):
+    """Persist shared add-on options and restart only after a successful save."""
+    saved_options = _options_for_save(options)
+    _save_options_to_supervisor(saved_options)
+    save_json(OPTIONS_PATH, saved_options)
+    _restart_addon_later()
+    return saved_options
+
+
 def render_settings_script():
     return SETTINGS_SCRIPT.encode("utf-8")
 
@@ -782,10 +801,8 @@ def handle_settings_save(body):
         if not isinstance(options, dict):
             options = {}
         options, change_message = _apply_settings_operation(options, form)
-        _save_options_to_supervisor(options)
-        save_json(OPTIONS_PATH, options)
+        save_options_and_restart(options)
         log("Ayarlar Home Assistant config'e kaydedildi; Hermes yeniden başlatılacak.")
-        _restart_addon_later()
         return True, f"{change_message} Hermes yeniden başlatılıyor; 10-20 saniye sonra sayfayı yenileyebilirsin."
     except Exception as exc:  # noqa: BLE001
         return False, f"Ayarlar kaydedilemedi: {exc}"

@@ -10,6 +10,8 @@ import requests
 from .constants import (
     TELEGRAM_ERROR_EVENTS_PATH,
     TELEGRAM_LOGIN_STATE_PATH,
+    OPTIONS_PATH,
+    TELEGRAM_QUICK_ADD_PATH,
     TELEGRAM_SEEN_MESSAGES_PATH,
     TELEGRAM_SESSION_PATH,
     TELEGRAM_STATUS_HEARTBEAT_SECONDS,
@@ -18,8 +20,17 @@ from .constants import (
 from .logging_utils import log
 from .models import HermesConfig, TelegramConfig
 from .notifier import send_pushover
+from .settings_ui import save_options_and_restart
 from .storage import load_json, save_json
-from .utils import format_local_datetime, local_now, normalize_offer_text
+from .utils import (
+    detect_site_from_url,
+    format_local_datetime,
+    format_tl,
+    local_now,
+    normalize_offer_text,
+    parse_decimal,
+    watch_name_required_for_url,
+)
 
 try:
     from telethon import TelegramClient, events
@@ -31,6 +42,8 @@ except Exception:  # pragma: no cover - handled at runtime inside the add-on
 
 
 MAX_SEEN_MESSAGES = 5000
+QUICK_ADD_EXPIRY_HOURS = 24
+URL_PATTERN = re.compile(r"https?://[^\s<>]+", re.IGNORECASE)
 
 
 def normalize_text(value: str) -> str:
@@ -134,6 +147,200 @@ def _mark_message_seen(key: str) -> None:
     if len(payload) > MAX_SEEN_MESSAGES:
         payload = dict(list(payload.items())[-MAX_SEEN_MESSAGES:])
     save_json(TELEGRAM_SEEN_MESSAGES_PATH, payload)
+
+
+def _extract_supported_url(text: str) -> str:
+    """Return the first Hermes-supported product or search URL from a message."""
+    for match in URL_PATTERN.finditer(str(text or "")):
+        candidate = match.group(0).rstrip(".,;:!?)]}>'\"")
+        try:
+            detect_site_from_url(candidate)
+        except Exception:  # Unsupported links are ordinary Saved Message content.
+            continue
+        return candidate
+    return ""
+
+
+def _quick_add_defaults() -> Dict[str, Any]:
+    return {"pending": []}
+
+
+def _load_quick_adds() -> Dict[str, Any]:
+    payload = load_json(TELEGRAM_QUICK_ADD_PATH, _quick_add_defaults())
+    if not isinstance(payload, dict):
+        return _quick_add_defaults()
+    pending = payload.get("pending")
+    payload["pending"] = pending if isinstance(pending, list) else []
+    return payload
+
+
+def _save_quick_adds(payload: Dict[str, Any]) -> None:
+    save_json(TELEGRAM_QUICK_ADD_PATH, payload)
+
+
+def _prune_pending_quick_adds(items: Iterable[Dict[str, Any]]) -> list:
+    cutoff = local_now() - timedelta(hours=QUICK_ADD_EXPIRY_HOURS)
+    valid = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        try:
+            created_at = datetime.fromisoformat(str(item.get("created_at") or ""))
+            if created_at.tzinfo is None:
+                created_at = created_at.astimezone()
+        except ValueError:
+            continue
+        if created_at.astimezone() >= cutoff:
+            valid.append(item)
+    return valid
+
+
+def _reply_to_message_id(event) -> Optional[int]:
+    message = getattr(event, "message", None)
+    direct_id = getattr(message, "reply_to_msg_id", None)
+    if direct_id:
+        return int(direct_id)
+    reply_to = getattr(message, "reply_to", None)
+    nested_id = getattr(reply_to, "reply_to_msg_id", None)
+    return int(nested_id) if nested_id else None
+
+
+def _pending_for_reply(event, pending_items: Iterable[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    reply_id = _reply_to_message_id(event)
+    if reply_id is None:
+        return None
+    chat_id = str(getattr(event, "chat_id", ""))
+    for item in pending_items:
+        if str(item.get("chat_id", "")) != chat_id:
+            continue
+        if reply_id in {item.get("source_message_id"), item.get("prompt_message_id")}:
+            return item
+    return None
+
+
+def _parse_target_price(text: str):
+    value = str(text or "").strip()
+    if not value:
+        return None
+    try:
+        price = parse_decimal(value)
+    except Exception:
+        return None
+    return price if price > 0 else None
+
+
+def _quick_add_watch(url: str, target_price, name: str = "") -> str:
+    """Append a Saved Messages watch through the same options path as the UI."""
+    options = load_json(OPTIONS_PATH, {})
+    if not isinstance(options, dict):
+        options = {}
+    watches = options.get("takip_edilenler")
+    watches = [dict(item) for item in watches if isinstance(item, dict)] if isinstance(watches, list) else []
+    normalized_url = str(url).strip()
+    for watch in watches:
+        for number in range(1, 6):
+            if str(watch.get(f"url_{number}") or "").strip() == normalized_url:
+                return "Bu bağlantı zaten takip ediliyor. Yeni kayıt oluşturulmadı."
+
+    watch = {
+        "name": str(name or "").strip(),
+        "target_price": float(target_price),
+        "url_1": normalized_url,
+        "notify_once_in_24H": True,
+        "active": True,
+    }
+    options["takip_edilenler"] = watches + [watch]
+    save_options_and_restart(options)
+    return "Takip kaydı eklendi"
+
+
+async def _reply(event, text: str):
+    return await event.reply(text)
+
+
+async def _handle_saved_message_quick_add(event) -> bool:
+    """Run the short Saved Messages conversation for adding a Hermes watch."""
+    payload = _load_quick_adds()
+    pending_items = _prune_pending_quick_adds(payload["pending"])
+    pending = _pending_for_reply(event, pending_items)
+    text = event.raw_text or ""
+
+    if pending:
+        if pending.get("stage") == "target_price":
+            target_price = _parse_target_price(text)
+            if target_price is None:
+                await _reply(event, "Hermes: hedef fiyatı örneğin `40000` veya `40.000 TL` biçiminde yanıtla.")
+                payload["pending"] = pending_items
+                _save_quick_adds(payload)
+                return True
+            pending["target_price"] = str(target_price)
+            if watch_name_required_for_url(str(pending.get("url") or "")):
+                prompt = await _reply(
+                    event,
+                    "Hermes: bu bir arama sayfası. Takip edilecek ürünün adını yanıtla; "
+                    "örnek: `Samsung Galaxy Tab S10 FE+`.",
+                )
+                pending["stage"] = "name"
+                pending["prompt_message_id"] = getattr(prompt, "id", None)
+                payload["pending"] = pending_items
+                _save_quick_adds(payload)
+                return True
+            result = _quick_add_watch(str(pending["url"]), target_price)
+            pending_items.remove(pending)
+            payload["pending"] = pending_items
+            _save_quick_adds(payload)
+            await _reply(
+                event,
+                f"Hermes: {result}. Hedef fiyat: {format_tl(target_price, with_currency=True)}. "
+                "Grup ve beden bilgisini Hermes Ayarlar ekranından ekleyebilirsin."
+                if result == "Takip kaydı eklendi"
+                else f"Hermes: {result}",
+            )
+            if result == "Takip kaydı eklendi":
+                log(f"Telegram Kayıtlı Mesajlar ile takip eklendi: {pending['url']}")
+            return True
+
+        name = str(text).strip()
+        if not name:
+            await _reply(event, "Hermes: ürün adını yazman gerekiyor; örnek: `Samsung Galaxy Tab S10 FE+`.")
+            return True
+        target_price = parse_decimal(str(pending["target_price"]))
+        result = _quick_add_watch(str(pending["url"]), target_price, name)
+        pending_items.remove(pending)
+        payload["pending"] = pending_items
+        _save_quick_adds(payload)
+        await _reply(
+            event,
+            f"Hermes: {result}. Hedef fiyat: {format_tl(target_price, with_currency=True)}. "
+            "Grup ve beden bilgisini Hermes Ayarlar ekranından ekleyebilirsin."
+            if result == "Takip kaydı eklendi"
+            else f"Hermes: {result}",
+        )
+        if result == "Takip kaydı eklendi":
+            log(f"Telegram Kayıtlı Mesajlar ile arama takibi eklendi: {name}")
+        return True
+
+    url = _extract_supported_url(text)
+    if not url:
+        payload["pending"] = pending_items
+        _save_quick_adds(payload)
+        return False
+
+    prompt = await _reply(event, "Hermes: bu bağlantı için hedef fiyat nedir? Örnek: `40000` veya `40.000 TL`.")
+    pending_items.append(
+        {
+            "chat_id": str(getattr(event, "chat_id", "")),
+            "source_message_id": getattr(event, "id", None),
+            "prompt_message_id": getattr(prompt, "id", None),
+            "url": url,
+            "stage": "target_price",
+            "created_at": local_now().isoformat(),
+        }
+    )
+    payload["pending"] = pending_items
+    _save_quick_adds(payload)
+    log(f"Telegram Kayıtlı Mesajlar bağlantısı algılandı: {url}")
+    return True
 
 
 def _matching_keyword(message_text: str, keywords: Iterable[str]) -> Optional[str]:
@@ -307,7 +514,11 @@ async def _run_telegram_listener(config: HermesConfig) -> None:
         return
 
     resolved_channels = await _resolve_channels(client, telegram_config.channels)
-    if not resolved_channels:
+    saved_messages_chat = await client.get_me() if telegram_config.saved_messages_enabled else None
+    listened_chats = list(resolved_channels)
+    if saved_messages_chat is not None:
+        listened_chats.append(saved_messages_chat)
+    if not listened_chats:
         record_telegram_error("Dinlenebilir Telegram kanalı bulunamadı.")
         await _wait_for_code()
         return
@@ -321,6 +532,19 @@ async def _run_telegram_listener(config: HermesConfig) -> None:
             return
         _mark_message_seen(key)
 
+        is_saved_message = (
+            saved_messages_chat is not None
+            and str(getattr(event, "chat_id", "")) == str(getattr(saved_messages_chat, "id", ""))
+        )
+        if is_saved_message:
+            # Only messages the user writes in Saved Messages can start or answer a flow.
+            if getattr(event, "out", False):
+                try:
+                    await _handle_saved_message_quick_add(event)
+                except Exception as exc:  # noqa: BLE001
+                    record_telegram_error(f"Kayıtlı Mesajlar ile takip eklenemedi: {exc}", "Telegram hızlı ekleme")
+            return
+
         keyword = _matching_keyword(text, telegram_config.keywords)
         if not keyword:
             return
@@ -333,9 +557,13 @@ async def _run_telegram_listener(config: HermesConfig) -> None:
         except Exception as exc:  # noqa: BLE001
             record_telegram_error(f"Pushover bildirimi gönderilemedi: {exc}", "Telegram bildirim")
 
-    client.add_event_handler(handle_message, events.NewMessage(chats=resolved_channels))
+    client.add_event_handler(handle_message, events.NewMessage(chats=listened_chats))
     _save_status(telegram_state="Dinleniyor", last_error="")
-    log(f"Telegram kanal dinleme aktif: kanal={len(resolved_channels)} | keyword={len(telegram_config.keywords)}")
+    saved_messages_status = " | Kayıtlı Mesajlar hızlı ekleme aktif" if saved_messages_chat else ""
+    log(
+        f"Telegram kanal dinleme aktif: kanal={len(resolved_channels)} | "
+        f"keyword={len(telegram_config.keywords)}{saved_messages_status}"
+    )
 
     while True:
         try:

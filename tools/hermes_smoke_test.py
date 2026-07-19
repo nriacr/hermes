@@ -17,6 +17,7 @@ from hermes import dashboard  # noqa: E402
 from hermes import dashboard_with_settings  # noqa: E402
 from hermes import public_dashboard  # noqa: E402
 from hermes import settings_ui  # noqa: E402
+from hermes import telegram_listener  # noqa: E402
 from hermes.errors import HermesError, OutOfStockHermesError  # noqa: E402
 from hermes.http_client import amazon_url_variants, fetch_amazon_page  # noqa: E402
 from hermes.config_loader import _prepare_watches  # noqa: E402
@@ -42,6 +43,18 @@ from hermes.utils import detect_site_from_url, parse_decimal, utc_now  # noqa: E
 
 
 class HermesSmokeTests(unittest.TestCase):
+    def test_telegram_quick_add_extracts_a_supported_product_url(self):
+        message = "Buna bakar mısın? https://www.amazon.com.tr/dp/B0B2PSDNV1?th=1"
+        self.assertEqual(
+            telegram_listener._extract_supported_url(message),
+            "https://www.amazon.com.tr/dp/B0B2PSDNV1?th=1",
+        )
+
+    def test_telegram_quick_add_target_price_accepts_turkish_price_formats(self):
+        self.assertEqual(telegram_listener._parse_target_price("40.000 TL"), Decimal("40000"))
+        self.assertEqual(telegram_listener._parse_target_price("40000"), Decimal("40000"))
+        self.assertIsNone(telegram_listener._parse_target_price("fiyat belli değil"))
+
     def test_ingress_and_public_settings_share_the_same_save_handler(self):
         self.assertIs(dashboard_with_settings.handle_settings_save, settings_ui.handle_settings_save)
         self.assertIs(public_dashboard.handle_settings_save, settings_ui.handle_settings_save)

@@ -128,6 +128,7 @@ def _prepare_telegram_config(payload: Dict[str, object]) -> TelegramConfig:
         channels=channels,
         keywords=keywords,
         exclude_keywords=exclude_keywords,
+        saved_messages_enabled=parse_bool(payload.get("telegram_saved_messages_enabled"), default=True),
     )
 
 
@@ -224,9 +225,9 @@ def load_config() -> HermesConfig:
     if telegram.enabled:
         if not telegram.api_id or not telegram.api_hash or not telegram.phone_number:
             raise HermesError("Telegram aktifse api_id, api_hash ve phone_number zorunlu.")
-        if not telegram.channels:
+        if not telegram.channels and not telegram.saved_messages_enabled:
             raise HermesError("Telegram aktifse en az bir channels kaydı tanımlanmalı.")
-        if not telegram.keywords:
+        if not telegram.keywords and not telegram.saved_messages_enabled:
             raise HermesError("Telegram aktifse en az bir keywords kaydı tanımlanmalı.")
 
     return HermesConfig(

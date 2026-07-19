@@ -83,3 +83,4 @@ class TelegramConfig:
     channels: List[str]
     keywords: List[str]
     exclude_keywords: List[str]
+    saved_messages_enabled: bool = True

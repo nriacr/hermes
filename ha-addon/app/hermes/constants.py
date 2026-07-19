@@ -1,6 +1,6 @@
 from pathlib import Path
 
-APP_VERSION = "2.2.69"
+APP_VERSION = "2.2.70"
 OPTIONS_PATH = Path("/data/options.json")
 STATE_PATH = Path("/data/state.json")
 SUMMARY_PATH = Path("/data/latest_price_summary.json")
@@ -9,6 +9,7 @@ TELEGRAM_LOGIN_STATE_PATH = Path("/data/login_state.json")
 TELEGRAM_SEEN_MESSAGES_PATH = Path("/data/seen_messages.json")
 TELEGRAM_STATUS_PATH = Path("/data/status.json")
 TELEGRAM_ERROR_EVENTS_PATH = Path("/data/error_events.json")
+TELEGRAM_QUICK_ADD_PATH = Path("/data/telegram_quick_add.json")
 PUSHOVER_URL = "https://api.pushover.net/1/messages.json"
 
 SITE_AMAZON = "amazon"

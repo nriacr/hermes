@@ -7,6 +7,7 @@ Takip edilen alanlar:
 - Hermes linkten siteyi ve link tipini otomatik algılar
 - Ürün linklerinde `name` boş bırakılabilir; Hermes ürün adını linkten okur. Arama linklerinde `name`, aranacak keyword olarak zorunludur.
 - Telegram kanalları: keyword ve exclude keyword tabanlı fırsat bildirimi
+- Telegram Kayıtlı Mesajlar: bağlantıyı gönder, Hermes hedef fiyatı sorup takibi ekler
 - Arama bağlantılarında en fazla 60 sonuç otomatik taranır.
 
 Bildirimler Pushover üzerinden gönderilir.  
