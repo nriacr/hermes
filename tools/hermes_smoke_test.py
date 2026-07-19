@@ -64,15 +64,25 @@ class HermesSmokeTests(unittest.TestCase):
             seller="Amazon",
             url="https://www.amazon.com.tr/dp/B000000001",
         )
-        with patch.object(link_test_ui, "inspect_link_now", return_value=("amazon", [offer])):
+        with patch.object(link_test_ui, "inspect_link_now", return_value=("amazon", [offer])) as inspect_link:
             payload = link_test_ui.render_link_test_from_request(
-                "", "./link-test", "./", b"url=https%3A%2F%2Fwww.amazon.com.tr%2Fdp%2FB000000001"
+                "",
+                "./link-test",
+                "./",
+                b"url=https%3A%2F%2Fwww.amazon.com.tr%2Fdp%2FB000000001&name=Ornek&size=XL&exclude_terms=kilif%2Ckoruyucu&include_variations=1",
             ).decode("utf-8")
 
+        inspect_link.assert_called_once_with(
+            "https://www.amazon.com.tr/dp/B000000001",
+            name="Ornek",
+            size="XL",
+            include_variations=True,
+            excluded_terms=["kilif", "koruyucu"],
+        )
         self.assertIn("Test sonuçları", payload)
         self.assertIn("Örnek ürün / Mavi", payload)
         self.assertIn("18.999 TL", payload)
-        self.assertIn("Kayıt oluşturmaz, bildirim göndermez", payload)
+        self.assertIn("Geçici sonuçlar. Kayıt ve bildirim oluşturmaz.", payload)
 
     def test_amazon_product_color_variations_keep_concrete_urls_and_labels(self):
         html = """

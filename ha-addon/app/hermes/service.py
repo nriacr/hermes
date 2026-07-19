@@ -1298,7 +1298,13 @@ def _fetch_watch_offers(session: requests.Session, watch: WatchRule, config: Her
     return [extract_offer(site, html, source_url=url)]
 
 
-def inspect_link_now(url: str) -> tuple[str, List[OfferResult]]:
+def inspect_link_now(
+    url: str,
+    name: str = "",
+    size: str = "",
+    include_variations: bool = False,
+    excluded_terms: List[str] | None = None,
+) -> tuple[str, List[OfferResult]]:
     """Read one supported link without changing tracking state or sending notifications."""
     source_url = str(url or "").strip()
     if not source_url:
@@ -1307,17 +1313,24 @@ def inspect_link_now(url: str) -> tuple[str, List[OfferResult]]:
     site = detect_site_from_url(source_url)
     config = load_config()
     temporary_watch = WatchRule(
-        name="",
+        name=str(name or "").strip(),
         site=site,
         url=source_url,
         target_price=Decimal("0"),
-        include_variations=True,
+        size=str(size or "").strip(),
+        include_variations=bool(include_variations),
+        excluded_terms=[str(term).strip() for term in (excluded_terms or []) if str(term).strip()],
         max_items_to_scan=60,
     )
     session = requests.Session()
     offers = _fetch_watch_offers(session, temporary_watch, config)
+    offers = [
+        offer
+        for offer in offers
+        if not skipped_offer_reason(temporary_watch, offer, offer.title or temporary_watch.name or source_url)
+    ]
     if not offers:
-        raise HermesError("Bağlantıda okunabilir ürün veya fiyat bulunamadı.")
+        raise HermesError("Bağlantıda seçilen filtrelerle okunabilir ürün veya fiyat bulunamadı.")
     return site, offers
 
 

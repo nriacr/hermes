@@ -7,6 +7,7 @@ Takip edilen alanlar:
 - Hermes linkten siteyi ve link tipini otomatik algılar
 - Ürün linklerinde `name` boş bırakılabilir; Hermes ürün adını linkten okur. Arama linklerinde `name`, aranacak keyword olarak zorunludur.
 - Amazon ürün linklerinde `Varyasyonları ekle` seçilirse, stokta olan renk seçenekleri ayrı satırlar halinde takip edilir.
+- Ana ekrandaki `Test` sayfası bağlantıyı anlık ve geçici olarak okur; arama anahtar kelimesi, beden, hariç tut ve varyasyon seçenekleri bu test için ayrıca uygulanabilir.
 - Telegram kanalları: keyword ve exclude keyword tabanlı fırsat bildirimi
 - Telegram Kayıtlı Mesajlar: bağlantıyı gönder, Hermes hedef fiyatı sorup takibi ekler
 - Arama bağlantılarında en fazla 60 sonuç otomatik taranır.
