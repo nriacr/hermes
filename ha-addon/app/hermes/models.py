@@ -13,6 +13,7 @@ class WatchRule:
     excluded_terms: List[str] = field(default_factory=list)
     group: str = ""
     size: str = ""
+    include_variations: bool = False
     max_items_to_scan: int = 60
     check_interval_minutes: Optional[int] = None
     notify_once_in_24h: bool = True

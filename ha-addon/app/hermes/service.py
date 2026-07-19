@@ -35,6 +35,7 @@ from .notifier import send_pushover
 from .providers import hepsiburada as hepsiburada_provider
 from .providers import hm as hm_provider
 from .providers import zara as zara_provider
+from .providers import amazon as amazon_provider
 from .providers.registry import extract_offer
 from .search_amazon import (
     dedupe_results,
@@ -45,6 +46,7 @@ from .search_amazon import (
 from .storage import load_json, save_json
 from .telegram_listener import start_telegram_listener
 from .utils import (
+    detect_site_from_url,
     format_local_datetime,
     format_signed_tl,
     format_tl,
@@ -759,7 +761,8 @@ def reset_product_alert_after_missing(
 
 def summary_config_signature(config: HermesConfig) -> str:
     watch_part = ",".join(
-        f"{watch.site}:{watch.url}:{watch.target_price}:{watch.minimum_price}:{watch.excluded_terms}:{watch.size}:{watch.active}"
+        f"{watch.site}:{watch.url}:{watch.target_price}:{watch.minimum_price}:{watch.excluded_terms}:"
+        f"{watch.size}:{watch.include_variations}:{watch.active}"
         for watch in config.watches
     )
     return f"watches={watch_part}"
@@ -1030,6 +1033,65 @@ def _fetch_amazon_search_watch_offers(
     return offers
 
 
+def _fetch_amazon_product_watch_offers(
+    session: requests.Session,
+    watch: WatchRule,
+    config: HermesConfig,
+) -> List[OfferResult]:
+    response = fetch_amazon_page(session, watch.url, config.request_timeout_seconds)
+    html = cleaned_html(response)
+    raise_if_age_verification(html)
+    if "captcha" in html.lower() and "robot" in html.lower():
+        raise HermesError("Amazon bot korumasi nedeniyle captcha sayfasi dondu.")
+
+    if not watch.include_variations:
+        offer = extract_offer(SITE_AMAZON, html, source_url=watch.url)
+        return [OfferResult(title=offer.title, price=offer.price, seller=offer.seller, url=watch.url)]
+
+    variations = amazon_provider.extract_color_variations(html, watch.url, watch.max_items_to_scan)
+    if len(variations) <= 1:
+        offer = extract_offer(SITE_AMAZON, html, source_url=watch.url)
+        return [OfferResult(title=offer.title, price=offer.price, seller=offer.seller, url=watch.url)]
+
+    log(f"Amazon renk varyasyonları bulundu: {watch.name or watch.url} | adet={len(variations)}")
+    offers: List[OfferResult] = []
+    errors: List[str] = []
+    seen_urls: set[str] = set()
+    source_url = str(watch.url).strip()
+    for variation in variations:
+        if variation.url in seen_urls:
+            continue
+        seen_urls.add(variation.url)
+        try:
+            if variation.url == source_url:
+                variation_html = html
+            else:
+                wait_before_request(request_log_label("Amazon varyasyon", variation.label), config)
+                variation_response = fetch_amazon_page(session, variation.url, config.request_timeout_seconds)
+                variation_html = cleaned_html(variation_response)
+                raise_if_age_verification(variation_html)
+                if "captcha" in variation_html.lower() and "robot" in variation_html.lower():
+                    raise HermesError("Amazon bot korumasi nedeniyle captcha sayfasi dondu.")
+            offer = extract_offer(SITE_AMAZON, variation_html, source_url=variation.url)
+            offers.append(
+                OfferResult(
+                    title=amazon_provider.title_with_color(offer.title, variation.label),
+                    price=offer.price,
+                    seller=offer.seller,
+                    url=variation.url,
+                )
+            )
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"{variation.label or variation.url} | {exc}")
+            log(f"Amazon renk varyasyonu okunamadi: {variation.label or variation.url} | {exc}")
+
+    if offers:
+        return offers
+    if errors:
+        raise HermesError(errors[-1])
+    raise HermesError("Amazon sayfasından fiyat bulunamadı.")
+
+
 def _hepsiburada_variant_scan_limit(watch: WatchRule) -> int:
     return max(1, min(int(watch.max_items_to_scan or 1), 100))
 
@@ -1219,14 +1281,14 @@ def _fetch_watch_offers(session: requests.Session, watch: WatchRule, config: Her
     timeout = config.request_timeout_seconds
     if site == SITE_AMAZON and is_amazon_search_url(url):
         return _fetch_amazon_search_watch_offers(session, watch, config)
+    if site == SITE_AMAZON:
+        return _fetch_amazon_product_watch_offers(session, watch, config)
     if site == SITE_HEPSIBURADA:
         return _fetch_hepsiburada_watch_offers(session, watch, config)
     if site == SITE_ZARA:
         return _fetch_zara_watch_offers(session, watch, config)
     if site == SITE_HM:
         return _fetch_hm_watch_offers(session, watch, config)
-    elif site == SITE_AMAZON:
-        response = fetch_amazon_page(session, url, timeout)
     else:
         response = fetch_with_retries(session, url, timeout)
     html = cleaned_html(response)
@@ -1234,6 +1296,29 @@ def _fetch_watch_offers(session: requests.Session, watch: WatchRule, config: Her
     if is_bot_protection_page(site, html):
         raise HermesError(f"{site_label(site)} bot korumasi nedeniyle captcha sayfasi dondu.")
     return [extract_offer(site, html, source_url=url)]
+
+
+def inspect_link_now(url: str) -> tuple[str, List[OfferResult]]:
+    """Read one supported link without changing tracking state or sending notifications."""
+    source_url = str(url or "").strip()
+    if not source_url:
+        raise HermesError("Test etmek için bir bağlantı girilmeli.")
+
+    site = detect_site_from_url(source_url)
+    config = load_config()
+    temporary_watch = WatchRule(
+        name="",
+        site=site,
+        url=source_url,
+        target_price=Decimal("0"),
+        include_variations=True,
+        max_items_to_scan=60,
+    )
+    session = requests.Session()
+    offers = _fetch_watch_offers(session, temporary_watch, config)
+    if not offers:
+        raise HermesError("Bağlantıda okunabilir ürün veya fiyat bulunamadı.")
+    return site, offers
 
 
 def _fetch_amazon_detail_result(session: requests.Session, candidate, config: HermesConfig) -> SearchResultItem:

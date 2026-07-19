@@ -1,9 +1,18 @@
 import re
+from dataclasses import dataclass
 from typing import Optional
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from ..errors import HermesError
 from ..models import OfferResult
-from ..utils import normalize_offer_text, parse_decimal
+from ..utils import (
+    canonical_amazon_product_url,
+    extract_asin_from_url,
+    make_amazon_absolute_url,
+    normalize_offer_text,
+    parse_decimal,
+    repair_mojibake,
+)
 from .amazon_common import extract_secondary_offer_price
 from .base import (
     extract_jsonld_product,
@@ -43,6 +52,123 @@ BUYING_OPTION_PRICE_PATTERNS = [
         r"(?:,(?P<comma_fraction>\d{1,2})|\s*(?P<plain_fraction>\d{2}))?\s*tl"
     ),
 ]
+
+AMAZON_VARIATION_QUERY_PARAMS = {"smid", "psc", "th"}
+AMAZON_COLOR_VARIATION_SELECTORS = (
+    "#variation_color_name li",
+    "#variation_color li",
+    "[id*='variation_color'] li",
+)
+
+
+@dataclass(frozen=True)
+class AmazonColorVariation:
+    label: str
+    url: str
+
+
+def _normalized_variation_url(raw_url: str, asin: str = "") -> str:
+    if not raw_url and not asin:
+        return ""
+    absolute_url = make_amazon_absolute_url(raw_url) if raw_url else ""
+    canonical_url = canonical_amazon_product_url(absolute_url, fallback_asin=asin)
+    parsed = urlsplit(absolute_url)
+    stable_params = [
+        (key, value)
+        for key, value in parse_qsl(parsed.query, keep_blank_values=True)
+        if key in AMAZON_VARIATION_QUERY_PARAMS
+    ]
+    if not stable_params:
+        return canonical_url
+    return urlunsplit(("https", "www.amazon.com.tr", urlsplit(canonical_url).path, urlencode(stable_params), ""))
+
+
+def _variation_url_from_element(element) -> str:
+    link = element.select_one("a[href]")
+    raw_url = str(link.get("href") or "") if link else ""
+    asin = ""
+    for node in (element, link):
+        if not node:
+            continue
+        asin = str(node.get("data-asin") or node.get("data-defaultasin") or "").strip()
+        if asin:
+            break
+    return _normalized_variation_url(raw_url, asin or extract_asin_from_url(raw_url) or "")
+
+
+def _clean_color_label(value: str) -> str:
+    text = repair_mojibake(value).strip()
+    text = re.sub(r"\s+", " ", text)
+    text = re.sub(r"^(?:renk|color|colour)\s*[:\-]\s*", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\s*(?:seçili|selected)\s*$", "", text, flags=re.IGNORECASE)
+    if not text or len(text) > 80:
+        return ""
+    normalized = normalize_offer_text(text)
+    if normalized in {"renk", "color", "colour", "secenek", "seçenek"}:
+        return ""
+    return text
+
+
+def _color_label_from_element(element) -> str:
+    candidates = []
+    for node in (element, element.select_one("a"), element.select_one("img")):
+        if not node:
+            continue
+        candidates.extend(
+            str(node.get(attribute) or "")
+            for attribute in ("title", "aria-label", "alt", "data-a-html-content")
+        )
+    candidates.append(element.get_text(" ", strip=True))
+    for candidate in candidates:
+        label = _clean_color_label(candidate)
+        if label:
+            return label
+    return ""
+
+
+def extract_color_variations(html: str, source_url: str, limit: int) -> list[AmazonColorVariation]:
+    """Return concrete Amazon color URLs from the product-page twister."""
+    soup = soup_from_html(html)
+    variations: list[AmazonColorVariation] = []
+    seen_urls: set[str] = set()
+    for selector in AMAZON_COLOR_VARIATION_SELECTORS:
+        elements = soup.select(selector)
+        if not elements:
+            continue
+        for element in elements:
+            if len(variations) >= max(1, limit):
+                break
+            classes = set(element.get("class") or [])
+            if "swatchUnavailable" in classes or "a-button-unavailable" in classes:
+                continue
+            url = _variation_url_from_element(element)
+            if not url or url in seen_urls:
+                continue
+            label = _color_label_from_element(element)
+            if not label:
+                continue
+            seen_urls.add(url)
+            variations.append(AmazonColorVariation(label=label, url=url))
+        if variations:
+            break
+
+    if not variations:
+        return []
+
+    source_variation_url = _normalized_variation_url(source_url, extract_asin_from_url(source_url) or "")
+    if source_variation_url and all(item.url != source_variation_url for item in variations):
+        selected = soup.select_one("#variation_color_name .selection, #variation_color .selection")
+        selected_label = _clean_color_label(selected.get_text(" ", strip=True)) if selected else ""
+        variations.insert(0, AmazonColorVariation(label=selected_label, url=source_variation_url))
+    return variations[: max(1, limit)]
+
+
+def title_with_color(title: str, color: str) -> str:
+    clean_title = repair_mojibake(title).strip() or "Amazon ürünü"
+    clean_color = _clean_color_label(color)
+    if not clean_color or normalize_offer_text(clean_color) in normalize_offer_text(clean_title):
+        return clean_title
+    return f"{clean_title} / {clean_color}"
 
 
 def _parse_visible_price(text: str):

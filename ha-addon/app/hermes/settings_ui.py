@@ -308,6 +308,7 @@ def _watch_form(item, index, is_new=False, groups=None, known_titles=None):
     urls = _watch_urls_for_form(item)
     notify_once = True if is_new else item.get("notify_once_in_24H", True)
     active = True if is_new else item.get("active", True)
+    include_variations = False if is_new else item.get("include_variations", False)
     selected_group = "" if is_new else str(item.get("group") or "").strip()
     if not selected_group and group == "Moda":
         selected_group = "Moda"
@@ -339,6 +340,7 @@ def _watch_form(item, index, is_new=False, groups=None, known_titles=None):
     ).replace("<label>", "<label class='watch-exclude'>", 1)
     notification_fields = "".join(
         [
+            _checkbox(prefix, "include_variations", "Varyasyonları ekle", include_variations),
             _checkbox(prefix, "notify_once_in_24H", "24 saat içinde aynı bildirimi tekrar gönderme", notify_once),
             _checkbox(prefix, "active", "Aktif", active),
         ]
@@ -516,6 +518,7 @@ def _build_watch(form, index):
         "name": name,
         "group": group,
         "target_price": _price_from_form(target),
+        "include_variations": _bool_from_form(form, prefix + "include_variations"),
         "notify_once_in_24H": _bool_from_form(form, prefix + "notify_once_in_24H"),
         "active": _bool_from_form(form, prefix + "active"),
     }

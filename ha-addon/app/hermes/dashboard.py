@@ -11,6 +11,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from .constants import OPTIONS_PATH, PUSHOVER_URL, STATE_PATH, SUMMARY_PATH, TELEGRAM_ERROR_EVENTS_PATH, TELEGRAM_STATUS_PATH
 from .logging_utils import log
+from .link_test_ui import render_link_test_from_request, render_link_test_page
 from .providers import hepsiburada as hepsiburada_provider
 from .storage import load_json
 from .utils import (
@@ -38,6 +39,7 @@ p { margin:0; color:var(--muted); line-height:1.5; font-size:13px; }
 .actions { display:flex; flex-wrap:wrap; gap:10px; margin-top:18px; align-items:center; } .inline-form { margin:0; } .button { display:inline-flex; align-items:center; justify-content:center; min-height:40px; padding:0 14px; border-radius:13px; border:1px solid transparent; text-decoration:none; font-weight:800; font-size:13px; cursor:pointer; }
 .button.primary { color:#181a1c; background:linear-gradient(135deg,var(--accent),var(--accent2)); } .button.secondary { color:var(--text); background:#35393d; border-color:var(--line); } .button.test { color:#f5f7fa; background:linear-gradient(135deg,#54595e,#35393d); border-color:#6b7075; }
 .notice { margin-top:14px; padding:11px 13px; border-radius:12px; font-weight:700; font-size:13px; } .notice-ok { color:#c6f7e6; background:rgba(127,220,184,.14); border:1px solid rgba(127,220,184,.38); } .notice-fail { color:#ffd8e3; background:rgba(255,156,181,.14); border:1px solid rgba(255,156,181,.38); }
+.link-test-form { display:flex; align-items:end; flex-wrap:wrap; gap:10px; } .link-test-form label { flex:1 1 520px; display:grid; gap:7px; color:var(--muted); font-size:12px; font-weight:750; } .link-test-form input { width:100%; min-height:42px; padding:10px 12px; color:var(--text); background:#151719; border:1px solid var(--line); border-radius:12px; font:inherit; } .link-test-form input:focus { outline:2px solid rgba(228,229,227,.38); outline-offset:1px; }
 .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:11px; margin-top:16px; } .card { border:1px solid var(--line); border-radius:15px; padding:14px; background:var(--card); min-height:82px; } .card span { display:block; color:var(--muted); font-size:12px; margin-bottom:8px; } .card strong { display:block; font-size:19px; line-height:1.18; overflow-wrap:anywhere; }
 .card.status-ok { border-color:rgba(127,220,184,.38); background:linear-gradient(135deg,rgba(127,220,184,.12),var(--card) 62%); } .card.status-ok strong { color:var(--ok); } .card.status-warn strong { color:var(--warn); } .card.status-error strong { color:var(--bad); }
 .error-card { grid-column:1 / -1; } .error-card ul { display:grid; gap:9px; margin:10px 0 0; padding:0; list-style:none; color:var(--text); } .error-card li { display:grid; gap:6px; padding:10px 12px; border:1px solid rgba(255,156,181,.28); border-radius:12px; background:rgba(255,156,181,.08); font-size:12px; line-height:1.35; overflow-wrap:anywhere; } .error-card li.empty-error { border-color:rgba(127,220,184,.26); background:rgba(127,220,184,.08); color:var(--muted); } .error-card li strong { font-size:13px; color:var(--text); } .error-card li span { margin:0; color:var(--muted); } .error-card li em { color:#ffd8e3; font-style:normal; } .error-card li a { color:#e5e7e8; font-weight:800; text-decoration:none; width:max-content; } .error-card li a:hover { color:#ffd166; text-decoration:underline; } .failed-link { display:grid; gap:3px; margin-top:4px; padding:8px 10px; border-radius:10px; background:rgba(220,223,224,.08); border:1px solid rgba(220,223,224,.20); } .failed-link span { color:#e0e2e3; font-weight:800; font-size:11px; } .failed-link strong { color:#f5f7fa; font-size:12px; } .failed-link em { color:#c8cccf; font-size:11px; }
@@ -990,7 +992,7 @@ def _render_page(path: str = "/", error_detail_limit: int | None = 4) -> bytes:
   });
 </script>"""
     html = f"""<!doctype html>
-<html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta http-equiv="refresh" content="60"><title>Hermes</title><style>{DASHBOARD_CSS}</style></head><body><main><div class="hero"><div class="badge">Hermes</div><div class="actions"><a class="button primary" href="{log_url}" target="_top">LOG</a><a class="button secondary" href="{app_url}" target="_top">Config</a><form class="inline-form" method="post" action="./test-pushover"><button class="button test" type="submit">Pushover</button></form><form class="inline-form" method="post" action="./reset-notifications" data-confirm="Bildirim susturma hafızası sıfırlanacak ve hedef altında kalan fırsatlar için tek seferlik kontrol başlatılacak. Devam etmek istiyor musun?"><button class="button secondary" type="submit">Bildirim Sıfırla</button></form><form class="inline-form" method="post" action="./reset-price-history" data-confirm="Min/maks fiyat geçmişi temizlenecek ve güncel fiyattan yeniden başlayacak. Devam etmek istiyor musun?"><button class="button secondary" type="submit">Min/Maks Sıfırla</button></form></div>{notice_html}<div class="grid">{card_html}{error_card_html}</div>{_render_telegram_panel(summary, include_recent_notifications=False)}{_render_table()}{_render_telegram_recent_notifications((summary.get('telegram') or {}).get('recent_notifications') or [])}</div></main>{confirm_script}</body></html>"""
+<html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta http-equiv="refresh" content="60"><title>Hermes</title><style>{DASHBOARD_CSS}</style></head><body><main><div class="hero"><div class="badge">Hermes</div><div class="actions"><a class="button primary" href="{log_url}" target="_top">LOG</a><a class="button secondary" href="{app_url}" target="_top">Config</a><a class="button secondary" href="./link-test">Test</a><form class="inline-form" method="post" action="./test-pushover"><button class="button test" type="submit">Pushover</button></form><form class="inline-form" method="post" action="./reset-notifications" data-confirm="Bildirim susturma hafızası sıfırlanacak ve hedef altında kalan fırsatlar için tek seferlik kontrol başlatılacak. Devam etmek istiyor musun?"><button class="button secondary" type="submit">Bildirim Sıfırla</button></form><form class="inline-form" method="post" action="./reset-price-history" data-confirm="Min/maks fiyat geçmişi temizlenecek ve güncel fiyattan yeniden başlayacak. Devam etmek istiyor musun?"><button class="button secondary" type="submit">Min/Maks Sıfırla</button></form></div>{notice_html}<div class="grid">{card_html}{error_card_html}</div>{_render_telegram_panel(summary, include_recent_notifications=False)}{_render_table()}{_render_telegram_recent_notifications((summary.get('telegram') or {}).get('recent_notifications') or [])}</div></main>{confirm_script}</body></html>"""
     return html.encode("utf-8")
 
 
@@ -1083,7 +1085,7 @@ def _render_public_page(path: str):
   });
 </script>"""
     html = f"""<!doctype html>
-<html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="theme-color" content="#111315"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Hermes"><meta http-equiv="refresh" content="60"><title>Hermes</title><style>{DASHBOARD_CSS}</style></head><body class="public"><main><div class="hero"><div class="badge">Hermes</div><div class="actions public-actions"><a class="button secondary" href="{base_path}/settings">Ayarlar</a><form class="inline-form" method="post" action="{base_path}/test-pushover"><button class="button test" type="submit">Pushover</button></form><form class="inline-form" method="post" action="{base_path}/reset-notifications" data-confirm="Bildirim susturma hafızası sıfırlanacak ve hedef altında kalan fırsatlar için tek seferlik kontrol başlatılacak. Devam etmek istiyor musun?"><button class="button secondary" type="submit">Bildirim Sıfırla</button></form><form class="inline-form" method="post" action="{base_path}/reset-price-history" data-confirm="Min/maks fiyat geçmişi temizlenecek ve güncel fiyattan yeniden başlayacak. Devam etmek istiyor musun?"><button class="button secondary" type="submit">Min/Maks Sıfırla</button></form></div>{public_cycle_row}{notice_html}{_render_table()}{telegram_recent_html}{error_card_html}<p class="footer">iPhone'da Safari paylaş menüsünden “Ana Ekrana Ekle” diyerek uygulama gibi kullanabilirsin.</p></div></main>{confirm_script}</body></html>"""
+<html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="theme-color" content="#111315"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Hermes"><meta http-equiv="refresh" content="60"><title>Hermes</title><style>{DASHBOARD_CSS}</style></head><body class="public"><main><div class="hero"><div class="badge">Hermes</div><div class="actions public-actions"><a class="button secondary" href="{base_path}/settings">Ayarlar</a><a class="button secondary" href="{base_path}/link-test">Test</a><form class="inline-form" method="post" action="{base_path}/test-pushover"><button class="button test" type="submit">Pushover</button></form><form class="inline-form" method="post" action="{base_path}/reset-notifications" data-confirm="Bildirim susturma hafızası sıfırlanacak ve hedef altında kalan fırsatlar için tek seferlik kontrol başlatılacak. Devam etmek istiyor musun?"><button class="button secondary" type="submit">Bildirim Sıfırla</button></form><form class="inline-form" method="post" action="{base_path}/reset-price-history" data-confirm="Min/maks fiyat geçmişi temizlenecek ve güncel fiyattan yeniden başlayacak. Devam etmek istiyor musun?"><button class="button secondary" type="submit">Min/Maks Sıfırla</button></form></div>{public_cycle_row}{notice_html}{_render_table()}{telegram_recent_html}{error_card_html}<p class="footer">iPhone'da Safari paylaş menüsünden “Ana Ekrana Ekle” diyerek uygulama gibi kullanabilirsin.</p></div></main>{confirm_script}</body></html>"""
     return 200, html.encode("utf-8")
 
 
@@ -1101,6 +1103,9 @@ class _StatusHandler(BaseHTTPRequestHandler):
         if path == "/health":
             payload = b"ok\n"
             content_type = "text/plain; charset=utf-8"
+        elif path == "/link-test":
+            payload = render_link_test_page(DASHBOARD_CSS, "./link-test", "./")
+            content_type = "text/html; charset=utf-8"
         elif path == "/public" or path.startswith("/public/"):
             status, payload = _render_public_page(self.path)
             content_type = "text/html; charset=utf-8" if status == 200 else "text/plain; charset=utf-8"
@@ -1116,9 +1121,17 @@ class _StatusHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         content_length = int(self.headers.get("Content-Length", "0") or 0)
-        if content_length:
-            self.rfile.read(content_length)
+        body = self.rfile.read(content_length) if content_length else b""
         path = urllib.parse.urlparse(self.path).path.rstrip("/")
+        if path == "/link-test":
+            payload = render_link_test_from_request(DASHBOARD_CSS, "./link-test", "./", body)
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+            return
         if path.endswith("/reset-notifications"):
             ok, message = _reset_notifications_async()
             self._redirect_with_message("reset", ok, message)

@@ -18,6 +18,7 @@ from hermes import dashboard_with_settings  # noqa: E402
 from hermes import public_dashboard  # noqa: E402
 from hermes import settings_ui  # noqa: E402
 from hermes import telegram_listener  # noqa: E402
+from hermes import link_test_ui  # noqa: E402
 from hermes.errors import HermesError, OutOfStockHermesError  # noqa: E402
 from hermes.http_client import amazon_url_variants, fetch_amazon_page  # noqa: E402
 from hermes.config_loader import _prepare_watches  # noqa: E402
@@ -38,11 +39,59 @@ from hermes.providers.hepsiburada import (  # noqa: E402
 from hermes.providers.hm import extract_offers as extract_hm_offers  # noqa: E402
 from hermes.providers.nordbron import extract_offer as extract_nordbron_offer  # noqa: E402
 from hermes.providers.zara import extract_offers as extract_zara_offers  # noqa: E402
+from hermes.providers.amazon import extract_color_variations, title_with_color  # noqa: E402
 from hermes.search_amazon import extract_result_candidates  # noqa: E402
 from hermes.utils import detect_site_from_url, parse_decimal, utc_now  # noqa: E402
 
 
 class HermesSmokeTests(unittest.TestCase):
+    def test_amazon_variations_are_opt_in_for_each_watch(self):
+        base_watch = {
+            "name": "Tablet",
+            "target_price": 20000,
+            "url_1": "https://www.amazon.com.tr/dp/B000000001",
+        }
+        default_watch = _prepare_watches([base_watch])[0]
+        opted_in_watch = _prepare_watches([{**base_watch, "include_variations": True}])[0]
+
+        self.assertFalse(default_watch.include_variations)
+        self.assertTrue(opted_in_watch.include_variations)
+
+    def test_link_test_renders_provider_results_without_writing_tracking_state(self):
+        offer = OfferResult(
+            title="Örnek ürün / Mavi",
+            price=Decimal("18999"),
+            seller="Amazon",
+            url="https://www.amazon.com.tr/dp/B000000001",
+        )
+        with patch.object(link_test_ui, "inspect_link_now", return_value=("amazon", [offer])):
+            payload = link_test_ui.render_link_test_from_request(
+                "", "./link-test", "./", b"url=https%3A%2F%2Fwww.amazon.com.tr%2Fdp%2FB000000001"
+            ).decode("utf-8")
+
+        self.assertIn("Test sonuçları", payload)
+        self.assertIn("Örnek ürün / Mavi", payload)
+        self.assertIn("18.999 TL", payload)
+        self.assertIn("Kayıt oluşturmaz, bildirim göndermez", payload)
+
+    def test_amazon_product_color_variations_keep_concrete_urls_and_labels(self):
+        html = """
+        <div id="variation_color_name"><ul>
+          <li data-defaultasin="B000000001"><a href="/dp/B000000001?th=1"><img alt="Renk: Antrasit"></a></li>
+          <li data-defaultasin="B000000002"><a href="/dp/B000000002?psc=1"><img alt="Renk: Mavi"></a></li>
+          <li class="swatchUnavailable" data-defaultasin="B000000003"><a href="/dp/B000000003"><img alt="Renk: Pembe"></a></li>
+        </ul></div>
+        """
+        variations = extract_color_variations(html, "https://www.amazon.com.tr/dp/B000000001?th=1", 60)
+        self.assertEqual(
+            [(item.label, item.url) for item in variations],
+            [
+                ("Antrasit", "https://www.amazon.com.tr/dp/B000000001?th=1"),
+                ("Mavi", "https://www.amazon.com.tr/dp/B000000002?psc=1"),
+            ],
+        )
+        self.assertEqual(title_with_color("Örnek ürün", "Mavi"), "Örnek ürün / Mavi")
+        self.assertEqual(title_with_color("Örnek ürün Mavi", "Mavi"), "Örnek ürün Mavi")
     def test_telegram_quick_add_extracts_a_supported_product_url(self):
         message = "Buna bakar mısın? https://www.amazon.com.tr/dp/B0B2PSDNV1?th=1"
         self.assertEqual(

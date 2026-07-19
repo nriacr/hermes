@@ -2,6 +2,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import urllib.parse
 
 from .dashboard import (
+    DASHBOARD_CSS,
     _public_base_path,
     _public_dashboard_allowed,
     _render_public_page,
@@ -9,6 +10,7 @@ from .dashboard import (
     _reset_price_history,
     _send_test_notification,
 )
+from .link_test_ui import render_link_test_from_request, render_link_test_page
 from .settings_ui import (
     handle_settings_save,
     render_settings_page,
@@ -77,6 +79,10 @@ class _PublicDashboardHandler(BaseHTTPRequestHandler):
                 status = 200
                 payload = render_settings_page(self.path)
                 content_type = "text/html; charset=utf-8"
+            elif suffix == "/link-test":
+                status = 200
+                payload = render_link_test_page(DASHBOARD_CSS, f"{base_path}/link-test", base_path)
+                content_type = "text/html; charset=utf-8"
             elif suffix == "/settings/restarting":
                 params = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
                 message = params.get("msg", ["Ayarlar kaydedildi. Hermes yeniden başlatılıyor."])[0]
@@ -112,6 +118,10 @@ class _PublicDashboardHandler(BaseHTTPRequestHandler):
                 self._redirect(f"{base_path}/settings/restarting?msg={urllib.parse.quote(message)}")
             else:
                 self._redirect_with_message(f"{base_path}/settings", "saved", False, message)
+            return
+        if suffix == "/link-test":
+            payload = render_link_test_from_request(DASHBOARD_CSS, f"{base_path}/link-test", base_path, body)
+            self._send_payload(200, payload, "text/html; charset=utf-8")
             return
         if suffix == "/reset-notifications":
             ok, message = _reset_notifications_async()

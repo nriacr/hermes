@@ -2,8 +2,10 @@ import urllib.parse
 from http.server import ThreadingHTTPServer
 
 from .dashboard import (
+    DASHBOARD_CSS,
     WEB_PORT,
     _StatusHandler,
+    _public_base_path,
     _public_dashboard_allowed,
     _render_page,
     _render_public_page,
@@ -11,6 +13,7 @@ from .dashboard import (
     _reset_price_history,
     _send_test_notification,
 )
+from .link_test_ui import render_link_test_from_request, render_link_test_page
 from .settings_ui import (
     handle_settings_save,
     render_settings_page,
@@ -58,6 +61,9 @@ class SettingsDashboardHandler(_StatusHandler):
         elif path == "/settings":
             payload = render_settings_page(self.path)
             content_type = "text/html; charset=utf-8"
+        elif path == "/link-test":
+            payload = render_link_test_page(DASHBOARD_CSS, "./link-test", "./")
+            content_type = "text/html; charset=utf-8"
         elif path.startswith("/public/") and path.endswith("/settings.js"):
             if _public_dashboard_allowed(self.path):
                 payload = render_settings_script()
@@ -77,6 +83,15 @@ class SettingsDashboardHandler(_StatusHandler):
         elif path.startswith("/public/") and path.endswith("/settings"):
             if _public_dashboard_allowed(self.path):
                 payload = render_settings_page(self.path)
+                content_type = "text/html; charset=utf-8"
+            else:
+                status = 404
+                payload = b"not found\n"
+                content_type = "text/plain; charset=utf-8"
+        elif path.startswith("/public/") and path.endswith("/link-test"):
+            if _public_dashboard_allowed(self.path):
+                base_path = _public_base_path(self.path)
+                payload = render_link_test_page(DASHBOARD_CSS, f"{base_path}/link-test", base_path)
                 content_type = "text/html; charset=utf-8"
             else:
                 status = 404
@@ -125,6 +140,22 @@ class SettingsDashboardHandler(_StatusHandler):
         body = self.rfile.read(content_length) if content_length else b""
         public_context = _public_settings_context(self.path)
         is_public_settings_save = bool(public_context and path.endswith("/settings/save"))
+        is_public_link_test = path.startswith("/public/") and path.endswith("/link-test")
+        if path == "/link-test" or is_public_link_test:
+            if is_public_link_test and not _public_dashboard_allowed(self.path):
+                self.send_error(404)
+                return
+            base_path = _public_base_path(self.path) if is_public_link_test else "."
+            action_path = f"{base_path}/link-test" if is_public_link_test else "./link-test"
+            back_path = base_path if is_public_link_test else "./"
+            payload = render_link_test_from_request(DASHBOARD_CSS, action_path, back_path, body)
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+            return
         if path == "/settings/save" or is_public_settings_save:
             if is_public_settings_save and not _public_dashboard_allowed(self.path):
                 self.send_error(404)
