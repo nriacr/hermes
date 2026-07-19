@@ -50,6 +50,19 @@ class HermesSmokeTests(unittest.TestCase):
             "https://www.amazon.com.tr/dp/B0B2PSDNV1?th=1",
         )
 
+    def test_telegram_quick_add_resolves_amazon_mobile_share_link(self):
+        class ShortLinkResponse:
+            url = "https://www.amazon.com.tr/dp/B0B2PSDNV1?th=1"
+
+            def close(self):
+                return None
+
+        with patch.object(telegram_listener.requests, "get", return_value=ShortLinkResponse()):
+            self.assertEqual(
+                telegram_listener._extract_supported_url("https://amzn.eu/d/example"),
+                "https://www.amazon.com.tr/dp/B0B2PSDNV1?th=1",
+            )
+
     def test_telegram_quick_add_target_price_accepts_turkish_price_formats(self):
         self.assertEqual(telegram_listener._parse_target_price("40.000 TL"), Decimal("40000"))
         self.assertEqual(telegram_listener._parse_target_price("40000"), Decimal("40000"))
