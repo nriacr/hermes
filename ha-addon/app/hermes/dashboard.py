@@ -572,6 +572,28 @@ def _render_rows_table(rows, empty_text):
     """
 
 
+def _summary_difference_sort_value(row) -> Decimal:
+    """Parse persisted Turkish price text for stable dashboard ordering."""
+    raw_value = repair_mojibake(str(row.get("difference") or "0"))
+    cleaned = re.sub(r"[^0-9,.-]", "", raw_value).strip()
+    if not cleaned:
+        return Decimal("0")
+    if "," in cleaned:
+        cleaned = cleaned.replace(".", "").replace(",", ".")
+    else:
+        cleaned = cleaned.replace(".", "")
+    try:
+        return Decimal(cleaned)
+    except InvalidOperation:
+        return Decimal("0")
+
+
+def _summary_row_sort_key(row):
+    seller = repair_mojibake(str(row.get("seller") or ""))
+    title = repair_mojibake(str(row.get("product_title") or ""))
+    return seller.casefold(), _summary_difference_sort_value(row), title.casefold()
+
+
 def _split_search_result_groups(rows):
     grouped = {}
     ungrouped = []
@@ -587,8 +609,16 @@ def _split_search_result_groups(rows):
         if len(group_rows) < 2:
             ungrouped.extend(group_rows)
             continue
+        group_rows.sort(key=_summary_row_sort_key)
         label = str(group_rows[0].get("search_group_label") or "Arama sonuçları").strip()
         collapsible_groups.append((label, group_rows))
+    ungrouped.sort(key=_summary_row_sort_key)
+    collapsible_groups.sort(
+        key=lambda item: (
+            _summary_row_sort_key(item[1][0]) if item[1] else ("", Decimal("0"), ""),
+            item[0].casefold(),
+        )
+    )
     return ungrouped, collapsible_groups
 
 

@@ -433,6 +433,40 @@ class HermesSmokeTests(unittest.TestCase):
         self.assertIn("Juo Q3", rendered)
         self.assertIn("2 sonuç", rendered)
 
+    def test_dashboard_orders_open_rows_by_seller_then_price_difference(self):
+        rows = [
+            {"seller": "Hepsiburada", "product_title": "Uzak", "difference": "+900,00"},
+            {"seller": "Amazon", "product_title": "Orta", "difference": "+600,00"},
+            {"seller": "Amazon", "product_title": "Yakın", "difference": "+100,00"},
+            {"seller": "Hepsiburada", "product_title": "Yakın", "difference": "+150,00"},
+            {
+                "seller": "Amazon",
+                "product_title": "Varyasyon A",
+                "difference": "+50,00",
+                "search_group": "amazon_juo_q3",
+                "search_group_label": "Juo Q3",
+            },
+            {
+                "seller": "Amazon",
+                "product_title": "Varyasyon B",
+                "difference": "+75,00",
+                "search_group": "amazon_juo_q3",
+                "search_group_label": "Juo Q3",
+            },
+        ]
+
+        open_rows, collapsed_groups = dashboard._split_search_result_groups(rows)
+
+        self.assertEqual(
+            [row["product_title"] for row in open_rows],
+            ["Yakın", "Orta", "Yakın", "Uzak"],
+        )
+        self.assertEqual([row["seller"] for row in open_rows], ["Amazon", "Amazon", "Hepsiburada", "Hepsiburada"])
+        self.assertEqual(
+            [row["product_title"] for row in collapsed_groups[0][1]],
+            ["Varyasyon A", "Varyasyon B"],
+        )
+
     def test_dashboard_rebuilds_missing_search_groups_from_state(self):
         rows = [
             {"product_url": "https://www.amazon.com.tr/dp/GREEN", "product_title": "Juo Q3 Yeşil"},
