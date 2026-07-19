@@ -50,7 +50,7 @@ class HermesSmokeTests(unittest.TestCase):
             "https://www.amazon.com.tr/dp/B0B2PSDNV1?th=1",
         )
 
-    def test_telegram_quick_add_resolves_amazon_mobile_share_link(self):
+    def test_telegram_quick_add_resolves_mobile_share_link(self):
         class ShortLinkResponse:
             url = "https://www.amazon.com.tr/dp/B0B2PSDNV1?th=1"
 

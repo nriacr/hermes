@@ -64,7 +64,7 @@ Hepsiburada için ürün detay linki yerine arama linki kullanılması önerilir
 
 Bu yapıda Hermes, arama sonuçlarındaki ürün kartlarını okur; taksit ve kupon fiyatlarını eleyerek gerçek ürün fiyatlarını karşılaştırır ve en düşük fiyatı dikkate alır.
 
-Telegram dinleme varsayılan olarak kapalıdır. Aktif edildiğinde Hermes config'teki kanalları dinler; mesajda keyword geçer ve exclude keyword'e takılmazsa Pushover bildirimi gönderir. `telegram_saved_messages_enabled` açıksa Kayıtlı Mesajlar'a gönderilen desteklenen ürün bağlantısı için Hermes önce hedef fiyatı sorar. Doğrudan ürün linkinde fiyat yanıtı kaydı oluşturur; arama linkinde ek olarak ürün adını ister. Grup ve beden daha sonra Hermes Ayarlar ekranından eklenebilir. İlk Telegram girişinde kod telefona gönderilir; gelen kod `verification_code` alanına yazılıp Hermes yeniden başlatıldığında session `/data/telegram_keyword_alert` altında kalıcı hale gelir.
+Telegram dinleme varsayılan olarak kapalıdır. Aktif edildiğinde Hermes config'teki kanalları dinler; mesajda keyword geçer ve exclude keyword'e takılmazsa Pushover bildirimi gönderir. `telegram_saved_messages_enabled` açıksa Kayıtlı Mesajlar'a gönderilen desteklenen ürün bağlantısı için Hermes önce hedef fiyatı sorar. Uygulamaların gönderdiği kısa bağlantılar da gerçek desteklenen ürün adresine çevrilir. Doğrudan ürün linkinde fiyat yanıtı kaydı oluşturur; arama linkinde ek olarak ürün adını ister. Grup ve beden daha sonra Hermes Ayarlar ekranından eklenebilir. İlk Telegram girişinde kod telefona gönderilir; gelen kod `verification_code` alanına yazılıp Hermes yeniden başlatıldığında session `/data/telegram_keyword_alert` altında kalıcı hale gelir.
 
 ## Veri Dosyaları
 
