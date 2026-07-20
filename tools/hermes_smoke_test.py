@@ -540,6 +540,52 @@ class HermesSmokeTests(unittest.TestCase):
         self.assertTrue(all(row["search_group"] for row in enriched))
         self.assertEqual([row["search_group_label"] for row in enriched], ["Juo Q3", "Juo Q3"])
 
+    def test_dashboard_groups_blank_name_variation_watch_from_configured_source(self):
+        rows = [
+            {
+                "seller": "Amazon",
+                "product_url": "https://www.amazon.com.tr/dp/BLUE",
+                "product_title": "Decanox Katlanır Kasa / Mavi",
+                "difference": "+100,00",
+                "target": "600,00",
+            },
+            {
+                "seller": "Amazon",
+                "product_url": "https://www.amazon.com.tr/dp/GREY",
+                "product_title": "Decanox Katlanır Kasa / Gri",
+                "difference": "+150,00",
+                "target": "600,00",
+            },
+        ]
+        source_url = "https://www.amazon.com.tr/dp/SOURCE?th=1"
+        state = {
+            "blue": {
+                "site": "amazon",
+                "configured_url": source_url,
+                "url": "https://www.amazon.com.tr/dp/BLUE",
+                "watch_name": "",
+            },
+            "grey": {
+                "site": "amazon",
+                "configured_url": source_url,
+                "url": "https://www.amazon.com.tr/dp/GREY",
+                "watch_name": "",
+            },
+        }
+        options = {
+            "takip_edilenler": [
+                {"url_1": source_url, "include_variations": True},
+            ]
+        }
+
+        enriched = dashboard._attach_legacy_search_groups(rows, state, options)
+        open_rows, collapsed_groups = dashboard._split_search_result_groups(enriched)
+
+        self.assertEqual(open_rows, [])
+        self.assertEqual(len(collapsed_groups), 1)
+        self.assertEqual(collapsed_groups[0][0], "Decanox Katlanır Kasa")
+        self.assertEqual(len(collapsed_groups[0][1]), 2)
+
     def test_public_settings_restart_paths_keep_the_public_token(self):
         context = dashboard_with_settings._public_settings_context("/public/secret-token/settings/save")
 

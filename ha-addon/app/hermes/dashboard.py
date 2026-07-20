@@ -642,8 +642,11 @@ def _split_search_result_groups(rows):
         group_key = str(row.get("search_group") or "").strip()
         if group_key:
             label = label or _inferred_variant_group_label(row)
-            # Merge legacy source-URL groups that represent the same tracked item.
-            group_key = normalize_item_key("dashboard_result_group", seller, label)
+            # New watch/state groups deliberately identify a configured watch. Keep
+            # that identity for blank-name variation cards; legacy URL groups are
+            # still merged by their visible tracked-item label.
+            if not group_key.startswith(("watch_result_group_", "state_result_group_")):
+                group_key = normalize_item_key("dashboard_result_group", seller, label)
         else:
             inferred_label = _inferred_variant_group_label(row)
             inferred_key = (seller, str(row.get("target") or "").strip(), inferred_label.casefold())
@@ -778,8 +781,31 @@ def _is_search_result_source(site: str, configured_url: str) -> bool:
     )
 
 
-def _search_result_groups_from_state(state):
+def _variation_watch_sources(options):
+    """Return configured sources whose output rows must stay collapsed together."""
+    sources = set()
+    if not isinstance(options, dict):
+        return sources
+    watches = options.get("takip_edilenler")
+    if not isinstance(watches, list):
+        return sources
+    for watch in watches:
+        if not isinstance(watch, dict) or not parse_bool(watch.get("include_variations"), default=False):
+            continue
+        for configured_url in _watch_urls_from_options(watch):
+            try:
+                site = detect_site_from_url(configured_url)
+            except Exception:  # noqa: BLE001
+                continue
+            sources.add((site, configured_url))
+            sources.add((site, canonical_tracking_url(configured_url)))
+    return sources
+
+
+def _search_result_groups_from_state(state, options=None):
     groups = {}
+    configured_groups = {}
+    variation_sources = _variation_watch_sources(options)
     if not isinstance(state, dict):
         return groups
     for entry in state.values():
@@ -789,32 +815,53 @@ def _search_result_groups_from_state(state):
         result_url = str(entry.get("url") or "").strip()
         watch_name = str(entry.get("watch_name") or "").strip()
         site = str(entry.get("site") or "").strip()
-        if not configured_url or not result_url or not watch_name:
+        if not configured_url or not result_url:
             continue
         if not site:
             try:
                 site = detect_site_from_url(configured_url)
             except Exception:  # noqa: BLE001
                 continue
-        if not _is_search_result_source(site, configured_url):
+        is_variation_watch = (
+            bool(entry.get("include_variations"))
+            or (site, configured_url) in variation_sources
+            or (site, canonical_tracking_url(configured_url)) in variation_sources
+        )
+        # Search pages have always been shown as collapsed result groups. A
+        # product page joins them only when its variation option is enabled.
+        if not (
+            is_variation_watch
+            or _is_search_result_source(site, configured_url)
+            or str(entry.get("search_group") or "").strip()
+        ):
             continue
-        groups[result_url] = {
-            "search_group": normalize_item_key("search_result_group", site, watch_name, configured_url),
-            "search_group_label": watch_name,
-        }
+        source_key = (site, configured_url)
+        if source_key not in configured_groups:
+            fallback_label = _inferred_variant_group_label({"product_title": entry.get("title") or ""})
+            label = watch_name or fallback_label
+            if label:
+                identity = watch_name or configured_url
+                configured_groups[source_key] = {
+                    "search_group": str(entry.get("search_group") or "")
+                    or normalize_item_key("state_result_group", site, identity),
+                    "search_group_label": str(entry.get("search_group_label") or "") or label,
+                }
+        metadata = configured_groups.get(source_key)
+        if metadata:
+            groups[canonical_tracking_url(result_url)] = metadata
     return groups
 
 
-def _attach_legacy_search_groups(rows, state):
-    groups = _search_result_groups_from_state(state)
+def _attach_legacy_search_groups(rows, state, options=None):
+    groups = _search_result_groups_from_state(state, options)
     if not groups:
         return rows
     enriched = []
     for row in rows:
-        if not isinstance(row, dict) or row.get("search_group"):
+        if not isinstance(row, dict):
             enriched.append(row)
             continue
-        metadata = groups.get(str(row.get("product_url") or "").strip())
+        metadata = groups.get(canonical_tracking_url(row.get("product_url")))
         if not metadata:
             enriched.append(row)
             continue
@@ -828,7 +875,11 @@ def _render_table():
     payload = load_json(SUMMARY_PATH, {})
     rows = payload.get("rows") if isinstance(payload.get("rows"), list) else []
     stock_rows = payload.get("stock_rows") if isinstance(payload.get("stock_rows"), list) else []
-    rows = _attach_legacy_search_groups(rows, load_json(STATE_PATH, {}))
+    rows = _attach_legacy_search_groups(
+        rows,
+        load_json(STATE_PATH, {}),
+        load_json(OPTIONS_PATH, {}),
+    )
     if not rows and not stock_rows:
         return """
         <section class="summary-panel">

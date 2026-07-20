@@ -1490,6 +1490,7 @@ def check_once(config: HermesConfig) -> None:
                 state[offer_key]["watch_name"] = watch.name
                 state[offer_key]["size"] = watch.size
                 state[offer_key]["site"] = watch.site
+                state[offer_key]["include_variations"] = watch.include_variations
                 state[offer_key]["search_group"] = search_group
                 state[offer_key]["search_group_label"] = search_group_label
                 state[offer_key]["last_error"] = None
@@ -1506,6 +1507,7 @@ def check_once(config: HermesConfig) -> None:
                 "watch_name": watch.name,
                 "configured_url": watch.url,
                 "size": watch.size,
+                "include_variations": watch.include_variations,
                 "search_group": search_group,
                 "search_group_label": search_group_label,
                 "offer_keys": offer_keys,
