@@ -15,6 +15,7 @@ from .link_test_ui import render_link_test_from_request, render_link_test_page
 from .providers import hepsiburada as hepsiburada_provider
 from .storage import load_json
 from .utils import (
+    canonical_tracking_url,
     detect_site_from_url,
     is_amazon_search_url,
     is_hepsiburada_search_url,
@@ -594,23 +595,74 @@ def _summary_row_sort_key(row):
     return seller.casefold(), _summary_difference_sort_value(row), title.casefold()
 
 
+def _deduplicate_dashboard_rows(rows):
+    """Hide duplicate saved URLs immediately, including pre-upgrade summaries."""
+    unique_rows = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        url_key = canonical_tracking_url(row.get("product_url"))
+        key = url_key or f"__missing_url__:{len(unique_rows)}"
+        current = unique_rows.get(key)
+        if current is None or _summary_difference_sort_value(row) < _summary_difference_sort_value(current):
+            unique_rows[key] = row
+    return list(unique_rows.values())
+
+
+def _inferred_variant_group_label(row):
+    title = repair_mojibake(str(row.get("product_title") or "")).strip()
+    if " / " in title:
+        return title.split(" / ", 1)[0].strip()
+    if " — " in title:
+        return title.split(" — ", 1)[0].strip()
+    return title
+
+
 def _split_search_result_groups(rows):
+    rows = _deduplicate_dashboard_rows(rows)
+    inferred_counts = {}
+    for row in rows:
+        if row.get("search_group"):
+            continue
+        label = _inferred_variant_group_label(row)
+        if not label:
+            continue
+        key = (
+            repair_mojibake(str(row.get("seller") or "")).casefold(),
+            str(row.get("target") or "").strip(),
+            label.casefold(),
+        )
+        inferred_counts[key] = inferred_counts.get(key, 0) + 1
+
     grouped = {}
     ungrouped = []
     for row in rows:
+        seller = repair_mojibake(str(row.get("seller") or "")).casefold()
+        label = str(row.get("search_group_label") or "").strip()
         group_key = str(row.get("search_group") or "").strip()
+        if group_key:
+            label = label or _inferred_variant_group_label(row)
+            # Merge legacy source-URL groups that represent the same tracked item.
+            group_key = normalize_item_key("dashboard_result_group", seller, label)
+        else:
+            inferred_label = _inferred_variant_group_label(row)
+            inferred_key = (seller, str(row.get("target") or "").strip(), inferred_label.casefold())
+            if inferred_label and inferred_counts.get(inferred_key, 0) > 1:
+                label = inferred_label
+                group_key = normalize_item_key("inferred_variant_group", seller, inferred_label, inferred_key[1])
         if not group_key:
             ungrouped.append(row)
             continue
-        grouped.setdefault(group_key, []).append(row)
+        grouped.setdefault(group_key, {"label": label, "rows": []})["rows"].append(row)
 
     collapsible_groups = []
-    for group_rows in grouped.values():
+    for group in grouped.values():
+        group_rows = group["rows"]
         if len(group_rows) < 2:
             ungrouped.extend(group_rows)
             continue
         group_rows.sort(key=_summary_row_sort_key)
-        label = str(group_rows[0].get("search_group_label") or "Arama sonuçları").strip()
+        label = str(group["label"] or "Arama sonuçları").strip()
         collapsible_groups.append((label, group_rows))
     ungrouped.sort(key=_summary_row_sort_key)
     collapsible_groups.sort(

@@ -46,12 +46,12 @@ from .search_amazon import (
 from .storage import load_json, save_json
 from .telegram_listener import start_telegram_listener
 from .utils import (
+    canonical_tracking_url,
     detect_site_from_url,
     format_local_datetime,
     format_signed_tl,
     format_tl,
     is_amazon_search_url,
-    is_hepsiburada_search_url,
     local_now,
     log_cell,
     normalize_item_key,
@@ -190,10 +190,10 @@ def sorted_summary_rows(rows: List[PriceSummaryRow]) -> List[PriceSummaryRow]:
 
 
 def deduplicate_summary_rows(rows: List[PriceSummaryRow]) -> List[PriceSummaryRow]:
-    """Keep one row per exact product URL without collapsing distinct variants."""
+    """Keep one row per product URL without collapsing distinct variants."""
     unique_rows: Dict[str, PriceSummaryRow] = {}
     for row in rows:
-        url = str(row.product_url or "").strip()
+        url = canonical_tracking_url(row.product_url)
         if not url:
             unique_rows[f"__missing_url__:{len(unique_rows)}"] = row
             continue
@@ -268,22 +268,17 @@ def watch_check_due(watch: WatchRule, state_entry: Dict[str, Any], global_interv
     return elapsed_seconds >= interval_seconds
 
 
-def search_result_group_for_watch(watch: WatchRule) -> tuple[str, str]:
-    is_search_watch = (
-        (watch.site == SITE_AMAZON and is_amazon_search_url(watch.url))
-        or (watch.site == SITE_HEPSIBURADA and is_hepsiburada_search_url(watch.url))
-    )
-    is_amazon_variation_watch = (
-        watch.site == SITE_AMAZON
-        and not is_amazon_search_url(watch.url)
-        and watch.include_variations
-    )
-    if not (is_search_watch or is_amazon_variation_watch) or not watch.name:
+def search_result_group_for_watch(watch: WatchRule, fallback_label: str = "") -> tuple[str, str]:
+    """Group all outputs from one configured watch without mixing sites or watches."""
+    label = str(watch.name or fallback_label or "").strip()
+    if not label:
         return "", ""
-    group_kind = "search_result_group" if is_search_watch else "variation_result_group"
+    # A card can contain multiple source URLs. Named cards intentionally share one
+    # group; unnamed product links remain isolated by their configured URL.
+    identity = watch.name or watch.url
     return (
-        normalize_item_key(group_kind, watch.site, watch.name, watch.url),
-        watch.name,
+        normalize_item_key("watch_result_group", watch.site, identity, str(watch.target_price)),
+        label,
     )
 
 
@@ -295,7 +290,10 @@ def summary_row_from_state(watch: WatchRule, state_entry: Dict[str, Any], seller
     product_title = str(state_entry.get("title") or watch.name or watch.url)
     if watch.site == SITE_HEPSIBURADA:
         product_title = hepsiburada_provider.clean_display_title(product_title)
-    search_group, search_group_label = search_result_group_for_watch(watch)
+    search_group = str(state_entry.get("search_group") or "")
+    search_group_label = str(state_entry.get("search_group_label") or "")
+    if not search_group:
+        search_group, search_group_label = search_result_group_for_watch(watch, product_title)
     return PriceSummaryRow(
         seller=seller,
         product_title=product_title,
@@ -464,7 +462,7 @@ def _stock_rows_from_payload(payload: Dict[str, Any]) -> List[StockSummaryRow]:
 
 
 def _row_urls(rows: List[PriceSummaryRow] | List[StockSummaryRow]) -> set[str]:
-    return {str(row.product_url or "").strip() for row in rows if str(row.product_url or "").strip()}
+    return {canonical_tracking_url(row.product_url) for row in rows if canonical_tracking_url(row.product_url)}
 
 
 def save_incremental_price_summary(
@@ -482,19 +480,24 @@ def save_incremental_price_summary(
     fresh_stock_rows = fresh_stock_rows or []
     fresh_price_urls = _row_urls(fresh_rows)
     fresh_stock_urls = _row_urls(fresh_stock_rows)
-    removed_price_urls = {str(url).strip() for url in (removed_price_urls or set()) if str(url).strip()}
+    removed_price_urls = {
+        canonical_tracking_url(url)
+        for url in (removed_price_urls or set())
+        if canonical_tracking_url(url)
+    }
     replaced_price_urls = fresh_price_urls | fresh_stock_urls | removed_price_urls
 
     merged_rows = [
         row
         for row in previous_rows
-        if row.product_url not in replaced_price_urls
+        if canonical_tracking_url(row.product_url) not in replaced_price_urls
     ]
     merged_rows.extend(fresh_rows)
     merged_stock_rows = [
         row
         for row in previous_stock_rows
-        if row.product_url not in fresh_price_urls and row.product_url not in fresh_stock_urls
+        if canonical_tracking_url(row.product_url) not in fresh_price_urls
+        and canonical_tracking_url(row.product_url) not in fresh_stock_urls
     ]
     merged_stock_rows.extend(fresh_stock_rows)
     save_price_summary(merged_rows, merged_stock_rows)
@@ -1402,7 +1405,15 @@ def check_once(config: HermesConfig) -> None:
             wait_before_request(request_log_label(seller, display_name), config)
             offers = _fetch_watch_offers(session, watch, config)
             offer_keys: List[str] = []
-            search_group, search_group_label = search_result_group_for_watch(watch)
+            group_fallback_title = next(
+                (
+                    str(offer.title).split(" / ", 1)[0].strip()
+                    for offer in offers
+                    if str(offer.title or "").strip()
+                ),
+                "",
+            )
+            search_group, search_group_label = search_result_group_for_watch(watch, group_fallback_title)
             for offer in offers:
                 offer_display_name = offer.title or watch.name or watch.url
                 if watch.site == SITE_HEPSIBURADA:
@@ -1479,6 +1490,8 @@ def check_once(config: HermesConfig) -> None:
                 state[offer_key]["watch_name"] = watch.name
                 state[offer_key]["size"] = watch.size
                 state[offer_key]["site"] = watch.site
+                state[offer_key]["search_group"] = search_group
+                state[offer_key]["search_group_label"] = search_group_label
                 state[offer_key]["last_error"] = None
                 state[offer_key]["last_error_status"] = None
 
@@ -1493,6 +1506,8 @@ def check_once(config: HermesConfig) -> None:
                 "watch_name": watch.name,
                 "configured_url": watch.url,
                 "size": watch.size,
+                "search_group": search_group,
+                "search_group_label": search_group_label,
                 "offer_keys": offer_keys,
                 "last_error": None,
                 "last_error_status": None,

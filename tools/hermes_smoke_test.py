@@ -467,6 +467,54 @@ class HermesSmokeTests(unittest.TestCase):
             ["Varyasyon A", "Varyasyon B"],
         )
 
+    def test_dashboard_groups_inferred_variants_and_merges_legacy_source_groups(self):
+        rows = [
+            {
+                "seller": "H&M",
+                "product_title": "Fitilli pantolon / Mavi / XL",
+                "product_url": "https://example.test/pants?color=blue",
+                "difference": "+100,00",
+                "target": "1.500,00",
+            },
+            {
+                "seller": "H&M",
+                "product_title": "Fitilli pantolon / Siyah / XL",
+                "product_url": "https://example.test/pants?color=black",
+                "difference": "+200,00",
+                "target": "1.500,00",
+            },
+            {
+                "seller": "Amazon",
+                "product_title": "Apple tablet / Mavi",
+                "product_url": "https://www.amazon.com.tr/dp/B000000001?th=1",
+                "difference": "+100,00",
+                "search_group": "old-first-source",
+                "search_group_label": "Apple tablet",
+            },
+            {
+                "seller": "Amazon",
+                "product_title": "Apple tablet / Mor",
+                "product_url": "https://www.amazon.com.tr/gp/product/B000000002?psc=1",
+                "difference": "+200,00",
+                "search_group": "old-second-source",
+                "search_group_label": "Apple tablet",
+            },
+            {
+                "seller": "Amazon",
+                "product_title": "Apple tablet / Mavi (aynı link)",
+                "product_url": "https://www.amazon.com.tr/dp/B000000001?smid=A1",
+                "difference": "+300,00",
+                "search_group": "old-third-source",
+                "search_group_label": "Apple tablet",
+            },
+        ]
+
+        open_rows, collapsed_groups = dashboard._split_search_result_groups(rows)
+
+        self.assertEqual(open_rows, [])
+        self.assertEqual([label for label, _ in collapsed_groups], ["Apple tablet", "Fitilli pantolon"])
+        self.assertEqual([len(group_rows) for _, group_rows in collapsed_groups], [2, 2])
+
     def test_dashboard_rebuilds_missing_search_groups_from_state(self):
         rows = [
             {"product_url": "https://www.amazon.com.tr/dp/GREEN", "product_title": "Juo Q3 Yeşil"},
@@ -2174,6 +2222,33 @@ class HermesSmokeTests(unittest.TestCase):
         unique_rows = service.deduplicate_summary_rows(rows)
 
         self.assertEqual(len(unique_rows), 2)
+        self.assertEqual(unique_rows[0].price, Decimal("95"))
+
+    def test_summary_keeps_one_row_for_equivalent_amazon_product_urls(self):
+        rows = [
+            PriceSummaryRow(
+                "Amazon",
+                "Ürün",
+                "https://www.amazon.com.tr/dp/B000000001?th=1",
+                Decimal("100"),
+                Decimal("90"),
+                Decimal("100"),
+                Decimal("100"),
+            ),
+            PriceSummaryRow(
+                "Amazon",
+                "Ürün",
+                "https://www.amazon.com.tr/gp/product/B000000001?smid=A1",
+                Decimal("95"),
+                Decimal("90"),
+                Decimal("95"),
+                Decimal("100"),
+            ),
+        ]
+
+        unique_rows = service.deduplicate_summary_rows(rows)
+
+        self.assertEqual(len(unique_rows), 1)
         self.assertEqual(unique_rows[0].price, Decimal("95"))
 
     def test_watch_settings_show_configured_groups_as_a_dropdown(self):

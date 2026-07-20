@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from decimal import ROUND_DOWN, Decimal, InvalidOperation
 from html import unescape
 from typing import Any, Dict
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urlparse, urlunparse
 
 from .constants import (
     AMAZON_BASE_URL,
@@ -191,6 +191,28 @@ def canonical_amazon_product_url(raw_url: str, fallback_asin: str = "") -> str:
     if asin:
         return f"{AMAZON_BASE_URL}/dp/{asin}"
     return absolute_url.split("?", 1)[0]
+
+
+def canonical_tracking_url(raw_url: str) -> str:
+    """Return a stable URL key while preserving non-Amazon variant queries."""
+    url = str(raw_url or "").strip()
+    if not url:
+        return ""
+    parsed = urlparse(url)
+    if "amazon." in parsed.netloc.casefold():
+        return canonical_amazon_product_url(url).casefold()
+    if not parsed.scheme or not parsed.netloc:
+        return url
+    return urlunparse(
+        (
+            parsed.scheme.casefold(),
+            parsed.netloc.casefold(),
+            parsed.path.rstrip("/"),
+            parsed.params,
+            parsed.query,
+            "",
+        )
+    )
 
 
 def detect_site_from_url(url: str) -> str:
