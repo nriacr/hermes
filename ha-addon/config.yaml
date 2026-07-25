@@ -1,5 +1,5 @@
 name: Hermes
-version: "2.2.84"
+version: "2.2.85"
 slug: hermes
 description: Takip edilen linkleri ve Telegram fırsat kanallarını Pushover bildirimiyle izler.
 url: https://github.com/nriacr/hermes
@@ -82,6 +82,7 @@ schema:
       exclude_terms: "str?"
       size: "str?"
       include_variations: "bool?"
+      include_warehouse: "bool?"
       url_1: "str?"
       url_2: "str?"
       url_3: "str?"

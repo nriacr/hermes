@@ -821,7 +821,7 @@ def reset_product_alert_after_missing(
 def summary_config_signature(config: HermesConfig) -> str:
     watch_part = ",".join(
         f"{watch.site}:{watch.url}:{watch.target_price}:{watch.minimum_price}:{watch.excluded_terms}:"
-        f"{watch.size}:{watch.include_variations}:{watch.active}"
+        f"{watch.size}:{watch.include_variations}:{watch.include_warehouse}:{watch.active}"
         for watch in config.watches
     )
     return f"watches={watch_part}"
@@ -1071,6 +1071,7 @@ def _fetch_amazon_search_watch_offers(
         raise HermesError("Amazon bot korumasi nedeniyle captcha sayfasi dondu.")
 
     candidates = extract_result_candidates(html, watch.max_items_to_scan)
+    warehouse_context = amazon_provider.is_warehouse_search_url(watch.url)
     target_keywords = [watch.name] if watch.name else []
     results: List[SearchResultItem] = []
     skipped_detail_count = 0
@@ -1081,7 +1082,7 @@ def _fetch_amazon_search_watch_offers(
                     title=candidate.title,
                     url=candidate.url,
                     price=candidate.price,
-                    is_warehouse=bool(candidate.is_warehouse),
+                    is_warehouse=bool(warehouse_context or candidate.is_warehouse),
                 )
             )
             continue
@@ -1089,7 +1090,7 @@ def _fetch_amazon_search_watch_offers(
             skipped_detail_count += 1
             continue
         try:
-            results.append(_fetch_amazon_detail_result(session, candidate, config))
+            results.append(_fetch_amazon_detail_result(session, candidate, config, warehouse_context))
         except Exception as exc:  # noqa: BLE001
             log(f"Amazon product arama detay fiyatı okunamadı: {log_cell(candidate.title, 60)} | {exc}")
 
@@ -1376,11 +1377,18 @@ def _fetch_hm_watch_offers(
 def _fetch_watch_offers(session: requests.Session, watch: WatchRule, config: HermesConfig) -> List[OfferResult]:
     site = watch.site
     url = watch.url
-    timeout = config.request_timeout_seconds
     if site == SITE_AMAZON and is_amazon_search_url(url):
-        return _fetch_amazon_search_watch_offers(session, watch, config)
-    if site == SITE_AMAZON:
-        return _fetch_amazon_product_watch_offers(session, watch, config)
+        offers = _fetch_amazon_search_watch_offers(session, watch, config)
+    elif site == SITE_AMAZON:
+        offers = _fetch_amazon_product_watch_offers(session, watch, config)
+    else:
+        offers = None
+    if offers is not None:
+        # A Warehouse-only source is itself an explicit request for used stock.
+        # On ordinary Amazon links, used offers remain opt-in per watch.
+        if not watch.include_warehouse and not amazon_provider.is_warehouse_url(url):
+            offers = [offer for offer in offers if not offer.is_warehouse]
+        return offers
     if site == SITE_HEPSIBURADA:
         return _fetch_hepsiburada_watch_offers(session, watch, config)
     if site == SITE_ZARA:
@@ -1388,7 +1396,7 @@ def _fetch_watch_offers(session: requests.Session, watch: WatchRule, config: Her
     if site == SITE_HM:
         return _fetch_hm_watch_offers(session, watch, config)
     else:
-        response = fetch_with_retries(session, url, timeout)
+        response = fetch_with_retries(session, url, config.request_timeout_seconds)
     html = cleaned_html(response)
     raise_if_age_verification(html)
     if is_bot_protection_page(site, html):
@@ -1436,6 +1444,7 @@ def _fetch_amazon_detail_result(
     session: requests.Session,
     candidate,
     config: HermesConfig,
+    warehouse_context: bool = False,
 ) -> SearchResultItem:
     cache = _amazon_detail_result_cache(session)
     cache_key = f"{str(candidate.url or '').strip()}|warehouse={bool(candidate.is_warehouse)}"
@@ -1459,7 +1468,7 @@ def _fetch_amazon_detail_result(
         title=title,
         url=url,
         price=offer.price,
-        is_warehouse=bool(candidate.is_warehouse or offer.is_warehouse),
+        is_warehouse=bool(warehouse_context or candidate.is_warehouse or offer.is_warehouse),
     )
     if cache_key:
         cache[cache_key] = result
@@ -1591,6 +1600,7 @@ def check_once(config: HermesConfig) -> None:
                 state[offer_key]["size"] = watch.size
                 state[offer_key]["site"] = watch.site
                 state[offer_key]["include_variations"] = watch.include_variations
+                state[offer_key]["include_warehouse"] = watch.include_warehouse
                 state[offer_key]["search_group"] = search_group
                 state[offer_key]["search_group_label"] = search_group_label
                 state[offer_key]["is_warehouse"] = offer.is_warehouse
@@ -1610,6 +1620,7 @@ def check_once(config: HermesConfig) -> None:
                 "configured_url": watch.url,
                 "size": watch.size,
                 "include_variations": watch.include_variations,
+                "include_warehouse": watch.include_warehouse,
                 "search_group": search_group,
                 "search_group_label": search_group_label,
                 "offer_keys": offer_keys,

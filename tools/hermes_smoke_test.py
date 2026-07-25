@@ -44,6 +44,7 @@ from hermes.providers.amazon import (  # noqa: E402
     extract_color_variations,
     extract_offer as extract_amazon_offer,
     extract_offers as extract_amazon_offers,
+    is_warehouse_search_url,
     title_with_color,
 )
 from hermes.search_amazon import dedupe_results, extract_result_candidates  # noqa: E402
@@ -62,6 +63,53 @@ class HermesSmokeTests(unittest.TestCase):
 
         self.assertFalse(default_watch.include_variations)
         self.assertTrue(opted_in_watch.include_variations)
+
+    def test_amazon_warehouse_offers_are_opt_in_for_normal_links(self):
+        watch = WatchRule(
+            name="Edifier M60",
+            site="amazon",
+            url="https://www.amazon.com.tr/dp/B0D95QG8W4?th=1",
+            target_price=Decimal("9000"),
+        )
+        offers = [
+            OfferResult("Edifier M60", Decimal("8899"), url=watch.url),
+            OfferResult("Edifier M60", Decimal("8787.77"), url=watch.url, is_warehouse=True),
+        ]
+        with patch.object(service, "_fetch_amazon_product_watch_offers", return_value=offers):
+            result = service._fetch_watch_offers(object(), watch, SimpleNamespace())
+
+        self.assertEqual([offer.is_warehouse for offer in result], [False])
+
+    def test_amazon_warehouse_offers_are_kept_when_enabled(self):
+        watch = WatchRule(
+            name="Edifier M60",
+            site="amazon",
+            url="https://www.amazon.com.tr/dp/B0D95QG8W4?th=1",
+            target_price=Decimal("9000"),
+            include_warehouse=True,
+        )
+        offers = [
+            OfferResult("Edifier M60", Decimal("8899"), url=watch.url),
+            OfferResult("Edifier M60", Decimal("8787.77"), url=watch.url, is_warehouse=True),
+        ]
+        with patch.object(service, "_fetch_amazon_product_watch_offers", return_value=offers):
+            result = service._fetch_watch_offers(object(), watch, SimpleNamespace())
+
+        self.assertEqual([offer.is_warehouse for offer in result], [False, True])
+
+    def test_amazon_warehouse_search_keeps_used_results_without_opt_in(self):
+        watch = WatchRule(
+            name="Edifier M60",
+            site="amazon",
+            url="https://www.amazon.com.tr/s?k=edifier+m60&i=warehouse-deals",
+            target_price=Decimal("9000"),
+        )
+        offers = [OfferResult("Edifier M60", Decimal("8787.77"), url=watch.url, is_warehouse=True)]
+        with patch.object(service, "_fetch_amazon_search_watch_offers", return_value=offers):
+            result = service._fetch_watch_offers(object(), watch, SimpleNamespace())
+
+        self.assertTrue(is_warehouse_search_url(watch.url))
+        self.assertEqual([offer.is_warehouse for offer in result], [True])
 
     def test_link_test_renders_provider_results_without_writing_tracking_state(self):
         offer = OfferResult(

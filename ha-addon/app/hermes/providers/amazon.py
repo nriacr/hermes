@@ -360,6 +360,12 @@ def is_warehouse_url(source_url: str) -> bool:
     )
 
 
+def is_warehouse_search_url(source_url: str) -> bool:
+    """Return true only for an Amazon search page explicitly filtered to used stock."""
+    parsed = urlsplit(str(source_url or ""))
+    return bool(parsed.path.rstrip("/").endswith("/s") and is_warehouse_url(source_url))
+
+
 def extract_offers(html: str, source_url: str = "") -> list[OfferResult]:
     """Extract normal and used offers separately when Amazon shows both on one page."""
     soup = soup_from_html(html)
