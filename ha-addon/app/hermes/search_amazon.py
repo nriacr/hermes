@@ -103,7 +103,9 @@ def _extract_card_offers(card: BeautifulSoup, source_is_warehouse_search: bool =
     """
     offers = []
     primary = _extract_primary_card_price(card)
-    secondary = extract_verified_secondary_offer_price(card, include_container_fallback=False)
+    # Accept Amazon's visible used-offer wording even when the site omits its
+    # usual secondary-offer wrapper. Both required phrases must still appear.
+    secondary = extract_verified_secondary_offer_price(card, include_container_fallback=True)
     card_text = card.get_text(" ", strip=True)
 
     # A Warehouse search can still include ordinary fallback cards. Mark a
@@ -112,8 +114,11 @@ def _extract_card_offers(card: BeautifulSoup, source_is_warehouse_search: bool =
     # separate block exists, the primary price remains a new offer.
     primary_is_warehouse = bool(
         source_is_warehouse_search
-        and secondary is None
         and has_explicit_used_offer_evidence(card_text)
+        # In a Depot-only search Amazon can render the same used price as both
+        # the visible card price and the secondary-offer text. It is one used
+        # offer, not a normal-plus-used pair.
+        and (secondary is None or secondary == primary)
     )
     if primary is not None:
         offers.append((primary, primary_is_warehouse))

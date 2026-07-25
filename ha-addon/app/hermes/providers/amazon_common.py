@@ -63,6 +63,10 @@ def extract_verified_secondary_offer_price(container: Any, include_container_fal
                 return price
     if include_container_fallback:
         text = container.get_text(" ", strip=True)
-        if has_verified_warehouse_evidence(text):
+        # Amazon's result card markup changes frequently. Some cards expose
+        # the used offer as plain card text rather than a dedicated component.
+        # The wording is reliable only when both phrases are in the same card:
+        # "Diğer satın alma seçenekleri" and "İkinci El ürün".
+        if has_explicit_used_offer_evidence(text):
             return _price_after_verified_secondary_offer_text(text)
     return None

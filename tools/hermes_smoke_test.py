@@ -1204,6 +1204,23 @@ class HermesSmokeTests(unittest.TestCase):
         self.assertEqual(item.price, Decimal("12999.00"))
         self.assertTrue(item.is_warehouse)
 
+    def test_amazon_search_reads_plain_card_used_offer_wording(self):
+        """Used search cards may not include Amazon's secondary-offer wrapper."""
+        html = """
+        <div class="s-main-slot">
+          <div data-component-type="s-search-result" data-asin="B0D95QG8W4">
+            <h2><a href="/dp/B0D95QG8W4"><span>Edifier M60 Siyah</span></a></h2>
+            <span class="a-price"><span class="a-offscreen">8.899,00 TL</span></span>
+            <p>Diğer satın alma seçenekleri 8.787,77 TL (1 İkinci El ürün)</p>
+          </div>
+        </div>
+        """
+
+        items = extract_result_candidates(html, 10)
+
+        self.assertEqual([item.price for item in items], [Decimal("8899.00"), Decimal("8787.77")])
+        self.assertEqual([item.is_warehouse for item in items], [False, True])
+
     def test_amazon_search_keeps_normal_and_used_prices_on_one_card(self):
         html = """
         <div class="s-main-slot">
@@ -1356,6 +1373,23 @@ class HermesSmokeTests(unittest.TestCase):
         offers = extract_amazon_offers(html, "https://www.amazon.com.tr/dp/B0D95QG8W4?th=1")
         self.assertEqual([offer.price for offer in offers], [Decimal("8899.00"), Decimal("8787.77")])
         self.assertEqual([offer.is_warehouse for offer in offers], [False, True])
+
+    def test_amazon_product_page_omits_same_price_used_duplicate(self):
+        html = """
+        <html><head><title>Çoklu teklif ürünü</title></head><body>
+          <div id="corePriceDisplay_desktop_feature_div">
+            <span class="a-price"><span class="a-offscreen">8.899,00 TL</span></span>
+          </div>
+          <div data-cy="secondary-offer-recipe">
+            Diğer satın alma seçenekleri 8.899,00 TL (1 İkinci El ürün)
+          </div>
+        </body></html>
+        """
+
+        offers = extract_amazon_offers(html, "https://www.amazon.com.tr/dp/B0D95QG8W4?th=1")
+
+        self.assertEqual(len(offers), 1)
+        self.assertFalse(offers[0].is_warehouse)
 
     def test_incremental_summary_keeps_normal_and_warehouse_offer_rows(self):
         normal = PriceSummaryRow(

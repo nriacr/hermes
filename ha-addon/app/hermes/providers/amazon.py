@@ -382,7 +382,9 @@ def extract_offers(html: str, source_url: str = "") -> list[OfferResult]:
     # A product page can contain unrelated used-offer text. Only Amazon's
     # dedicated secondary-offer block can produce a separate DEPO result.
     secondary_price = extract_verified_secondary_offer_price(soup, include_container_fallback=False)
-    if secondary_price is not None:
+    # A matching number is not a distinct offer. Keeping it would create a
+    # duplicate DEPO row beside the exact same new-product price.
+    if secondary_price is not None and secondary_price != primary_price:
         offers.append(OfferResult(title=title, price=secondary_price, seller=None, is_warehouse=True))
 
     if offers:
