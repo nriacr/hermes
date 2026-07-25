@@ -24,6 +24,7 @@ from .utils import (
     parse_iso_datetime,
     repair_mojibake,
     site_label,
+    tracking_offer_identity,
 )
 
 WEB_PORT = 8099
@@ -597,13 +598,13 @@ def _summary_row_sort_key(row):
 
 
 def _deduplicate_dashboard_rows(rows):
-    """Hide duplicate saved URLs immediately, including pre-upgrade summaries."""
+    """Hide duplicate offers while keeping new and Amazon Depo rows separate."""
     unique_rows = {}
     for row in rows:
         if not isinstance(row, dict):
             continue
-        url_key = canonical_tracking_url(row.get("product_url"))
-        key = url_key or f"__missing_url__:{len(unique_rows)}"
+        key = tracking_offer_identity(row.get("product_url"), parse_bool(row.get("is_warehouse"), default=False))
+        key = key or f"__missing_url__:{len(unique_rows)}"
         current = unique_rows.get(key)
         if current is None or _summary_difference_sort_value(row) < _summary_difference_sort_value(current):
             unique_rows[key] = row

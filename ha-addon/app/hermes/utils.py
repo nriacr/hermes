@@ -215,6 +215,14 @@ def canonical_tracking_url(raw_url: str) -> str:
     )
 
 
+def tracking_offer_identity(raw_url: str, is_warehouse: bool = False) -> str:
+    """Identify a tracked offer without merging new and Amazon Depo stock."""
+    url = canonical_tracking_url(raw_url)
+    if not url:
+        return ""
+    return f"{url}|{'warehouse' if is_warehouse else 'normal'}"
+
+
 def detect_site_from_url(url: str) -> str:
     host = urlparse(url).netloc.casefold()
     if "hepsiburada" in host:

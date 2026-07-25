@@ -60,6 +60,7 @@ from .utils import (
     parse_decimal,
     parse_iso_datetime,
     site_label,
+    tracking_offer_identity,
     utc_now,
 )
 
@@ -236,12 +237,10 @@ def deduplicate_summary_rows(rows: List[PriceSummaryRow]) -> List[PriceSummaryRo
     """Keep one row per product offer without collapsing normal and Warehouse stock."""
     unique_rows: Dict[str, PriceSummaryRow] = {}
     for row in rows:
-        url = canonical_tracking_url(row.product_url)
-        if not url:
+        row_key = tracking_offer_identity(row.product_url, row.is_warehouse)
+        if not row_key:
             unique_rows[f"__missing_url__:{len(unique_rows)}"] = row
             continue
-        condition_key = "warehouse" if row.is_warehouse else "normal"
-        row_key = f"{url}|{condition_key}"
         current = unique_rows.get(row_key)
         if current is None or row.price < current.price:
             unique_rows[row_key] = row
@@ -377,14 +376,18 @@ def cached_summary_rows_for_watch(
     return rows
 
 
-def cached_summary_urls_for_watch(
+def cached_summary_offer_ids_for_watch(
     watch: WatchRule,
     watch_key: str,
     state: Dict[str, Any],
     seller: str,
 ) -> set[str]:
-    """Return previously published offer URLs for a watch before replacing its state."""
-    return _row_urls(cached_summary_rows_for_watch(watch, watch_key, state, seller))
+    """Return this watch's offer identities before replacing its state."""
+    return {
+        _price_row_identity(row)
+        for row in cached_summary_rows_for_watch(watch, watch_key, state, seller)
+        if _price_row_identity(row)
+    }
 
 
 def format_minutes(seconds: float | int | None) -> str:
@@ -515,17 +518,13 @@ def _row_urls(rows: List[PriceSummaryRow] | List[StockSummaryRow]) -> set[str]:
 
 def _price_row_identity(row: PriceSummaryRow) -> str:
     """Keep normal and verified Amazon Depo offers separate in live updates."""
-    url = canonical_tracking_url(row.product_url)
-    if not url:
-        return ""
-    condition = "warehouse" if row.is_warehouse else "normal"
-    return f"{url}|{condition}"
+    return tracking_offer_identity(row.product_url, row.is_warehouse)
 
 
 def save_incremental_price_summary(
     fresh_rows: List[PriceSummaryRow],
     fresh_stock_rows: List[StockSummaryRow] | None = None,
-    removed_price_urls: set[str] | None = None,
+    removed_price_ids: set[str] | None = None,
 ) -> None:
     """Publish fresh rows immediately without hiding rows pending later in the cycle."""
     previous_payload = load_json(SUMMARY_PATH, {})
@@ -538,17 +537,13 @@ def save_incremental_price_summary(
     fresh_price_ids = {_price_row_identity(row) for row in fresh_rows if _price_row_identity(row)}
     fresh_price_urls = _row_urls(fresh_rows)
     fresh_stock_urls = _row_urls(fresh_stock_rows)
-    removed_price_urls = {
-        canonical_tracking_url(url)
-        for url in (removed_price_urls or set())
-        if canonical_tracking_url(url)
-    }
+    removed_price_ids = {str(item) for item in (removed_price_ids or set()) if item}
     merged_rows = [
         row
         for row in previous_rows
         if _price_row_identity(row) not in fresh_price_ids
         and canonical_tracking_url(row.product_url) not in fresh_stock_urls
-        and canonical_tracking_url(row.product_url) not in removed_price_urls
+        and _price_row_identity(row) not in removed_price_ids
     ]
     merged_rows.extend(fresh_rows)
     merged_stock_rows = [
@@ -1647,7 +1642,7 @@ def check_once(config: HermesConfig) -> None:
                 "last_checked_at": utc_now(),
             }
         except OutOfStockHermesError as exc:
-            stale_summary_urls = cached_summary_urls_for_watch(watch, watch_key, state, seller)
+            stale_summary_offer_ids = cached_summary_offer_ids_for_watch(watch, watch_key, state, seller)
             stock_title = getattr(exc, "product_title", "") or watch.name or watch.url
             stock_url = getattr(exc, "product_url", "") or watch.url
             log(f"Stokta yok: {seller} | {stock_title} | {exc}")
@@ -1672,9 +1667,9 @@ def check_once(config: HermesConfig) -> None:
             failed["last_out_of_stock_at"] = utc_now()
             state[watch_key] = failed
             # A missing item must not keep its previous price visible until the cycle ends.
-            save_incremental_price_summary([], stock_rows[-1:], removed_price_urls=stale_summary_urls)
+            save_incremental_price_summary([], stock_rows[-1:], removed_price_ids=stale_summary_offer_ids)
         except Exception as exc:  # noqa: BLE001
-            stale_summary_urls = cached_summary_urls_for_watch(watch, watch_key, state, seller)
+            stale_summary_offer_ids = cached_summary_offer_ids_for_watch(watch, watch_key, state, seller)
             normal_empty_search = is_amazon_search_watch and is_normal_amazon_search_result_absence(exc)
             if normal_empty_search:
                 log(f"Amazon arama sonucu boş: {watch.name or watch.url} | {exc}")
@@ -1720,7 +1715,7 @@ def check_once(config: HermesConfig) -> None:
             state[watch_key] = failed
             # State records the current error while the dashboard may still show the last
             # successful cycle. Remove only this watch's stale rows immediately.
-            save_incremental_price_summary([], removed_price_urls=stale_summary_urls)
+            save_incremental_price_summary([], removed_price_ids=stale_summary_offer_ids)
 
     for watch in config.watches:
         watch_key = normalize_item_key("watch", watch.site, watch.name, watch.url, watch.size)

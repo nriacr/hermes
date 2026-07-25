@@ -1353,6 +1353,56 @@ class HermesSmokeTests(unittest.TestCase):
         self.assertEqual(len(payload["rows"]), 2)
         self.assertEqual(sorted(row["is_warehouse"] for row in payload["rows"]), [False, True])
 
+    def test_dashboard_keeps_normal_and_warehouse_rows_for_the_same_amazon_asin(self):
+        rows = [
+            {
+                "seller": "Amazon",
+                "product_title": "Edifier M60 Siyah",
+                "product_url": "https://www.amazon.com.tr/dp/B0D95QG8W4?th=1",
+                "price": "8.899 TL",
+                "target": "9.000 TL",
+                "difference": "-101 TL",
+                "is_warehouse": False,
+            },
+            {
+                "seller": "Amazon",
+                "product_title": "Edifier M60 Siyah",
+                "product_url": "https://www.amazon.com.tr/dp/B0D95QG8W4?condition=used",
+                "price": "8.787 TL",
+                "target": "9.000 TL",
+                "difference": "-213 TL",
+                "is_warehouse": True,
+            },
+        ]
+
+        visible_rows = dashboard._deduplicate_dashboard_rows(rows)
+
+        self.assertEqual(len(visible_rows), 2)
+        self.assertEqual(sorted(row["is_warehouse"] for row in visible_rows), [False, True])
+
+    def test_incremental_removal_keeps_the_other_amazon_condition(self):
+        normal = PriceSummaryRow(
+            "Amazon", "Edifier M60 Siyah", "https://www.amazon.com.tr/dp/B0D95QG8W4",
+            Decimal("8899"), Decimal("9000"), Decimal("8899"), Decimal("8899"),
+        )
+        warehouse = PriceSummaryRow(
+            "Amazon", "Edifier M60 Siyah", "https://www.amazon.com.tr/dp/B0D95QG8W4",
+            Decimal("8787.77"), Decimal("9000"), Decimal("8787.77"), Decimal("8787.77"),
+            is_warehouse=True,
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            summary_path = Path(temp_dir) / "summary.json"
+            with patch.object(service, "SUMMARY_PATH", summary_path):
+                service.save_price_summary([normal, warehouse])
+                service.save_incremental_price_summary(
+                    [],
+                    removed_price_ids={service._price_row_identity(warehouse)},
+                )
+                payload = json.loads(summary_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(len(payload["rows"]), 1)
+        self.assertFalse(payload["rows"][0]["is_warehouse"])
+
     def test_amazon_product_page_ignores_unscoped_used_text(self):
         html = """
         <html><head><title>Normal ürün</title></head><body>
@@ -1572,7 +1622,19 @@ class HermesSmokeTests(unittest.TestCase):
                     ]
                 )
 
-                service.save_incremental_price_summary([], removed_price_urls={stale_url})
+                stale_row = PriceSummaryRow(
+                    "Nordbron",
+                    "Stark Sırt Çantası",
+                    stale_url,
+                    Decimal("4850"),
+                    Decimal("4500"),
+                    Decimal("4850"),
+                    Decimal("4850"),
+                )
+                service.save_incremental_price_summary(
+                    [],
+                    removed_price_ids={service._price_row_identity(stale_row)},
+                )
 
                 payload = json.loads(service.SUMMARY_PATH.read_text(encoding="utf-8"))
                 self.assertEqual(payload["row_count"], 1)
