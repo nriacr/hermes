@@ -40,7 +40,12 @@ from hermes.providers.hepsiburada import (  # noqa: E402
 from hermes.providers.hm import extract_offers as extract_hm_offers  # noqa: E402
 from hermes.providers.nordbron import extract_offer as extract_nordbron_offer  # noqa: E402
 from hermes.providers.zara import extract_offers as extract_zara_offers  # noqa: E402
-from hermes.providers.amazon import extract_color_variations, extract_offer as extract_amazon_offer, title_with_color  # noqa: E402
+from hermes.providers.amazon import (  # noqa: E402
+    extract_color_variations,
+    extract_offer as extract_amazon_offer,
+    extract_offers as extract_amazon_offers,
+    title_with_color,
+)
 from hermes.search_amazon import extract_result_candidates  # noqa: E402
 from hermes.utils import detect_site_from_url, parse_decimal, utc_now  # noqa: E402
 
@@ -149,20 +154,22 @@ class HermesSmokeTests(unittest.TestCase):
             SimpleNamespace(label="Pembe", url=variation_urls[2]),
         ]
 
-        def offer_for_url(site, html, source_url):
-            return OfferResult(
-                title="Örnek tablet",
-                price=Decimal("18999"),
-                seller="Amazon",
-                url=source_url,
-            )
+        def offers_for_url(html, source_url):
+            return [
+                OfferResult(
+                    title="Örnek tablet",
+                    price=Decimal("18999"),
+                    seller="Amazon",
+                    url=source_url,
+                )
+            ]
 
         with (
             patch.object(service, "fetch_amazon_page", side_effect=lambda _session, url, _timeout: url) as fetch_page,
             patch.object(service, "cleaned_html", side_effect=lambda value: value),
-            patch.object(service, "extract_offer", side_effect=offer_for_url),
             patch.object(service, "wait_before_request"),
             patch.object(service.amazon_provider, "extract_color_variations", return_value=variations),
+            patch.object(service.amazon_provider, "extract_offers", side_effect=offers_for_url),
         ):
             offers = service._fetch_amazon_product_watch_offers(object(), watch, config)
 
@@ -1160,6 +1167,21 @@ class HermesSmokeTests(unittest.TestCase):
         offer = extract_amazon_offer(html, "https://www.amazon.com.tr/s?k=ipad&i=warehouse-deals")
         self.assertEqual(offer.price, Decimal("12999.00"))
         self.assertTrue(offer.is_warehouse)
+
+    def test_amazon_product_page_keeps_normal_and_used_prices_separate(self):
+        html = """
+        <html><head><title>Çoklu teklif ürünü</title></head><body>
+          <div id="corePriceDisplay_desktop_feature_div">
+            <span class="a-price"><span class="a-offscreen">8.899,00 TL</span></span>
+          </div>
+          <div data-cy="secondary-offer-recipe">
+            Diğer satın alma seçenekleri 8.787,77 TL (1 İkinci El ürün)
+          </div>
+        </body></html>
+        """
+        offers = extract_amazon_offers(html, "https://www.amazon.com.tr/dp/B0D95QG8W4?th=1")
+        self.assertEqual([offer.price for offer in offers], [Decimal("8899.00"), Decimal("8787.77")])
+        self.assertEqual([offer.is_warehouse for offer in offers], [False, True])
 
     def test_amazon_search_ignores_all_departments_fallback_section(self):
         html = """

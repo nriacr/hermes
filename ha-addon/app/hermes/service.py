@@ -1073,7 +1073,6 @@ def _fetch_amazon_product_watch_offers(
         raise HermesError("Amazon bot korumasi nedeniyle captcha sayfasi dondu.")
 
     if not watch.include_variations:
-        offer = extract_offer(SITE_AMAZON, html, source_url=watch.url)
         return [
             OfferResult(
                 title=offer.title,
@@ -1082,6 +1081,7 @@ def _fetch_amazon_product_watch_offers(
                 url=watch.url,
                 is_warehouse=offer.is_warehouse,
             )
+            for offer in amazon_provider.extract_offers(html, source_url=watch.url)
         ]
 
     variations = amazon_provider.extract_color_variations(html, watch.url, watch.max_items_to_scan)
@@ -1090,7 +1090,6 @@ def _fetch_amazon_product_watch_offers(
             "Amazon varyasyon taramasi: "
             f"{watch.name or watch.url} | ayar=acik | bulunan={len(variations)} | tek urunle devam edildi"
         )
-        offer = extract_offer(SITE_AMAZON, html, source_url=watch.url)
         return [
             OfferResult(
                 title=offer.title,
@@ -1099,6 +1098,7 @@ def _fetch_amazon_product_watch_offers(
                 url=watch.url,
                 is_warehouse=offer.is_warehouse,
             )
+            for offer in amazon_provider.extract_offers(html, source_url=watch.url)
         ]
 
     log(f"Amazon renk varyasyonları bulundu: {watch.name or watch.url} | adet={len(variations)}")
@@ -1121,16 +1121,16 @@ def _fetch_amazon_product_watch_offers(
                 raise_if_age_verification(variation_html)
                 if "captcha" in variation_html.lower() and "robot" in variation_html.lower():
                     raise HermesError("Amazon bot korumasi nedeniyle captcha sayfasi dondu.")
-            offer = extract_offer(SITE_AMAZON, variation_html, source_url=variation.url)
-            offers.append(
-                OfferResult(
-                    title=amazon_provider.title_with_color(offer.title, variation.label),
-                    price=offer.price,
-                    seller=offer.seller,
-                    url=variation.url,
-                    is_warehouse=offer.is_warehouse,
+            for offer in amazon_provider.extract_offers(variation_html, source_url=variation.url):
+                offers.append(
+                    OfferResult(
+                        title=amazon_provider.title_with_color(offer.title, variation.label),
+                        price=offer.price,
+                        seller=offer.seller,
+                        url=variation.url,
+                        is_warehouse=offer.is_warehouse,
+                    )
                 )
-            )
         except Exception as exc:  # noqa: BLE001
             errors.append(f"{variation.label or variation.url} | {exc}")
             log(f"Amazon renk varyasyonu okunamadi: {variation.label or variation.url} | {exc}")
@@ -1469,7 +1469,14 @@ def check_once(config: HermesConfig) -> None:
                     log(f"Sonuç dikkate alınmadı: {seller} | {offer_display_name} | {skip_reason}")
                     continue
                 matched_url = offer.url or watch.url
-                offer_key = normalize_item_key("watch_offer", watch.site, watch.name, matched_url, watch.size)
+                offer_key = normalize_item_key(
+                    "watch_offer",
+                    watch.site,
+                    watch.name,
+                    matched_url,
+                    watch.size,
+                    "warehouse" if offer.is_warehouse else "normal",
+                )
                 offer_state_entry = state.get(offer_key, {})
                 if not isinstance(offer_state_entry, dict):
                     offer_state_entry = {}

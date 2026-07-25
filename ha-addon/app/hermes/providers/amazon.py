@@ -362,21 +362,34 @@ def is_warehouse_url(source_url: str) -> bool:
     )
 
 
-def extract_offer(html: str, source_url: str = "") -> OfferResult:
+def extract_offers(html: str, source_url: str = "") -> list[OfferResult]:
+    """Extract normal and used offers separately when Amazon shows both on one page."""
     soup = soup_from_html(html)
     jsonld_title, jsonld_price = extract_jsonld_product(soup)
     title: Optional[str] = jsonld_title or extract_title(soup) or "Amazon ürünü"
+    warehouse_source = is_warehouse_url(source_url)
+    offers: list[OfferResult] = []
 
     primary_price = _extract_visible_primary_price(soup)
     if primary_price is not None:
-        return OfferResult(title=title, price=primary_price, seller=None, is_warehouse=is_warehouse_url(source_url))
+        offers.append(
+            OfferResult(title=title, price=primary_price, seller=None, is_warehouse=warehouse_source)
+        )
 
     secondary_price = extract_secondary_offer_price(soup)
-    if secondary_price is not None:
-        return OfferResult(title=title, price=secondary_price, seller=None, is_warehouse=True)
+    if secondary_price is not None and not warehouse_source:
+        offers.append(OfferResult(title=title, price=secondary_price, seller=None, is_warehouse=True))
+
+    if offers:
+        return offers
 
     for price in (jsonld_price, extract_price_from_meta(soup)):
         if price is not None:
-            return OfferResult(title=title, price=price, seller=None, is_warehouse=is_warehouse_url(source_url))
+            return [OfferResult(title=title, price=price, seller=None, is_warehouse=warehouse_source)]
 
     raise HermesError("Amazon sayfasından fiyat bulunamadı.")
+
+
+def extract_offer(html: str, source_url: str = "") -> OfferResult:
+    """Compatibility helper for callers that expect Amazon's primary offer only."""
+    return extract_offers(html, source_url=source_url)[0]
