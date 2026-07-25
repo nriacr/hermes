@@ -40,7 +40,7 @@ from hermes.providers.hepsiburada import (  # noqa: E402
 from hermes.providers.hm import extract_offers as extract_hm_offers  # noqa: E402
 from hermes.providers.nordbron import extract_offer as extract_nordbron_offer  # noqa: E402
 from hermes.providers.zara import extract_offers as extract_zara_offers  # noqa: E402
-from hermes.providers.amazon import extract_color_variations, title_with_color  # noqa: E402
+from hermes.providers.amazon import extract_color_variations, extract_offer as extract_amazon_offer, title_with_color  # noqa: E402
 from hermes.search_amazon import extract_result_candidates  # noqa: E402
 from hermes.utils import detect_site_from_url, parse_decimal, utc_now  # noqa: E402
 
@@ -1132,6 +1132,34 @@ class HermesSmokeTests(unittest.TestCase):
         """
         item = extract_result_candidates(html, 10)[0]
         self.assertEqual(item.price, Decimal("10448.99"))
+        self.assertFalse(item.is_warehouse)
+
+    def test_amazon_search_secondary_used_offer_is_marked_as_warehouse(self):
+        html = """
+        <div class="s-main-slot">
+          <div data-component-type="s-search-result" data-asin="B000000001">
+            <h2><a href="/dp/B000000001"><span>İkinci el ürün</span></a></h2>
+            <div data-cy="secondary-offer-recipe">
+              Diğer satın alma seçenekleri 12.999,00 TL (1 İkinci El ürün)
+            </div>
+          </div>
+        </div>
+        """
+        item = extract_result_candidates(html, 10)[0]
+        self.assertEqual(item.price, Decimal("12999.00"))
+        self.assertTrue(item.is_warehouse)
+
+    def test_amazon_warehouse_url_marks_primary_price_as_warehouse(self):
+        html = """
+        <html><head><title>Depo ürünü</title></head><body>
+          <div id="corePriceDisplay_desktop_feature_div">
+            <span class="a-price"><span class="a-offscreen">12.999,00 TL</span></span>
+          </div>
+        </body></html>
+        """
+        offer = extract_amazon_offer(html, "https://www.amazon.com.tr/s?k=ipad&i=warehouse-deals")
+        self.assertEqual(offer.price, Decimal("12999.00"))
+        self.assertTrue(offer.is_warehouse)
 
     def test_amazon_search_ignores_all_departments_fallback_section(self):
         html = """
@@ -2296,6 +2324,38 @@ class HermesSmokeTests(unittest.TestCase):
 
         self.assertEqual(len(unique_rows), 1)
         self.assertEqual(unique_rows[0].price, Decimal("95"))
+
+    def test_summary_keeps_normal_and_warehouse_offers_separate(self):
+        rows = [
+            PriceSummaryRow(
+                "Amazon", "Normal ürün", "https://www.amazon.com.tr/dp/B000000001",
+                Decimal("100"), Decimal("90"), Decimal("100"), Decimal("100"), is_warehouse=False,
+            ),
+            PriceSummaryRow(
+                "Amazon", "Depo ürün", "https://www.amazon.com.tr/dp/B000000001",
+                Decimal("80"), Decimal("90"), Decimal("80"), Decimal("80"), is_warehouse=True,
+            ),
+        ]
+
+        unique_rows = service.deduplicate_summary_rows(rows)
+
+        self.assertEqual(len(unique_rows), 2)
+
+    def test_dashboard_labels_warehouse_rows(self):
+        row_html = dashboard._render_table_row(
+            {
+                "seller": "Amazon",
+                "product_title": "Depo ürünü",
+                "product_url": "https://www.amazon.com.tr/dp/B000000001",
+                "price": "12.999 TL",
+                "target": "13.000 TL",
+                "difference": "-1 TL",
+                "min_price": "12.999 TL",
+                "max_price": "12.999 TL",
+                "is_warehouse": True,
+            }
+        )
+        self.assertIn('class="warehouse-tag">DEPO</strong>', row_html)
 
     def test_watch_settings_show_configured_groups_as_a_dropdown(self):
         html = settings_ui._watch_form(

@@ -43,6 +43,7 @@ class AmazonSearchCandidate:
     title: str
     url: str
     price: Optional[Decimal] = None
+    is_warehouse: bool = False
 
 
 def _extract_card_title(card: BeautifulSoup) -> Optional[str]:
@@ -61,10 +62,10 @@ def _extract_card_title(card: BeautifulSoup) -> Optional[str]:
     return None
 
 
-def _extract_card_price(card: BeautifulSoup):
+def _extract_card_offer(card: BeautifulSoup):
     secondary = extract_secondary_offer_price(card, include_container_fallback=False)
     if secondary is not None:
-        return secondary
+        return secondary, True
     for price_element in card.select(".a-price"):
         classes = set(price_element.get("class") or [])
         if "a-text-price" in classes or price_element.get("data-a-strike") == "true":
@@ -74,7 +75,7 @@ def _extract_card_price(card: BeautifulSoup):
         offscreen = price_element.select_one(".a-offscreen")
         if offscreen and not _is_hidden_element(offscreen):
             try:
-                return parse_decimal(offscreen.get_text(" ", strip=True))
+                return parse_decimal(offscreen.get_text(" ", strip=True)), False
             except HermesError:
                 pass
         whole = price_element.select_one(".a-price-whole")
@@ -86,10 +87,15 @@ def _extract_card_price(card: BeautifulSoup):
         if not whole_text:
             continue
         try:
-            return parse_decimal(f"{whole_text},{(fraction_text or '00')[:2].ljust(2, '0')}")
+            return parse_decimal(f"{whole_text},{(fraction_text or '00')[:2].ljust(2, '0')}"), False
         except HermesError:
             continue
-    return None
+    return None, False
+
+
+def _extract_card_price(card: BeautifulSoup):
+    """Keep the historical price helper available for focused parser tests."""
+    return _extract_card_offer(card)[0]
 
 
 def _extract_card_url(card: BeautifulSoup, fallback_asin: str = ""):
@@ -195,7 +201,10 @@ def extract_result_candidates(html: str, max_items_to_scan: int) -> List[AmazonS
         if not title or not url or url in seen_urls:
             continue
         seen_urls.add(url)
-        candidates.append(AmazonSearchCandidate(title=title, url=url, price=_extract_card_price(card)))
+        price, is_warehouse = _extract_card_offer(card)
+        candidates.append(
+            AmazonSearchCandidate(title=title, url=url, price=price, is_warehouse=is_warehouse)
+        )
 
     if not candidates:
         raise HermesError("Amazon arama sonuç sayfasında okunabilir ürün bulunamadı.")

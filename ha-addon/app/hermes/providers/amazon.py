@@ -2,7 +2,7 @@ import json
 import re
 from dataclasses import dataclass
 from typing import Optional
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, unquote_plus, urlencode, urlsplit, urlunsplit
 
 from ..errors import HermesError
 from ..models import OfferResult
@@ -343,18 +343,40 @@ def _extract_visible_primary_price(soup):
     return None
 
 
-def extract_offer(html: str) -> OfferResult:
+def is_warehouse_url(source_url: str) -> bool:
+    """Return whether an Amazon URL explicitly targets used/Warehouse inventory."""
+    raw_url = str(source_url or "").strip()
+    if not raw_url:
+        return False
+    parsed = urlsplit(raw_url)
+    query = dict(parse_qsl(parsed.query, keep_blank_values=True))
+    normalized_url = normalize_offer_text(unquote_plus(raw_url))
+    condition = normalize_offer_text(query.get("condition", ""))
+    refinement = normalize_offer_text(query.get("rh", ""))
+    return (
+        "warehouse-deals" in normalized_url
+        or condition == "used"
+        or "p_n_condition-type:13818537031" in refinement
+        or query.get("bbn") == "44219324031"
+        or query.get("srs") == "44219324031"
+    )
+
+
+def extract_offer(html: str, source_url: str = "") -> OfferResult:
     soup = soup_from_html(html)
     jsonld_title, jsonld_price = extract_jsonld_product(soup)
     title: Optional[str] = jsonld_title or extract_title(soup) or "Amazon ürünü"
 
-    for price in (
-        _extract_visible_primary_price(soup),
-        extract_secondary_offer_price(soup),
-        jsonld_price,
-        extract_price_from_meta(soup),
-    ):
+    primary_price = _extract_visible_primary_price(soup)
+    if primary_price is not None:
+        return OfferResult(title=title, price=primary_price, seller=None, is_warehouse=is_warehouse_url(source_url))
+
+    secondary_price = extract_secondary_offer_price(soup)
+    if secondary_price is not None:
+        return OfferResult(title=title, price=secondary_price, seller=None, is_warehouse=True)
+
+    for price in (jsonld_price, extract_price_from_meta(soup)):
         if price is not None:
-            return OfferResult(title=title, price=price, seller=None)
+            return OfferResult(title=title, price=price, seller=None, is_warehouse=is_warehouse_url(source_url))
 
     raise HermesError("Amazon sayfasından fiyat bulunamadı.")

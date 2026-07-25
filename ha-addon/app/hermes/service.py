@@ -190,16 +190,18 @@ def sorted_summary_rows(rows: List[PriceSummaryRow]) -> List[PriceSummaryRow]:
 
 
 def deduplicate_summary_rows(rows: List[PriceSummaryRow]) -> List[PriceSummaryRow]:
-    """Keep one row per product URL without collapsing distinct variants."""
+    """Keep one row per product offer without collapsing normal and Warehouse stock."""
     unique_rows: Dict[str, PriceSummaryRow] = {}
     for row in rows:
         url = canonical_tracking_url(row.product_url)
         if not url:
             unique_rows[f"__missing_url__:{len(unique_rows)}"] = row
             continue
-        current = unique_rows.get(url)
+        condition_key = "warehouse" if row.is_warehouse else "normal"
+        row_key = f"{url}|{condition_key}"
+        current = unique_rows.get(row_key)
         if current is None or row.price < current.price:
-            unique_rows[url] = row
+            unique_rows[row_key] = row
     return list(unique_rows.values())
 
 
@@ -304,6 +306,7 @@ def summary_row_from_state(watch: WatchRule, state_entry: Dict[str, Any], seller
         max_price=max_price,
         search_group=search_group,
         search_group_label=search_group_label,
+        is_warehouse=bool(state_entry.get("is_warehouse", False)),
     )
 
 
@@ -390,6 +393,7 @@ def save_price_summary(
                 "is_target_hit": row.price <= row.target_price,
                 "search_group": row.search_group,
                 "search_group_label": row.search_group_label,
+                "is_warehouse": row.is_warehouse,
             }
             for idx, row in enumerate(sorted_rows, start=1)
         ],
@@ -430,6 +434,7 @@ def _summary_rows_from_payload(payload: Dict[str, Any]) -> List[PriceSummaryRow]
                     max_price=parse_decimal(str(raw_row.get("max_price") or raw_row.get("price") or "")),
                     search_group=str(raw_row.get("search_group") or ""),
                     search_group_label=str(raw_row.get("search_group_label") or ""),
+                    is_warehouse=bool(raw_row.get("is_warehouse", False)),
                 )
             )
         except HermesError:
@@ -985,7 +990,13 @@ def offers_from_amazon_search_results(results: List[SearchResultItem], product_n
     if not matches:
         raise HermesError("Amazon arama sayfasında ürün adına uyan fiyatlı ürün bulunamadı.")
     return [
-        OfferResult(title=item.title, price=item.price, seller="Amazon", url=item.url)
+        OfferResult(
+            title=item.title,
+            price=item.price,
+            seller="Amazon",
+            url=item.url,
+            is_warehouse=item.is_warehouse,
+        )
         for item in matches
     ]
 
@@ -1015,18 +1026,26 @@ def _fetch_amazon_search_watch_offers(
         raise HermesError("Amazon bot korumasi nedeniyle captcha sayfasi dondu.")
 
     candidates = extract_result_candidates(html, watch.max_items_to_scan)
+    warehouse_context = amazon_provider.is_warehouse_url(watch.url)
     target_keywords = [watch.name] if watch.name else []
     results: List[SearchResultItem] = []
     skipped_detail_count = 0
     for candidate in candidates:
         if candidate.price is not None:
-            results.append(SearchResultItem(title=candidate.title, url=candidate.url, price=candidate.price))
+            results.append(
+                SearchResultItem(
+                    title=candidate.title,
+                    url=candidate.url,
+                    price=candidate.price,
+                    is_warehouse=bool(warehouse_context or candidate.is_warehouse),
+                )
+            )
             continue
         if target_keywords and not title_matches_any_keyword(candidate.title, target_keywords):
             skipped_detail_count += 1
             continue
         try:
-            results.append(_fetch_amazon_detail_result(session, candidate, config))
+            results.append(_fetch_amazon_detail_result(session, candidate, config, warehouse_context))
         except Exception as exc:  # noqa: BLE001
             log(f"Amazon product arama detay fiyatı okunamadı: {log_cell(candidate.title, 60)} | {exc}")
 
@@ -1055,7 +1074,15 @@ def _fetch_amazon_product_watch_offers(
 
     if not watch.include_variations:
         offer = extract_offer(SITE_AMAZON, html, source_url=watch.url)
-        return [OfferResult(title=offer.title, price=offer.price, seller=offer.seller, url=watch.url)]
+        return [
+            OfferResult(
+                title=offer.title,
+                price=offer.price,
+                seller=offer.seller,
+                url=watch.url,
+                is_warehouse=offer.is_warehouse,
+            )
+        ]
 
     variations = amazon_provider.extract_color_variations(html, watch.url, watch.max_items_to_scan)
     if len(variations) <= 1:
@@ -1064,7 +1091,15 @@ def _fetch_amazon_product_watch_offers(
             f"{watch.name or watch.url} | ayar=acik | bulunan={len(variations)} | tek urunle devam edildi"
         )
         offer = extract_offer(SITE_AMAZON, html, source_url=watch.url)
-        return [OfferResult(title=offer.title, price=offer.price, seller=offer.seller, url=watch.url)]
+        return [
+            OfferResult(
+                title=offer.title,
+                price=offer.price,
+                seller=offer.seller,
+                url=watch.url,
+                is_warehouse=offer.is_warehouse,
+            )
+        ]
 
     log(f"Amazon renk varyasyonları bulundu: {watch.name or watch.url} | adet={len(variations)}")
     offers: List[OfferResult] = []
@@ -1093,6 +1128,7 @@ def _fetch_amazon_product_watch_offers(
                     price=offer.price,
                     seller=offer.seller,
                     url=variation.url,
+                    is_warehouse=offer.is_warehouse,
                 )
             )
         except Exception as exc:  # noqa: BLE001
@@ -1352,9 +1388,14 @@ def inspect_link_now(
     return site, offers
 
 
-def _fetch_amazon_detail_result(session: requests.Session, candidate, config: HermesConfig) -> SearchResultItem:
+def _fetch_amazon_detail_result(
+    session: requests.Session,
+    candidate,
+    config: HermesConfig,
+    warehouse_context: bool = False,
+) -> SearchResultItem:
     cache = _amazon_detail_result_cache(session)
-    cache_key = str(candidate.url or "").strip()
+    cache_key = f"{str(candidate.url or '').strip()}|warehouse={warehouse_context}"
     if cache_key in cache:
         return cache[cache_key]
 
@@ -1364,14 +1405,19 @@ def _fetch_amazon_detail_result(session: requests.Session, candidate, config: He
     raise_if_age_verification(html)
     if "captcha" in html.lower() and "robot" in html.lower():
         raise HermesError("Amazon bot korumasi nedeniyle captcha sayfasi dondu.")
-    offer = extract_offer(SITE_AMAZON, html)
+    offer = extract_offer(SITE_AMAZON, html, source_url=candidate.url)
     title = offer.title or candidate.title
     url = offer.url or candidate.url
     log(
         "Amazon arama fiyatı ürün detayından tamamlandı: "
         f"{log_cell(title, 60)} | fiyat={format_tl(offer.price, with_currency=True)}"
     )
-    result = SearchResultItem(title=title, url=url, price=offer.price)
+    result = SearchResultItem(
+        title=title,
+        url=url,
+        price=offer.price,
+        is_warehouse=bool(warehouse_context or candidate.is_warehouse or offer.is_warehouse),
+    )
     if cache_key:
         cache[cache_key] = result
     return result
@@ -1446,6 +1492,7 @@ def check_once(config: HermesConfig) -> None:
                         max_price=max_price,
                         search_group=search_group,
                         search_group_label=search_group_label,
+                        is_warehouse=offer.is_warehouse,
                     )
                 )
                 log(
@@ -1493,6 +1540,7 @@ def check_once(config: HermesConfig) -> None:
                 state[offer_key]["include_variations"] = watch.include_variations
                 state[offer_key]["search_group"] = search_group
                 state[offer_key]["search_group_label"] = search_group_label
+                state[offer_key]["is_warehouse"] = offer.is_warehouse
                 state[offer_key]["last_error"] = None
                 state[offer_key]["last_error_status"] = None
 

@@ -25,6 +25,7 @@ class SearchResultItem:
     title: str
     url: str
     price: Decimal
+    is_warehouse: bool = False
 
 
 @dataclass
@@ -38,6 +39,7 @@ class PriceSummaryRow:
     max_price: Decimal
     search_group: str = ""
     search_group_label: str = ""
+    is_warehouse: bool = False
 
     @property
     def difference(self) -> Decimal:
@@ -59,6 +61,7 @@ class OfferResult:
     price: Decimal
     seller: Optional[str] = None
     url: Optional[str] = None
+    is_warehouse: bool = False
 
 
 @dataclass
