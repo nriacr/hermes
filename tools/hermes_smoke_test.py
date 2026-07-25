@@ -46,7 +46,7 @@ from hermes.providers.amazon import (  # noqa: E402
     extract_offers as extract_amazon_offers,
     title_with_color,
 )
-from hermes.search_amazon import extract_result_candidates  # noqa: E402
+from hermes.search_amazon import dedupe_results, extract_result_candidates  # noqa: E402
 from hermes.utils import detect_site_from_url, parse_decimal, utc_now  # noqa: E402
 
 
@@ -1155,6 +1155,37 @@ class HermesSmokeTests(unittest.TestCase):
         item = extract_result_candidates(html, 10)[0]
         self.assertEqual(item.price, Decimal("12999.00"))
         self.assertTrue(item.is_warehouse)
+
+    def test_amazon_search_keeps_normal_and_used_prices_on_one_card(self):
+        html = """
+        <div class="s-main-slot">
+          <div data-component-type="s-search-result" data-asin="B0D95QG8W4">
+            <h2><a href="/dp/B0D95QG8W4?th=1"><span>Edifier M60 Siyah</span></a></h2>
+            <span class="a-price"><span class="a-offscreen">8.899,00 TL</span></span>
+            <div data-cy="secondary-offer-recipe">
+              Diğer satın alma seçenekleri 8.787,77 TL (1 İkinci El ürün)
+            </div>
+          </div>
+        </div>
+        """
+        items = extract_result_candidates(html, 10)
+        self.assertEqual([item.price for item in items], [Decimal("8899.00"), Decimal("8787.77")])
+        self.assertEqual([item.is_warehouse for item in items], [False, True])
+
+    def test_amazon_search_deduplication_keeps_normal_and_used_conditions(self):
+        rows = dedupe_results(
+            [
+                SearchResultItem("Edifier M60", "https://www.amazon.com.tr/dp/B0D95QG8W4", Decimal("8899")),
+                SearchResultItem(
+                    "Edifier M60",
+                    "https://www.amazon.com.tr/dp/B0D95QG8W4",
+                    Decimal("8787.77"),
+                    is_warehouse=True,
+                ),
+            ]
+        )
+        self.assertEqual(len(rows), 2)
+        self.assertEqual([row.is_warehouse for row in rows], [False, True])
 
     def test_amazon_warehouse_url_marks_primary_price_as_warehouse(self):
         html = """

@@ -97,7 +97,7 @@ AMAZON_NORMAL_EMPTY_SEARCH_MARKERS = (
     "amazon arama sayfasinda urun adina uyan fiyatli urun bulunamadi",
     "amazon arama sayfasinda okunabilir fiyat bulunamadi",
 )
-WAREHOUSE_STATE_MIGRATION_VERSION = 2
+WAREHOUSE_STATE_MIGRATION_VERSION = 3
 
 
 def raise_if_age_verification(html: str) -> None:
@@ -187,12 +187,7 @@ def reset_price_history() -> int:
 
 
 def clear_legacy_amazon_warehouse_rows(state: Dict[str, Any]) -> int:
-    """Remove old DEPO rows whose URL never explicitly selected used inventory.
-
-    Earlier versions inferred Warehouse status from broad Amazon search context
-    parameters. Those cached rows must not remain visible until their next
-    successful fetch, because they can label normal marketplace offers as DEPO.
-    """
+    """Remove cached DEPO rows that predate explicit offer-level evidence."""
     meta = state.get("_meta")
     if not isinstance(meta, dict):
         meta = {}
@@ -205,8 +200,7 @@ def clear_legacy_amazon_warehouse_rows(state: Dict[str, Any]) -> int:
             continue
         if entry.get("site") != SITE_AMAZON or not entry.get("is_warehouse"):
             continue
-        configured_url = str(entry.get("configured_url") or entry.get("url") or "")
-        if amazon_provider.is_warehouse_url(configured_url):
+        if entry.get("warehouse_evidence"):
             continue
         removed_keys.add(key)
         state.pop(key, None)
@@ -226,7 +220,6 @@ def clear_legacy_amazon_warehouse_rows(state: Dict[str, Any]) -> int:
                     isinstance(row, dict)
                     and str(row.get("seller") or "") == "Amazon"
                     and bool(row.get("is_warehouse"))
-                    and not amazon_provider.is_warehouse_url(str(row.get("product_url") or ""))
                 )
             ]
             summary["row_count"] = len(summary["rows"])
@@ -1078,7 +1071,6 @@ def _fetch_amazon_search_watch_offers(
         raise HermesError("Amazon bot korumasi nedeniyle captcha sayfasi dondu.")
 
     candidates = extract_result_candidates(html, watch.max_items_to_scan)
-    warehouse_context = amazon_provider.is_warehouse_url(watch.url)
     target_keywords = [watch.name] if watch.name else []
     results: List[SearchResultItem] = []
     skipped_detail_count = 0
@@ -1089,7 +1081,7 @@ def _fetch_amazon_search_watch_offers(
                     title=candidate.title,
                     url=candidate.url,
                     price=candidate.price,
-                    is_warehouse=bool(warehouse_context or candidate.is_warehouse),
+                    is_warehouse=bool(candidate.is_warehouse),
                 )
             )
             continue
@@ -1097,7 +1089,7 @@ def _fetch_amazon_search_watch_offers(
             skipped_detail_count += 1
             continue
         try:
-            results.append(_fetch_amazon_detail_result(session, candidate, config, warehouse_context))
+            results.append(_fetch_amazon_detail_result(session, candidate, config))
         except Exception as exc:  # noqa: BLE001
             log(f"Amazon product arama detay fiyatı okunamadı: {log_cell(candidate.title, 60)} | {exc}")
 
@@ -1444,10 +1436,9 @@ def _fetch_amazon_detail_result(
     session: requests.Session,
     candidate,
     config: HermesConfig,
-    warehouse_context: bool = False,
 ) -> SearchResultItem:
     cache = _amazon_detail_result_cache(session)
-    cache_key = f"{str(candidate.url or '').strip()}|warehouse={warehouse_context}"
+    cache_key = f"{str(candidate.url or '').strip()}|warehouse={bool(candidate.is_warehouse)}"
     if cache_key in cache:
         return cache[cache_key]
 
@@ -1468,7 +1459,7 @@ def _fetch_amazon_detail_result(
         title=title,
         url=url,
         price=offer.price,
-        is_warehouse=bool(warehouse_context or candidate.is_warehouse or offer.is_warehouse),
+        is_warehouse=bool(candidate.is_warehouse or offer.is_warehouse),
     )
     if cache_key:
         cache[cache_key] = result
@@ -1603,6 +1594,7 @@ def check_once(config: HermesConfig) -> None:
                 state[offer_key]["search_group"] = search_group
                 state[offer_key]["search_group_label"] = search_group_label
                 state[offer_key]["is_warehouse"] = offer.is_warehouse
+                state[offer_key]["warehouse_evidence"] = bool(offer.is_warehouse)
                 state[offer_key]["last_error"] = None
                 state[offer_key]["last_error_status"] = None
 

@@ -62,10 +62,8 @@ def _extract_card_title(card: BeautifulSoup) -> Optional[str]:
     return None
 
 
-def _extract_card_offer(card: BeautifulSoup):
-    secondary = extract_secondary_offer_price(card, include_container_fallback=False)
-    if secondary is not None:
-        return secondary, True
+def _extract_primary_card_price(card: BeautifulSoup):
+    """Return the visible main price, never a strike-through or hidden price."""
     for price_element in card.select(".a-price"):
         classes = set(price_element.get("class") or [])
         if "a-text-price" in classes or price_element.get("data-a-strike") == "true":
@@ -75,7 +73,7 @@ def _extract_card_offer(card: BeautifulSoup):
         offscreen = price_element.select_one(".a-offscreen")
         if offscreen and not _is_hidden_element(offscreen):
             try:
-                return parse_decimal(offscreen.get_text(" ", strip=True)), False
+                return parse_decimal(offscreen.get_text(" ", strip=True))
             except HermesError:
                 pass
         whole = price_element.select_one(".a-price-whole")
@@ -87,10 +85,33 @@ def _extract_card_offer(card: BeautifulSoup):
         if not whole_text:
             continue
         try:
-            return parse_decimal(f"{whole_text},{(fraction_text or '00')[:2].ljust(2, '0')}"), False
+            return parse_decimal(f"{whole_text},{(fraction_text or '00')[:2].ljust(2, '0')}")
         except HermesError:
             continue
-    return None, False
+    return None
+
+
+def _extract_card_offers(card: BeautifulSoup):
+    """Return normal and explicitly-marked used offers without merging them.
+
+    Amazon can show the main new-product price and an "other buying options"
+    used price on the same result card. The primary price must win for the
+    normal offer; the secondary block is a separate Warehouse offer.
+    """
+    offers = []
+    primary = _extract_primary_card_price(card)
+    if primary is not None:
+        offers.append((primary, False))
+    secondary = extract_secondary_offer_price(card, include_container_fallback=False)
+    if secondary is not None:
+        offers.append((secondary, True))
+    return offers
+
+
+def _extract_card_offer(card: BeautifulSoup):
+    """Compatibility helper returning the normal offer when one exists."""
+    offers = _extract_card_offers(card)
+    return offers[0] if offers else (None, False)
 
 
 def _extract_card_price(card: BeautifulSoup):
@@ -189,22 +210,30 @@ def extract_result_candidates(html: str, max_items_to_scan: int) -> List[AmazonS
             break
 
     candidates: List[AmazonSearchCandidate] = []
-    seen_urls = set()
+    seen_offers = set()
+    scanned_cards = 0
     for card in cards:
         asin = str(card.get("data-asin", "")).strip() or ""
         if not asin or _is_hidden_element(card):
             continue
-        if len(candidates) >= max_items_to_scan:
+        if scanned_cards >= max_items_to_scan:
             break
         title = _extract_card_title(card)
         url = _extract_card_url(card, asin)
-        if not title or not url or url in seen_urls:
+        if not title or not url:
             continue
-        seen_urls.add(url)
-        price, is_warehouse = _extract_card_offer(card)
-        candidates.append(
-            AmazonSearchCandidate(title=title, url=url, price=price, is_warehouse=is_warehouse)
-        )
+        scanned_cards += 1
+        card_offers = _extract_card_offers(card) or [(None, False)]
+        for price, is_warehouse in card_offers:
+            # Normal and used prices for the same ASIN are deliberately
+            # distinct; duplicate cards within the same condition are not.
+            offer_key = (url, is_warehouse)
+            if offer_key in seen_offers:
+                continue
+            seen_offers.add(offer_key)
+            candidates.append(
+                AmazonSearchCandidate(title=title, url=url, price=price, is_warehouse=is_warehouse)
+            )
 
     if not candidates:
         raise HermesError("Amazon arama sonuç sayfasında okunabilir ürün bulunamadı.")
@@ -214,9 +243,10 @@ def extract_result_candidates(html: str, max_items_to_scan: int) -> List[AmazonS
 def dedupe_results(results: List[SearchResultItem]) -> List[SearchResultItem]:
     deduped = {}
     for item in results:
-        existing = deduped.get(item.url)
+        key = (item.url, bool(item.is_warehouse))
+        existing = deduped.get(key)
         if existing is None or item.price < existing.price:
-            deduped[item.url] = item
+            deduped[key] = item
     return list(deduped.values())
 
 
