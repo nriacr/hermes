@@ -111,6 +111,48 @@ class HermesSmokeTests(unittest.TestCase):
         self.assertTrue(is_warehouse_search_url(watch.url))
         self.assertEqual([offer.is_warehouse for offer in result], [True])
 
+    def test_amazon_search_deep_scan_adds_verified_used_price_when_enabled(self):
+        search_url = "https://www.amazon.com.tr/s?k=edifier+m60"
+        search_html = """
+        <div class="s-main-slot">
+          <div data-component-type="s-search-result" data-asin="B0D95QG8W4">
+            <h2><a href="/dp/B0D95QG8W4"><span>Edifier M60 Compact Masa Hoparlörü - Siyah</span></a></h2>
+            <span class="a-price"><span class="a-offscreen">8.899,00 TL</span></span>
+          </div>
+        </div>
+        """
+        detail_html = """
+        <html><head><title>Edifier M60 Compact Masa Hoparlörü - Siyah</title></head><body>
+          <div id="corePriceDisplay_desktop_feature_div">
+            <span class="a-price"><span class="a-offscreen">8.899,00 TL</span></span>
+          </div>
+          <div data-cy="secondary-offer-recipe">
+            Diğer satın alma seçenekleri 8.787,77 TL (1 İkinci El ürün)
+          </div>
+        </body></html>
+        """
+        watch = WatchRule(
+            name="Edifier M60",
+            site="amazon",
+            url=search_url,
+            target_price=Decimal("9000"),
+            include_warehouse=True,
+        )
+        config = SimpleNamespace(request_timeout_seconds=20, request_delay_min_seconds=0, request_delay_max_seconds=0)
+
+        def page_for_url(_session, url, _timeout, **_kwargs):
+            return search_html if url == search_url else detail_html
+
+        with (
+            patch.object(service, "fetch_amazon_page", side_effect=page_for_url),
+            patch.object(service, "cleaned_html", side_effect=lambda value: value),
+            patch.object(service, "wait_before_request"),
+        ):
+            offers = service._fetch_amazon_search_watch_offers(SimpleNamespace(), watch, config)
+
+        self.assertEqual([offer.price for offer in offers], [Decimal("8899.00"), Decimal("8787.77")])
+        self.assertEqual([offer.is_warehouse for offer in offers], [False, True])
+
     def test_link_test_renders_provider_results_without_writing_tracking_state(self):
         offer = OfferResult(
             title="Örnek ürün / Mavi",

@@ -1049,12 +1049,49 @@ def offers_from_amazon_search_results(results: List[SearchResultItem], product_n
     ]
 
 
-def _amazon_detail_result_cache(session: requests.Session) -> Dict[str, SearchResultItem]:
-    cache = getattr(session, "_hermes_amazon_detail_result_cache", None)
+def _amazon_detail_offers_cache(session: requests.Session) -> Dict[str, List[SearchResultItem]]:
+    """Keep one product-page read per Amazon search result in a check cycle."""
+    cache = getattr(session, "_hermes_amazon_detail_offers_cache", None)
     if not isinstance(cache, dict):
         cache = {}
-        setattr(session, "_hermes_amazon_detail_result_cache", cache)
+        setattr(session, "_hermes_amazon_detail_offers_cache", cache)
     return cache
+
+
+def _fetch_amazon_detail_offers(
+    session: requests.Session,
+    candidate,
+    config: HermesConfig,
+) -> List[SearchResultItem]:
+    """Read all verified new/used offers from one Amazon result's product page."""
+    cache = _amazon_detail_offers_cache(session)
+    cache_key = str(candidate.url or "").strip()
+    cached = cache.get(cache_key)
+    if isinstance(cached, list):
+        return cached
+
+    wait_before_request(request_log_label("Amazon detay", candidate.title), config)
+    response = fetch_amazon_page(session, candidate.url, config.request_timeout_seconds)
+    html = cleaned_html(response)
+    raise_if_age_verification(html)
+    if "captcha" in html.lower() and "robot" in html.lower():
+        raise HermesError("Amazon bot korumasi nedeniyle captcha sayfasi dondu.")
+
+    parsed_offers = amazon_provider.extract_offers(html, source_url=candidate.url)
+    results = [
+        SearchResultItem(
+            # Search-card title is the authoritative match context. Amazon's
+            # lightweight detail HTML may omit a product title altogether.
+            title=candidate.title or offer.title,
+            url=offer.url or candidate.url,
+            price=offer.price,
+            is_warehouse=bool(offer.is_warehouse),
+        )
+        for offer in parsed_offers
+    ]
+    if cache_key:
+        cache[cache_key] = results
+    return results
 
 
 def _fetch_amazon_search_watch_offers(
@@ -1082,11 +1119,14 @@ def _fetch_amazon_search_watch_offers(
     target_keywords = [watch.name] if watch.name else []
     results: List[SearchResultItem] = []
     skipped_detail_count = 0
+    warehouse_detail_scans = 0
+    warehouse_detail_hits = 0
     for candidate in candidates:
         # Amazon may append ordinary fallback cards to a Depot-only search.
         # They cannot become used stock through a later product-page lookup.
         if warehouse_search and not candidate.is_warehouse:
             continue
+        candidate_matches_watch = not target_keywords or title_matches_any_keyword(candidate.title, target_keywords)
         if candidate.price is not None:
             results.append(
                 SearchResultItem(
@@ -1096,17 +1136,45 @@ def _fetch_amazon_search_watch_offers(
                     is_warehouse=candidate.is_warehouse,
                 )
             )
+
+            # Standard Amazon search cards often omit the used price even
+            # though the linked product page exposes it. When explicitly
+            # enabled, inspect that one product page and add only a separately
+            # verified used offer. The visible new-price card remains intact.
+            if watch.include_warehouse and not warehouse_search and not candidate.is_warehouse and candidate_matches_watch:
+                warehouse_detail_scans += 1
+                try:
+                    used_results = [
+                        item
+                        for item in _fetch_amazon_detail_offers(session, candidate, config)
+                        if item.is_warehouse
+                    ]
+                    warehouse_detail_hits += len(used_results)
+                    results.extend(used_results)
+                except Exception as exc:  # noqa: BLE001
+                    log(
+                        "Amazon Depo detay fiyatı okunamadı: "
+                        f"{log_cell(candidate.title, 60)} | {exc}"
+                    )
             continue
-        if target_keywords and not title_matches_any_keyword(candidate.title, target_keywords):
+        if not candidate_matches_watch:
             skipped_detail_count += 1
             continue
         try:
-            results.append(_fetch_amazon_detail_result(session, candidate, config))
+            detailed_results = _fetch_amazon_detail_offers(session, candidate, config)
+            if not watch.include_warehouse and not warehouse_search:
+                detailed_results = [item for item in detailed_results if not item.is_warehouse]
+            results.extend(detailed_results)
         except Exception as exc:  # noqa: BLE001
             log(f"Amazon product arama detay fiyatı okunamadı: {log_cell(candidate.title, 60)} | {exc}")
 
     if skipped_detail_count:
         log(f"Amazon product arama detay fiyatı atlandı: eslesmeyen_urun={skipped_detail_count}")
+    if warehouse_detail_scans:
+        log(
+            "Amazon Depo derin taraması tamamlandı: "
+            f"urun={warehouse_detail_scans} | bulunan_depo={warehouse_detail_hits}"
+        )
     if not results:
         raise HermesError("Amazon arama sayfasında okunabilir fiyat bulunamadı.")
     offers = offers_from_amazon_search_results(dedupe_results(results), watch.name)
@@ -1456,40 +1524,6 @@ def inspect_link_now(
     if not offers:
         raise HermesError("Bağlantıda seçilen filtrelerle okunabilir ürün veya fiyat bulunamadı.")
     return site, offers
-
-
-def _fetch_amazon_detail_result(
-    session: requests.Session,
-    candidate,
-    config: HermesConfig,
-) -> SearchResultItem:
-    cache = _amazon_detail_result_cache(session)
-    cache_key = f"{str(candidate.url or '').strip()}|warehouse={bool(candidate.is_warehouse)}"
-    if cache_key in cache:
-        return cache[cache_key]
-
-    wait_before_request(request_log_label("Amazon detay", candidate.title), config)
-    response = fetch_amazon_page(session, candidate.url, config.request_timeout_seconds)
-    html = cleaned_html(response)
-    raise_if_age_verification(html)
-    if "captcha" in html.lower() and "robot" in html.lower():
-        raise HermesError("Amazon bot korumasi nedeniyle captcha sayfasi dondu.")
-    offer = extract_offer(SITE_AMAZON, html, source_url=candidate.url)
-    title = offer.title or candidate.title
-    url = offer.url or candidate.url
-    log(
-        "Amazon arama fiyatı ürün detayından tamamlandı: "
-        f"{log_cell(title, 60)} | fiyat={format_tl(offer.price, with_currency=True)}"
-    )
-    result = SearchResultItem(
-        title=title,
-        url=url,
-        price=offer.price,
-        is_warehouse=bool(candidate.is_warehouse or offer.is_warehouse),
-    )
-    if cache_key:
-        cache[cache_key] = result
-    return result
 
 
 def check_once(config: HermesConfig) -> None:
