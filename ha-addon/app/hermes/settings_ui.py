@@ -346,14 +346,14 @@ def _watch_form(item, index, is_new=False, groups=None, known_titles=None):
     exclude_field = _field(
         prefix,
         "exclude_terms",
-        "Hariç tut (virgülle ayır)",
+        "Hariç Tut",
         exclude_terms,
     ).replace("<label>", "<label class='watch-exclude'>", 1)
     notification_fields = "".join(
         [
             _checkbox(prefix, "include_variations", "Varyasyonları ekle", include_variations),
-            _checkbox(prefix, "include_warehouse", "Depo ürünleri dahil edilsin (yalnızca Amazon)", include_warehouse),
-            _checkbox(prefix, "notify_once_in_24H", "24 saat içinde aynı bildirimi tekrar gönderme", notify_once),
+            _checkbox(prefix, "include_warehouse", "Amazon Depo", include_warehouse),
+            _checkbox(prefix, "notify_once_in_24H", "24 saat sustur", notify_once),
             _checkbox(prefix, "active", "Aktif", active),
         ]
     )
@@ -374,8 +374,8 @@ def _watch_form(item, index, is_new=False, groups=None, known_titles=None):
         "<div class='watch-top'>"
         f"{_select(prefix, 'group', 'Grup', selected_group, group_choices)}"
         f"{_field(prefix, 'name', 'Ad', item.get('name', ''))}"
-        f"{_field(prefix, 'target_price', 'Fiyat (TL)', _price_input_value(item.get('target_price', '')))}"
-        f"{_field(prefix, 'minimum_price', 'Min. hedef (TL)', _price_input_value(item.get('minimum_price', '')))}"
+        f"{_field(prefix, 'target_price', 'Hedef Fiyat Maks', _price_input_value(item.get('target_price', '')))}"
+        f"{_field(prefix, 'minimum_price', 'Hedef Fiyat Min', _price_input_value(item.get('minimum_price', '')))}"
         f"{_field(prefix, 'size', 'Beden', item.get('size', ''))}"
         "</div>"
         f"<div class='watch-links'>{link_fields}</div>"

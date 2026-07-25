@@ -813,8 +813,8 @@ class HermesSmokeTests(unittest.TestCase):
             self.assertIn("watch-links", html)
             self.assertIn("watch-bottom", html)
             self.assertLess(html.index(">Grup<"), html.index(">Ad<"))
-            self.assertLess(html.index(">Ad<"), html.index(">Fiyat (TL)<"))
-            self.assertLess(html.index(">Fiyat (TL)<"), html.index(">Beden<"))
+            self.assertLess(html.index(">Ad<"), html.index(">Hedef Fiyat Maks<"))
+            self.assertLess(html.index(">Hedef Fiyat Maks<"), html.index(">Beden<"))
             for link_number in range(1, 6):
                 self.assertIn(f">Link {link_number}<", html)
 

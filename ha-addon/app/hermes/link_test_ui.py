@@ -94,7 +94,7 @@ def render_link_test_page(
             <label>Beden
               <input type='text' name='size' value='{escape(_text_value(size), quote=True)}' placeholder='Örn. XL veya 44'>
             </label>
-            <label>Hariç tut
+            <label>Hariç Tut
               <input type='text' name='exclude_terms' value='{escape(_text_value(exclude_terms), quote=True)}' placeholder='Kılıf, koruyucu'>
             </label>
             <label class='link-test-checkbox'><input type='checkbox' name='include_variations' value='1'{_checked(bool(include_variations))}> Varyasyonları ekle</label>
