@@ -14,7 +14,7 @@ from .errors import HermesError
 from .logging_utils import log
 from .models import HermesConfig, TelegramConfig, WatchRule
 from .storage import load_json
-from .utils import detect_site_from_url, parse_bool, parse_decimal, watch_name_required_for_url
+from .utils import detect_site_from_url, normalize_item_key, parse_bool, parse_decimal, watch_name_required_for_url
 
 WATCH_URL_FIELDS = ("url_1", "url_2", "url_3", "url_4", "url_5")
 
@@ -164,6 +164,15 @@ def _prepare_watches(raw_watches: object) -> List[WatchRule]:
         include_warehouse = parse_bool(item.get("include_warehouse"), default=False)
         check_interval_minutes = _optional_bounded_integer(item, "check_interval_minutes", 1, 1440)
         notify_once_in_24h = parse_bool(item.get("notify_once_in_24H"), default=True)
+        # A card may contain several links, but all of them belong to the same
+        # tracking rule. This keeps their results separate from another card.
+        tracking_id = normalize_item_key(
+            "tracking_card",
+            name,
+            str(target_price),
+            size,
+            "|".join(sorted(url for url, _ in supported_urls)),
+        )
         for url, site in supported_urls:
             watches.append(
                 WatchRule(
@@ -181,6 +190,7 @@ def _prepare_watches(raw_watches: object) -> List[WatchRule]:
                     check_interval_minutes=check_interval_minutes,
                     notify_once_in_24h=notify_once_in_24h,
                     active=True,
+                    tracking_id=tracking_id,
                 )
             )
     return watches

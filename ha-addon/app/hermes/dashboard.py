@@ -587,6 +587,9 @@ def _deduplicate_dashboard_rows(rows):
         if not isinstance(row, dict):
             continue
         key = tracking_offer_identity(row.get("product_url"), parse_bool(row.get("is_warehouse"), default=False))
+        tracking_id = str(row.get("tracking_id") or "").strip()
+        if key and tracking_id:
+            key = f"{tracking_id}|{key}"
         key = key or f"__missing_url__:{len(unique_rows)}"
         current = unique_rows.get(key)
         if current is None or _summary_difference_sort_value(row) < _summary_difference_sort_value(current):
@@ -845,6 +848,11 @@ def _attach_state_search_groups(rows, state, options=None):
     enriched = []
     for row in rows:
         if not isinstance(row, dict):
+            enriched.append(row)
+            continue
+        # Fresh summaries already carry their configured-card identity. Do not
+        # overwrite it with URL-only legacy state from another tracking card.
+        if str(row.get("search_group") or "").strip():
             enriched.append(row)
             continue
         metadata = groups.get(canonical_tracking_url(row.get("product_url")))

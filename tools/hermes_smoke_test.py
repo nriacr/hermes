@@ -2699,6 +2699,45 @@ class HermesSmokeTests(unittest.TestCase):
         self.assertEqual(len(unique_rows), 2)
         self.assertEqual(unique_rows[0].price, Decimal("95"))
 
+    def test_summary_keeps_identical_offers_for_distinct_tracking_cards(self):
+        rows = [
+            PriceSummaryRow(
+                "Amazon", "Apple iPhone 17 Pro Max", "https://www.amazon.com.tr/dp/B000000001",
+                Decimal("121499"), Decimal("100000"), Decimal("121499"), Decimal("121499"),
+                tracking_id="iphone-17-pro",
+            ),
+            PriceSummaryRow(
+                "Amazon", "Apple iPhone 17 Pro Max", "https://www.amazon.com.tr/dp/B000000001",
+                Decimal("121499"), Decimal("110000"), Decimal("121499"), Decimal("121499"),
+                tracking_id="iphone-17-pro-max",
+            ),
+        ]
+
+        unique_rows = service.deduplicate_summary_rows(rows)
+
+        self.assertEqual(len(unique_rows), 2)
+        self.assertEqual({row.target_price for row in unique_rows}, {Decimal("100000"), Decimal("110000")})
+
+    def test_tracking_card_id_is_shared_by_its_links_and_unique_per_card(self):
+        watches = _prepare_watches(
+            [
+                {
+                    "name": "Apple iPhone 17 Pro",
+                    "target_price": 100000,
+                    "url_1": "https://www.amazon.com.tr/dp/B000000001",
+                    "url_2": "https://www.amazon.com.tr/dp/B000000002",
+                },
+                {
+                    "name": "Apple iPhone 17 Pro Max",
+                    "target_price": 110000,
+                    "url_1": "https://www.amazon.com.tr/dp/B000000001",
+                },
+            ]
+        )
+
+        self.assertEqual(watches[0].tracking_id, watches[1].tracking_id)
+        self.assertNotEqual(watches[0].tracking_id, watches[2].tracking_id)
+
     def test_summary_keeps_one_row_for_equivalent_amazon_product_urls(self):
         rows = [
             PriceSummaryRow(

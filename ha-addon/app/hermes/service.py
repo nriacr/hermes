@@ -241,6 +241,8 @@ def deduplicate_summary_rows(rows: List[PriceSummaryRow]) -> List[PriceSummaryRo
         if not row_key:
             unique_rows[f"__missing_url__:{len(unique_rows)}"] = row
             continue
+        if row.tracking_id:
+            row_key = f"{row.tracking_id}|{row_key}"
         current = unique_rows.get(row_key)
         if current is None or row.price < current.price:
             unique_rows[row_key] = row
@@ -319,7 +321,7 @@ def search_result_group_for_watch(watch: WatchRule, fallback_label: str = "") ->
         return "", ""
     # A card can contain multiple source URLs. Named cards intentionally share one
     # group; unnamed product links remain isolated by their configured URL.
-    identity = watch.name or watch.url
+    identity = watch.tracking_id or watch.name or watch.url
     return (
         normalize_item_key("watch_result_group", watch.site, identity, str(watch.target_price)),
         label,
@@ -348,6 +350,7 @@ def summary_row_from_state(watch: WatchRule, state_entry: Dict[str, Any], seller
         max_price=max_price,
         search_group=search_group,
         search_group_label=search_group_label,
+        tracking_id=str(state_entry.get("tracking_id") or watch.tracking_id or ""),
         is_warehouse=bool(state_entry.get("is_warehouse", False)),
     )
 
@@ -440,6 +443,7 @@ def save_price_summary(
                 "search_group": row.search_group,
                 "search_group_label": row.search_group_label,
                 "is_warehouse": row.is_warehouse,
+                "tracking_id": row.tracking_id,
             }
             for idx, row in enumerate(sorted_rows, start=1)
         ],
@@ -481,6 +485,7 @@ def _summary_rows_from_payload(payload: Dict[str, Any]) -> List[PriceSummaryRow]
                     search_group=str(raw_row.get("search_group") or ""),
                     search_group_label=str(raw_row.get("search_group_label") or ""),
                     is_warehouse=bool(raw_row.get("is_warehouse", False)),
+                    tracking_id=str(raw_row.get("tracking_id") or ""),
                 )
             )
         except HermesError:
@@ -518,7 +523,10 @@ def _row_urls(rows: List[PriceSummaryRow] | List[StockSummaryRow]) -> set[str]:
 
 def _price_row_identity(row: PriceSummaryRow) -> str:
     """Keep normal and verified Amazon Depo offers separate in live updates."""
-    return tracking_offer_identity(row.product_url, row.is_warehouse)
+    identity = tracking_offer_identity(row.product_url, row.is_warehouse)
+    if identity and row.tracking_id:
+        return f"{row.tracking_id}|{identity}"
+    return identity
 
 
 def save_incremental_price_summary(
@@ -1578,7 +1586,7 @@ def check_once(config: HermesConfig) -> None:
                 offer_key = normalize_item_key(
                     "watch_offer",
                     watch.site,
-                    watch.name,
+                    watch.tracking_id or watch.name,
                     matched_url,
                     watch.size,
                     "warehouse" if offer.is_warehouse else "normal",
@@ -1606,6 +1614,7 @@ def check_once(config: HermesConfig) -> None:
                         search_group=search_group,
                         search_group_label=search_group_label,
                         is_warehouse=offer.is_warehouse,
+                        tracking_id=watch.tracking_id,
                     )
                 )
                 log(
@@ -1648,6 +1657,7 @@ def check_once(config: HermesConfig) -> None:
                 state[offer_key]["url"] = matched_url
                 state[offer_key]["configured_url"] = watch.url
                 state[offer_key]["watch_name"] = watch.name
+                state[offer_key]["tracking_id"] = watch.tracking_id
                 state[offer_key]["size"] = watch.size
                 state[offer_key]["site"] = watch.site
                 state[offer_key]["include_variations"] = watch.include_variations
@@ -1668,6 +1678,7 @@ def check_once(config: HermesConfig) -> None:
                 **dict(state_entry),
                 "site": watch.site,
                 "watch_name": watch.name,
+                "tracking_id": watch.tracking_id,
                 "configured_url": watch.url,
                 "size": watch.size,
                 "include_variations": watch.include_variations,
@@ -1696,6 +1707,7 @@ def check_once(config: HermesConfig) -> None:
             failed = reset_product_alert_after_missing(dict(state_entry), seller, stock_title)
             failed["site"] = watch.site
             failed["watch_name"] = watch.name
+            failed["tracking_id"] = watch.tracking_id
             failed["configured_url"] = watch.url
             failed["size"] = watch.size
             failed["offer_keys"] = []
@@ -1744,6 +1756,7 @@ def check_once(config: HermesConfig) -> None:
                     log(f"Amazon arama hata bildirimi gonderilemedi: {watch.name} | {notify_exc}")
             failed["site"] = watch.site
             failed["watch_name"] = watch.name
+            failed["tracking_id"] = watch.tracking_id
             failed["configured_url"] = watch.url
             failed["size"] = watch.size
             failed["offer_keys"] = []
@@ -1756,7 +1769,7 @@ def check_once(config: HermesConfig) -> None:
             save_incremental_price_summary([], removed_price_ids=stale_summary_offer_ids)
 
     for watch in config.watches:
-        watch_key = normalize_item_key("watch", watch.site, watch.name, watch.url, watch.size)
+        watch_key = normalize_item_key("watch", watch.site, watch.tracking_id or watch.name, watch.url, watch.size)
         state_entry = state.get(watch_key, {})
         if not isinstance(state_entry, dict):
             state_entry = {}

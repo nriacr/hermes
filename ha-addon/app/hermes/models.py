@@ -19,6 +19,8 @@ class WatchRule:
     check_interval_minutes: Optional[int] = None
     notify_once_in_24h: bool = True
     active: bool = True
+    # Shared by every URL in one configured tracking card.
+    tracking_id: str = ""
 
 
 @dataclass
@@ -41,6 +43,7 @@ class PriceSummaryRow:
     search_group: str = ""
     search_group_label: str = ""
     is_warehouse: bool = False
+    tracking_id: str = ""
 
     @property
     def difference(self) -> Decimal:
