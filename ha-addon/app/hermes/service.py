@@ -97,7 +97,7 @@ AMAZON_NORMAL_EMPTY_SEARCH_MARKERS = (
     "amazon arama sayfasinda urun adina uyan fiyatli urun bulunamadi",
     "amazon arama sayfasinda okunabilir fiyat bulunamadi",
 )
-WAREHOUSE_STATE_MIGRATION_VERSION = 3
+WAREHOUSE_STATE_MIGRATION_VERSION = 4
 
 
 def raise_if_age_verification(html: str) -> None:
@@ -187,7 +187,7 @@ def reset_price_history() -> int:
 
 
 def clear_legacy_amazon_warehouse_rows(state: Dict[str, Any]) -> int:
-    """Remove cached DEPO rows that predate explicit offer-level evidence."""
+    """Remove cached DEPO rows before the strict Amazon Depo verification rule."""
     meta = state.get("_meta")
     if not isinstance(meta, dict):
         meta = {}
@@ -199,8 +199,6 @@ def clear_legacy_amazon_warehouse_rows(state: Dict[str, Any]) -> int:
         if key == "_meta" or not isinstance(entry, dict):
             continue
         if entry.get("site") != SITE_AMAZON or not entry.get("is_warehouse"):
-            continue
-        if entry.get("warehouse_evidence"):
             continue
         removed_keys.add(key)
         state.pop(key, None)
@@ -515,6 +513,15 @@ def _row_urls(rows: List[PriceSummaryRow] | List[StockSummaryRow]) -> set[str]:
     return {canonical_tracking_url(row.product_url) for row in rows if canonical_tracking_url(row.product_url)}
 
 
+def _price_row_identity(row: PriceSummaryRow) -> str:
+    """Keep normal and verified Amazon Depo offers separate in live updates."""
+    url = canonical_tracking_url(row.product_url)
+    if not url:
+        return ""
+    condition = "warehouse" if row.is_warehouse else "normal"
+    return f"{url}|{condition}"
+
+
 def save_incremental_price_summary(
     fresh_rows: List[PriceSummaryRow],
     fresh_stock_rows: List[StockSummaryRow] | None = None,
@@ -528,6 +535,7 @@ def save_incremental_price_summary(
     previous_rows = _summary_rows_from_payload(previous_payload)
     previous_stock_rows = _stock_rows_from_payload(previous_payload)
     fresh_stock_rows = fresh_stock_rows or []
+    fresh_price_ids = {_price_row_identity(row) for row in fresh_rows if _price_row_identity(row)}
     fresh_price_urls = _row_urls(fresh_rows)
     fresh_stock_urls = _row_urls(fresh_stock_rows)
     removed_price_urls = {
@@ -535,12 +543,12 @@ def save_incremental_price_summary(
         for url in (removed_price_urls or set())
         if canonical_tracking_url(url)
     }
-    replaced_price_urls = fresh_price_urls | fresh_stock_urls | removed_price_urls
-
     merged_rows = [
         row
         for row in previous_rows
-        if canonical_tracking_url(row.product_url) not in replaced_price_urls
+        if _price_row_identity(row) not in fresh_price_ids
+        and canonical_tracking_url(row.product_url) not in fresh_stock_urls
+        and canonical_tracking_url(row.product_url) not in removed_price_urls
     ]
     merged_rows.extend(fresh_rows)
     merged_stock_rows = [
@@ -1071,7 +1079,7 @@ def _fetch_amazon_search_watch_offers(
         raise HermesError("Amazon bot korumasi nedeniyle captcha sayfasi dondu.")
 
     candidates = extract_result_candidates(html, watch.max_items_to_scan)
-    warehouse_context = amazon_provider.is_warehouse_search_url(watch.url)
+    warehouse_search = amazon_provider.is_warehouse_search_url(watch.url)
     target_keywords = [watch.name] if watch.name else []
     results: List[SearchResultItem] = []
     skipped_detail_count = 0
@@ -1082,7 +1090,7 @@ def _fetch_amazon_search_watch_offers(
                     title=candidate.title,
                     url=candidate.url,
                     price=candidate.price,
-                    is_warehouse=bool(warehouse_context or candidate.is_warehouse),
+                    is_warehouse=candidate.is_warehouse,
                 )
             )
             continue
@@ -1090,7 +1098,7 @@ def _fetch_amazon_search_watch_offers(
             skipped_detail_count += 1
             continue
         try:
-            results.append(_fetch_amazon_detail_result(session, candidate, config, warehouse_context))
+            results.append(_fetch_amazon_detail_result(session, candidate, config))
         except Exception as exc:  # noqa: BLE001
             log(f"Amazon product arama detay fiyatı okunamadı: {log_cell(candidate.title, 60)} | {exc}")
 
@@ -1099,6 +1107,10 @@ def _fetch_amazon_search_watch_offers(
     if not results:
         raise HermesError("Amazon arama sayfasında okunabilir fiyat bulunamadı.")
     offers = offers_from_amazon_search_results(dedupe_results(results), watch.name)
+    if warehouse_search:
+        offers = [offer for offer in offers if offer.is_warehouse]
+        if not offers:
+            raise HermesError("Amazon Depo aramasında ikinci el ve Amazon Depo bilgisi doğrulanamadı.")
     log(
         "Amazon arama linki okundu: "
         f"{watch.name or watch.url} | eslesen_urun={len(offers)}"
@@ -1386,7 +1398,7 @@ def _fetch_watch_offers(session: requests.Session, watch: WatchRule, config: Her
     if offers is not None:
         # A Warehouse-only source is itself an explicit request for used stock.
         # On ordinary Amazon links, used offers remain opt-in per watch.
-        if not watch.include_warehouse and not amazon_provider.is_warehouse_url(url):
+        if not watch.include_warehouse and not amazon_provider.is_warehouse_search_url(url):
             offers = [offer for offer in offers if not offer.is_warehouse]
         return offers
     if site == SITE_HEPSIBURADA:
@@ -1444,7 +1456,6 @@ def _fetch_amazon_detail_result(
     session: requests.Session,
     candidate,
     config: HermesConfig,
-    warehouse_context: bool = False,
 ) -> SearchResultItem:
     cache = _amazon_detail_result_cache(session)
     cache_key = f"{str(candidate.url or '').strip()}|warehouse={bool(candidate.is_warehouse)}"
@@ -1468,7 +1479,7 @@ def _fetch_amazon_detail_result(
         title=title,
         url=url,
         price=offer.price,
-        is_warehouse=bool(warehouse_context or candidate.is_warehouse or offer.is_warehouse),
+        is_warehouse=bool(candidate.is_warehouse or offer.is_warehouse),
     )
     if cache_key:
         cache[cache_key] = result

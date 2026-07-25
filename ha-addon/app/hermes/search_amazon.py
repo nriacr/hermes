@@ -8,7 +8,11 @@ from bs4 import BeautifulSoup
 
 from .errors import HermesError
 from .models import SearchResultItem
-from .providers.amazon_common import extract_secondary_offer_price
+from .providers.amazon_common import (
+    extract_verified_secondary_offer_price,
+    has_secondary_offer_text,
+    has_verified_warehouse_evidence,
+)
 from .utils import canonical_amazon_product_url, make_amazon_absolute_url, normalize_offer_text, parse_decimal, repair_mojibake
 
 AMAZON_SEARCH_CARD_SELECTORS = [
@@ -99,10 +103,14 @@ def _extract_card_offers(card: BeautifulSoup):
     normal offer; the secondary block is a separate Warehouse offer.
     """
     offers = []
+    card_text = card.get_text(" ", strip=True)
+    has_secondary_offer = has_secondary_offer_text(card_text)
     primary = _extract_primary_card_price(card)
     if primary is not None:
-        offers.append((primary, False))
-    secondary = extract_secondary_offer_price(card, include_container_fallback=False)
+        # A card with a separate "other buying options" block has a normal
+        # main price. A used-only card must prove both conditions explicitly.
+        offers.append((primary, bool(not has_secondary_offer and has_verified_warehouse_evidence(card_text))))
+    secondary = extract_verified_secondary_offer_price(card, include_container_fallback=False)
     if secondary is not None:
         offers.append((secondary, True))
     return offers

@@ -2,7 +2,7 @@ import json
 import re
 from dataclasses import dataclass
 from typing import Optional
-from urllib.parse import parse_qsl, unquote_plus, urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from ..errors import HermesError
 from ..models import OfferResult
@@ -14,7 +14,11 @@ from ..utils import (
     parse_decimal,
     repair_mojibake,
 )
-from .amazon_common import extract_secondary_offer_price
+from .amazon_common import (
+    extract_verified_secondary_offer_price,
+    has_secondary_offer_text,
+    has_verified_warehouse_evidence,
+)
 from .base import (
     extract_jsonld_product,
     extract_price_from_meta,
@@ -343,27 +347,16 @@ def _extract_visible_primary_price(soup):
     return None
 
 
-def is_warehouse_url(source_url: str) -> bool:
-    """Return whether an Amazon URL explicitly targets used/Warehouse inventory."""
-    raw_url = str(source_url or "").strip()
-    if not raw_url:
-        return False
-    parsed = urlsplit(raw_url)
-    query = dict(parse_qsl(parsed.query, keep_blank_values=True))
-    normalized_url = normalize_offer_text(unquote_plus(raw_url))
-    condition = normalize_offer_text(query.get("condition", ""))
-    refinement = normalize_offer_text(query.get("rh", ""))
-    return (
-        "warehouse-deals" in normalized_url
-        or condition == "used"
-        or "p_n_condition-type:13818537031" in refinement
-    )
-
-
 def is_warehouse_search_url(source_url: str) -> bool:
-    """Return true only for an Amazon search page explicitly filtered to used stock."""
+    """Return true only for an explicit Amazon Depo search category."""
     parsed = urlsplit(str(source_url or ""))
-    return bool(parsed.path.rstrip("/").endswith("/s") and is_warehouse_url(source_url))
+    if not parsed.path.rstrip("/").endswith("/s"):
+        return False
+    query = dict(parse_qsl(parsed.query, keep_blank_values=True))
+    return any(
+        normalize_offer_text(query.get(key, "")).replace("-", " ") == "warehouse deals"
+        for key in ("i", "s")
+    )
 
 
 def extract_offers(html: str, source_url: str = "") -> list[OfferResult]:
@@ -371,19 +364,25 @@ def extract_offers(html: str, source_url: str = "") -> list[OfferResult]:
     soup = soup_from_html(html)
     jsonld_title, jsonld_price = extract_jsonld_product(soup)
     title: Optional[str] = jsonld_title or extract_title(soup) or "Amazon ürünü"
-    warehouse_source = is_warehouse_url(source_url)
     offers: list[OfferResult] = []
 
+    page_text = soup.get_text(" ", strip=True)
+    has_secondary_offer = has_secondary_offer_text(page_text)
     primary_price = _extract_visible_primary_price(soup)
     if primary_price is not None:
         offers.append(
-            OfferResult(title=title, price=primary_price, seller=None, is_warehouse=warehouse_source)
+            OfferResult(
+                title=title,
+                price=primary_price,
+                seller=None,
+                is_warehouse=bool(not has_secondary_offer and has_verified_warehouse_evidence(page_text)),
+            )
         )
 
-    # A product page can contain unrelated "used" text in recommendations or
-    # page metadata. Only accept the dedicated secondary-offer block here.
-    secondary_price = extract_secondary_offer_price(soup, include_container_fallback=False)
-    if secondary_price is not None and not warehouse_source:
+    # A product page can contain unrelated used-offer text. Only Amazon's
+    # dedicated secondary-offer block can produce a separate DEPO result.
+    secondary_price = extract_verified_secondary_offer_price(soup, include_container_fallback=False)
+    if secondary_price is not None:
         offers.append(OfferResult(title=title, price=secondary_price, seller=None, is_warehouse=True))
 
     if offers:
@@ -391,7 +390,14 @@ def extract_offers(html: str, source_url: str = "") -> list[OfferResult]:
 
     for price in (jsonld_price, extract_price_from_meta(soup)):
         if price is not None:
-            return [OfferResult(title=title, price=price, seller=None, is_warehouse=warehouse_source)]
+            return [
+                OfferResult(
+                    title=title,
+                    price=price,
+                    seller=None,
+                    is_warehouse=has_verified_warehouse_evidence(page_text),
+                )
+            ]
 
     raise HermesError("Amazon sayfasından fiyat bulunamadı.")
 

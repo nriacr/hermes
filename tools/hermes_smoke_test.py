@@ -1235,15 +1235,16 @@ class HermesSmokeTests(unittest.TestCase):
         self.assertEqual(len(rows), 2)
         self.assertEqual([row.is_warehouse for row in rows], [False, True])
 
-    def test_amazon_warehouse_url_marks_primary_price_as_warehouse(self):
+    def test_amazon_primary_price_requires_explicit_warehouse_evidence(self):
         html = """
         <html><head><title>Depo ürünü</title></head><body>
           <div id="corePriceDisplay_desktop_feature_div">
             <span class="a-price"><span class="a-offscreen">12.999,00 TL</span></span>
           </div>
+          <div>Amazon Depo - 1 İkinci El ürün</div>
         </body></html>
         """
-        offer = extract_amazon_offer(html, "https://www.amazon.com.tr/s?k=ipad&i=warehouse-deals")
+        offer = extract_amazon_offer(html, "https://www.amazon.com.tr/dp/B000000001?condition=used")
         self.assertEqual(offer.price, Decimal("12999.00"))
         self.assertTrue(offer.is_warehouse)
 
@@ -1253,11 +1254,23 @@ class HermesSmokeTests(unittest.TestCase):
           <div id="corePriceDisplay_desktop_feature_div">
             <span class="a-price"><span class="a-offscreen">18.999,00 TL</span></span>
           </div>
+          <div id="merchantInfo">Gürgençler Apple Premium Partner</div>
         </body></html>
         """
-        url = "https://www.amazon.com.tr/dp/B0GQVC369W?th=1&srs=44219324031&bbn=44219324031"
+        url = "https://www.amazon.com.tr/dp/B0GQVC369W?th=1&condition=used&srs=44219324031&bbn=44219324031"
         offer = extract_amazon_offer(html, url)
         self.assertFalse(offer.is_warehouse)
+
+    def test_amazon_warehouse_search_requires_explicit_category(self):
+        self.assertTrue(
+            is_warehouse_search_url("https://www.amazon.com.tr/s?k=edifier+m60&i=warehouse-deals")
+        )
+        self.assertTrue(
+            is_warehouse_search_url("https://www.amazon.com.tr/s?k=edifier+m60&s=warehouse-deals")
+        )
+        self.assertFalse(
+            is_warehouse_search_url("https://www.amazon.com.tr/dp/B0D95QG8W4?condition=used")
+        )
 
     def test_amazon_product_page_keeps_normal_and_used_prices_separate(self):
         html = """
@@ -1273,6 +1286,36 @@ class HermesSmokeTests(unittest.TestCase):
         offers = extract_amazon_offers(html, "https://www.amazon.com.tr/dp/B0D95QG8W4?th=1")
         self.assertEqual([offer.price for offer in offers], [Decimal("8899.00"), Decimal("8787.77")])
         self.assertEqual([offer.is_warehouse for offer in offers], [False, True])
+
+    def test_incremental_summary_keeps_normal_and_warehouse_offer_rows(self):
+        normal = PriceSummaryRow(
+            seller="Amazon",
+            product_title="Edifier M60 Siyah",
+            product_url="https://www.amazon.com.tr/dp/B0D95QG8W4?th=1",
+            price=Decimal("8899"),
+            target_price=Decimal("9000"),
+            min_price=Decimal("8899"),
+            max_price=Decimal("8899"),
+        )
+        warehouse = PriceSummaryRow(
+            seller="Amazon",
+            product_title="Edifier M60 Siyah",
+            product_url="https://www.amazon.com.tr/dp/B0D95QG8W4?th=1",
+            price=Decimal("8787.77"),
+            target_price=Decimal("9000"),
+            min_price=Decimal("8787.77"),
+            max_price=Decimal("8787.77"),
+            is_warehouse=True,
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            summary_path = Path(temp_dir) / "summary.json"
+            with patch.object(service, "SUMMARY_PATH", summary_path):
+                service.save_price_summary([normal])
+                service.save_incremental_price_summary([warehouse])
+                payload = json.loads(summary_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(len(payload["rows"]), 2)
+        self.assertEqual(sorted(row["is_warehouse"] for row in payload["rows"]), [False, True])
 
     def test_amazon_product_page_ignores_unscoped_used_text(self):
         html = """

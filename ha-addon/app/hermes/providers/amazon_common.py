@@ -17,7 +17,25 @@ AMAZON_SECONDARY_OFFER_PRICE_PATTERN = re.compile(
 )
 
 
-def extract_price_after_secondary_offer_text(text: str):
+def has_secondary_offer_text(text: str) -> bool:
+    normalized = normalize_offer_text(text)
+    return "diger satin alma secenekleri" in normalized
+
+
+def has_verified_warehouse_evidence(text: str) -> bool:
+    """Require both Amazon Depo and second-hand evidence before tagging DEPO."""
+    normalized = normalize_offer_text(text)
+    return "ikinci el" in normalized and "amazon depo" in normalized
+
+
+def _price_after_verified_secondary_offer_text(text: str):
+    """Read Amazon's dedicated second-hand offer component.
+
+    Amazon's search cards do not always render the seller name in text. The
+    dedicated secondary-offer component is Amazon's own used-offer surface, so
+    its explicit "İkinci El" wording is the verified condition there. A plain
+    page-wide text fallback stays stricter and still requires "Amazon Depo".
+    """
     normalized = normalize_offer_text(text)
     if "diger satin alma secenekleri" not in normalized or "ikinci el" not in normalized:
         return None
@@ -30,12 +48,15 @@ def extract_price_after_secondary_offer_text(text: str):
         return None
 
 
-def extract_secondary_offer_price(container: Any, include_container_fallback: bool = True):
+def extract_verified_secondary_offer_price(container: Any, include_container_fallback: bool = True):
+    """Return a used price only from Amazon's dedicated offer component."""
     for selector in AMAZON_SECONDARY_OFFER_SELECTORS:
         for element in container.select(selector):
-            price = extract_price_after_secondary_offer_text(element.get_text(" ", strip=True))
+            price = _price_after_verified_secondary_offer_text(element.get_text(" ", strip=True))
             if price is not None:
                 return price
     if include_container_fallback:
-        return extract_price_after_secondary_offer_text(container.get_text(" ", strip=True))
+        text = container.get_text(" ", strip=True)
+        if has_verified_warehouse_evidence(text):
+            return _price_after_verified_secondary_offer_text(text)
     return None
