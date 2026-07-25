@@ -1220,6 +1220,42 @@ class HermesSmokeTests(unittest.TestCase):
         self.assertEqual([item.price for item in items], [Decimal("8899.00"), Decimal("8787.77")])
         self.assertEqual([item.is_warehouse for item in items], [False, True])
 
+    def test_amazon_normal_search_primary_offer_stays_normal_with_used_text(self):
+        """A normal search must not relabel its new price from card-wide used text."""
+        html = """
+        <div class="s-main-slot">
+          <div data-component-type="s-search-result" data-asin="B0D95QG8W4">
+            <h2><a href="/dp/B0D95QG8W4?th=1"><span>Edifier M60 Siyah</span></a></h2>
+            <span class="a-price"><span class="a-offscreen">8.899,00 TL</span></span>
+            <span>Amazon Depo 1 İkinci El ürün</span>
+            <div data-cy="secondary-offer-recipe">
+              Diğer satın alma seçenekleri 8.787,77 TL (1 İkinci El ürün)
+            </div>
+          </div>
+        </div>
+        """
+
+        items = extract_result_candidates(html, 10, primary_is_warehouse=False)
+
+        self.assertEqual([item.price for item in items], [Decimal("8899.00"), Decimal("8787.77")])
+        self.assertEqual([item.is_warehouse for item in items], [False, True])
+
+    def test_amazon_warehouse_search_primary_offer_is_warehouse(self):
+        html = """
+        <div class="s-main-slot">
+          <div data-component-type="s-search-result" data-asin="B0D95QG8W4">
+            <h2><a href="/dp/B0D95QG8W4?th=1"><span>Edifier M60 Siyah</span></a></h2>
+            <span class="a-price"><span class="a-offscreen">8.787,77 TL</span></span>
+            <span>1 İkinci El ürün</span>
+          </div>
+        </div>
+        """
+
+        items = extract_result_candidates(html, 10, primary_is_warehouse=True)
+
+        self.assertEqual(len(items), 1)
+        self.assertTrue(items[0].is_warehouse)
+
     def test_amazon_search_deduplication_keeps_normal_and_used_conditions(self):
         rows = dedupe_results(
             [

@@ -1078,8 +1078,12 @@ def _fetch_amazon_search_watch_offers(
     if "captcha" in html.lower() and "robot" in html.lower():
         raise HermesError("Amazon bot korumasi nedeniyle captcha sayfasi dondu.")
 
-    candidates = extract_result_candidates(html, watch.max_items_to_scan)
     warehouse_search = amazon_provider.is_warehouse_search_url(watch.url)
+    candidates = extract_result_candidates(
+        html,
+        watch.max_items_to_scan,
+        primary_is_warehouse=warehouse_search,
+    )
     target_keywords = [watch.name] if watch.name else []
     results: List[SearchResultItem] = []
     skipped_detail_count = 0
@@ -1111,9 +1115,12 @@ def _fetch_amazon_search_watch_offers(
         offers = [offer for offer in offers if offer.is_warehouse]
         if not offers:
             raise HermesError("Amazon Depo aramasında ikinci el ve Amazon Depo bilgisi doğrulanamadı.")
+    normal_count = sum(1 for offer in offers if not offer.is_warehouse)
+    warehouse_count = len(offers) - normal_count
     log(
         "Amazon arama linki okundu: "
-        f"{watch.name or watch.url} | eslesen_urun={len(offers)}"
+        f"{watch.name or watch.url} | eslesen_urun={len(offers)} | "
+        f"yeni={normal_count} | depo={warehouse_count}"
     )
     return offers
 

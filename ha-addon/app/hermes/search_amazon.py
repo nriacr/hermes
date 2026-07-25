@@ -10,8 +10,6 @@ from .errors import HermesError
 from .models import SearchResultItem
 from .providers.amazon_common import (
     extract_verified_secondary_offer_price,
-    has_secondary_offer_text,
-    has_verified_warehouse_evidence,
 )
 from .utils import canonical_amazon_product_url, make_amazon_absolute_url, normalize_offer_text, parse_decimal, repair_mojibake
 
@@ -95,7 +93,7 @@ def _extract_primary_card_price(card: BeautifulSoup):
     return None
 
 
-def _extract_card_offers(card: BeautifulSoup):
+def _extract_card_offers(card: BeautifulSoup, primary_is_warehouse: bool = False):
     """Return normal and explicitly-marked used offers without merging them.
 
     Amazon can show the main new-product price and an "other buying options"
@@ -103,13 +101,13 @@ def _extract_card_offers(card: BeautifulSoup):
     normal offer; the secondary block is a separate Warehouse offer.
     """
     offers = []
-    card_text = card.get_text(" ", strip=True)
-    has_secondary_offer = has_secondary_offer_text(card_text)
     primary = _extract_primary_card_price(card)
     if primary is not None:
-        # A card with a separate "other buying options" block has a normal
-        # main price. A used-only card must prove both conditions explicitly.
-        offers.append((primary, bool(not has_secondary_offer and has_verified_warehouse_evidence(card_text))))
+        # The source URL decides the condition of a card's primary price. A
+        # normal search card can contain secondary-offer text too; inferring
+        # its primary price from that surrounding text can incorrectly merge
+        # the new offer with a separate Amazon Depo offer for the same ASIN.
+        offers.append((primary, primary_is_warehouse))
     secondary = extract_verified_secondary_offer_price(card, include_container_fallback=False)
     if secondary is not None:
         offers.append((secondary, True))
@@ -208,7 +206,11 @@ def title_matches_any_keyword(title: str, keywords: List[str]) -> bool:
     return any(title_matches_keyword(title, keyword) for keyword in keywords)
 
 
-def extract_result_candidates(html: str, max_items_to_scan: int) -> List[AmazonSearchCandidate]:
+def extract_result_candidates(
+    html: str,
+    max_items_to_scan: int,
+    primary_is_warehouse: bool = False,
+) -> List[AmazonSearchCandidate]:
     soup = BeautifulSoup(html, "html.parser")
     cards: List[Any] = []
     for selector in AMAZON_SEARCH_CARD_SELECTORS:
@@ -231,7 +233,7 @@ def extract_result_candidates(html: str, max_items_to_scan: int) -> List[AmazonS
         if not title or not url:
             continue
         scanned_cards += 1
-        card_offers = _extract_card_offers(card) or [(None, False)]
+        card_offers = _extract_card_offers(card, primary_is_warehouse) or [(None, primary_is_warehouse)]
         for price, is_warehouse in card_offers:
             # Normal and used prices for the same ASIN are deliberately
             # distinct; duplicate cards within the same condition are not.
