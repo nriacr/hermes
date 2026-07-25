@@ -1,6 +1,6 @@
 from pathlib import Path
 
-APP_VERSION = "2.2.91"
+APP_VERSION = "2.2.92"
 OPTIONS_PATH = Path("/data/options.json")
 STATE_PATH = Path("/data/state.json")
 SUMMARY_PATH = Path("/data/latest_price_summary.json")
@@ -40,6 +40,7 @@ DEFAULT_SEARCH_MAX_ITEMS_TO_SCAN = 60
 AMAZON_SEARCH_HTTP_COOLDOWN_SECONDS = 45 * 60
 AMAZON_SEARCH_ERROR_NOTIFICATION_HOUR = 11
 TELEGRAM_STATUS_HEARTBEAT_SECONDS = 60 * 60
+TELEGRAM_QUICK_ADD_GROUP = "Paylaşılanlar"
 
 DEFAULT_HEADERS = {
     "Accept": (

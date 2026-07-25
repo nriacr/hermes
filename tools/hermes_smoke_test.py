@@ -341,6 +341,29 @@ class HermesSmokeTests(unittest.TestCase):
         self.assertEqual(telegram_listener._parse_target_price("40000"), Decimal("40000"))
         self.assertIsNone(telegram_listener._parse_target_price("fiyat belli değil"))
 
+    def test_telegram_quick_add_uses_shared_group_and_search_query_name(self):
+        options = {"gruplar": ["Teknoloji"], "takip_edilenler": []}
+        url = "https://www.amazon.com.tr/s?k=edifier+m60"
+        with patch.object(telegram_listener, "load_json", return_value=options), patch.object(
+            telegram_listener, "save_options_and_restart"
+        ) as save_options:
+            result = telegram_listener._quick_add_watch(url, Decimal("8700"))
+
+        self.assertEqual(result, "Takip kaydı eklendi")
+        saved_options = save_options.call_args.args[0]
+        self.assertIn("Paylaşılanlar", saved_options["gruplar"])
+        self.assertEqual(
+            saved_options["takip_edilenler"][0],
+            {
+                "name": "edifier m60",
+                "group": "Paylaşılanlar",
+                "target_price": 8700.0,
+                "url_1": url,
+                "notify_once_in_24H": True,
+                "active": True,
+            },
+        )
+
     def test_ingress_and_public_settings_share_the_same_save_handler(self):
         self.assertIs(dashboard_with_settings.handle_settings_save, settings_ui.handle_settings_save)
         self.assertIs(public_dashboard.handle_settings_save, settings_ui.handle_settings_save)

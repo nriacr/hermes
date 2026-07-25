@@ -4,7 +4,7 @@ import threading
 import time
 from datetime import datetime, timedelta
 from typing import Any, Dict, Iterable, Optional
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 import requests
 
@@ -13,6 +13,7 @@ from .constants import (
     TELEGRAM_LOGIN_STATE_PATH,
     OPTIONS_PATH,
     TELEGRAM_QUICK_ADD_PATH,
+    TELEGRAM_QUICK_ADD_GROUP,
     TELEGRAM_SEEN_MESSAGES_PATH,
     TELEGRAM_SESSION_PATH,
     TELEGRAM_STATUS_HEARTBEAT_SECONDS,
@@ -255,6 +256,25 @@ def _parse_target_price(text: str):
     return price if price > 0 else None
 
 
+def _quick_add_search_name(url: str) -> str:
+    """Infer the required search keyword so Saved Messages needs one reply only."""
+    query = parse_qs(urlparse(str(url or "")).query)
+    for key in ("k", "q", "query", "search"):
+        values = query.get(key) or []
+        value = re.sub(r"\s+", " ", str(values[0] or "")).strip() if values else ""
+        if value:
+            return value[:160]
+    return ""
+
+
+def _ensure_quick_add_group(options: Dict[str, Any]) -> None:
+    groups = options.get("gruplar")
+    groups = [str(group).strip() for group in groups if str(group).strip()] if isinstance(groups, list) else []
+    if TELEGRAM_QUICK_ADD_GROUP.casefold() not in {group.casefold() for group in groups}:
+        groups.append(TELEGRAM_QUICK_ADD_GROUP)
+    options["gruplar"] = groups
+
+
 def _quick_add_watch(url: str, target_price, name: str = "") -> str:
     """Append a Saved Messages watch through the same options path as the UI."""
     options = load_json(OPTIONS_PATH, {})
@@ -268,14 +288,22 @@ def _quick_add_watch(url: str, target_price, name: str = "") -> str:
             if str(watch.get(f"url_{number}") or "").strip() == normalized_url:
                 return "Bu bağlantı zaten takip ediliyor. Yeni kayıt oluşturulmadı."
 
+    normalized_name = str(name or "").strip()
+    if not normalized_name and watch_name_required_for_url(normalized_url):
+        normalized_name = _quick_add_search_name(normalized_url)
+        if not normalized_name:
+            return "Arama bağlantısındaki ürün adı çözümlenemedi. Bağlantıyı Hermes Ayarlar ekranından ekle."
+
     watch = {
-        "name": str(name or "").strip(),
+        "name": normalized_name,
+        "group": TELEGRAM_QUICK_ADD_GROUP,
         "target_price": float(target_price),
         "url_1": normalized_url,
         "notify_once_in_24H": True,
         "active": True,
     }
     options["takip_edilenler"] = watches + [watch]
+    _ensure_quick_add_group(options)
     save_options_and_restart(options)
     return "Takip kaydı eklendi"
 
@@ -300,17 +328,6 @@ async def _handle_saved_message_quick_add(event) -> bool:
                 _save_quick_adds(payload)
                 return True
             pending["target_price"] = str(target_price)
-            if watch_name_required_for_url(str(pending.get("url") or "")):
-                prompt = await _reply(
-                    event,
-                    "Hermes: bu bir arama sayfası. Takip edilecek ürünün adını yanıtla; "
-                    "örnek: `Samsung Galaxy Tab S10 FE+`.",
-                )
-                pending["stage"] = "name"
-                pending["prompt_message_id"] = getattr(prompt, "id", None)
-                payload["pending"] = pending_items
-                _save_quick_adds(payload)
-                return True
             result = _quick_add_watch(str(pending["url"]), target_price)
             pending_items.remove(pending)
             payload["pending"] = pending_items
@@ -318,33 +335,13 @@ async def _handle_saved_message_quick_add(event) -> bool:
             await _reply(
                 event,
                 f"Hermes: {result}. Hedef fiyat: {format_tl(target_price, with_currency=True)}. "
-                "Grup ve beden bilgisini Hermes Ayarlar ekranından ekleyebilirsin."
+                f"Kayıt `{TELEGRAM_QUICK_ADD_GROUP}` grubuna eklendi; beden ve diğer ayarları Hermes Ayarlar ekranından düzenleyebilirsin."
                 if result == "Takip kaydı eklendi"
                 else f"Hermes: {result}",
             )
             if result == "Takip kaydı eklendi":
                 log(f"Telegram Kayıtlı Mesajlar ile takip eklendi: {pending['url']}")
             return True
-
-        name = str(text).strip()
-        if not name:
-            await _reply(event, "Hermes: ürün adını yazman gerekiyor; örnek: `Samsung Galaxy Tab S10 FE+`.")
-            return True
-        target_price = parse_decimal(str(pending["target_price"]))
-        result = _quick_add_watch(str(pending["url"]), target_price, name)
-        pending_items.remove(pending)
-        payload["pending"] = pending_items
-        _save_quick_adds(payload)
-        await _reply(
-            event,
-            f"Hermes: {result}. Hedef fiyat: {format_tl(target_price, with_currency=True)}. "
-            "Grup ve beden bilgisini Hermes Ayarlar ekranından ekleyebilirsin."
-            if result == "Takip kaydı eklendi"
-            else f"Hermes: {result}",
-        )
-        if result == "Takip kaydı eklendi":
-            log(f"Telegram Kayıtlı Mesajlar ile arama takibi eklendi: {name}")
-        return True
 
     url = _extract_supported_url(text)
     if not url:
