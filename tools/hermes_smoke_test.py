@@ -1183,6 +1183,20 @@ class HermesSmokeTests(unittest.TestCase):
         self.assertEqual([offer.price for offer in offers], [Decimal("8899.00"), Decimal("8787.77")])
         self.assertEqual([offer.is_warehouse for offer in offers], [False, True])
 
+    def test_amazon_product_page_ignores_unscoped_used_text(self):
+        html = """
+        <html><head><title>Normal ürün</title></head><body>
+          <div id="corePriceDisplay_desktop_feature_div">
+            <span class="a-price"><span class="a-offscreen">18.999,00 TL</span></span>
+          </div>
+          <div id="merchantInfo">Gürgençler Apple Premium Partner</div>
+          <footer>Diğer satın alma seçenekleri 17.999,00 TL (1 İkinci El ürün)</footer>
+        </body></html>
+        """
+        offers = extract_amazon_offers(html, "https://www.amazon.com.tr/dp/B0GQVC369W?th=1")
+        self.assertEqual([offer.price for offer in offers], [Decimal("18999.00")])
+        self.assertEqual([offer.is_warehouse for offer in offers], [False])
+
     def test_amazon_search_ignores_all_departments_fallback_section(self):
         html = """
         <div class="s-main-slot">

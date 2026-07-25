@@ -376,7 +376,9 @@ def extract_offers(html: str, source_url: str = "") -> list[OfferResult]:
             OfferResult(title=title, price=primary_price, seller=None, is_warehouse=warehouse_source)
         )
 
-    secondary_price = extract_secondary_offer_price(soup)
+    # A product page can contain unrelated "used" text in recommendations or
+    # page metadata. Only accept the dedicated secondary-offer block here.
+    secondary_price = extract_secondary_offer_price(soup, include_container_fallback=False)
     if secondary_price is not None and not warehouse_source:
         offers.append(OfferResult(title=title, price=secondary_price, seller=None, is_warehouse=True))
 
