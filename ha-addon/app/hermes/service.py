@@ -97,6 +97,7 @@ AMAZON_NORMAL_EMPTY_SEARCH_MARKERS = (
     "amazon arama sayfasinda urun adina uyan fiyatli urun bulunamadi",
     "amazon arama sayfasinda okunabilir fiyat bulunamadi",
 )
+WAREHOUSE_STATE_MIGRATION_VERSION = 2
 
 
 def raise_if_age_verification(html: str) -> None:
@@ -183,6 +184,57 @@ def reset_price_history() -> int:
 
     log(f"Min/maks fiyat gecmisi sifirlandi: alan={cleared_count}")
     return cleared_count
+
+
+def clear_legacy_amazon_warehouse_rows(state: Dict[str, Any]) -> int:
+    """Remove old DEPO rows whose URL never explicitly selected used inventory.
+
+    Earlier versions inferred Warehouse status from broad Amazon search context
+    parameters. Those cached rows must not remain visible until their next
+    successful fetch, because they can label normal marketplace offers as DEPO.
+    """
+    meta = state.get("_meta")
+    if not isinstance(meta, dict):
+        meta = {}
+    if int(meta.get("warehouse_state_migration_version") or 0) >= WAREHOUSE_STATE_MIGRATION_VERSION:
+        return 0
+
+    removed_keys: set[str] = set()
+    for key, entry in list(state.items()):
+        if key == "_meta" or not isinstance(entry, dict):
+            continue
+        if entry.get("site") != SITE_AMAZON or not entry.get("is_warehouse"):
+            continue
+        configured_url = str(entry.get("configured_url") or entry.get("url") or "")
+        if amazon_provider.is_warehouse_url(configured_url):
+            continue
+        removed_keys.add(key)
+        state.pop(key, None)
+
+    if removed_keys:
+        for entry in state.values():
+            if not isinstance(entry, dict) or not isinstance(entry.get("offer_keys"), list):
+                continue
+            entry["offer_keys"] = [key for key in entry["offer_keys"] if key not in removed_keys]
+
+        summary = load_json(SUMMARY_PATH, {})
+        if isinstance(summary, dict) and isinstance(summary.get("rows"), list):
+            summary["rows"] = [
+                row
+                for row in summary["rows"]
+                if not (
+                    isinstance(row, dict)
+                    and str(row.get("seller") or "") == "Amazon"
+                    and bool(row.get("is_warehouse"))
+                    and not amazon_provider.is_warehouse_url(str(row.get("product_url") or ""))
+                )
+            ]
+            summary["row_count"] = len(summary["rows"])
+            save_json(SUMMARY_PATH, summary)
+
+    meta["warehouse_state_migration_version"] = WAREHOUSE_STATE_MIGRATION_VERSION
+    state["_meta"] = meta
+    return len(removed_keys)
 
 
 def sorted_summary_rows(rows: List[PriceSummaryRow]) -> List[PriceSummaryRow]:
@@ -1428,6 +1480,9 @@ def check_once(config: HermesConfig) -> None:
     state = load_json(STATE_PATH, {})
     if not isinstance(state, dict):
         state = {}
+    cleared_warehouse_rows = clear_legacy_amazon_warehouse_rows(state)
+    if cleared_warehouse_rows:
+        log(f"Eski yanlis DEPO kayitlari temizlendi: adet={cleared_warehouse_rows}")
     session = requests.Session()
     summary_rows: List[PriceSummaryRow] = []
     stock_rows: List[StockSummaryRow] = []

@@ -357,8 +357,6 @@ def is_warehouse_url(source_url: str) -> bool:
         "warehouse-deals" in normalized_url
         or condition == "used"
         or "p_n_condition-type:13818537031" in refinement
-        or query.get("bbn") == "44219324031"
-        or query.get("srs") == "44219324031"
     )
 
 

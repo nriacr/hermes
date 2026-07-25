@@ -1168,6 +1168,18 @@ class HermesSmokeTests(unittest.TestCase):
         self.assertEqual(offer.price, Decimal("12999.00"))
         self.assertTrue(offer.is_warehouse)
 
+    def test_amazon_search_context_parameters_do_not_mark_a_product_as_warehouse(self):
+        html = """
+        <html><head><title>Normal ürün</title></head><body>
+          <div id="corePriceDisplay_desktop_feature_div">
+            <span class="a-price"><span class="a-offscreen">18.999,00 TL</span></span>
+          </div>
+        </body></html>
+        """
+        url = "https://www.amazon.com.tr/dp/B0GQVC369W?th=1&srs=44219324031&bbn=44219324031"
+        offer = extract_amazon_offer(html, url)
+        self.assertFalse(offer.is_warehouse)
+
     def test_amazon_product_page_keeps_normal_and_used_prices_separate(self):
         html = """
         <html><head><title>Çoklu teklif ürünü</title></head><body>
