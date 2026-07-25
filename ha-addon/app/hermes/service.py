@@ -1083,6 +1083,10 @@ def _fetch_amazon_search_watch_offers(
     results: List[SearchResultItem] = []
     skipped_detail_count = 0
     for candidate in candidates:
+        # Amazon may append ordinary fallback cards to a Depot-only search.
+        # They cannot become used stock through a later product-page lookup.
+        if warehouse_search and not candidate.is_warehouse:
+            continue
         if candidate.price is not None:
             results.append(
                 SearchResultItem(

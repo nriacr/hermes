@@ -10,6 +10,7 @@ from .errors import HermesError
 from .models import SearchResultItem
 from .providers.amazon_common import (
     extract_verified_secondary_offer_price,
+    has_explicit_used_offer_evidence,
 )
 from .utils import canonical_amazon_product_url, make_amazon_absolute_url, normalize_offer_text, parse_decimal, repair_mojibake
 
@@ -93,7 +94,7 @@ def _extract_primary_card_price(card: BeautifulSoup):
     return None
 
 
-def _extract_card_offers(card: BeautifulSoup, primary_is_warehouse: bool = False):
+def _extract_card_offers(card: BeautifulSoup, source_is_warehouse_search: bool = False):
     """Return normal and explicitly-marked used offers without merging them.
 
     Amazon can show the main new-product price and an "other buying options"
@@ -102,14 +103,23 @@ def _extract_card_offers(card: BeautifulSoup, primary_is_warehouse: bool = False
     """
     offers = []
     primary = _extract_primary_card_price(card)
-    if primary is not None:
-        # The source URL decides the condition of a card's primary price. A
-        # normal search card can contain secondary-offer text too; inferring
-        # its primary price from that surrounding text can incorrectly merge
-        # the new offer with a separate Amazon Depo offer for the same ASIN.
-        offers.append((primary, primary_is_warehouse))
     secondary = extract_verified_secondary_offer_price(card, include_container_fallback=False)
-    if secondary is not None:
+    card_text = card.get_text(" ", strip=True)
+
+    # A Warehouse search can still include ordinary fallback cards. Mark a
+    # card's primary price as used only when that very card explicitly says it
+    # is a second-hand offer and there is no separate used-offer block. If a
+    # separate block exists, the primary price remains a new offer.
+    primary_is_warehouse = bool(
+        source_is_warehouse_search
+        and secondary is None
+        and has_explicit_used_offer_evidence(card_text)
+    )
+    if primary is not None:
+        offers.append((primary, primary_is_warehouse))
+    # A same-price secondary label is not a distinct deal. Keeping it would
+    # create a duplicate DEPO row next to the identical new offer.
+    if secondary is not None and secondary != primary:
         offers.append((secondary, True))
     return offers
 
@@ -233,7 +243,12 @@ def extract_result_candidates(
         if not title or not url:
             continue
         scanned_cards += 1
-        card_offers = _extract_card_offers(card, primary_is_warehouse) or [(None, primary_is_warehouse)]
+        card_offers = _extract_card_offers(card, primary_is_warehouse)
+        if not card_offers:
+            # A missing card price may be completed from the product page.
+            # The card's source category alone must never turn that later
+            # normal price into a DEPO offer.
+            card_offers = [(None, False)]
         for price, is_warehouse in card_offers:
             # Normal and used prices for the same ASIN are deliberately
             # distinct; duplicate cards within the same condition are not.
