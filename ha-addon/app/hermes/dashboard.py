@@ -1,4 +1,3 @@
-import os
 import re
 import threading
 import urllib.error
@@ -28,7 +27,6 @@ from .utils import (
 )
 
 WEB_PORT = 8099
-ADDON_SLUG = "hermes"
 RESET_NOTIFICATIONS_LOCK = threading.Lock()
 PRICE_HISTORY_RESET_LOCK = threading.Lock()
 
@@ -201,21 +199,6 @@ def _is_target_hit(row):
         return price <= target
     diff = _parse_turkish_money(row.get("difference"))
     return diff is not None and diff <= 0
-
-
-def _current_addon_slug():
-    hostname = os.getenv("HOSTNAME", "").strip()
-    hyphen_slug = ADDON_SLUG.replace("_", "-")
-    if hostname.endswith(f"-{hyphen_slug}"):
-        repository_id = hostname[: -(len(hyphen_slug) + 1)]
-        if repository_id:
-            return f"{repository_id}_{ADDON_SLUG}"
-    return hostname.replace("-", "_") if hostname else f"local_{ADDON_SLUG}"
-
-
-def _addon_urls():
-    slug = urllib.parse.quote(_current_addon_slug(), safe="")
-    return f"/config/app/{slug}/logs", f"/config/app/{slug}/config"
 
 
 def _extract_first_url(text):
@@ -854,7 +837,8 @@ def _search_result_groups_from_state(state, options=None):
     return groups
 
 
-def _attach_legacy_search_groups(rows, state, options=None):
+def _attach_state_search_groups(rows, state, options=None):
+    """Restore result-group metadata that belongs to persisted watch state."""
     groups = _search_result_groups_from_state(state, options)
     if not groups:
         return rows
@@ -877,7 +861,7 @@ def _render_table():
     payload = load_json(SUMMARY_PATH, {})
     rows = payload.get("rows") if isinstance(payload.get("rows"), list) else []
     stock_rows = payload.get("stock_rows") if isinstance(payload.get("stock_rows"), list) else []
-    rows = _attach_legacy_search_groups(
+    rows = _attach_state_search_groups(
         rows,
         load_json(STATE_PATH, {}),
         load_json(OPTIONS_PATH, {}),
@@ -912,37 +896,6 @@ def _render_table():
     <section class="summary-panel">
       <div class="summary-head"><h2>Özet Tablo</h2><span>{row_count} ürün · {deal_count} fırsat · {stock_count} stokta yok</span></div>
       {sections}
-    </section>
-    """
-
-
-def _render_telegram_panel(summary, include_recent_notifications=True):
-    telegram = summary.get("telegram") or {}
-    state = str(telegram.get("state") or "Pasif")
-    state_class = "status-ok" if state == "Dinleniyor" else ("status-warn" if state in {"Pasif", "Kod bekleniyor"} else "status-error")
-    cards = [
-        ("Telegram durumu", state, state_class),
-        ("Telegram kanalları", telegram.get("channels", 0), ""),
-        ("Keyword sayısı", telegram.get("keywords", 0), ""),
-        ("Gönderilen bildirim", telegram.get("notifications", 0), ""),
-        ("Son Telegram kontrolü", telegram.get("last_check", "-"), ""),
-        ("Son Telegram bildirimi", telegram.get("last_notification", "-"), ""),
-        ("Telegram hata sayısı (24s)", telegram.get("errors", 0), "status-error" if int(telegram.get("errors", 0) or 0) else ""),
-    ]
-    card_html = "".join(
-        f"<section class='card {escape(str(css))}'><span>{escape(str(label))}</span><strong>{escape(str(value))}</strong></section>"
-        for label, value, css in cards
-    )
-    recent_html = (
-        _render_telegram_recent_notifications(telegram.get("recent_notifications") or [])
-        if include_recent_notifications
-        else ""
-    )
-    return f"""
-    <section class="summary-panel">
-      <div class="summary-head"><h2>Telegram Takip</h2><span>Keyword bildirimleri</span></div>
-      <div class="grid">{card_html}</div>
-      {recent_html}
     </section>
     """
 

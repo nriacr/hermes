@@ -87,6 +87,20 @@ Telegram dinleme varsayılan olarak kapalıdır. Aktif edildiğinde Hermes confi
 5. Gerekirse Pushover bildirimi gönderilir.
 6. State ve özet dosyaları güncellenir.
 
+## Sağlayıcı Davranışları ve Performans
+
+Hermes her siteyi kendi sağlayıcısında okur. Bir sitenin fiyat okuma kuralı diğer sitelerin fiyat çıkarımını değiştirmez.
+
+- **Amazon:** Ürün ve arama sayfalarını destekler. Arama sonuçlarında yalnızca takip adıyla eşleşen ürünler değerlendirilir; `All Departments içindeki sonuçlar gösteriliyor` bölümünden sonrası yok sayılır. Normal satışlar ve doğrulanmış Amazon Depo ikinci el teklifleri ayrı satırlardır. Depo teklifi için hem ikinci el kanıtı hem de Amazon Depo satıcısı aranır. Varyasyonlar ve Depo seçenekleri açıldığında ürün ayrıntıları ek olarak okunabildiği için kontrol süresi uzayabilir.
+- **Hepsiburada:** Ürün ve arama sayfalarını destekler. Birden fazla satıcı arasından en düşük geçerli fiyat seçilir; ürün kartı, renk/depolama gibi varyasyonlar ve görünürse Premium fiyat metni ayrı değerlendirilir. Çok varyasyonlu ürünlerde her varyasyonun ayrıntı sayfası okunabileceğinden tarama süresi artabilir.
+- **Trendyol:** Ürün sayfasındaki güncel ürün fiyatını ve temel ürün bilgisini okur.
+- **Network:** Sayfadaki normal fiyatın yanında `Sepette` fiyatı varsa indirimli sepet fiyatını önceliklendirir.
+- **Nordbron:** Sayfadaki ürün fiyatını okur; bot koruması veya captcha gerçek hata olarak kaydedilir.
+- **Zara:** Renk varyasyonlarını ve seçilen bedeni kontrol eder. İstenen beden stokta değilse bu durum hata değil, özet tablodaki `Stokta Olmayanlar` bölümüne yazılır. `6` ve `44` gibi girilen bedenler, sayfadaki yaş/EU ekleriyle uyumlu karşılaştırılır.
+- **H&M:** Renk ve beden stok bilgisini siteye özel veri yolu üzerinden okur. Stokta olmayan beden hata olarak değil, `Stokta Olmayanlar` bölümünde gösterilir.
+
+Kontrol sırası aynı siteye art arda istek gelmesini azaltacak biçimde dengelenir. Amazon ve Hepsiburada'nın bot koruması veya değişken sayfa yapısı nedeniyle ek kurtarma denemeleri yalnızca ilk okuma başarısız olduğunda çalışır. Bu nedenle hızlı çevrim için, varyasyon ve Amazon Depo taramasını yalnızca gerçekten ihtiyaç duyulan takiplerde etkinleştirmek en verimli yaklaşımdır.
+
 ## Geliştirme Notu
 
 Hermes mimarisi provider tabanlıdır. Her site için parser/fiyat yakalama kodu ayrı dosyadadır:

@@ -587,7 +587,7 @@ class HermesSmokeTests(unittest.TestCase):
             ["Varyasyon A", "Varyasyon B"],
         )
 
-    def test_dashboard_groups_inferred_variants_and_merges_legacy_source_groups(self):
+    def test_dashboard_groups_inferred_variants_and_merges_state_source_groups(self):
         rows = [
             {
                 "seller": "H&M",
@@ -655,7 +655,7 @@ class HermesSmokeTests(unittest.TestCase):
             },
         }
 
-        enriched = dashboard._attach_legacy_search_groups(rows, state)
+        enriched = dashboard._attach_state_search_groups(rows, state)
 
         self.assertTrue(all(row["search_group"] for row in enriched))
         self.assertEqual([row["search_group_label"] for row in enriched], ["Juo Q3", "Juo Q3"])
@@ -698,7 +698,7 @@ class HermesSmokeTests(unittest.TestCase):
             ]
         }
 
-        enriched = dashboard._attach_legacy_search_groups(rows, state, options)
+        enriched = dashboard._attach_state_search_groups(rows, state, options)
         open_rows, collapsed_groups = dashboard._split_search_result_groups(enriched)
 
         self.assertEqual(open_rows, [])

@@ -129,17 +129,6 @@ def _extract_card_offers(card: BeautifulSoup, source_is_warehouse_search: bool =
     return offers
 
 
-def _extract_card_offer(card: BeautifulSoup):
-    """Compatibility helper returning the normal offer when one exists."""
-    offers = _extract_card_offers(card)
-    return offers[0] if offers else (None, False)
-
-
-def _extract_card_price(card: BeautifulSoup):
-    """Keep the historical price helper available for focused parser tests."""
-    return _extract_card_offer(card)[0]
-
-
 def _extract_card_url(card: BeautifulSoup, fallback_asin: str = ""):
     link = (
         card.select_one("h2 a[href]")
