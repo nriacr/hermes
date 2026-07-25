@@ -42,6 +42,7 @@ from .search_amazon import (
     extract_result_candidates,
     filter_matching_results,
     title_matches_any_keyword,
+    title_matches_keyword,
 )
 from .storage import load_json, save_json
 from .telegram_listener import start_telegram_listener
@@ -1041,8 +1042,49 @@ def maybe_alert_amazon_empty_searches(
     state["_meta"] = meta
 
 
-def offers_from_amazon_search_results(results: List[SearchResultItem], product_name: str) -> List[OfferResult]:
+def _watch_name_specificity(name: str) -> int:
+    """Use model-name token count to prefer a more specific configured card."""
+    return len(normalize_offer_text(name).split())
+
+
+def _most_specific_amazon_matches(
+    results: List[SearchResultItem], product_name: str, configured_names: List[str] | None = None
+) -> List[SearchResultItem]:
+    """Keep search results assigned to the most specific matching watch name.
+
+    This is intentionally model-agnostic: when e.g. "Ultra" and "Ultra Max"
+    cards both match a title, the longer configured model name owns that result.
+    """
     matches = filter_matching_results(results, product_name) if product_name else results
+    if not product_name or not configured_names:
+        return matches
+
+    normalized_name = normalize_offer_text(product_name)
+    names = {
+        str(name).strip()
+        for name in configured_names
+        if str(name or "").strip()
+    }
+    if normalized_name not in {normalize_offer_text(name) for name in names}:
+        names.add(product_name)
+
+    filtered: List[SearchResultItem] = []
+    current_specificity = _watch_name_specificity(product_name)
+    for item in matches:
+        matching_specificities = [
+            _watch_name_specificity(name)
+            for name in names
+            if title_matches_keyword(item.title, name)
+        ]
+        if not matching_specificities or current_specificity >= max(matching_specificities):
+            filtered.append(item)
+    return filtered
+
+
+def offers_from_amazon_search_results(
+    results: List[SearchResultItem], product_name: str, configured_names: List[str] | None = None
+) -> List[OfferResult]:
+    matches = _most_specific_amazon_matches(results, product_name, configured_names)
     if not matches:
         raise HermesError("Amazon arama sayfasında ürün adına uyan fiyatlı ürün bulunamadı.")
     return [
@@ -1185,7 +1227,16 @@ def _fetch_amazon_search_watch_offers(
         )
     if not results:
         raise HermesError("Amazon arama sayfasında okunabilir fiyat bulunamadı.")
-    offers = offers_from_amazon_search_results(dedupe_results(results), watch.name)
+    configured_amazon_names = [
+        configured_watch.name
+        for configured_watch in getattr(config, "watches", [])
+        if configured_watch.site == SITE_AMAZON and configured_watch.name
+    ]
+    offers = offers_from_amazon_search_results(
+        dedupe_results(results),
+        watch.name,
+        configured_amazon_names,
+    )
     if warehouse_search:
         offers = [offer for offer in offers if offer.is_warehouse]
         if not offers:

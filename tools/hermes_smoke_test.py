@@ -1600,6 +1600,31 @@ class HermesSmokeTests(unittest.TestCase):
             ],
         )
 
+    def test_amazon_search_assigns_overlapping_models_to_the_most_specific_card(self):
+        results = [
+            SearchResultItem(
+                title="Apple iPhone 17 Pro 256 GB",
+                url="https://www.amazon.com.tr/dp/B000000001",
+                price=Decimal("100000"),
+            ),
+            SearchResultItem(
+                title="Apple iPhone 17 Pro Max 256 GB",
+                url="https://www.amazon.com.tr/dp/B000000002",
+                price=Decimal("110000"),
+            ),
+        ]
+        configured_names = ["Apple iPhone 17 Pro", "Apple iPhone 17 Pro Max"]
+
+        pro_offers = service.offers_from_amazon_search_results(
+            results, "Apple iPhone 17 Pro", configured_names
+        )
+        pro_max_offers = service.offers_from_amazon_search_results(
+            results, "Apple iPhone 17 Pro Max", configured_names
+        )
+
+        self.assertEqual([offer.url for offer in pro_offers], ["https://www.amazon.com.tr/dp/B000000001"])
+        self.assertEqual([offer.url for offer in pro_max_offers], ["https://www.amazon.com.tr/dp/B000000002"])
+
     def test_amazon_search_keeps_distinct_variation_links(self):
         html = """
         <div class="s-main-slot">
