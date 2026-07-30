@@ -39,6 +39,7 @@ from hermes.providers.hepsiburada import (  # noqa: E402
 )
 from hermes.providers.hm import extract_offers as extract_hm_offers  # noqa: E402
 from hermes.providers.nordbron import extract_offer as extract_nordbron_offer  # noqa: E402
+from hermes.providers.network import extract_offer as extract_network_offer  # noqa: E402
 from hermes.providers.zara import extract_offers as extract_zara_offers  # noqa: E402
 from hermes.providers.amazon import (  # noqa: E402
     extract_color_variations,
@@ -52,6 +53,31 @@ from hermes.utils import detect_site_from_url, parse_decimal, utc_now  # noqa: E
 
 
 class HermesSmokeTests(unittest.TestCase):
+    def test_network_prefers_two_or_more_basket_price(self):
+        html = """
+        <html><head><title>Vizon Mini Elbise</title></head><body>
+          <h1>Vizon Mini Elbise</h1>
+          <div class="product-detail__price">8.499,00 TL</div>
+          <div class="basket-campaign">2 ve üzeri 4.999,50 TL</div>
+        </body></html>
+        """
+
+        offer = extract_network_offer(html)
+
+        self.assertEqual(offer.title, "Vizon Mini Elbise")
+        self.assertEqual(offer.price, Decimal("4999.50"))
+
+    def test_network_prefers_three_or_more_basket_price(self):
+        html = """
+        <html><head><title>Örnek Network Ürünü</title></head><body>
+          <h1>Örnek Network Ürünü</h1>
+          <div class="product-detail__price">8.499,00 TL</div>
+          <div class="basket-campaign">3 ve üzeri için 4.999,50 TL</div>
+        </body></html>
+        """
+
+        self.assertEqual(extract_network_offer(html).price, Decimal("4999.50"))
+
     def test_amazon_variations_are_opt_in_for_each_watch(self):
         base_watch = {
             "name": "Tablet",

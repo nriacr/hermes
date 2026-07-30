@@ -26,6 +26,11 @@ NETWORK_SELECTORS = [
 
 NETWORK_BASKET_PATTERNS = [
     re.compile(
+        r"(?<!\d)\d+\s*ve\s*(?:üzeri|uzeri)(?:\s+adet)?(?:\s+(?:için|icin))?\s*"
+        r"(?P<price>\d{1,3}(?:\.\d{3})*,\d{2}|\d+(?:,\d{2})?)\s*tl",
+        re.IGNORECASE | re.DOTALL,
+    ),
+    re.compile(
         r"\d+\s*ve\s*(?:üzeri|uzeri|ve\s*üzeri|ve\s*uzeri).*?sepette\s*"
         r"(?P<price>\d{1,3}(?:\.\d{3})*,\d{2}|\d+(?:,\d{2})?)\s*tl",
         re.IGNORECASE | re.DOTALL,
