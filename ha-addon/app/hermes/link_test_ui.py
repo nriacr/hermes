@@ -10,6 +10,7 @@ SITE_THEME_CLASSES = {
     "hepsiburada": "site-hepsiburada",
     "trendyol": "site-trendyol",
     "network": "site-network",
+    "beymenclub": "site-beymenclub",
     "nordbron": "site-nordbron",
     "zara": "site-zara",
     "hm": "site-hm",

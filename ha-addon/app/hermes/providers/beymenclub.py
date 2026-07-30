@@ -1,3 +1,9 @@
+"""Beymen Club'a ozel fiyat okuyucu.
+
+Network benzeri sepet kampanyalarini onceleyerek, normal fiyatla karismasini
+engeller. Bu kurallar baska saglayicilardan tamamen bagimsiz tutulur.
+"""
+
 import re
 
 from ..errors import HermesError
@@ -12,7 +18,7 @@ from .base import (
     soup_from_html,
 )
 
-NETWORK_SELECTORS = [
+BEYMENCLUB_SELECTORS = [
     ".product-detail__price",
     ".product-price",
     ".price-current",
@@ -26,14 +32,14 @@ NETWORK_SELECTORS = [
 
 PRICE_PATTERN = r"(?:\d{1,3}(?:\.\d{3})+(?:,\d{2})?|\d+(?:,\d{2})?)"
 
-NETWORK_BASKET_PATTERNS = [
+BEYMENCLUB_BASKET_PATTERNS = [
     re.compile(
-        r"(?<!\d)\d+\s*ve\s*(?:üzeri|uzeri)(?:\s+adet)?(?:\s+(?:için|icin))?\s*"
+        rf"(?<!\d)\d+\s*ve\s*(?:üzeri|uzeri)(?:\s+adet)?(?:\s+(?:için|icin))?\s*"
         rf"(?P<price>{PRICE_PATTERN})\s*tl",
         re.IGNORECASE | re.DOTALL,
     ),
     re.compile(
-        r"\d+\s*ve\s*(?:üzeri|uzeri|ve\s*üzeri|ve\s*uzeri).*?sepette\s*"
+        rf"\d+\s*ve\s*(?:üzeri|uzeri).*?sepette\s*"
         rf"(?P<price>{PRICE_PATTERN})\s*tl",
         re.IGNORECASE | re.DOTALL,
     ),
@@ -45,9 +51,10 @@ NETWORK_BASKET_PATTERNS = [
 
 
 def _extract_basket_price(soup):
+    """Return the cheapest explicit basket campaign price, if present."""
     text = soup.get_text(" ", strip=True)
     candidates = []
-    for pattern in NETWORK_BASKET_PATTERNS:
+    for pattern in BEYMENCLUB_BASKET_PATTERNS:
         for match in pattern.finditer(text):
             try:
                 candidates.append(parse_decimal(match.group("price")))
@@ -59,16 +66,16 @@ def _extract_basket_price(soup):
 def extract_offer(html: str) -> OfferResult:
     soup = soup_from_html(html)
     jsonld_title, jsonld_price = extract_jsonld_product(soup)
-    title = jsonld_title or extract_title(soup) or "Network urunu"
+    title = jsonld_title or extract_title(soup) or "Beymen Club urunu"
 
     for price in (
         _extract_basket_price(soup),
         jsonld_price,
         extract_price_from_meta(soup),
-        extract_price_from_selectors(soup, NETWORK_SELECTORS),
+        extract_price_from_selectors(soup, BEYMENCLUB_SELECTORS),
         extract_price_from_scripts(html),
     ):
         if price is not None:
             return OfferResult(title=title, price=price, seller=None)
 
-    raise HermesError("Network sayfasindan fiyat bulunamadi.")
+    raise HermesError("Beymen Club sayfasindan fiyat bulunamadi.")

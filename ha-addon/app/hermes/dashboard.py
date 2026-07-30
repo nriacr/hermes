@@ -52,6 +52,7 @@ tbody tr.site-amazon { --site-bg:rgba(247,197,109,.13); --site-bg-strong:rgba(24
 tbody tr.site-hepsiburada { --site-bg:rgba(255,154,111,.13); --site-bg-strong:rgba(255,154,111,.25); --site-line:rgba(255,154,111,.86); --site-link:#ffad82; }
 tbody tr.site-trendyol { --site-bg:rgba(246,163,199,.13); --site-bg-strong:rgba(246,163,199,.25); --site-line:rgba(246,163,199,.84); --site-link:#f8b4d0; }
 tbody tr.site-network { --site-bg:rgba(133,220,207,.13); --site-bg-strong:rgba(133,220,207,.25); --site-line:rgba(133,220,207,.84); --site-link:#a6ebe0; }
+tbody tr.site-beymenclub { --site-bg:rgba(230,176,137,.13); --site-bg-strong:rgba(230,176,137,.25); --site-line:rgba(230,176,137,.84); --site-link:#f1c49f; }
 tbody tr.site-nordbron { --site-bg:rgba(143,190,255,.13); --site-bg-strong:rgba(143,190,255,.25); --site-line:rgba(143,190,255,.84); --site-link:#b8d4ff; }
 tbody tr.site-zara { --site-bg:rgba(176,218,139,.13); --site-bg-strong:rgba(176,218,139,.25); --site-line:rgba(176,218,139,.84); --site-link:#c9ec9f; }
 tbody tr.site-hm { --site-bg:rgba(214,178,255,.13); --site-bg-strong:rgba(214,178,255,.25); --site-line:rgba(214,178,255,.84); --site-link:#dec4ff; }
@@ -227,6 +228,7 @@ def _site_name(raw_site, is_search):
         "hepsiburada": "Hepsiburada",
         "trendyol": "Trendyol",
         "network": "Network",
+        "beymenclub": "Beymen Club",
         "nordbron": "Nordbron",
         "zara": "Zara",
         "hm": "H&M",
@@ -242,6 +244,8 @@ def _site_theme_class(seller):
         return "site-hepsiburada"
     if "network" in normalized:
         return "site-network"
+    if "beymen club" in normalized or "beymenclub" in normalized:
+        return "site-beymenclub"
     if "trendyol" in normalized:
         return "site-trendyol"
     if "nordbron" in normalized:

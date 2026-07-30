@@ -5,7 +5,7 @@ Hermes, Home Assistant üzerinde çalışan çok siteli ürün ve Telegram fırs
 ## Özellikler
 
 - Takip edilenler: tek kayıt altında en fazla 5 link izleme
-- Linkten otomatik site algılama: Amazon, Hepsiburada, Trendyol, Network, Nordbron, Zara, H&M
+- Linkten otomatik site algılama: Amazon, Hepsiburada, Trendyol, Network, Beymen Club, Nordbron, Zara, H&M
 - Ürün ve arama linklerini aynı takip kaydı içinde karışık kullanabilme
 - Arama linklerinde, takip adını keyword kabul ederek eşleşen sonuçlar arasından en iyi fiyatı seçme
 - Arama linklerinde sabit olarak en fazla 60 sonuç tarama
@@ -95,6 +95,7 @@ Hermes her siteyi kendi sağlayıcısında okur. Bir sitenin fiyat okuma kuralı
 - **Hepsiburada:** Ürün ve arama sayfalarını destekler. Birden fazla satıcı arasından en düşük geçerli fiyat seçilir; ürün kartı, renk/depolama gibi varyasyonlar ve görünürse Premium fiyat metni ayrı değerlendirilir. Çok varyasyonlu ürünlerde her varyasyonun ayrıntı sayfası okunabileceğinden tarama süresi artabilir.
 - **Trendyol:** Ürün sayfasındaki güncel ürün fiyatını ve temel ürün bilgisini okur.
 - **Network:** Sayfadaki normal fiyatın yanında `Sepette` fiyatı varsa indirimli sepet fiyatını önceliklendirir.
+- **Beymen Club:** Network ile aynı şekilde normal fiyatın yanında `Sepette`, `2 ve üzeri` veya `3 ve üzeri` kampanya fiyatı varsa indirimli fiyatı önceliklendirir.
 - **Nordbron:** Sayfadaki ürün fiyatını okur; bot koruması veya captcha gerçek hata olarak kaydedilir.
 - **Zara:** Renk varyasyonlarını ve seçilen bedeni kontrol eder. İstenen beden stokta değilse bu durum hata değil, özet tablodaki `Stokta Olmayanlar` bölümüne yazılır. `6` ve `44` gibi girilen bedenler, sayfadaki yaş/EU ekleriyle uyumlu karşılaştırılır.
 - **H&M:** Renk ve beden stok bilgisini siteye özel veri yolu üzerinden okur. Stokta olmayan beden hata olarak değil, `Stokta Olmayanlar` bölümünde gösterilir.
@@ -109,6 +110,7 @@ Hermes mimarisi provider tabanlıdır. Her site için parser/fiyat yakalama kodu
 - `app/hermes/providers/hepsiburada.py`
 - `app/hermes/providers/trendyol.py`
 - `app/hermes/providers/network.py`
+- `app/hermes/providers/beymenclub.py`
 - `app/hermes/providers/nordbron.py`
 - `app/hermes/providers/zara.py`
 - `app/hermes/providers/hm.py`

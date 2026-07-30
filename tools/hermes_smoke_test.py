@@ -39,6 +39,7 @@ from hermes.providers.hepsiburada import (  # noqa: E402
 )
 from hermes.providers.hm import extract_offers as extract_hm_offers  # noqa: E402
 from hermes.providers.nordbron import extract_offer as extract_nordbron_offer  # noqa: E402
+from hermes.providers.beymenclub import extract_offer as extract_beymenclub_offer  # noqa: E402
 from hermes.providers.network import extract_offer as extract_network_offer  # noqa: E402
 from hermes.providers.zara import extract_offers as extract_zara_offers  # noqa: E402
 from hermes.providers.amazon import (  # noqa: E402
@@ -77,6 +78,31 @@ class HermesSmokeTests(unittest.TestCase):
         """
 
         self.assertEqual(extract_network_offer(html).price, Decimal("4999.50"))
+
+    def test_beymenclub_prefers_sepette_price_without_decimal_cents(self):
+        html = """
+        <html><head><title>Beymen Club Bej Polo Yaka Triko</title></head><body>
+          <h1>Beymen Club Bej Polo Yaka Triko</h1>
+          <div class="product-price">5.495 TL</div>
+          <div class="basket-campaign">Sepette 3.475 TL</div>
+        </body></html>
+        """
+
+        offer = extract_beymenclub_offer(html)
+
+        self.assertEqual(offer.title, "Beymen Club Bej Polo Yaka Triko")
+        self.assertEqual(offer.price, Decimal("3475"))
+
+    def test_beymenclub_prefers_multi_item_basket_price(self):
+        html = """
+        <html><head><title>Beymen Club Kırık Beyaz Hırka</title></head><body>
+          <h1>Beymen Club Kırık Beyaz Hırka</h1>
+          <div class="product-price">5.995 TL</div>
+          <div class="basket-campaign">2 ve üzeri 4.475 TL</div>
+        </body></html>
+        """
+
+        self.assertEqual(extract_beymenclub_offer(html).price, Decimal("4475"))
 
     def test_amazon_variations_are_opt_in_for_each_watch(self):
         base_watch = {
@@ -407,6 +433,7 @@ class HermesSmokeTests(unittest.TestCase):
             "Hepsiburada": "site-hepsiburada",
             "Trendyol": "site-trendyol",
             "Network": "site-network",
+            "Beymen Club": "site-beymenclub",
             "Nordbron": "site-nordbron",
             "Zara": "site-zara",
             "H&M": "site-hm",
