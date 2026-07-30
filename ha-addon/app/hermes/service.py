@@ -4,6 +4,7 @@ import time
 from datetime import timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, List
+from urllib.parse import urlsplit
 
 import requests
 
@@ -13,8 +14,10 @@ from .constants import (
     APP_VERSION,
     NOTIFY_REPEAT_SECONDS,
     SITE_AMAZON,
+    SITE_BEYMENCLUB,
     SITE_HEPSIBURADA,
     SITE_HM,
+    SITE_NETWORK,
     SITE_NORDBRON,
     SITE_ZARA,
     STATE_PATH,
@@ -36,6 +39,8 @@ from .providers import hepsiburada as hepsiburada_provider
 from .providers import hm as hm_provider
 from .providers import zara as zara_provider
 from .providers import amazon as amazon_provider
+from .providers import beymenclub as beymenclub_provider
+from .providers import network as network_provider
 from .providers.registry import extract_offer
 from .search_amazon import (
     dedupe_results,
@@ -1519,6 +1524,67 @@ def _fetch_hm_watch_offers(
     return offers
 
 
+def _fetch_network_watch_offers(
+    session: requests.Session,
+    watch: WatchRule,
+    config: HermesConfig,
+) -> List[OfferResult]:
+    response = fetch_with_retries(session, watch.url, config.request_timeout_seconds)
+    html = cleaned_html(response)
+    raise_if_age_verification(html)
+    if is_bot_protection_page(SITE_NETWORK, html):
+        raise HermesError("Network bot korumasi nedeniyle captcha sayfasi dondu.")
+    offers = network_provider.extract_offers(html, source_url=watch.url, size=watch.size)
+    if watch.size:
+        log(f"Network beden kontrol edildi: {watch.name or watch.url} | beden={watch.size} | adet={len(offers)}")
+    return offers
+
+
+def _fetch_beymenclub_watch_offers(
+    session: requests.Session,
+    watch: WatchRule,
+    config: HermesConfig,
+) -> List[OfferResult]:
+    response = fetch_with_retries(session, watch.url, config.request_timeout_seconds)
+    html = cleaned_html(response)
+    raise_if_age_verification(html)
+    if is_bot_protection_page(SITE_BEYMENCLUB, html):
+        raise HermesError("Beymen Club bot korumasi nedeniyle captcha sayfasi dondu.")
+    size_summary = None
+    if watch.size:
+        product_id = beymenclub_provider.extract_product_id(html)
+        if product_id is None:
+            raise HermesError("Beymen Club ürün kimliği bulunamadı; beden durumu doğrulanamadı.")
+        parsed_url = urlsplit(watch.url)
+        summary_url = (
+            f"{parsed_url.scheme}://{parsed_url.netloc}"
+            f"/sf-api/api/product/{product_id}/productsummary"
+        )
+        summary_response = session.post(
+            summary_url,
+            headers={
+                "Accept": "application/json, text/plain, */*",
+                "Origin": f"{parsed_url.scheme}://{parsed_url.netloc}",
+                "Referer": watch.url,
+            },
+            timeout=config.request_timeout_seconds,
+        )
+        summary_response.raise_for_status()
+        try:
+            size_summary = summary_response.json()
+        except ValueError as exc:
+            raise HermesError("Beymen Club beden stok verisi okunamadı.") from exc
+    offers = beymenclub_provider.extract_offers(
+        html,
+        source_url=watch.url,
+        size=watch.size,
+        size_summary=size_summary,
+    )
+    if watch.size:
+        log(f"Beymen Club beden kontrol edildi: {watch.name or watch.url} | beden={watch.size} | adet={len(offers)}")
+    return offers
+
+
 def _fetch_watch_offers(session: requests.Session, watch: WatchRule, config: HermesConfig) -> List[OfferResult]:
     site = watch.site
     url = watch.url
@@ -1540,6 +1606,10 @@ def _fetch_watch_offers(session: requests.Session, watch: WatchRule, config: Her
         return _fetch_zara_watch_offers(session, watch, config)
     if site == SITE_HM:
         return _fetch_hm_watch_offers(session, watch, config)
+    if site == SITE_NETWORK:
+        return _fetch_network_watch_offers(session, watch, config)
+    if site == SITE_BEYMENCLUB:
+        return _fetch_beymenclub_watch_offers(session, watch, config)
     else:
         response = fetch_with_retries(session, url, config.request_timeout_seconds)
     html = cleaned_html(response)

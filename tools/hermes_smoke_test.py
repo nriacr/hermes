@@ -39,8 +39,17 @@ from hermes.providers.hepsiburada import (  # noqa: E402
 )
 from hermes.providers.hm import extract_offers as extract_hm_offers  # noqa: E402
 from hermes.providers.nordbron import extract_offer as extract_nordbron_offer  # noqa: E402
-from hermes.providers.beymenclub import extract_offer as extract_beymenclub_offer  # noqa: E402
-from hermes.providers.network import extract_offer as extract_network_offer  # noqa: E402
+from hermes.providers.beymenclub import (  # noqa: E402
+    extract_offer as extract_beymenclub_offer,
+    extract_offers as extract_beymenclub_offers,
+    extract_product_id as extract_beymenclub_product_id,
+    requested_size_state_from_summary,
+)
+from hermes.providers.network import (  # noqa: E402
+    _network_requested_size_state,
+    extract_offer as extract_network_offer,
+    extract_offers as extract_network_offers,
+)
 from hermes.providers.zara import extract_offers as extract_zara_offers  # noqa: E402
 from hermes.providers.amazon import (  # noqa: E402
     extract_color_variations,
@@ -103,6 +112,104 @@ class HermesSmokeTests(unittest.TestCase):
         """
 
         self.assertEqual(extract_beymenclub_offer(html).price, Decimal("4475"))
+
+    def test_network_size_matching_is_case_insensitive(self):
+        html = """
+        <html><head><title>Network Gömlek</title></head><body>
+          <div class="product-price">2.500 TL</div>
+          <script>
+            var product = {"DisplayName":"Network Gömlek","Sizes":[
+              {"ValueText":"XS","NoStock":false},
+              {"ValueText":"XL","NoStock":false}
+            ]};
+            var productModel = {};
+          </script>
+        </body></html>
+        """
+
+        offers = extract_network_offers(html, source_url="https://network.com.tr/urun", size="xl")
+
+        self.assertEqual(len(offers), 1)
+        self.assertEqual(offers[0].price, Decimal("2500"))
+
+    def test_network_unavailable_size_is_not_a_page_error(self):
+        html = """
+        <html><head><title>Network Gömlek</title></head><body>
+          <div class="product-price">2.500 TL</div>
+          <script>
+            var product = {"Sizes":[{"ValueText":"XL","NoStock":true}]};
+            var productModel = {};
+          </script>
+        </body></html>
+        """
+
+        with self.assertRaisesRegex(OutOfStockHermesError, "Network beden stokta değil: xl"):
+            extract_network_offers(html, size="xl")
+
+    def test_network_reads_authoritative_sizes_payload(self):
+        html = """
+        <script>
+          var product = {
+            "Sizes": [
+              {"ValueText":"XS","NoStock":false},
+              {"ValueText":"S","NoStock":false},
+              {"ValueText":"M","NoStock":false},
+              {"ValueText":"L","NoStock":true},
+              {"ValueText":"XL","NoStock":true}
+            ]
+          };
+          var productModel = {};
+        </script>
+        """
+
+        self.assertEqual(_network_requested_size_state(html, "xs"), (True, True))
+        self.assertEqual(_network_requested_size_state(html, "M"), (True, True))
+        self.assertEqual(_network_requested_size_state(html, "l"), (True, False))
+        self.assertEqual(_network_requested_size_state(html, "XL"), (True, False))
+
+    def test_beymenclub_size_matching_ignores_parenthetical_size_labels(self):
+        html = """
+        <html><head><title>Beymen Club Hırka</title></head><body>
+          <div class="product-price">4.475 TL</div>
+          <select name="beden"><option value="XL (EU XL)">XL (EU XL)</option></select>
+        </body></html>
+        """
+
+        offers = extract_beymenclub_offers(html, size="xl")
+
+        self.assertEqual(len(offers), 1)
+        self.assertEqual(offers[0].price, Decimal("4475"))
+
+    def test_beymenclub_missing_size_is_not_a_page_error(self):
+        html = """
+        <html><head><title>Beymen Club Hırka</title></head><body>
+          <div class="product-price">4.475 TL</div>
+          <select name="beden"><option value="M">M</option></select>
+        </body></html>
+        """
+
+        with self.assertRaisesRegex(OutOfStockHermesError, "Beymen Club beden bulunamadı: XL"):
+            extract_beymenclub_offers(html, size="XL")
+
+    def test_beymenclub_reads_authoritative_size_summary(self):
+        summary = {
+            "result": {
+                "sizes": [
+                    {"sizeName": "S", "inStock": True, "stockQuantity": 27},
+                    {"sizeName": "XL", "inStock": True, "stockQuantity": 6},
+                    {"sizeName": "XXL", "inStock": False, "stockQuantity": 0},
+                ]
+            }
+        }
+
+        self.assertEqual(requested_size_state_from_summary(summary, "s"), (True, True))
+        self.assertEqual(requested_size_state_from_summary(summary, "XL"), (True, True))
+        self.assertEqual(requested_size_state_from_summary(summary, "xxl"), (True, False))
+
+    def test_beymenclub_extracts_product_id_from_page_payload(self):
+        html = '<script>BEYMEN.productMain = {"productId":1941303,"displayName":"Polo"};</script>'
+
+        self.assertEqual(extract_beymenclub_product_id(html), 1941303)
 
     def test_amazon_variations_are_opt_in_for_each_watch(self):
         base_watch = {

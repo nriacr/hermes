@@ -1,6 +1,7 @@
+import json
 import re
 
-from ..errors import HermesError
+from ..errors import HermesError, OutOfStockHermesError
 from ..models import OfferResult
 from ..utils import parse_decimal
 from .base import (
@@ -11,6 +12,7 @@ from .base import (
     extract_title,
     soup_from_html,
 )
+from .size_availability import requested_size_state, size_matches
 
 NETWORK_SELECTORS = [
     ".product-detail__price",
@@ -56,7 +58,41 @@ def _extract_basket_price(soup):
     return min(candidates) if candidates else None
 
 
-def extract_offer(html: str) -> OfferResult:
+def _network_product_payload(html: str) -> dict:
+    """Return Network's server-rendered product payload without touching other providers."""
+    match = re.search(r"\bvar\s+product\s*=\s*", html)
+    if not match:
+        return {}
+    try:
+        # The payload contains nested objects, so a balanced JSON decoder is
+        # safer than a regular expression that has to guess where it ends.
+        payload, _ = json.JSONDecoder().raw_decode(html[match.end() :].lstrip())
+    except json.JSONDecodeError:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _network_requested_size_state(html: str, requested_size: str) -> tuple[bool, bool]:
+    """Read Network's authoritative ``Sizes`` / ``NoStock`` values first."""
+    product = _network_product_payload(html)
+    sizes = product.get("Sizes") if isinstance(product, dict) else None
+    if isinstance(sizes, list):
+        found = False
+        available = False
+        for size in sizes:
+            if not isinstance(size, dict) or not size_matches(size.get("ValueText"), requested_size):
+                continue
+            found = True
+            available = available or not bool(size.get("NoStock"))
+        if found:
+            return found, available
+
+    # Preserve a narrow fallback for future Network markup changes. This only
+    # decides stock state; Network's price parser remains fully isolated here.
+    return requested_size_state(html, requested_size)
+
+
+def extract_offer(html: str, source_url: str = "") -> OfferResult:
     soup = soup_from_html(html)
     jsonld_title, jsonld_price = extract_jsonld_product(soup)
     title = jsonld_title or extract_title(soup) or "Network urunu"
@@ -72,3 +108,22 @@ def extract_offer(html: str) -> OfferResult:
             return OfferResult(title=title, price=price, seller=None)
 
     raise HermesError("Network sayfasindan fiyat bulunamadi.")
+
+
+def extract_offers(html: str, source_url: str = "", size: str = "") -> list[OfferResult]:
+    """Read Network's price only when the requested apparel size is available."""
+    requested_size = str(size or "").strip()
+    if not requested_size:
+        return [extract_offer(html, source_url=source_url)]
+    found, available = _network_requested_size_state(html, requested_size)
+    soup = soup_from_html(html)
+    title = extract_jsonld_product(soup)[0] or extract_title(soup) or "Network urunu"
+    if not found:
+        raise OutOfStockHermesError(
+            f"Network beden bulunamadı: {requested_size}", title, source_url
+        )
+    if not available:
+        raise OutOfStockHermesError(
+            f"Network beden stokta değil: {requested_size}", title, source_url
+        )
+    return [extract_offer(html, source_url=source_url)]

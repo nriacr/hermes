@@ -20,6 +20,6 @@ def extract_offer(site: str, html: str, source_url: str = "") -> OfferResult:
     parser = PROVIDERS.get(site_key)
     if parser is None:
         raise HermesError(f"Desteklenmeyen site parserı: {site}")
-    if site_key in {SITE_AMAZON, SITE_HEPSIBURADA, SITE_ZARA, SITE_HM}:
+    if site_key in {SITE_AMAZON, SITE_HEPSIBURADA, SITE_ZARA, SITE_HM, SITE_NETWORK, SITE_BEYMENCLUB}:
         return parser(html, source_url=source_url)
     return parser(html)
