@@ -782,6 +782,88 @@ def fetch_hepsiburada_page(session: requests.Session, url: str, timeout: int) ->
     raise HttpStatusHermesError(0, url)
 
 
+def beymenclub_headers(url: str) -> Dict[str, str]:
+    """Return the browser-shaped headers required by Beymen Club's WAF."""
+    return {
+        "User-Agent": AMAZON_CHROME_USER_AGENT,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+        "Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Cache-Control": "max-age=0",
+        "Connection": "keep-alive",
+        "Upgrade-Insecure-Requests": "1",
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "none",
+        "Sec-Fetch-User": "?1",
+        "sec-ch-ua": '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": '"Linux"',
+        "Referer": referer_for_url(url),
+    }
+
+
+def _is_usable_beymenclub_response(response) -> bool:
+    text = decode_response_text(response)
+    return "BEYMEN.productMain" in text or "m-priceWrapper" in text or "o-productDetail" in text
+
+
+def _get_beymenclub_response(session, url: str, timeout: int):
+    response = session.get(
+        url,
+        headers=beymenclub_headers(url),
+        timeout=timeout,
+        allow_redirects=True,
+    )
+    if response.status_code == 403:
+        raise HttpStatusHermesError(403, url)
+    response.raise_for_status()
+    if not _is_usable_beymenclub_response(response):
+        raise HermesError("Beymen Club ürün sayfası beklenen fiyat verisini içermiyor.")
+    return response
+
+
+def fetch_beymenclub_page(session: requests.Session, url: str, timeout: int) -> requests.Response:
+    """Fetch Beymen Club through its WAF-friendly, site-specific request path."""
+    last_error: Optional[Exception] = None
+    attempts: List[str] = []
+
+    for method, client in (("requests", session), ("requests_fresh", requests.Session())):
+        try:
+            return _get_beymenclub_response(client, url, timeout)
+        except Exception as exc:  # noqa: BLE001
+            last_error = exc
+            status = getattr(exc, "status_code", None) or exc.__class__.__name__
+            attempts.append(f"{method}:{status}")
+
+    if curl_requests is not None:
+        try:
+            curl_session = curl_requests.Session()
+            response = curl_session.get(
+                url,
+                headers=beymenclub_headers(url),
+                timeout=timeout,
+                allow_redirects=True,
+                impersonate="chrome124",
+            )
+            if response.status_code == 403:
+                raise HttpStatusHermesError(403, url)
+            response.raise_for_status()
+            if not _is_usable_beymenclub_response(response):
+                raise HermesError("Beymen Club ürün sayfası beklenen fiyat verisini içermiyor.")
+            return response
+        except Exception as exc:  # noqa: BLE001
+            last_error = exc
+            status = getattr(exc, "status_code", None) or exc.__class__.__name__
+            attempts.append(f"curl:{status}")
+
+    if attempts:
+        log(f"Beymen Club teşhis: deneme={len(attempts)} | akis={' > '.join(attempts)} | url={url}")
+    if last_error is not None:
+        raise last_error
+    raise HttpStatusHermesError(0, url)
+
+
 def _is_zara_interstitial(html: str) -> bool:
     normalized = normalize_offer_text(html)
     return "bm-verify" in normalized and "_sec/verify" in normalized

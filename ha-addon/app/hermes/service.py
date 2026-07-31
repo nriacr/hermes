@@ -27,6 +27,7 @@ from .errors import HermesError, OutOfStockHermesError
 from .http_client import (
     cleaned_html,
     fetch_amazon_page,
+    fetch_beymenclub_page,
     fetch_hepsiburada_page,
     fetch_hm_page,
     fetch_with_retries,
@@ -1622,7 +1623,7 @@ def _fetch_beymenclub_watch_offers(
     watch: WatchRule,
     config: HermesConfig,
 ) -> List[OfferResult]:
-    response = fetch_with_retries(session, watch.url, config.request_timeout_seconds)
+    response = fetch_beymenclub_page(session, watch.url, config.request_timeout_seconds)
     html = cleaned_html(response)
     raise_if_age_verification(html)
     if is_bot_protection_page(SITE_BEYMENCLUB, html):

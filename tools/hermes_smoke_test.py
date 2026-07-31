@@ -21,7 +21,7 @@ from hermes import settings_ui  # noqa: E402
 from hermes import telegram_listener  # noqa: E402
 from hermes import link_test_ui  # noqa: E402
 from hermes.errors import HermesError, OutOfStockHermesError  # noqa: E402
-from hermes.http_client import amazon_url_variants, fetch_amazon_page  # noqa: E402
+from hermes.http_client import amazon_url_variants, fetch_amazon_page, fetch_beymenclub_page  # noqa: E402
 from hermes.config_loader import _prepare_watches  # noqa: E402
 from hermes.models import HermesConfig, OfferResult, PriceSummaryRow, SearchResultItem, StockSummaryRow, TelegramConfig, WatchRule  # noqa: E402
 from hermes.providers.base import soup_from_html  # noqa: E402
@@ -65,6 +65,33 @@ from hermes.utils import detect_site_from_url, parse_decimal, utc_now  # noqa: E
 
 
 class HermesSmokeTests(unittest.TestCase):
+    def test_beymenclub_fetch_uses_its_browser_shaped_headers(self):
+        class Response:
+            status_code = 200
+            headers = {"content-type": "text/html; charset=utf-8"}
+            text = "<script>BEYMEN.productMain = {}</script>"
+            content = text.encode("utf-8")
+
+            def raise_for_status(self):
+                return None
+
+        class Session:
+            def __init__(self):
+                self.calls = []
+
+            def get(self, url, **kwargs):
+                self.calls.append((url, kwargs))
+                return Response()
+
+        session = Session()
+        response = fetch_beymenclub_page(session, "https://www.beymenclub.com/tr/p_test", 10)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(session.calls), 1)
+        headers = session.calls[0][1]["headers"]
+        self.assertIn("Chrome/124", headers["User-Agent"])
+        self.assertEqual(headers["Accept-Language"], "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7")
+
     def test_network_prefers_two_or_more_basket_price(self):
         html = """
         <html><head><title>Vizon Mini Elbise</title></head><body>
