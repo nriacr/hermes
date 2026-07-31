@@ -14,11 +14,6 @@ from ..utils import (
     parse_decimal,
     repair_mojibake,
 )
-from .amazon_common import (
-    extract_verified_secondary_offer_price,
-    has_secondary_offer_text,
-    has_verified_warehouse_evidence,
-)
 from .base import (
     extract_jsonld_product,
     extract_price_from_meta,
@@ -65,6 +60,15 @@ AMAZON_COLOR_VARIATION_SELECTORS = (
     "#variation_color_name li",
     "#variation_color li",
     "[id*='variation_color'] li",
+)
+
+AMAZON_USED_OFFER_LINK_SELECTOR = "a[href*='offer-listing']"
+AMAZON_USED_OFFER_CONTAINER_SELECTORS = (
+    ".aod-offer",
+    "[data-cy='aod-offer']",
+    "[data-cy*='offer']",
+    "[id^='aod-offer']",
+    "#olpOfferList .a-row",
 )
 
 
@@ -359,6 +363,89 @@ def is_warehouse_search_url(source_url: str) -> bool:
     )
 
 
+def _is_used_offer_url(url: str) -> bool:
+    parsed = urlsplit(str(url or ""))
+    if "offer-listing" not in parsed.path:
+        return False
+    query = {key.casefold(): value.casefold() for key, value in parse_qsl(parsed.query, keep_blank_values=True)}
+    return query.get("condition") in {"used", "secondhand"}
+
+
+def extract_used_offer_listing_url(html: str, source_url: str = "") -> str:
+    """Find Amazon's dedicated used-offer listing without guessing a seller."""
+    soup = soup_from_html(html)
+    for link in soup.select(AMAZON_USED_OFFER_LINK_SELECTOR):
+        raw_url = str(link.get("href") or "").strip()
+        absolute_url = make_amazon_absolute_url(raw_url) if raw_url else ""
+        if _is_used_offer_url(absolute_url):
+            return absolute_url
+    # Amazon sometimes renders the used-offer text before the offer-listing
+    # link is hydrated. In that case the ASIN endpoint is still the only
+    # acceptable fallback, and it is tried only when the page itself says a
+    # second-hand offer exists.
+    page_text = normalize_offer_text(soup.get_text(" ", strip=True))
+    asin = extract_asin_from_url(source_url)
+    if asin and "ikinci el" in page_text:
+        return f"https://www.amazon.com.tr/gp/offer-listing/{asin}?condition=used"
+    return ""
+
+
+def _offer_container_price(container):
+    for price_element in container.select(".a-price"):
+        classes = set(price_element.get("class") or [])
+        if "a-text-price" in classes or price_element.get("data-a-strike") == "true":
+            continue
+        price = _price_from_split_spans(price_element)
+        if price is not None:
+            return price
+        offscreen = price_element.select_one(".a-offscreen")
+        if offscreen:
+            price = _parse_visible_price(offscreen.get_text(" ", strip=True))
+            if price is not None:
+                return price
+    return None
+
+
+def extract_verified_warehouse_offers_from_listing(html: str, source_url: str) -> list[OfferResult]:
+    """Read only explicit Amazon Depo second-hand offers from Amazon's offer list.
+
+    The product's primary price is deliberately never reused here.  Amazon can
+    show the normal price and a used offer on the same page, so the seller and
+    price must come from one concrete used-offer row.
+    """
+    soup = soup_from_html(html)
+    title, _ = extract_jsonld_product(soup)
+    title = title or extract_title(soup) or "Amazon ürünü"
+    offers: list[OfferResult] = []
+    seen_prices: set = set()
+    containers = []
+    for selector in AMAZON_USED_OFFER_CONTAINER_SELECTORS:
+        for container in soup.select(selector):
+            if container not in containers:
+                containers.append(container)
+
+    for container in containers:
+        text = normalize_offer_text(container.get_text(" ", strip=True))
+        # Both conditions are mandatory. A generic used-offer panel or another
+        # merchant must never receive Hermes' DEPO label.
+        if "amazon depo" not in text or not any(marker in text for marker in ("ikinci el", "kullanilmis", "used")):
+            continue
+        price = _offer_container_price(container)
+        if price is None or price in seen_prices:
+            continue
+        seen_prices.add(price)
+        offers.append(
+            OfferResult(
+                title=title,
+                price=price,
+                seller="Amazon Depo",
+                url=source_url,
+                is_warehouse=True,
+            )
+        )
+    return offers
+
+
 def extract_offers(html: str, source_url: str = "") -> list[OfferResult]:
     """Extract normal and used offers separately when Amazon shows both on one page."""
     soup = soup_from_html(html)
@@ -366,8 +453,6 @@ def extract_offers(html: str, source_url: str = "") -> list[OfferResult]:
     title: Optional[str] = jsonld_title or extract_title(soup) or "Amazon ürünü"
     offers: list[OfferResult] = []
 
-    page_text = soup.get_text(" ", strip=True)
-    has_secondary_offer = has_secondary_offer_text(page_text)
     primary_price = _extract_visible_primary_price(soup)
     if primary_price is not None:
         offers.append(
@@ -375,17 +460,12 @@ def extract_offers(html: str, source_url: str = "") -> list[OfferResult]:
                 title=title,
                 price=primary_price,
                 seller=None,
-                is_warehouse=bool(not has_secondary_offer and has_verified_warehouse_evidence(page_text)),
+                # A product page's main price always belongs to the selected
+                # new offer. A separate second-hand row is added only after
+                # its own price and Amazon Depo seller are verified below.
+                is_warehouse=False,
             )
         )
-
-    # A product page can contain unrelated used-offer text. Only Amazon's
-    # dedicated secondary-offer block can produce a separate DEPO result.
-    secondary_price = extract_verified_secondary_offer_price(soup, include_container_fallback=False)
-    # A matching number is not a distinct offer. Keeping it would create a
-    # duplicate DEPO row beside the exact same new-product price.
-    if secondary_price is not None and secondary_price != primary_price:
-        offers.append(OfferResult(title=title, price=secondary_price, seller=None, is_warehouse=True))
 
     if offers:
         return offers
@@ -397,7 +477,7 @@ def extract_offers(html: str, source_url: str = "") -> list[OfferResult]:
                     title=title,
                     price=price,
                     seller=None,
-                    is_warehouse=has_verified_warehouse_evidence(page_text),
+                    is_warehouse=False,
                 )
             ]
 

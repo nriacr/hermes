@@ -55,6 +55,8 @@ from hermes.providers.amazon import (  # noqa: E402
     extract_color_variations,
     extract_offer as extract_amazon_offer,
     extract_offers as extract_amazon_offers,
+    extract_used_offer_listing_url,
+    extract_verified_warehouse_offers_from_listing,
     is_warehouse_search_url,
     title_with_color,
 )
@@ -285,8 +287,14 @@ class HermesSmokeTests(unittest.TestCase):
           <div id="corePriceDisplay_desktop_feature_div">
             <span class="a-price"><span class="a-offscreen">8.899,00 TL</span></span>
           </div>
-          <div data-cy="secondary-offer-recipe">
-            Diğer satın alma seçenekleri 8.787,77 TL (1 İkinci El ürün)
+          <a href="/gp/offer-listing/B0D95QG8W4?condition=used">Yeni & İkinci El Ürün</a>
+        </body></html>
+        """
+        used_listing_html = """
+        <html><head><title>Edifier M60 Compact Masa Hoparlörü - Siyah</title></head><body>
+          <div class="aod-offer">
+            <span>İkinci El - Çok İyi</span><a>Amazon Depo</a>
+            <span class="a-price"><span class="a-offscreen">8.787,77 TL</span></span>
           </div>
         </body></html>
         """
@@ -300,7 +308,11 @@ class HermesSmokeTests(unittest.TestCase):
         config = SimpleNamespace(request_timeout_seconds=20, request_delay_min_seconds=0, request_delay_max_seconds=0)
 
         def page_for_url(_session, url, _timeout, **_kwargs):
-            return search_html if url == search_url else detail_html
+            if url == search_url:
+                return search_html
+            if "offer-listing" in url:
+                return used_listing_html
+            return detail_html
 
         with (
             patch.object(service, "fetch_amazon_page", side_effect=page_for_url),
@@ -1547,7 +1559,7 @@ class HermesSmokeTests(unittest.TestCase):
         self.assertEqual(len(rows), 2)
         self.assertEqual([row.is_warehouse for row in rows], [False, True])
 
-    def test_amazon_primary_price_requires_explicit_warehouse_evidence(self):
+    def test_amazon_primary_price_stays_normal_when_page_mentions_used_offer(self):
         html = """
         <html><head><title>Depo ürünü</title></head><body>
           <div id="corePriceDisplay_desktop_feature_div">
@@ -1558,7 +1570,7 @@ class HermesSmokeTests(unittest.TestCase):
         """
         offer = extract_amazon_offer(html, "https://www.amazon.com.tr/dp/B000000001?condition=used")
         self.assertEqual(offer.price, Decimal("12999.00"))
-        self.assertTrue(offer.is_warehouse)
+        self.assertFalse(offer.is_warehouse)
 
     def test_amazon_search_context_parameters_do_not_mark_a_product_as_warehouse(self):
         html = """
@@ -1584,7 +1596,7 @@ class HermesSmokeTests(unittest.TestCase):
             is_warehouse_search_url("https://www.amazon.com.tr/dp/B0D95QG8W4?condition=used")
         )
 
-    def test_amazon_product_page_keeps_normal_and_used_prices_separate(self):
+    def test_amazon_product_page_never_relabels_primary_price_as_warehouse(self):
         html = """
         <html><head><title>Çoklu teklif ürünü</title></head><body>
           <div id="corePriceDisplay_desktop_feature_div">
@@ -1596,8 +1608,29 @@ class HermesSmokeTests(unittest.TestCase):
         </body></html>
         """
         offers = extract_amazon_offers(html, "https://www.amazon.com.tr/dp/B0D95QG8W4?th=1")
-        self.assertEqual([offer.price for offer in offers], [Decimal("8899.00"), Decimal("8787.77")])
-        self.assertEqual([offer.is_warehouse for offer in offers], [False, True])
+        self.assertEqual([offer.price for offer in offers], [Decimal("8899.00")])
+        self.assertEqual([offer.is_warehouse for offer in offers], [False])
+
+    def test_amazon_used_offer_listing_requires_amazon_depo_and_distinct_price(self):
+        product_html = """
+        <a href="/gp/offer-listing/B0D95QG8W4?condition=used">Yeni & İkinci El Ürün</a>
+        """
+        listing_html = """
+        <html><head><title>Edifier M60 Compact Masa Hoparlörü - Siyah</title></head><body>
+          <div class="aod-offer"><span>İkinci El - Çok İyi</span><a>Amazon Depo</a>
+            <span class="a-price"><span class="a-offscreen">8.787,77 TL</span></span></div>
+          <div class="aod-offer"><span>İkinci El - Çok İyi</span><a>Başka Satıcı</a>
+            <span class="a-price"><span class="a-offscreen">8.600,00 TL</span></span></div>
+        </body></html>
+        """
+        source_url = "https://www.amazon.com.tr/dp/B0D95QG8W4?th=1"
+
+        self.assertIn("condition=used", extract_used_offer_listing_url(product_html, source_url))
+        offers = extract_verified_warehouse_offers_from_listing(listing_html, source_url)
+
+        self.assertEqual([offer.price for offer in offers], [Decimal("8787.77")])
+        self.assertEqual([offer.seller for offer in offers], ["Amazon Depo"])
+        self.assertTrue(offers[0].is_warehouse)
 
     def test_amazon_product_page_omits_same_price_used_duplicate(self):
         html = """

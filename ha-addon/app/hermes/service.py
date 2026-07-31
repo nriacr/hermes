@@ -1113,14 +1113,59 @@ def _amazon_detail_offers_cache(session: requests.Session) -> Dict[str, List[Sea
     return cache
 
 
+def _extract_amazon_page_offers(
+    session: requests.Session,
+    source_url: str,
+    html: str,
+    config: HermesConfig,
+    include_warehouse: bool,
+) -> List[OfferResult]:
+    """Keep the selected new offer separate from a verified Amazon Depo offer."""
+    offers = amazon_provider.extract_offers(html, source_url=source_url)
+    if not include_warehouse or any(offer.is_warehouse for offer in offers):
+        return offers
+
+    used_listing_url = amazon_provider.extract_used_offer_listing_url(html, source_url=source_url)
+    if not used_listing_url:
+        return offers
+
+    try:
+        response = fetch_amazon_page(session, used_listing_url, config.request_timeout_seconds)
+        listing_html = cleaned_html(response)
+        raise_if_age_verification(listing_html)
+        warehouse_offers = amazon_provider.extract_verified_warehouse_offers_from_listing(
+            listing_html,
+            source_url=source_url,
+        )
+    except Exception as exc:  # noqa: BLE001
+        log(f"Amazon Depo teklif listesi okunamadı: {log_cell(source_url, 70)} | {exc}")
+        return offers
+
+    normal_prices = {offer.price for offer in offers if not offer.is_warehouse}
+    verified_warehouse_offers = [
+        offer
+        for offer in warehouse_offers
+        # A separate offer requires its own, different price. This prevents a
+        # normal offer from being duplicated with a DEPO label.
+        if offer.price not in normal_prices
+    ]
+    if verified_warehouse_offers:
+        log(
+            "Amazon Depo teklifi doğrulandı: "
+            f"adet={len(verified_warehouse_offers)} | url={log_cell(source_url, 70)}"
+        )
+    return offers + verified_warehouse_offers
+
+
 def _fetch_amazon_detail_offers(
     session: requests.Session,
     candidate,
     config: HermesConfig,
+    include_warehouse: bool = False,
 ) -> List[SearchResultItem]:
     """Read all verified new/used offers from one Amazon result's product page."""
     cache = _amazon_detail_offers_cache(session)
-    cache_key = str(candidate.url or "").strip()
+    cache_key = f"{str(candidate.url or '').strip()}|warehouse={bool(include_warehouse)}"
     cached = cache.get(cache_key)
     if isinstance(cached, list):
         return cached
@@ -1132,7 +1177,13 @@ def _fetch_amazon_detail_offers(
     if "captcha" in html.lower() and "robot" in html.lower():
         raise HermesError("Amazon bot korumasi nedeniyle captcha sayfasi dondu.")
 
-    parsed_offers = amazon_provider.extract_offers(html, source_url=candidate.url)
+    parsed_offers = _extract_amazon_page_offers(
+        session,
+        candidate.url,
+        html,
+        config,
+        include_warehouse=include_warehouse,
+    )
     results = [
         SearchResultItem(
             # Search-card title is the authoritative match context. Amazon's
@@ -1201,7 +1252,12 @@ def _fetch_amazon_search_watch_offers(
                 try:
                     used_results = [
                         item
-                        for item in _fetch_amazon_detail_offers(session, candidate, config)
+                        for item in _fetch_amazon_detail_offers(
+                            session,
+                            candidate,
+                            config,
+                            include_warehouse=True,
+                        )
                         if item.is_warehouse
                     ]
                     warehouse_detail_hits += len(used_results)
@@ -1216,7 +1272,12 @@ def _fetch_amazon_search_watch_offers(
             skipped_detail_count += 1
             continue
         try:
-            detailed_results = _fetch_amazon_detail_offers(session, candidate, config)
+            detailed_results = _fetch_amazon_detail_offers(
+                session,
+                candidate,
+                config,
+                include_warehouse=watch.include_warehouse or warehouse_search,
+            )
             if not watch.include_warehouse and not warehouse_search:
                 detailed_results = [item for item in detailed_results if not item.is_warehouse]
             results.extend(detailed_results)
@@ -1276,7 +1337,13 @@ def _fetch_amazon_product_watch_offers(
                 url=watch.url,
                 is_warehouse=offer.is_warehouse,
             )
-            for offer in amazon_provider.extract_offers(html, source_url=watch.url)
+            for offer in _extract_amazon_page_offers(
+                session,
+                watch.url,
+                html,
+                config,
+                include_warehouse=watch.include_warehouse,
+            )
         ]
 
     variations = amazon_provider.extract_color_variations(html, watch.url, watch.max_items_to_scan)
@@ -1293,7 +1360,13 @@ def _fetch_amazon_product_watch_offers(
                 url=watch.url,
                 is_warehouse=offer.is_warehouse,
             )
-            for offer in amazon_provider.extract_offers(html, source_url=watch.url)
+            for offer in _extract_amazon_page_offers(
+                session,
+                watch.url,
+                html,
+                config,
+                include_warehouse=watch.include_warehouse,
+            )
         ]
 
     log(f"Amazon renk varyasyonları bulundu: {watch.name or watch.url} | adet={len(variations)}")
@@ -1316,7 +1389,13 @@ def _fetch_amazon_product_watch_offers(
                 raise_if_age_verification(variation_html)
                 if "captcha" in variation_html.lower() and "robot" in variation_html.lower():
                     raise HermesError("Amazon bot korumasi nedeniyle captcha sayfasi dondu.")
-            for offer in amazon_provider.extract_offers(variation_html, source_url=variation.url):
+            for offer in _extract_amazon_page_offers(
+                session,
+                variation.url,
+                variation_html,
+                config,
+                include_warehouse=watch.include_warehouse,
+            ):
                 offers.append(
                     OfferResult(
                         title=amazon_provider.title_with_color(offer.title, variation.label),
