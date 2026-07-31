@@ -225,29 +225,12 @@ class HermesSmokeTests(unittest.TestCase):
         self.assertFalse(default_watch.include_variations)
         self.assertTrue(opted_in_watch.include_variations)
 
-    def test_amazon_warehouse_offers_are_opt_in_for_normal_links(self):
+    def test_amazon_warehouse_offers_are_always_kept_for_normal_links(self):
         watch = WatchRule(
             name="Edifier M60",
             site="amazon",
             url="https://www.amazon.com.tr/dp/B0D95QG8W4?th=1",
             target_price=Decimal("9000"),
-        )
-        offers = [
-            OfferResult("Edifier M60", Decimal("8899"), url=watch.url),
-            OfferResult("Edifier M60", Decimal("8787.77"), url=watch.url, is_warehouse=True),
-        ]
-        with patch.object(service, "_fetch_amazon_product_watch_offers", return_value=offers):
-            result = service._fetch_watch_offers(object(), watch, SimpleNamespace())
-
-        self.assertEqual([offer.is_warehouse for offer in result], [False])
-
-    def test_amazon_warehouse_offers_are_kept_when_enabled(self):
-        watch = WatchRule(
-            name="Edifier M60",
-            site="amazon",
-            url="https://www.amazon.com.tr/dp/B0D95QG8W4?th=1",
-            target_price=Decimal("9000"),
-            include_warehouse=True,
         )
         offers = [
             OfferResult("Edifier M60", Decimal("8899"), url=watch.url),
@@ -272,7 +255,7 @@ class HermesSmokeTests(unittest.TestCase):
         self.assertTrue(is_warehouse_search_url(watch.url))
         self.assertEqual([offer.is_warehouse for offer in result], [True])
 
-    def test_amazon_search_deep_scan_adds_verified_used_price_when_enabled(self):
+    def test_amazon_search_deep_scan_always_adds_verified_used_price(self):
         search_url = "https://www.amazon.com.tr/s?k=edifier+m60"
         search_html = """
         <div class="s-main-slot">
@@ -303,7 +286,6 @@ class HermesSmokeTests(unittest.TestCase):
             site="amazon",
             url=search_url,
             target_price=Decimal("9000"),
-            include_warehouse=True,
         )
         config = SimpleNamespace(request_timeout_seconds=20, request_delay_min_seconds=0, request_delay_max_seconds=0)
 

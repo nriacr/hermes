@@ -838,7 +838,7 @@ def reset_product_alert_after_missing(
 def summary_config_signature(config: HermesConfig) -> str:
     watch_part = ",".join(
         f"{watch.site}:{watch.url}:{watch.target_price}:{watch.minimum_price}:{watch.excluded_terms}:"
-        f"{watch.size}:{watch.include_variations}:{watch.include_warehouse}:{watch.active}"
+        f"{watch.size}:{watch.include_variations}:{watch.active}"
         for watch in config.watches
     )
     return f"watches={watch_part}"
@@ -1118,11 +1118,15 @@ def _extract_amazon_page_offers(
     source_url: str,
     html: str,
     config: HermesConfig,
-    include_warehouse: bool,
 ) -> List[OfferResult]:
-    """Keep the selected new offer separate from a verified Amazon Depo offer."""
+    """Keep the selected new offer separate from a verified Amazon Depo offer.
+
+    Depot offers are always checked for Amazon links. A used offer is added only
+    when its dedicated offer-listing row explicitly confirms both condition and
+    seller, so normal offers can never inherit the DEPO label.
+    """
     offers = amazon_provider.extract_offers(html, source_url=source_url)
-    if not include_warehouse or any(offer.is_warehouse for offer in offers):
+    if any(offer.is_warehouse for offer in offers):
         return offers
 
     used_listing_url = amazon_provider.extract_used_offer_listing_url(html, source_url=source_url)
@@ -1161,11 +1165,10 @@ def _fetch_amazon_detail_offers(
     session: requests.Session,
     candidate,
     config: HermesConfig,
-    include_warehouse: bool = False,
 ) -> List[SearchResultItem]:
-    """Read all verified new/used offers from one Amazon result's product page."""
+    """Read the normal and any verified Amazon Depo offer from one product page."""
     cache = _amazon_detail_offers_cache(session)
-    cache_key = f"{str(candidate.url or '').strip()}|warehouse={bool(include_warehouse)}"
+    cache_key = str(candidate.url or "").strip()
     cached = cache.get(cache_key)
     if isinstance(cached, list):
         return cached
@@ -1182,7 +1185,6 @@ def _fetch_amazon_detail_offers(
         candidate.url,
         html,
         config,
-        include_warehouse=include_warehouse,
     )
     results = [
         SearchResultItem(
@@ -1234,20 +1236,23 @@ def _fetch_amazon_search_watch_offers(
             continue
         candidate_matches_watch = not target_keywords or title_matches_any_keyword(candidate.title, target_keywords)
         if candidate.price is not None:
-            results.append(
-                SearchResultItem(
-                    title=candidate.title,
-                    url=candidate.url,
-                    price=candidate.price,
-                    is_warehouse=candidate.is_warehouse,
+            # A normal search card can mention a second-hand price without
+            # exposing the actual seller. Never trust that card-level signal
+            # as DEPO; obtain it from the dedicated offer list below instead.
+            if warehouse_search or not candidate.is_warehouse:
+                results.append(
+                    SearchResultItem(
+                        title=candidate.title,
+                        url=candidate.url,
+                        price=candidate.price,
+                        is_warehouse=candidate.is_warehouse,
+                    )
                 )
-            )
 
-            # Standard Amazon search cards often omit the used price even
-            # though the linked product page exposes it. When explicitly
-            # enabled, inspect that one product page and add only a separately
-            # verified used offer. The visible new-price card remains intact.
-            if watch.include_warehouse and not warehouse_search and not candidate.is_warehouse and candidate_matches_watch:
+            # Standard Amazon cards often omit used prices. Always inspect a
+            # matching product page so a separately verified Amazon Depo offer
+            # can accompany the visible normal-price card when available.
+            if not warehouse_search and candidate_matches_watch:
                 warehouse_detail_scans += 1
                 try:
                     used_results = [
@@ -1256,7 +1261,6 @@ def _fetch_amazon_search_watch_offers(
                             session,
                             candidate,
                             config,
-                            include_warehouse=True,
                         )
                         if item.is_warehouse
                     ]
@@ -1276,10 +1280,7 @@ def _fetch_amazon_search_watch_offers(
                 session,
                 candidate,
                 config,
-                include_warehouse=watch.include_warehouse or warehouse_search,
             )
-            if not watch.include_warehouse and not warehouse_search:
-                detailed_results = [item for item in detailed_results if not item.is_warehouse]
             results.extend(detailed_results)
         except Exception as exc:  # noqa: BLE001
             log(f"Amazon product arama detay fiyatı okunamadı: {log_cell(candidate.title, 60)} | {exc}")
@@ -1342,7 +1343,6 @@ def _fetch_amazon_product_watch_offers(
                 watch.url,
                 html,
                 config,
-                include_warehouse=watch.include_warehouse,
             )
         ]
 
@@ -1365,7 +1365,6 @@ def _fetch_amazon_product_watch_offers(
                 watch.url,
                 html,
                 config,
-                include_warehouse=watch.include_warehouse,
             )
         ]
 
@@ -1394,7 +1393,6 @@ def _fetch_amazon_product_watch_offers(
                 variation.url,
                 variation_html,
                 config,
-                include_warehouse=watch.include_warehouse,
             ):
                 offers.append(
                     OfferResult(
@@ -1674,10 +1672,6 @@ def _fetch_watch_offers(session: requests.Session, watch: WatchRule, config: Her
     else:
         offers = None
     if offers is not None:
-        # A Warehouse-only source is itself an explicit request for used stock.
-        # On ordinary Amazon links, used offers remain opt-in per watch.
-        if not watch.include_warehouse and not amazon_provider.is_warehouse_search_url(url):
-            offers = [offer for offer in offers if not offer.is_warehouse]
         return offers
     if site == SITE_HEPSIBURADA:
         return _fetch_hepsiburada_watch_offers(session, watch, config)
@@ -1861,7 +1855,6 @@ def check_once(config: HermesConfig) -> None:
                 state[offer_key]["size"] = watch.size
                 state[offer_key]["site"] = watch.site
                 state[offer_key]["include_variations"] = watch.include_variations
-                state[offer_key]["include_warehouse"] = watch.include_warehouse
                 state[offer_key]["search_group"] = search_group
                 state[offer_key]["search_group_label"] = search_group_label
                 state[offer_key]["is_warehouse"] = offer.is_warehouse
@@ -1882,7 +1875,6 @@ def check_once(config: HermesConfig) -> None:
                 "configured_url": watch.url,
                 "size": watch.size,
                 "include_variations": watch.include_variations,
-                "include_warehouse": watch.include_warehouse,
                 "search_group": search_group,
                 "search_group_label": search_group_label,
                 "offer_keys": offer_keys,
