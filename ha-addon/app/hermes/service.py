@@ -4,8 +4,6 @@ import time
 from datetime import timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, List
-from urllib.parse import urlsplit
-
 import requests
 
 from .config_loader import load_config
@@ -28,6 +26,7 @@ from .http_client import (
     cleaned_html,
     fetch_amazon_page,
     fetch_beymenclub_page,
+    fetch_beymenclub_size_summary,
     fetch_hepsiburada_page,
     fetch_hm_page,
     fetch_with_retries,
@@ -1633,25 +1632,12 @@ def _fetch_beymenclub_watch_offers(
         product_id = beymenclub_provider.extract_product_id(html)
         if product_id is None:
             raise HermesError("Beymen Club ürün kimliği bulunamadı; beden durumu doğrulanamadı.")
-        parsed_url = urlsplit(watch.url)
-        summary_url = (
-            f"{parsed_url.scheme}://{parsed_url.netloc}"
-            f"/sf-api/api/product/{product_id}/productsummary"
+        size_summary = fetch_beymenclub_size_summary(
+            session,
+            watch.url,
+            product_id,
+            config.request_timeout_seconds,
         )
-        summary_response = session.post(
-            summary_url,
-            headers={
-                "Accept": "application/json, text/plain, */*",
-                "Origin": f"{parsed_url.scheme}://{parsed_url.netloc}",
-                "Referer": watch.url,
-            },
-            timeout=config.request_timeout_seconds,
-        )
-        summary_response.raise_for_status()
-        try:
-            size_summary = summary_response.json()
-        except ValueError as exc:
-            raise HermesError("Beymen Club beden stok verisi okunamadı.") from exc
     offers = beymenclub_provider.extract_offers(
         html,
         source_url=watch.url,

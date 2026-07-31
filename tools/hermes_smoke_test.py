@@ -21,7 +21,12 @@ from hermes import settings_ui  # noqa: E402
 from hermes import telegram_listener  # noqa: E402
 from hermes import link_test_ui  # noqa: E402
 from hermes.errors import HermesError, OutOfStockHermesError  # noqa: E402
-from hermes.http_client import amazon_url_variants, fetch_amazon_page, fetch_beymenclub_page  # noqa: E402
+from hermes.http_client import (  # noqa: E402
+    amazon_url_variants,
+    fetch_amazon_page,
+    fetch_beymenclub_page,
+    fetch_beymenclub_size_summary,
+)
 from hermes.config_loader import _prepare_watches  # noqa: E402
 from hermes.models import HermesConfig, OfferResult, PriceSummaryRow, SearchResultItem, StockSummaryRow, TelegramConfig, WatchRule  # noqa: E402
 from hermes.providers.base import soup_from_html  # noqa: E402
@@ -91,6 +96,39 @@ class HermesSmokeTests(unittest.TestCase):
         headers = session.calls[0][1]["headers"]
         self.assertIn("Chrome/124", headers["User-Agent"])
         self.assertEqual(headers["Accept-Language"], "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7")
+
+    def test_beymenclub_size_summary_uses_browser_session_headers(self):
+        class Response:
+            status_code = 200
+            headers = {"content-type": "application/json"}
+
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return {"result": {"sizes": [{"sizeName": "XL", "inStock": True}]}}
+
+        class Session:
+            def __init__(self):
+                self.calls = []
+
+            def post(self, url, **kwargs):
+                self.calls.append((url, kwargs))
+                return Response()
+
+        session = Session()
+        payload = fetch_beymenclub_size_summary(
+            session,
+            "https://www.beymenclub.com/tr/p_test",
+            1941298,
+            10,
+        )
+
+        self.assertEqual(payload["result"]["sizes"][0]["sizeName"], "XL")
+        request_url, kwargs = session.calls[0]
+        self.assertEqual(request_url, "https://www.beymenclub.com/sf-api/api/product/1941298/productsummary")
+        self.assertEqual(kwargs["headers"]["Origin"], "https://www.beymenclub.com")
+        self.assertEqual(kwargs["headers"]["Sec-Fetch-Site"], "same-origin")
 
     def test_network_prefers_two_or_more_basket_price(self):
         html = """

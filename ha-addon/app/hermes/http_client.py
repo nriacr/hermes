@@ -864,6 +864,99 @@ def fetch_beymenclub_page(session: requests.Session, url: str, timeout: int) -> 
     raise HttpStatusHermesError(0, url)
 
 
+def _beymenclub_summary_headers(product_url: str) -> Dict[str, str]:
+    parsed = urlsplit(product_url)
+    origin = f"{parsed.scheme}://{parsed.netloc}"
+    headers = beymenclub_headers(product_url)
+    headers.update(
+        {
+            "Accept": "application/json, text/plain, */*",
+            "Content-Type": "application/json",
+            "Origin": origin,
+            "Referer": product_url,
+            "Sec-Fetch-Dest": "empty",
+            "Sec-Fetch-Mode": "cors",
+            "Sec-Fetch-Site": "same-origin",
+            "X-Requested-With": "XMLHttpRequest",
+        }
+    )
+    return headers
+
+
+def _get_beymenclub_size_summary(session, product_url: str, product_id: int, timeout: int) -> Dict[str, Any]:
+    parsed = urlsplit(product_url)
+    summary_url = f"{parsed.scheme}://{parsed.netloc}/sf-api/api/product/{product_id}/productsummary"
+    response = session.post(
+        summary_url,
+        headers=_beymenclub_summary_headers(product_url),
+        timeout=timeout,
+        allow_redirects=True,
+    )
+    if response.status_code == 403:
+        raise HttpStatusHermesError(403, summary_url)
+    response.raise_for_status()
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        raise HermesError("Beymen Club beden stok verisi okunamadı.") from exc
+    if not isinstance(payload, dict):
+        raise HermesError("Beymen Club beden stok verisi beklenen biçimde dönmedi.")
+    return payload
+
+
+def fetch_beymenclub_size_summary(
+    session: requests.Session, product_url: str, product_id: int, timeout: int
+) -> Dict[str, Any]:
+    """Read the protected size API using the same browser identity as the product page."""
+    attempts: List[str] = []
+    last_error: Optional[Exception] = None
+
+    try:
+        return _get_beymenclub_size_summary(session, product_url, product_id, timeout)
+    except Exception as exc:  # noqa: BLE001
+        last_error = exc
+        status = getattr(exc, "status_code", None) or exc.__class__.__name__
+        attempts.append(f"requests:{status}")
+
+    fresh_session = requests.Session()
+    try:
+        _get_beymenclub_response(fresh_session, product_url, timeout)
+        return _get_beymenclub_size_summary(fresh_session, product_url, product_id, timeout)
+    except Exception as exc:  # noqa: BLE001
+        last_error = exc
+        status = getattr(exc, "status_code", None) or exc.__class__.__name__
+        attempts.append(f"requests_fresh:{status}")
+
+    if curl_requests is not None:
+        try:
+            curl_session = curl_requests.Session()
+            response = curl_session.get(
+                product_url,
+                headers=beymenclub_headers(product_url),
+                timeout=timeout,
+                allow_redirects=True,
+                impersonate="chrome124",
+            )
+            if response.status_code == 403:
+                raise HttpStatusHermesError(403, product_url)
+            response.raise_for_status()
+            if not _is_usable_beymenclub_response(response):
+                raise HermesError("Beymen Club ürün sayfası beklenen fiyat verisini içermiyor.")
+            return _get_beymenclub_size_summary(curl_session, product_url, product_id, timeout)
+        except Exception as exc:  # noqa: BLE001
+            last_error = exc
+            status = getattr(exc, "status_code", None) or exc.__class__.__name__
+            attempts.append(f"curl:{status}")
+
+    if attempts:
+        log(f"Beymen Club beden teşhis: deneme={len(attempts)} | akis={' > '.join(attempts)} | url={product_url}")
+    if isinstance(last_error, HttpStatusHermesError):
+        raise HermesError("Beymen Club beden stok verisine erişim reddedildi; sonraki turda yeniden denenecek.")
+    if last_error is not None:
+        raise HermesError(f"Beymen Club beden stok verisi okunamadı: {last_error}") from last_error
+    raise HermesError("Beymen Club beden stok verisi okunamadı.")
+
+
 def _is_zara_interstitial(html: str) -> bool:
     normalized = normalize_offer_text(html)
     return "bm-verify" in normalized and "_sec/verify" in normalized
