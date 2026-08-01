@@ -24,6 +24,7 @@ from hermes.errors import HermesError, OutOfStockHermesError  # noqa: E402
 from hermes.http_client import (  # noqa: E402
     amazon_url_variants,
     fetch_amazon_page,
+    fetch_bengurme_page,
     fetch_beymenclub_page,
     fetch_beymenclub_size_summary,
 )
@@ -50,6 +51,7 @@ from hermes.providers.beymenclub import (  # noqa: E402
     extract_product_id as extract_beymenclub_product_id,
     requested_size_state_from_summary,
 )
+from hermes.providers.bengurme import extract_offers as extract_bengurme_offers  # noqa: E402
 from hermes.providers.network import (  # noqa: E402
     _network_requested_size_state,
     extract_offer as extract_network_offer,
@@ -70,6 +72,84 @@ from hermes.utils import detect_site_from_url, parse_decimal, utc_now  # noqa: E
 
 
 class HermesSmokeTests(unittest.TestCase):
+    def test_bengurme_fetch_prefers_shopify_variant_json(self):
+        class Response:
+            status_code = 200
+            headers = {"content-type": "application/json"}
+            encoding = "utf-8"
+            text = '{"title":"Kilis Karası Kan Üzümü","variants":[]}'
+            content = text.encode("utf-8")
+
+            def raise_for_status(self):
+                return None
+
+        class Session:
+            def __init__(self):
+                self.calls = []
+
+            def get(self, url, **kwargs):
+                self.calls.append((url, kwargs))
+                return Response()
+
+        session = Session()
+        response = fetch_bengurme_page(session, "https://bengurme.com/products/kilis-karasi-kan-uzumu", 10)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(session.calls), 1)
+        self.assertEqual(session.calls[0][0], "https://bengurme.com/products/kilis-karasi-kan-uzumu.js")
+        self.assertIn("Chrome/124", session.calls[0][1]["headers"]["User-Agent"])
+
+    def test_bengurme_url_is_detected(self):
+        self.assertEqual(
+            detect_site_from_url("https://bengurme.com/products/kilis-karasi-kan-uzumu"),
+            "bengurme",
+        )
+
+    def test_bengurme_reads_each_available_gram_variant(self):
+        payload = {
+            "title": "Kilis Karası Kan Üzümü",
+            "variants": [
+                {"title": "250 gram", "price": 27500, "available": True},
+                {"title": "500 gram", "price": 45000, "available": True},
+                {"title": "1000 gram", "price": 95000, "available": True},
+                {"title": "2000 gram", "price": 180000, "available": False},
+            ],
+        }
+
+        offers = extract_bengurme_offers(json.dumps(payload), "https://bengurme.com/products/uzum")
+
+        self.assertEqual(
+            [(offer.title, offer.price) for offer in offers],
+            [
+                ("Kilis Karası Kan Üzümü / 250 gram", Decimal("275")),
+                ("Kilis Karası Kan Üzümü / 500 gram", Decimal("450")),
+                ("Kilis Karası Kan Üzümü / 1000 gram", Decimal("950")),
+            ],
+        )
+
+    def test_bengurme_unavailable_product_is_stock_state_not_page_error(self):
+        payload = {
+            "title": "Taş Kırma Çekirdeksiz Yeşil Zeytin",
+            "variants": [{"title": "1 kg", "price": 69500, "available": False}],
+        }
+
+        with self.assertRaisesRegex(OutOfStockHermesError, "Ben Gurme ürünü stokta değil"):
+            extract_bengurme_offers(json.dumps(payload), "https://bengurme.com/products/zeytin")
+
+    def test_bengurme_requested_variant_matching_is_case_insensitive(self):
+        payload = {
+            "title": "Kilis Karası Kan Üzümü",
+            "variants": [
+                {"title": "500 gram", "price": 45000, "available": True},
+                {"title": "1000 gram", "price": 95000, "available": True},
+            ],
+        }
+
+        offers = extract_bengurme_offers(json.dumps(payload), size="500 GRAM")
+
+        self.assertEqual(len(offers), 1)
+        self.assertEqual(offers[0].price, Decimal("450"))
+
     def test_beymenclub_fetch_uses_its_browser_shaped_headers(self):
         class Response:
             status_code = 200

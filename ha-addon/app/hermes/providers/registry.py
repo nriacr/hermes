@@ -1,7 +1,7 @@
-from ..constants import SITE_AMAZON, SITE_BEYMENCLUB, SITE_HEPSIBURADA, SITE_HM, SITE_NETWORK, SITE_NORDBRON, SITE_TRENDYOL, SITE_ZARA
+from ..constants import SITE_AMAZON, SITE_BENGURME, SITE_BEYMENCLUB, SITE_HEPSIBURADA, SITE_HM, SITE_NETWORK, SITE_NORDBRON, SITE_TRENDYOL, SITE_ZARA
 from ..errors import HermesError
 from ..models import OfferResult
-from . import amazon, beymenclub, hepsiburada, hm, network, nordbron, trendyol, zara
+from . import amazon, bengurme, beymenclub, hepsiburada, hm, network, nordbron, trendyol, zara
 
 PROVIDERS = {
     SITE_AMAZON: amazon.extract_offer,
@@ -9,6 +9,7 @@ PROVIDERS = {
     SITE_TRENDYOL: trendyol.extract_offer,
     SITE_NETWORK: network.extract_offer,
     SITE_BEYMENCLUB: beymenclub.extract_offer,
+    SITE_BENGURME: bengurme.extract_offer,
     SITE_NORDBRON: nordbron.extract_offer,
     SITE_ZARA: zara.extract_offer,
     SITE_HM: hm.extract_offer,
@@ -20,6 +21,6 @@ def extract_offer(site: str, html: str, source_url: str = "") -> OfferResult:
     parser = PROVIDERS.get(site_key)
     if parser is None:
         raise HermesError(f"Desteklenmeyen site parserı: {site}")
-    if site_key in {SITE_AMAZON, SITE_HEPSIBURADA, SITE_ZARA, SITE_HM, SITE_NETWORK, SITE_BEYMENCLUB}:
+    if site_key in {SITE_AMAZON, SITE_HEPSIBURADA, SITE_ZARA, SITE_HM, SITE_NETWORK, SITE_BEYMENCLUB, SITE_BENGURME}:
         return parser(html, source_url=source_url)
     return parser(html)

@@ -12,6 +12,7 @@ from .constants import (
     APP_VERSION,
     NOTIFY_REPEAT_SECONDS,
     SITE_AMAZON,
+    SITE_BENGURME,
     SITE_BEYMENCLUB,
     SITE_HEPSIBURADA,
     SITE_HM,
@@ -25,6 +26,7 @@ from .errors import HermesError, OutOfStockHermesError
 from .http_client import (
     cleaned_html,
     fetch_amazon_page,
+    fetch_bengurme_page,
     fetch_beymenclub_page,
     fetch_beymenclub_size_summary,
     fetch_hepsiburada_page,
@@ -39,6 +41,7 @@ from .providers import hepsiburada as hepsiburada_provider
 from .providers import hm as hm_provider
 from .providers import zara as zara_provider
 from .providers import amazon as amazon_provider
+from .providers import bengurme as bengurme_provider
 from .providers import beymenclub as beymenclub_provider
 from .providers import network as network_provider
 from .providers.registry import extract_offer
@@ -1649,6 +1652,22 @@ def _fetch_beymenclub_watch_offers(
     return offers
 
 
+def _fetch_bengurme_watch_offers(
+    session: requests.Session,
+    watch: WatchRule,
+    config: HermesConfig,
+) -> List[OfferResult]:
+    response = fetch_bengurme_page(session, watch.url, config.request_timeout_seconds)
+    html = cleaned_html(response)
+    raise_if_age_verification(html)
+    if is_bot_protection_page(SITE_BENGURME, html):
+        raise HermesError("Ben Gurme bot korumasi nedeniyle captcha sayfasi dondu.")
+    offers = bengurme_provider.extract_offers(html, source_url=watch.url, size=watch.size)
+    if watch.size:
+        log(f"Ben Gurme beden kontrol edildi: {watch.name or watch.url} | beden={watch.size} | adet={len(offers)}")
+    return offers
+
+
 def _fetch_watch_offers(session: requests.Session, watch: WatchRule, config: HermesConfig) -> List[OfferResult]:
     site = watch.site
     url = watch.url
@@ -1670,6 +1689,8 @@ def _fetch_watch_offers(session: requests.Session, watch: WatchRule, config: Her
         return _fetch_network_watch_offers(session, watch, config)
     if site == SITE_BEYMENCLUB:
         return _fetch_beymenclub_watch_offers(session, watch, config)
+    if site == SITE_BENGURME:
+        return _fetch_bengurme_watch_offers(session, watch, config)
     else:
         response = fetch_with_retries(session, url, config.request_timeout_seconds)
     html = cleaned_html(response)
@@ -1745,6 +1766,30 @@ def check_once(config: HermesConfig) -> None:
             display_name = watch.name or watch.url
             wait_before_request(request_log_label(seller, display_name), config)
             offers = _fetch_watch_offers(session, watch, config)
+            stock_returned = watch.site == SITE_BENGURME and bool(state_entry.get("last_out_of_stock_at"))
+            stock_return_notification_sent = False
+            if stock_returned and offers:
+                lowest_offer = min(offers, key=lambda offer: offer.price)
+                returned_title = lowest_offer.title or watch.name or watch.url
+                message = (
+                    f"Site: {seller}\n"
+                    f"{returned_title}\n"
+                    "Stok yeniden geldi.\n"
+                    f"Guncel fiyat: {format_tl(lowest_offer.price, with_currency=True)}"
+                )
+                send_pushover(
+                    session,
+                    config.pushover_user_key,
+                    config.pushover_api_token,
+                    f"{seller} stok alarmi",
+                    message,
+                    lowest_offer.url or watch.url,
+                    config.request_timeout_seconds,
+                )
+                stock_return_notification_sent = True
+                state_entry = dict(state_entry)
+                state_entry.pop("last_out_of_stock_at", None)
+                log(f"Stok geri geldi bildirimi gonderildi: {seller} | {returned_title}")
             offer_keys: List[str] = []
             group_fallback_title = next(
                 (
@@ -1803,7 +1848,14 @@ def check_once(config: HermesConfig) -> None:
                     f"hedef={format_tl(watch.target_price, with_currency=True)}"
                 )
 
-                alert_sent = should_alert(offer_state_entry, offer.price, watch.target_price, watch.notify_once_in_24h)
+                # A stock-return notification already reached the user for this
+                # watch. Record it as the alert state below, without sending a
+                # second price notification in the same cycle.
+                alert_sent = (
+                    False
+                    if stock_return_notification_sent
+                    else should_alert(offer_state_entry, offer.price, watch.target_price, watch.notify_once_in_24h)
+                )
                 if alert_sent:
                     seller_note = f" ({offer.seller})" if offer.seller and watch.site == SITE_HEPSIBURADA else ""
                     message = (
@@ -1831,7 +1883,7 @@ def check_once(config: HermesConfig) -> None:
                     offer_state_entry,
                     offer.price,
                     watch.target_price,
-                    alert_sent,
+                    alert_sent or stock_return_notification_sent,
                     f"{seller} | {offer_display_name}",
                 )
                 state[offer_key]["title"] = offer_display_name

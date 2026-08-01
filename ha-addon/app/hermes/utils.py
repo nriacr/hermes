@@ -11,6 +11,7 @@ from .constants import (
     AMAZON_BASE_URL,
     DEFAULT_HEADERS,
     SITE_AMAZON,
+    SITE_BENGURME,
     SITE_BEYMENCLUB,
     SITE_HEPSIBURADA,
     SITE_HM,
@@ -234,6 +235,8 @@ def detect_site_from_url(url: str) -> str:
         return SITE_NETWORK
     if "beymenclub" in host:
         return SITE_BEYMENCLUB
+    if "bengurme" in host:
+        return SITE_BENGURME
     if "nordbron" in host:
         return SITE_NORDBRON
     if "zara" in host:

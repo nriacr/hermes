@@ -864,6 +864,114 @@ def fetch_beymenclub_page(session: requests.Session, url: str, timeout: int) -> 
     raise HttpStatusHermesError(0, url)
 
 
+def bengurme_headers(url: str) -> Dict[str, str]:
+    """Return headers for Ben Gurme's public Shopify product endpoints."""
+    headers = build_headers(url)
+    headers.update(
+        {
+            "User-Agent": AMAZON_CHROME_USER_AGENT,
+            "Accept": "application/json,text/javascript,*/*;q=0.8",
+            "Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7",
+            "Referer": referer_for_url(url),
+            "X-Requested-With": "XMLHttpRequest",
+        }
+    )
+    return headers
+
+
+def bengurme_product_json_url(url: str) -> str:
+    """Build Shopify's public product JSON endpoint from a Ben Gurme link."""
+    parsed = urlsplit(url)
+    match = re.search(r"/products/([^/?#]+)", parsed.path, re.IGNORECASE)
+    if not match:
+        raise HermesError("Ben Gurme linkinden ürün kimliği okunamadı.")
+    path = f"/products/{match.group(1)}.js"
+    return urlunsplit((parsed.scheme or "https", parsed.netloc, path, "", ""))
+
+
+def _is_usable_bengurme_response(response) -> bool:
+    text = decode_response_text(response).lstrip()
+    normalized = normalize_offer_text(text)
+    return (
+        (text.startswith("{") and '"variants"' in text)
+        or "shopify" in normalized
+        or "product" in normalized and "variants" in normalized
+        or "sepete ekle" in normalized
+        or "tukendi" in normalized
+    )
+
+
+def _get_bengurme_response(session, url: str, timeout: int):
+    response = session.get(
+        url,
+        headers=bengurme_headers(url),
+        timeout=timeout,
+        allow_redirects=True,
+    )
+    if response.status_code in {403, 429}:
+        raise HttpStatusHermesError(response.status_code, url)
+    response.raise_for_status()
+    if not _is_usable_bengurme_response(response):
+        raise HermesError("Ben Gurme ürün sayfası beklenen stok veya fiyat verisini içermiyor.")
+    return response
+
+
+def fetch_bengurme_page(session: requests.Session, url: str, timeout: int) -> requests.Response:
+    """Read Ben Gurme from Shopify JSON first, with the product page as fallback.
+
+    The JSON endpoint contains every variant's live availability and price, so it
+    is both faster and less brittle than reading storefront button text.
+    """
+    cache = getattr(session, "_hermes_bengurme_response_cache", None)
+    if cache is None:
+        cache = {}
+        setattr(session, "_hermes_bengurme_response_cache", cache)
+    if url in cache:
+        return cache[url]
+
+    attempts: List[str] = []
+    last_error: Optional[Exception] = None
+    candidates = (bengurme_product_json_url(url), url)
+    for label, client in (("requests", session), ("requests_fresh", requests.Session())):
+        for candidate_url in candidates:
+            try:
+                response = _get_bengurme_response(client, candidate_url, timeout)
+                cache[url] = response
+                return response
+            except Exception as exc:  # noqa: BLE001
+                last_error = exc
+                status = getattr(exc, "status_code", None) or exc.__class__.__name__
+                attempts.append(f"{label}:{status}")
+
+    if curl_requests is not None:
+        for candidate_url in candidates:
+            try:
+                response = curl_requests.get(
+                    candidate_url,
+                    headers=bengurme_headers(candidate_url),
+                    timeout=timeout,
+                    allow_redirects=True,
+                    impersonate="chrome124",
+                )
+                if response.status_code in {403, 429}:
+                    raise HttpStatusHermesError(response.status_code, candidate_url)
+                response.raise_for_status()
+                if not _is_usable_bengurme_response(response):
+                    raise HermesError("Ben Gurme ürün verisi okunamadı.")
+                cache[url] = response
+                return response
+            except Exception as exc:  # noqa: BLE001
+                last_error = exc
+                status = getattr(exc, "status_code", None) or exc.__class__.__name__
+                attempts.append(f"curl:{status}")
+
+    if attempts:
+        log(f"Ben Gurme teşhis: deneme={len(attempts)} | akis={' > '.join(attempts)} | url={url}")
+    if last_error is not None:
+        raise last_error
+    raise HttpStatusHermesError(0, url)
+
+
 def _beymenclub_summary_headers(product_url: str) -> Dict[str, str]:
     parsed = urlsplit(product_url)
     origin = f"{parsed.scheme}://{parsed.netloc}"

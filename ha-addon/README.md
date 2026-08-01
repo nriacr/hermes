@@ -5,7 +5,7 @@ Hermes, Home Assistant üzerinde çalışan çok siteli ürün ve Telegram fırs
 ## Özellikler
 
 - Takip edilenler: tek kayıt altında en fazla 5 link izleme
-- Linkten otomatik site algılama: Amazon, Hepsiburada, Trendyol, Network, Beymen Club, Nordbron, Zara, H&M
+- Linkten otomatik site algılama: Amazon, Hepsiburada, Trendyol, Network, Beymen Club, Nordbron, Zara, H&M, Ben Gurme
 - Ürün ve arama linklerini aynı takip kaydı içinde karışık kullanabilme
 - Arama linklerinde, takip adını keyword kabul ederek eşleşen sonuçlar arasından en iyi fiyatı seçme
 - Arama linklerinde sabit olarak en fazla 60 sonuç tarama
@@ -99,6 +99,7 @@ Hermes her siteyi kendi sağlayıcısında okur. Bir sitenin fiyat okuma kuralı
 - **Nordbron:** Sayfadaki ürün fiyatını okur; bot koruması veya captcha gerçek hata olarak kaydedilir.
 - **Zara:** Renk varyasyonlarını ve seçilen bedeni kontrol eder. İstenen beden stokta değilse bu durum hata değil, özet tablodaki `Stokta Olmayanlar` bölümüne yazılır. `6` ve `44` gibi girilen bedenler, sayfadaki yaş/EU ekleriyle uyumlu karşılaştırılır.
 - **H&M:** Renk ve beden stok bilgisini siteye özel veri yolu üzerinden okur. Stokta olmayan beden hata olarak değil, `Stokta Olmayanlar` bölümünde gösterilir.
+- **Ben Gurme:** Shopify ürün verisindeki canlı stok ve varyant bilgisini okur. Stoktaki her gramaj ayrı satır olarak değerlendirilir; ürün tamamen tükendiyse bu teknik hata sayılmaz ve `Stokta Olmayanlar` bölümünde gösterilir. Ürün tekrar stokta olduğunda hedef fiyattan bağımsız tek bir stok bildirimi gönderilir.
 
 Kontrol sırası aynı siteye art arda istek gelmesini azaltacak biçimde dengelenir. Amazon ve Hepsiburada'nın bot koruması veya değişken sayfa yapısı nedeniyle ek kurtarma denemeleri yalnızca ilk okuma başarısız olduğunda çalışır. Amazon Depo teklifi denetimi otomatik yürür; hızlı çevrim için varyasyon taramasını yalnızca gerçekten ihtiyaç duyulan takiplerde etkinleştirmek en verimli yaklaşımdır.
 
@@ -114,6 +115,7 @@ Hermes mimarisi provider tabanlıdır. Her site için parser/fiyat yakalama kodu
 - `app/hermes/providers/nordbron.py`
 - `app/hermes/providers/zara.py`
 - `app/hermes/providers/hm.py`
+- `app/hermes/providers/bengurme.py`
 
 Amazon ürün ve Amazon arama içindeki ortak fiyat yakalama yardımcıları `app/hermes/providers/amazon_common.py` altında tutulur. Yeni site eklerken mevcut provider dosyalarını değiştirmek yerine yeni siteye özel ayrı bir provider eklenmelidir.
 
