@@ -22,6 +22,7 @@ from .settings_ui import (
     render_settings_script,
     should_return_to_main_after_save,
 )
+from .web_assets import HERMES_ICON_PNG, HERMES_ICON_SVG, render_web_manifest
 
 
 def _public_settings_context(path: str):
@@ -45,10 +46,43 @@ class SettingsDashboardHandler(_StatusHandler):
         if path == "/health":
             payload = b"ok\n"
             content_type = "text/plain; charset=utf-8"
+        elif path == "/icon.png":
+            payload = HERMES_ICON_PNG
+            content_type = "image/png"
+        elif path == "/icon.svg":
+            payload = HERMES_ICON_SVG
+            content_type = "image/svg+xml"
+        elif path == "/manifest.webmanifest":
+            payload = render_web_manifest(".")
+            content_type = "application/manifest+json; charset=utf-8"
         elif path.startswith("/public/") and path.endswith("/health"):
             if _public_dashboard_allowed(self.path):
                 payload = b"ok\n"
                 content_type = "text/plain; charset=utf-8"
+            else:
+                status = 404
+                payload = b"not found\n"
+                content_type = "text/plain; charset=utf-8"
+        elif path.startswith("/public/") and path.endswith("/icon.png"):
+            if _public_dashboard_allowed(self.path):
+                payload = HERMES_ICON_PNG
+                content_type = "image/png"
+            else:
+                status = 404
+                payload = b"not found\n"
+                content_type = "text/plain; charset=utf-8"
+        elif path.startswith("/public/") and path.endswith("/icon.svg"):
+            if _public_dashboard_allowed(self.path):
+                payload = HERMES_ICON_SVG
+                content_type = "image/svg+xml"
+            else:
+                status = 404
+                payload = b"not found\n"
+                content_type = "text/plain; charset=utf-8"
+        elif path.startswith("/public/") and path.endswith("/manifest.webmanifest"):
+            if _public_dashboard_allowed(self.path):
+                payload = render_web_manifest(_public_base_path(self.path))
+                content_type = "application/manifest+json; charset=utf-8"
             else:
                 status = 404
                 payload = b"not found\n"

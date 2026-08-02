@@ -13,6 +13,7 @@ from .logging_utils import log
 from .link_test_ui import render_link_test_from_request, render_link_test_page
 from .providers import hepsiburada as hepsiburada_provider
 from .storage import load_json
+from .web_assets import HERMES_ICON_PNG, HERMES_ICON_SVG, render_web_app_head, render_web_manifest
 from .utils import (
     canonical_tracking_url,
     detect_site_from_url,
@@ -1114,6 +1115,7 @@ def _render_dashboard_page(path: str, base_path: str, error_detail_limit: int | 
     if action_status:
         notice_class = "notice-ok" if action_status == "ok" else "notice-fail"
         notice_html = f"<p class='notice {notice_class}'>{escape(action_message)}</p>"
+    web_app_head = render_web_app_head(base_path)
     base_path = escape(base_path, quote=True)
     options = load_json(OPTIONS_PATH, {})
     telegram_summary = _collect_telegram_summary(options if isinstance(options, dict) else {})
@@ -1149,7 +1151,7 @@ def _render_dashboard_page(path: str, base_path: str, error_detail_limit: int | 
   });
 </script>"""
     html = f"""<!doctype html>
-<html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="theme-color" content="#111315"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Hermes"><meta http-equiv="refresh" content="60"><title>Hermes</title><style>{DASHBOARD_CSS}</style></head><body class="public"><main><div class="hero"><div class="badge">Hermes</div><div class="actions public-actions"><a class="button secondary" href="{base_path}/settings">Ayarlar</a><a class="button secondary" href="{base_path}/link-test">Test</a><form class="inline-form" method="post" action="{base_path}/test-pushover"><button class="button test" type="submit">Pushover</button></form><form class="inline-form" method="post" action="{base_path}/reset-notifications" data-confirm="Bildirim susturma hafızası sıfırlanacak ve hedef altında kalan fırsatlar için tek seferlik kontrol başlatılacak. Devam etmek istiyor musun?"><button class="button secondary" type="submit">Bildirim Sıfırla</button></form><form class="inline-form" method="post" action="{base_path}/reset-price-history" data-confirm="Min/maks fiyat geçmişi temizlenecek ve güncel fiyattan yeniden başlayacak. Devam etmek istiyor musun?"><button class="button secondary" type="submit">Min/Maks Sıfırla</button></form></div>{public_cycle_row}{notice_html}{_render_table()}{telegram_recent_html}{error_card_html}</div></main>{confirm_script}</body></html>"""
+<html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="theme-color" content="#111315"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Hermes">{web_app_head}<meta http-equiv="refresh" content="60"><title>Hermes</title><style>{DASHBOARD_CSS}</style></head><body class="public"><main><div class="hero"><div class="badge">Hermes</div><div class="actions public-actions"><a class="button secondary" href="{base_path}/settings">Ayarlar</a><a class="button secondary" href="{base_path}/link-test">Test</a><form class="inline-form" method="post" action="{base_path}/test-pushover"><button class="button test" type="submit">Pushover</button></form><form class="inline-form" method="post" action="{base_path}/reset-notifications" data-confirm="Bildirim susturma hafızası sıfırlanacak ve hedef altında kalan fırsatlar için tek seferlik kontrol başlatılacak. Devam etmek istiyor musun?"><button class="button secondary" type="submit">Bildirim Sıfırla</button></form><form class="inline-form" method="post" action="{base_path}/reset-price-history" data-confirm="Min/maks fiyat geçmişi temizlenecek ve güncel fiyattan yeniden başlayacak. Devam etmek istiyor musun?"><button class="button secondary" type="submit">Min/Maks Sıfırla</button></form></div>{public_cycle_row}{notice_html}{_render_table()}{telegram_recent_html}{error_card_html}</div></main>{confirm_script}</body></html>"""
     return html.encode("utf-8")
 
 
@@ -1173,6 +1175,15 @@ class _StatusHandler(BaseHTTPRequestHandler):
         if path == "/health":
             payload = b"ok\n"
             content_type = "text/plain; charset=utf-8"
+        elif path == "/icon.png":
+            payload = HERMES_ICON_PNG
+            content_type = "image/png"
+        elif path == "/icon.svg":
+            payload = HERMES_ICON_SVG
+            content_type = "image/svg+xml"
+        elif path == "/manifest.webmanifest":
+            payload = render_web_manifest(".")
+            content_type = "application/manifest+json; charset=utf-8"
         elif path == "/link-test":
             payload = render_link_test_page(DASHBOARD_CSS, "./link-test", "./")
             content_type = "text/html; charset=utf-8"

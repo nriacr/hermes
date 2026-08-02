@@ -11,6 +11,7 @@ from .dashboard import (
     _send_test_notification,
 )
 from .link_test_ui import render_link_test_from_request, render_link_test_page
+from .web_assets import HERMES_ICON_PNG, HERMES_ICON_SVG, render_web_manifest
 from .settings_ui import (
     handle_settings_save,
     render_settings_page,
@@ -68,7 +69,19 @@ class _PublicDashboardHandler(BaseHTTPRequestHandler):
                 return
             suffix = _public_suffix(self.path)
             base_path = _public_base_path(self.path)
-            if suffix == "/settings.js":
+            if suffix == "/icon.png":
+                status = 200
+                payload = HERMES_ICON_PNG
+                content_type = "image/png"
+            elif suffix == "/icon.svg":
+                status = 200
+                payload = HERMES_ICON_SVG
+                content_type = "image/svg+xml"
+            elif suffix == "/manifest.webmanifest":
+                status = 200
+                payload = render_web_manifest(base_path)
+                content_type = "application/manifest+json; charset=utf-8"
+            elif suffix == "/settings.js":
                 status = 200
                 payload = render_settings_script()
                 content_type = "application/javascript; charset=utf-8"
