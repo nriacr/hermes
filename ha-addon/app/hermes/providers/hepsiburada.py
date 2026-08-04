@@ -5,7 +5,7 @@ from decimal import Decimal
 from typing import Any, Iterable, Optional
 from urllib.parse import unquote, urljoin, urlsplit
 
-from ..errors import HermesError
+from ..errors import EmptySearchResultsHermesError, HermesError
 from ..logging_utils import log
 from ..models import OfferResult
 from ..utils import format_tl, normalize_offer_text, parse_decimal, repair_mojibake
@@ -1368,7 +1368,7 @@ def extract_search_offers(html: str, source_url: str = "", limit: int = 24) -> l
     if not candidates:
         candidates = _search_candidates_from_json(soup)
     if not candidates:
-        raise HermesError("Hepsiburada arama sayfasından fiyat bulunamadı.")
+        raise EmptySearchResultsHermesError("Hepsiburada arama sayfasında ürün bulunamadı.")
 
     candidates = candidates[: max(1, int(limit or 1))]
     _log_candidates(candidates)

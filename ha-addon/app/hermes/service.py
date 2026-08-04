@@ -22,7 +22,7 @@ from .constants import (
     STATE_PATH,
     SUMMARY_PATH,
 )
-from .errors import HermesError, OutOfStockHermesError
+from .errors import EmptySearchResultsHermesError, HermesError, OutOfStockHermesError
 from .http_client import (
     cleaned_html,
     fetch_amazon_page,
@@ -61,6 +61,7 @@ from .utils import (
     format_signed_tl,
     format_tl,
     is_amazon_search_url,
+    watch_name_required_for_url,
     local_now,
     log_cell,
     normalize_item_key,
@@ -98,8 +99,8 @@ SUMMARY_DROP_CONSECUTIVE_CYCLES = 5
 SUMMARY_DROP_ALERT_COOLDOWN_SECONDS = 60 * 60
 SUMMARY_DROP_QUIET_START_HOUR = 22
 SUMMARY_DROP_QUIET_END_HOUR = 8
-AMAZON_EMPTY_ALERT_MIN_PAGES = 2
-AMAZON_EMPTY_ALERT_MIN_FAILED_LINKS = 3
+SEARCH_FAILURE_ALERT_MIN_PAGES = 4
+SEARCH_FAILURE_ALERT_MIN_FAILED_LINKS = 6
 PRICE_HISTORY_SPIKE_RATIO = Decimal("5")
 PRICE_HISTORY_SPIKE_ABSOLUTE_TL = Decimal("50000")
 PRICE_HISTORY_KEYS = ("min_price", "max_price", "min_price_at", "max_price_at")
@@ -825,6 +826,11 @@ def is_normal_amazon_search_result_absence(exc: Exception) -> bool:
     return any(marker in normalized for marker in AMAZON_NORMAL_EMPTY_SEARCH_MARKERS)
 
 
+def is_normal_search_result_absence(exc: Exception) -> bool:
+    """Identify successful search requests with no purchasable matching item."""
+    return isinstance(exc, EmptySearchResultsHermesError) or is_normal_amazon_search_result_absence(exc)
+
+
 def reset_product_alert_after_missing(
     state_entry: Dict[str, Any], seller: str, product_name: str
 ) -> Dict[str, Any]:
@@ -888,8 +894,8 @@ def skipped_offer_reason(watch: WatchRule, offer: OfferResult, display_name: str
     return ""
 
 
-def amazon_empty_alert_cooldown_passed(meta: Dict[str, Any], now) -> bool:
-    last_alerted = parse_iso_datetime(meta.get("last_amazon_empty_search_alert_at"))
+def search_failure_alert_cooldown_passed(meta: Dict[str, Any], now) -> bool:
+    last_alerted = parse_iso_datetime(meta.get("last_search_failure_alert_at"))
     if not last_alerted:
         return True
     elapsed = (now.astimezone(timezone.utc) - last_alerted).total_seconds()
@@ -975,7 +981,7 @@ def maybe_alert_summary_drop(
     state["_meta"] = meta
 
 
-def maybe_alert_amazon_empty_searches(
+def maybe_alert_search_failures(
     state: Dict[str, Any],
     events: List[Dict[str, Any]],
     config: HermesConfig,
@@ -986,9 +992,9 @@ def maybe_alert_amazon_empty_searches(
 
     affected_pages = sorted({str(event.get("page") or "") for event in events if event.get("page")})
     failed_link_count = sum(int(event.get("failed_links") or 0) for event in events)
-    if len(affected_pages) < AMAZON_EMPTY_ALERT_MIN_PAGES and failed_link_count < AMAZON_EMPTY_ALERT_MIN_FAILED_LINKS:
+    if len(affected_pages) < SEARCH_FAILURE_ALERT_MIN_PAGES and failed_link_count < SEARCH_FAILURE_ALERT_MIN_FAILED_LINKS:
         log(
-            "Amazon bos arama uyarisi atlandi, esik altinda: "
+            "Arama erisim uyarisi atlandi, esik altinda: "
             f"sayfa={len(affected_pages)} | link={failed_link_count}"
         )
         return
@@ -997,20 +1003,20 @@ def maybe_alert_amazon_empty_searches(
     now = local_now()
     if summary_drop_quiet_hours(now):
         log(
-            "Amazon bos arama uyarisi sessiz saat nedeniyle atlandi: "
+            "Arama erisim uyarisi sessiz saat nedeniyle atlandi: "
             f"sayfa={len(affected_pages)} | link={failed_link_count}"
         )
         state["_meta"] = meta
         return
-    if not amazon_empty_alert_cooldown_passed(meta, now):
+    if not search_failure_alert_cooldown_passed(meta, now):
         log(
-            "Amazon bos arama uyarisi 1 saatlik sinir nedeniyle atlandi: "
+            "Arama erisim uyarisi 1 saatlik sinir nedeniyle atlandi: "
             f"sayfa={len(affected_pages)} | link={failed_link_count}"
         )
         state["_meta"] = meta
         return
     if not config.pushover_user_key or not config.pushover_api_token:
-        log("Amazon bos arama uyarisi atlandi: Pushover ayarlari eksik.")
+        log("Arama erisim uyarisi atlandi: Pushover ayarlari eksik.")
         state["_meta"] = meta
         return
 
@@ -1018,16 +1024,15 @@ def maybe_alert_amazon_empty_searches(
     for event in events[:8]:
         page_name = str(event.get("page") or "-")
         failed_links = int(event.get("failed_links") or 0)
-        mode = "tamamen bos" if event.get("full_empty") else "kismi bos"
-        event_lines.append(f"- {page_name}: {mode}, bos link={failed_links}")
+        event_lines.append(f"- {page_name}: erisim hatasi, link={failed_links}")
     if len(events) > 8:
-        event_lines.append(f"- +{len(events) - 8} ek Amazon arama kaydi")
+        event_lines.append(f"- +{len(events) - 8} ek arama kaydi")
 
     message = (
-        "Amazon arama sayfalarinda anlamli sayida bos donus yakalandi.\n"
+        "Arama sayfalarinda anlamli sayida erisim hatasi yakalandi.\n"
         f"Etkilenen arama sayfasi: {len(affected_pages)}\n"
-        f"Bos donen link sayisi: {failed_link_count}\n"
-        "Okunamayan urunler bu tur ozet tablodan cikarildi; config/Amazon linklerini kontrol etmeni oneririm.\n"
+        f"Hata veren link sayisi: {failed_link_count}\n"
+        "Bos arama sonuclari bu uyarinin disindadir. Erisim, koruma veya sayfa hatasi olan linkleri kontrol etmeni oneririm.\n"
         + "\n".join(event_lines)
     )
     try:
@@ -1035,18 +1040,18 @@ def maybe_alert_amazon_empty_searches(
             session,
             config.pushover_user_key,
             config.pushover_api_token,
-            "Hermes Amazon arama uyarısı",
+            "Hermes arama erişim uyarısı",
             message[:900],
             "",
             config.request_timeout_seconds,
         )
-        meta["last_amazon_empty_search_alert_at"] = utc_now()
+        meta["last_search_failure_alert_at"] = utc_now()
         log(
-            "Amazon bos arama uyarisi gonderildi: "
+            "Arama erisim uyarisi gonderildi: "
             f"sayfa={len(affected_pages)} | link={failed_link_count}"
         )
     except Exception as exc:  # noqa: BLE001
-        log(f"Amazon bos arama uyarisi gonderilemedi: {exc}")
+        log(f"Arama erisim uyarisi gonderilemedi: {exc}")
     state["_meta"] = meta
 
 
@@ -1094,7 +1099,7 @@ def offers_from_amazon_search_results(
 ) -> List[OfferResult]:
     matches = _most_specific_amazon_matches(results, product_name, configured_names)
     if not matches:
-        raise HermesError("Amazon arama sayfasında ürün adına uyan fiyatlı ürün bulunamadı.")
+        raise EmptySearchResultsHermesError("Amazon arama sayfasında ürün adına uyan ürün bulunamadı.")
     return [
         OfferResult(
             title=item.title,
@@ -1296,7 +1301,7 @@ def _fetch_amazon_search_watch_offers(
             f"urun={warehouse_detail_scans} | bulunan_depo={warehouse_detail_hits}"
         )
     if not results:
-        raise HermesError("Amazon arama sayfasında okunabilir fiyat bulunamadı.")
+        raise EmptySearchResultsHermesError("Amazon arama sayfasında fiyatı okunabilir ürün bulunamadı.")
     configured_amazon_names = [
         configured_watch.name
         for configured_watch in getattr(config, "watches", [])
@@ -1310,7 +1315,7 @@ def _fetch_amazon_search_watch_offers(
     if warehouse_search:
         offers = [offer for offer in offers if offer.is_warehouse]
         if not offers:
-            raise HermesError("Amazon Depo aramasında ikinci el ve Amazon Depo bilgisi doğrulanamadı.")
+            raise EmptySearchResultsHermesError("Amazon Depo aramasında ikinci el ürün bulunamadı.")
     normal_count = sum(1 for offer in offers if not offer.is_warehouse)
     warehouse_count = len(offers) - normal_count
     log(
@@ -1747,11 +1752,11 @@ def check_once(config: HermesConfig) -> None:
     session = requests.Session()
     summary_rows: List[PriceSummaryRow] = []
     stock_rows: List[StockSummaryRow] = []
-    amazon_empty_events: List[Dict[str, Any]] = []
+    search_failure_events: List[Dict[str, Any]] = []
     request_tasks: List[Dict[str, Any]] = []
 
     def check_watch(watch: WatchRule, watch_key: str, state_entry: Dict[str, Any], seller: str) -> None:
-        is_amazon_search_watch = watch.site == SITE_AMAZON and is_amazon_search_url(watch.url)
+        is_search_watch = watch_name_required_for_url(watch.url)
         if watch.site == SITE_AMAZON:
             remaining = amazon_protection_remaining_seconds(state, watch_key)
             if remaining > 0:
@@ -1951,40 +1956,40 @@ def check_once(config: HermesConfig) -> None:
             save_incremental_price_summary([], stock_rows[-1:], removed_price_ids=stale_summary_offer_ids)
         except Exception as exc:  # noqa: BLE001
             stale_summary_offer_ids = cached_summary_offer_ids_for_watch(watch, watch_key, state, seller)
-            normal_empty_search = is_amazon_search_watch and is_normal_amazon_search_result_absence(exc)
+            normal_empty_search = is_search_watch and is_normal_search_result_absence(exc)
             if normal_empty_search:
-                log(f"Amazon arama sonucu boş: {watch.name or watch.url} | {exc}")
+                log(f"Arama sonucu boş: {seller} | {watch.name or watch.url}")
             else:
                 log(f"Hata: {seller} | {watch.url} | {exc}")
             if watch.site == SITE_AMAZON and is_amazon_protection_error(exc):
                 note_amazon_protection(state, watch_key, watch.name or watch.url, exc)
-            if is_amazon_search_watch and not normal_empty_search:
-                amazon_empty_events.append({"page": watch.name, "failed_links": 1, "full_empty": True})
+            if is_search_watch and not normal_empty_search:
+                search_failure_events.append({"page": watch.name, "failed_links": 1})
             failed = dict(state_entry)
             if should_reset_product_alert_on_error(exc):
                 failed = reset_product_alert_after_missing(failed, seller, watch.name or watch.url)
-            if is_amazon_search_watch and not normal_empty_search and should_send_search_error_notification(failed):
+            if is_search_watch and not normal_empty_search and should_send_search_error_notification(failed):
                 try:
                     message = (
-                        f"Amazon arama: {watch.name}\n"
+                        f"{seller} arama: {watch.name}\n"
                         f"Aranan keyword: {watch.name}\n"
                         f"Hata: {exc}\n"
                         f"Link: {watch.url}\n"
-                        "Kontrol etmen gerekebilir: link geçersiz olabilir, Amazon koruması olabilir veya sayfa yapısı değişmiş olabilir."
+                        "Kontrol etmen gerekebilir: link geçersiz olabilir, site koruması olabilir veya sayfa yapısı değişmiş olabilir."
                     )
                     send_pushover(
                         session,
                         config.pushover_user_key,
                         config.pushover_api_token,
-                        "Amazon arama hatasi",
+                        f"{seller} arama hatasi",
                         message[:900],
                         watch.url,
                         config.request_timeout_seconds,
                     )
                     failed = update_error_notification_state(failed)
-                    log(f"Amazon arama hata bildirimi gonderildi: {watch.name}")
+                    log(f"Arama hata bildirimi gonderildi: {seller} | {watch.name}")
                 except Exception as notify_exc:  # noqa: BLE001
-                    log(f"Amazon arama hata bildirimi gonderilemedi: {watch.name} | {notify_exc}")
+                    log(f"Arama hata bildirimi gonderilemedi: {seller} | {watch.name} | {notify_exc}")
             failed["site"] = watch.site
             failed["watch_name"] = watch.name
             failed["tracking_id"] = watch.tracking_id
@@ -2028,7 +2033,7 @@ def check_once(config: HermesConfig) -> None:
         summary_rows = deduplicate_summary_rows(summary_rows)
         publish_price_summary(summary_rows, stock_rows, cycle_duration_seconds, scan_duration_seconds)
         maybe_alert_summary_drop(state, summary_rows, config, session)
-        maybe_alert_amazon_empty_searches(state, amazon_empty_events, config, session)
+        maybe_alert_search_failures(state, search_failure_events, config, session)
     save_json(STATE_PATH, state)
 
 

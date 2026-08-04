@@ -9,6 +9,15 @@ class OutOfStockHermesError(HermesError):
         super().__init__(message)
 
 
+class EmptySearchResultsHermesError(HermesError):
+    """A valid search page returned no matching, purchasable products.
+
+    This is an expected marketplace state, not an operational error. Keeping it
+    separate from parser and access failures prevents normal out-of-stock
+    searches from polluting the dashboard error list or triggering alerts.
+    """
+
+
 class HttpStatusHermesError(HermesError):
     def __init__(self, status_code: int, url: str) -> None:
         self.status_code = status_code

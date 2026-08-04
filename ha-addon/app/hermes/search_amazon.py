@@ -6,7 +6,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from bs4 import BeautifulSoup
 
-from .errors import HermesError
+from .errors import EmptySearchResultsHermesError, HermesError
 from .models import SearchResultItem
 from .providers.amazon_common import (
     extract_verified_secondary_offer_price,
@@ -255,7 +255,7 @@ def extract_result_candidates(
             )
 
     if not candidates:
-        raise HermesError("Amazon arama sonuç sayfasında okunabilir ürün bulunamadı.")
+        raise EmptySearchResultsHermesError("Amazon arama sayfasında ürün bulunamadı.")
     return candidates
 
 
