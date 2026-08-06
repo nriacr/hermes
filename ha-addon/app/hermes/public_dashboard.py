@@ -10,6 +10,7 @@ from .dashboard import (
     _reset_price_history,
     _send_test_notification,
     _toggle_watch_active,
+    _update_watch_target_price,
 )
 from .link_test_ui import render_link_test_from_request, render_link_test_page
 from .web_assets import HERMES_ICON_PNG, HERMES_ICON_SVG, render_web_manifest
@@ -158,6 +159,13 @@ class _PublicDashboardHandler(BaseHTTPRequestHandler):
                 self._redirect(f"{base_path}/settings/restarting?msg={urllib.parse.quote(message)}&return_to_main=1")
             else:
                 self._redirect_with_message(base_path, "toggle", False, message)
+            return
+        if suffix == "/update-target-price":
+            ok, message = _update_watch_target_price(body)
+            if ok:
+                self._redirect(f"{base_path}/settings/restarting?msg={urllib.parse.quote(message)}&return_to_main=1")
+            else:
+                self._redirect_with_message(base_path, "price", False, message)
             return
 
         self.send_error(404)

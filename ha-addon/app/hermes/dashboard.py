@@ -164,6 +164,15 @@ tbody tr.site-other { --site-bg:rgba(156,151,255,.13); --site-bg-strong:rgba(156
 .hm-site-dot { height:22px; padding:0 8px; border-radius:999px; background:var(--surface-2); border:1px solid var(--line); display:inline-flex; align-items:center; justify-content:center; font-size:10.5px; font-weight:700; color:var(--ink-soft); white-space:nowrap; }
 .hm-meta { font-size:11px; color:var(--ink-faint); }
 .hm-toggle-form { margin:0; flex-shrink:0; }
+.hm-icon-btn-sm { width:30px; height:30px; border-radius:9px; background:var(--surface-2); border:1px solid var(--line); display:flex; align-items:center; justify-content:center; color:var(--ink-soft); cursor:pointer; flex-shrink:0; }
+.hm-icon-btn-sm svg { width:14px; height:14px; }
+.hm-manage-panel { margin-top:12px; padding-top:12px; border-top:1px solid var(--line); display:flex; flex-direction:column; gap:12px; }
+.hm-manage-panel[hidden] { display:none; }
+.hm-manage-row { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+.hm-manage-label { font-size:12.5px; font-weight:700; color:var(--text); }
+.hm-price-edit-form { display:flex; align-items:end; gap:8px; flex-wrap:wrap; margin:0; }
+.hm-price-edit-form label { flex:1 1 140px; display:grid; gap:5px; color:var(--muted); font-size:11px; font-weight:700; }
+.hm-price-edit-form input { width:100%; min-height:36px; border-radius:10px; border:1px solid var(--line); background:var(--surface-2); color:var(--text); padding:0 10px; font-size:13px; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
 .hm-toggle { width:34px; height:20px; border-radius:999px; background:var(--line); position:relative; border:0; padding:0; cursor:pointer; flex-shrink:0; }
 .hm-toggle.hm-on { background:var(--indigo-ink); }
 .hm-toggle .hm-knob { position:absolute; top:2px; left:2px; width:16px; height:16px; border-radius:50%; background:#fff; box-shadow:0 1px 2px rgba(0,0,0,.35); }
@@ -1276,6 +1285,7 @@ def _hm_build_cards(options, summary_payload, state):
                 "status": status,
                 "price_text": price_text,
                 "target_text": target_text,
+                "configured_target_price": item.get("target_price"),
                 "gauge": gauge,
                 "drop_pct": drop_pct,
                 "extra_rows": extra_rows,
@@ -1359,11 +1369,16 @@ def _hm_render_extra_results(card):
     )
 
 
-def _hm_render_card(card, base_path):
-    status = card["status"]
-    classes = "hm-card" + ("" if card["active"] else " hm-paused")
-    paused_suffix = " · Duraklatıldı" if not card["active"] else ""
-    pill = f'<span class="hm-status {_HM_STATUS_PILL[status]}">{escape(_HM_STATUS_LABELS[status])}{escape(paused_suffix)}</span>'
+def _hm_price_input_value(raw):
+    if raw in (None, ""):
+        return ""
+    amount = _parse_turkish_money(str(raw))
+    if amount is None:
+        return ""
+    return f"{amount.quantize(Decimal('1'), rounding=ROUND_DOWN):,}".replace(",", ".")
+
+
+def _hm_render_manage_panel(card, base_path):
     toggle_value = "0" if card["active"] else "1"
     toggle_label = "Duraklat" if card["active"] else "Devam ettir"
     toggle_html = (
@@ -1374,12 +1389,43 @@ def _hm_render_card(card, base_path):
         '<span class="hm-knob"></span></button>'
         "</form>"
     )
+    price_value = escape(_hm_price_input_value(card.get("configured_target_price")), quote=True)
+    price_form = (
+        f'<form class="hm-price-edit-form" method="post" action="{base_path}/update-target-price">'
+        f'<input type="hidden" name="watch_index" value="{card["index"]}">'
+        "<label>Hedef fiyat"
+        f'<input type="text" name="target_price" value="{price_value}" inputmode="decimal" placeholder="ör. 17.600">'
+        "</label>"
+        '<button type="submit" class="hm-btn">Kaydet</button>'
+        "</form>"
+    )
+    return (
+        '<div class="hm-manage-panel" hidden>'
+        '<div class="hm-manage-row"><span class="hm-manage-label">Takibi aktif tut</span>'
+        f"{toggle_html}</div>"
+        f"{price_form}"
+        "</div>"
+    )
+
+
+def _hm_render_card(card, base_path):
+    status = card["status"]
+    classes = "hm-card" + ("" if card["active"] else " hm-paused")
+    paused_suffix = " · Duraklatıldı" if not card["active"] else ""
+    pill = f'<span class="hm-status {_HM_STATUS_PILL[status]}">{escape(_HM_STATUS_LABELS[status])}{escape(paused_suffix)}</span>'
+    manage_trigger = (
+        '<button type="button" class="hm-icon-btn-sm" data-hm-price-toggle aria-label="Takibi yönet">'
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">'
+        '<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 013 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>'
+        "</button>"
+    )
     return (
         f'<div class="{classes}" data-hm-status="{status}">'
         f'<div class="hm-card-top"><div class="hm-card-name">{escape(card["name"])}</div>{pill}</div>'
         f"{_hm_render_status_block(card)}"
         f"{_hm_render_gauge(card)}"
-        f'<div class="hm-card-bottom">{_hm_render_sites(card)}<div class="hm-meta">{escape(card["last_checked_text"])}</div>{toggle_html}</div>'
+        f'<div class="hm-card-bottom">{_hm_render_sites(card)}<div class="hm-meta">{escape(card["last_checked_text"])}</div>{manage_trigger}</div>'
+        f"{_hm_render_manage_panel(card, base_path)}"
         f"{_hm_render_extra_results(card)}"
         "</div>"
     )
@@ -1450,6 +1496,14 @@ _HM_SCRIPT = """
       });
     });
   });
+  document.querySelectorAll('[data-hm-price-toggle]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const panel = button.closest('.hm-card')?.querySelector('.hm-manage-panel');
+      if (!panel) return;
+      panel.hidden = !panel.hidden;
+      if (!panel.hidden) panel.querySelector('input[name="target_price"]')?.focus();
+    });
+  });
 </script>"""
 
 
@@ -1477,6 +1531,40 @@ def _toggle_watch_active(body) -> tuple[bool, str]:
         return True, f"{name} takibi {verb}."
     except Exception as exc:  # noqa: BLE001
         return False, f"Takip durumu değiştirilemedi: {exc}"
+
+
+def _update_watch_target_price(body) -> tuple[bool, str]:
+    """Update one configured watch's target price in place and persist through the normal save+restart flow."""
+    try:
+        if not isinstance(body, (bytes, bytearray)):
+            raise ValueError("Geçersiz istek.")
+        form = urllib.parse.parse_qs(body.decode("utf-8", errors="replace"))
+        index = int(form.get("watch_index", [""])[0])
+        raw_price = form.get("target_price", [""])[0]
+
+        from .utils import parse_decimal
+
+        new_target = int(parse_decimal(raw_price))
+        if new_target <= 0:
+            raise ValueError("Hedef fiyat sıfırdan büyük olmalı.")
+        options = load_json(OPTIONS_PATH, {})
+        if not isinstance(options, dict):
+            raise ValueError("Ayarlar okunamadı.")
+        watches = options.get("takip_edilenler")
+        if not isinstance(watches, list) or not (0 <= index < len(watches)) or not isinstance(watches[index], dict):
+            raise ValueError("Takip kaydı bulunamadı.")
+        minimum_price = watches[index].get("minimum_price")
+        if minimum_price not in (None, "") and int(parse_decimal(str(minimum_price))) > new_target:
+            raise ValueError("Hedef fiyat, minimum fiyattan küçük olamaz.")
+        watches[index]["target_price"] = new_target
+        name = str(watches[index].get("name") or "").strip() or f"Takip {index + 1}"
+
+        from .settings_ui import save_options_and_restart
+
+        save_options_and_restart(options)
+        return True, f"{name} hedef fiyatı güncellendi."
+    except Exception as exc:  # noqa: BLE001
+        return False, f"Hedef fiyat güncellenemedi: {exc}"
 
 
 def _render_page(path: str = "/", error_detail_limit: int | None = 4) -> bytes:
@@ -1528,7 +1616,7 @@ def _render_dashboard_page(path: str, base_path: str, error_detail_limit: int | 
     params = urllib.parse.parse_qs(urllib.parse.urlparse(path).query)
     action_status = ""
     action_message = ""
-    for key in ("test", "reset", "history", "settings", "toggle"):
+    for key in ("test", "reset", "history", "settings", "toggle", "price"):
         status = params.get(key, [""])[0]
         if status in {"ok", "fail"}:
             action_status = status

@@ -13,6 +13,7 @@ from .dashboard import (
     _reset_price_history,
     _send_test_notification,
     _toggle_watch_active,
+    _update_watch_target_price,
 )
 from .link_test_ui import render_link_test_from_request, render_link_test_page
 from .settings_ui import (
@@ -240,6 +241,28 @@ class SettingsDashboardHandler(_StatusHandler):
                 location = f"{restart_path}?msg={urllib.parse.quote(message)}&return_to_main=1"
             else:
                 location = f"{target_path}?toggle=fail&msg={urllib.parse.quote(message)}"
+            self.send_response(303)
+            self.send_header("Location", location)
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            return
+        is_public_price_update = path.startswith("/public/") and path.endswith("/update-target-price")
+        if path == "/update-target-price" or is_public_price_update:
+            if is_public_price_update and not _public_dashboard_allowed(self.path):
+                self.send_error(404)
+                return
+            ok, message = _update_watch_target_price(body)
+            if is_public_price_update:
+                base_path = _public_base_path(self.path)
+                restart_path = f"{base_path}/settings/restarting"
+                target_path = base_path
+            else:
+                restart_path = "./settings/restarting"
+                target_path = "."
+            if ok:
+                location = f"{restart_path}?msg={urllib.parse.quote(message)}&return_to_main=1"
+            else:
+                location = f"{target_path}?price=fail&msg={urllib.parse.quote(message)}"
             self.send_response(303)
             self.send_header("Location", location)
             self.send_header("Cache-Control", "no-store")
