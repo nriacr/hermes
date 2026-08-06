@@ -8,6 +8,7 @@ from decimal import ROUND_DOWN, Decimal, InvalidOperation
 from html import escape
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+from .config_loader import tracking_id_for_watch
 from .constants import OPTIONS_PATH, PUSHOVER_URL, STATE_PATH, SUMMARY_PATH, TELEGRAM_ERROR_EVENTS_PATH, TELEGRAM_STATUS_PATH
 from .logging_utils import log
 from .link_test_ui import render_link_test_from_request, render_link_test_page
@@ -32,41 +33,41 @@ RESET_NOTIFICATIONS_LOCK = threading.Lock()
 PRICE_HISTORY_RESET_LOCK = threading.Lock()
 
 DASHBOARD_CSS = """
-:root { color-scheme:dark; --bg:#111315; --panel:#1a1c1f; --card:#24272b; --line:#3c4147; --text:#f5f7fa; --muted:#b0b6be; --accent:#e4e5e3; --accent2:#b8bbba; --ok:#86dfb7; --warn:#ffd07a; --bad:#ff9caf; --head:#30343a; }
-* { box-sizing:border-box; } body { margin:0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; background:radial-gradient(circle at top left,#373b40,var(--bg) 58%); color:var(--text); font-size:14px; }
-main { max-width:1060px; margin:0 auto; padding:28px 18px 44px; } .hero { border:1px solid var(--line); border-radius:22px; padding:22px; background:var(--panel); box-shadow:0 18px 42px rgba(0,0,0,.35); }
+:root { color-scheme:light; --bg:#F5F4FB; --panel:#FFFFFF; --card:#FBFAFF; --line:#E9E7F5; --text:#2B2A3D; --muted:#6B6980; --accent:#D6D4FB; --accent2:#C9EEDA; --ok:#146C43; --warn:#9A5B10; --bad:#B03A4A; --head:#F1EFFC; --ink:#2B2A3D; --ink-soft:#6B6980; --ink-faint:#9C9AB0; --surface:#FFFFFF; --surface-2:#FBFAFF; --mint-bg:#C9EEDA; --mint-ink:#146C43; --mint-soft:#E4F7ED; --indigo-bg:#D6D4FB; --indigo-ink:#4B47D6; --indigo-soft:#EDECFE; --peach-bg:#FBDFC0; --peach-ink:#9A5B10; --peach-soft:#FDEFDD; --rose-bg:#F9CDD4; --rose-ink:#B03A4A; --rose-soft:#FCE7EA; --radius-lg:20px; --radius-md:14px; --radius-sm:10px; }
+* { box-sizing:border-box; } body { margin:0; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; background:radial-gradient(circle at top left,#EFEDFB,var(--bg) 58%); color:var(--text); font-size:14px; }
+main { max-width:1060px; margin:0 auto; padding:28px 18px 44px; } .hero { border:1px solid var(--line); border-radius:22px; padding:22px; background:var(--panel); box-shadow:0 16px 36px rgba(43,42,61,.10); }
 p { margin:0; color:var(--muted); line-height:1.5; font-size:13px; }
-.badge { display:inline-flex; margin-bottom:12px; color:#17191b; background:linear-gradient(135deg,#ffd166,#f0ad61); border-radius:18px; padding:9px 15px; font-size:clamp(24px,5vw,42px); line-height:1; letter-spacing:-.04em; font-weight:900; }
+.badge { display:inline-flex; margin-bottom:12px; color:var(--indigo-ink); background:linear-gradient(135deg,var(--indigo-bg),var(--mint-bg)); border-radius:18px; padding:9px 15px; font-size:clamp(24px,5vw,42px); line-height:1; letter-spacing:-.04em; font-weight:900; }
 .actions { display:flex; flex-wrap:wrap; gap:10px; margin-top:18px; align-items:center; } .inline-form { margin:0; } .button { display:inline-flex; align-items:center; justify-content:center; min-height:40px; padding:0 14px; border-radius:13px; border:1px solid transparent; text-decoration:none; font-weight:800; font-size:13px; cursor:pointer; }
-.button.primary { color:#181a1c; background:linear-gradient(135deg,var(--accent),var(--accent2)); } .button.secondary { color:var(--text); background:#35393d; border-color:var(--line); } .button.test { color:#f5f7fa; background:linear-gradient(135deg,#54595e,#35393d); border-color:#6b7075; }
-.notice { margin-top:14px; padding:11px 13px; border-radius:12px; font-weight:700; font-size:13px; } .notice-ok { color:#c6f7e6; background:rgba(127,220,184,.14); border:1px solid rgba(127,220,184,.38); } .notice-fail { color:#ffd8e3; background:rgba(255,156,181,.14); border:1px solid rgba(255,156,181,.38); }
-.link-test-form { display:flex; align-items:end; flex-wrap:wrap; gap:10px; } .link-test-form label { flex:1 1 520px; display:grid; gap:7px; color:var(--muted); font-size:12px; font-weight:750; } .link-test-form .link-test-url { flex-basis:100%; } .link-test-form input { width:100%; min-height:42px; padding:10px 12px; color:var(--text); background:#151719; border:1px solid var(--line); border-radius:12px; font:inherit; } .link-test-form input:focus { outline:2px solid rgba(228,229,227,.38); outline-offset:1px; } .link-test-options { display:grid; grid-template-columns:2fr 1fr 2fr auto; gap:10px; width:100%; align-items:end; } .link-test-options label { min-width:0; flex:initial; } .link-test-options .link-test-checkbox { display:flex; align-items:center; gap:7px; min-height:42px; padding:0 12px; white-space:nowrap; border:1px solid var(--line); border-radius:12px; background:#25282b; color:var(--text); } .link-test-options .link-test-checkbox input { width:16px; min-height:16px; padding:0; accent-color:var(--accent); }
+.button.primary { color:#181a2c; background:linear-gradient(135deg,var(--indigo-bg),var(--accent2)); } .button.secondary { color:var(--text); background:var(--indigo-soft); border-color:var(--line); } .button.test { color:var(--text); background:linear-gradient(135deg,var(--mint-soft),var(--indigo-soft)); border-color:var(--line); }
+.notice { margin-top:14px; padding:11px 13px; border-radius:12px; font-weight:700; font-size:13px; } .notice-ok { color:var(--mint-ink); background:var(--mint-soft); border:1px solid rgba(20,108,67,.28); } .notice-fail { color:var(--rose-ink); background:var(--rose-soft); border:1px solid rgba(176,58,74,.28); }
+.link-test-form { display:flex; align-items:end; flex-wrap:wrap; gap:10px; } .link-test-form label { flex:1 1 520px; display:grid; gap:7px; color:var(--muted); font-size:12px; font-weight:750; } .link-test-form .link-test-url { flex-basis:100%; } .link-test-form input { width:100%; min-height:42px; padding:10px 12px; color:var(--text); background:var(--surface); border:1px solid var(--line); border-radius:12px; font:inherit; } .link-test-form input:focus { outline:2px solid rgba(75,71,214,.32); outline-offset:1px; } .link-test-options { display:grid; grid-template-columns:2fr 1fr 2fr auto; gap:10px; width:100%; align-items:end; } .link-test-options label { min-width:0; flex:initial; } .link-test-options .link-test-checkbox { display:flex; align-items:center; gap:7px; min-height:42px; padding:0 12px; white-space:nowrap; border:1px solid var(--line); border-radius:12px; background:var(--indigo-soft); color:var(--text); } .link-test-options .link-test-checkbox input { width:16px; min-height:16px; padding:0; accent-color:var(--indigo-ink); }
 .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:11px; margin-top:16px; } .card { border:1px solid var(--line); border-radius:15px; padding:14px; background:var(--card); min-height:82px; } .card span { display:block; color:var(--muted); font-size:12px; margin-bottom:8px; } .card strong { display:block; font-size:19px; line-height:1.18; overflow-wrap:anywhere; }
-.card.status-ok { border-color:rgba(127,220,184,.38); background:linear-gradient(135deg,rgba(127,220,184,.12),var(--card) 62%); } .card.status-ok strong { color:var(--ok); } .card.status-warn strong { color:var(--warn); } .card.status-error strong { color:var(--bad); }
-.error-card { grid-column:1 / -1; } .error-card ul { display:grid; gap:9px; margin:10px 0 0; padding:0; list-style:none; color:var(--text); } .error-card li { display:grid; gap:6px; padding:10px 12px; border:1px solid rgba(255,156,181,.28); border-radius:12px; background:rgba(255,156,181,.08); font-size:12px; line-height:1.35; overflow-wrap:anywhere; } .error-card li.empty-error { border-color:rgba(127,220,184,.26); background:rgba(127,220,184,.08); color:var(--muted); } .error-card li strong { font-size:13px; color:var(--text); } .error-card li span { margin:0; color:var(--muted); } .error-card li em { color:#ffd8e3; font-style:normal; } .error-card li a { color:#e5e7e8; font-weight:800; text-decoration:none; width:max-content; } .error-card li a:hover { color:#ffd166; text-decoration:underline; } .failed-link { display:grid; gap:3px; margin-top:4px; padding:8px 10px; border-radius:10px; background:rgba(220,223,224,.08); border:1px solid rgba(220,223,224,.20); } .failed-link span { color:#e0e2e3; font-weight:800; font-size:11px; } .failed-link strong { color:#f5f7fa; font-size:12px; } .failed-link em { color:#c8cccf; font-size:11px; }
+.card.status-ok { border-color:rgba(20,108,67,.28); background:linear-gradient(135deg,var(--mint-soft),var(--card) 62%); } .card.status-ok strong { color:var(--ok); } .card.status-warn strong { color:var(--warn); } .card.status-error strong { color:var(--bad); }
+.error-card { grid-column:1 / -1; } .error-card ul { display:grid; gap:9px; margin:10px 0 0; padding:0; list-style:none; color:var(--text); } .error-card li { display:grid; gap:6px; padding:10px 12px; border:1px solid rgba(176,58,74,.22); border-radius:12px; background:var(--rose-soft); font-size:12px; line-height:1.35; overflow-wrap:anywhere; } .error-card li.empty-error { border-color:rgba(20,108,67,.22); background:var(--mint-soft); color:var(--muted); } .error-card li strong { font-size:13px; color:var(--text); } .error-card li span { margin:0; color:var(--muted); } .error-card li em { color:var(--rose-ink); font-style:normal; } .error-card li a { color:var(--indigo-ink); font-weight:800; text-decoration:none; width:max-content; } .error-card li a:hover { color:var(--mint-ink); text-decoration:underline; } .failed-link { display:grid; gap:3px; margin-top:4px; padding:8px 10px; border-radius:10px; background:var(--surface-2); border:1px solid var(--line); } .failed-link span { color:var(--muted); font-weight:800; font-size:11px; } .failed-link strong { color:var(--text); font-size:12px; } .failed-link em { color:var(--muted); font-size:11px; }
 .public-error-card { margin-top:18px; }
-.summary-panel { margin-top:18px; border:1px solid var(--line); border-radius:18px; padding:16px; background:var(--card); } .summary-head { display:flex; align-items:flex-end; justify-content:space-between; gap:12px; margin-bottom:12px; } .summary-head h2 { font-size:18px; margin:0; } .summary-head span { color:var(--muted); font-size:12px; white-space:nowrap; } .table-section + .table-section { margin-top:18px; } .table-section h3 { margin:0 0 9px; font-size:14px; color:#f0f1f0; } .deals-section h3 { color:#b7f0dc; }
-.telegram-recent { margin-top:14px; border:1px solid rgba(210,213,213,.22); border-radius:14px; padding:13px; background:rgba(20,22,24,.46); } .telegram-recent h3 { margin:0 0 10px; font-size:13px; color:#f0f1f0; } .telegram-recent p { color:var(--muted); } .telegram-recent ul { display:grid; gap:8px; margin:0; padding:0; list-style:none; } .telegram-recent li { display:grid; gap:4px; padding:10px 11px; border:1px solid rgba(210,213,213,.20); border-radius:12px; background:rgba(210,213,213,.06); } .telegram-recent li a,.telegram-recent li strong { color:#f1f3f3; font-size:13px; font-weight:850; text-decoration:none; overflow-wrap:anywhere; } .telegram-recent li a:hover { color:#ffd166; text-decoration:underline; } .telegram-recent li span { color:var(--muted); font-size:11px; } .telegram-recent li em { color:#d9dcdd; font-size:12px; font-style:normal; line-height:1.35; overflow-wrap:anywhere; }
-.table-wrap { overflow-x:auto; border:1px solid var(--line); border-radius:14px; } table { width:100%; border-collapse:collapse; min-width:860px; } th,td { padding:8px 8px; border-bottom:1px solid var(--line); text-align:right; white-space:nowrap; } th { color:#e1e3e3; background:var(--head); font-size:11px; text-transform:uppercase; letter-spacing:.035em; } td { color:var(--text); font-size:13px; font-variant-numeric:tabular-nums; } tr:last-child td { border-bottom:none; } th:nth-child(1),td:nth-child(1) { width:104px; } th:nth-child(1),td:nth-child(1),th:nth-child(2),td:nth-child(2) { text-align:left; } th:not(:nth-child(2)),td:not(:nth-child(2)) { width:100px; } th:nth-child(6),td:nth-child(6) { width:148px; } .empty-row td { color:var(--muted); text-align:left; background:rgba(255,255,255,.025); }
-.search-result-group { margin:10px 0; overflow:hidden; border:1px solid rgba(210,213,213,.38); border-radius:14px; background:rgba(210,213,213,.06); } .search-result-group summary { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:12px 14px; color:#f0f1f0; font-size:13px; font-weight:850; cursor:pointer; list-style:none; } .search-result-group summary::-webkit-details-marker { display:none; } .search-result-group summary::before { content:'▸'; display:inline-block; margin-right:8px; color:#d6d8d7; font-size:16px; transition:transform .16s ease; } .search-result-group[open] summary::before { transform:rotate(90deg); } .search-result-group summary strong { margin-right:auto; } .search-result-group summary span { color:var(--muted); font-size:11px; font-weight:750; white-space:nowrap; } .search-result-group[open] summary { border-bottom:1px solid rgba(210,213,213,.25); background:rgba(210,213,213,.09); } .search-result-group .table-wrap { border:0; border-radius:0; }
-tbody tr.site-amazon { --site-bg:rgba(247,197,109,.13); --site-bg-strong:rgba(247,197,109,.24); --site-line:rgba(247,197,109,.84); --site-link:#ffd482; }
-tbody tr.site-hepsiburada { --site-bg:rgba(255,154,111,.13); --site-bg-strong:rgba(255,154,111,.25); --site-line:rgba(255,154,111,.86); --site-link:#ffad82; }
-tbody tr.site-trendyol { --site-bg:rgba(246,163,199,.13); --site-bg-strong:rgba(246,163,199,.25); --site-line:rgba(246,163,199,.84); --site-link:#f8b4d0; }
-tbody tr.site-network { --site-bg:rgba(133,220,207,.13); --site-bg-strong:rgba(133,220,207,.25); --site-line:rgba(133,220,207,.84); --site-link:#a6ebe0; }
-tbody tr.site-beymenclub { --site-bg:rgba(230,176,137,.13); --site-bg-strong:rgba(230,176,137,.25); --site-line:rgba(230,176,137,.84); --site-link:#f1c49f; }
-tbody tr.site-nordbron { --site-bg:rgba(143,190,255,.13); --site-bg-strong:rgba(143,190,255,.25); --site-line:rgba(143,190,255,.84); --site-link:#b8d4ff; }
-tbody tr.site-zara { --site-bg:rgba(176,218,139,.13); --site-bg-strong:rgba(176,218,139,.25); --site-line:rgba(176,218,139,.84); --site-link:#c9ec9f; }
-tbody tr.site-hm { --site-bg:rgba(214,178,255,.13); --site-bg-strong:rgba(214,178,255,.25); --site-line:rgba(214,178,255,.84); --site-link:#dec4ff; }
-tbody tr.site-other { --site-bg:rgba(183,177,222,.13); --site-bg-strong:rgba(183,177,222,.22); --site-line:rgba(183,177,222,.72); --site-link:#d1caff; } tbody tr[class*='site-'] td { background:linear-gradient(90deg,var(--site-bg),rgba(36,39,43,.40)); } tbody tr[class*='site-'] td:first-child { border-left:4px solid var(--site-line); color:var(--site-link); font-weight:800; } tbody tr[class*='site-'] .product-cell a { color:var(--site-link); } tbody tr[class*='site-']:hover td { background:linear-gradient(90deg,rgba(255,255,255,.055),var(--site-bg)); }
-.product-cell { max-width:360px; white-space:normal; line-height:1.22; } .product-cell a { color:#e4e6e6; text-decoration:none; } .product-cell a:hover { color:#ffd166; text-decoration:underline; } .product-cell .warehouse-tag { display:inline-block; margin:0 8px 0 0; padding:0 7px; border-radius:5px; background:rgba(236,183,82,.20); color:#fff; font-size:13px; font-weight:900; letter-spacing:.05em; line-height:1.1; vertical-align:top; } .product-cell span { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; text-overflow:ellipsis; } .deal-row td { color:#b7f0dc; } .deal-row td:first-child { color:var(--site-link); } .deal-row .product-cell a { color:#b7f0dc; } .note { margin-top:18px; border-left:4px solid #a9adaf; padding:12px 14px; background:rgba(169,173,175,.14); border-radius:10px; font-size:13px; } .footer { margin-top:18px; font-size:12px; color:var(--muted); }
+.summary-panel { margin-top:18px; border:1px solid var(--line); border-radius:18px; padding:16px; background:var(--card); } .summary-head { display:flex; align-items:flex-end; justify-content:space-between; gap:12px; margin-bottom:12px; } .summary-head h2 { font-size:18px; margin:0; } .summary-head span { color:var(--muted); font-size:12px; white-space:nowrap; } .table-section + .table-section { margin-top:18px; } .table-section h3 { margin:0 0 9px; font-size:14px; color:var(--text); } .deals-section h3 { color:var(--mint-ink); }
+.telegram-recent { margin-top:14px; border:1px solid var(--line); border-radius:14px; padding:13px; background:var(--surface-2); } .telegram-recent h3 { margin:0 0 10px; font-size:13px; color:var(--text); } .telegram-recent p { color:var(--muted); } .telegram-recent ul { display:grid; gap:8px; margin:0; padding:0; list-style:none; } .telegram-recent li { display:grid; gap:4px; padding:10px 11px; border:1px solid var(--line); border-radius:12px; background:var(--surface); } .telegram-recent li a,.telegram-recent li strong { color:var(--text); font-size:13px; font-weight:850; text-decoration:none; overflow-wrap:anywhere; } .telegram-recent li a:hover { color:var(--indigo-ink); text-decoration:underline; } .telegram-recent li span { color:var(--muted); font-size:11px; } .telegram-recent li em { color:var(--ink-soft); font-size:12px; font-style:normal; line-height:1.35; overflow-wrap:anywhere; }
+.table-wrap { overflow-x:auto; border:1px solid var(--line); border-radius:14px; } table { width:100%; border-collapse:collapse; min-width:860px; } th,td { padding:8px 8px; border-bottom:1px solid var(--line); text-align:right; white-space:nowrap; } th { color:var(--ink-soft); background:var(--head); font-size:11px; text-transform:uppercase; letter-spacing:.035em; } td { color:var(--text); font-size:13px; font-variant-numeric:tabular-nums; } tr:last-child td { border-bottom:none; } th:nth-child(1),td:nth-child(1) { width:104px; } th:nth-child(1),td:nth-child(1),th:nth-child(2),td:nth-child(2) { text-align:left; } th:not(:nth-child(2)),td:not(:nth-child(2)) { width:100px; } th:nth-child(6),td:nth-child(6) { width:148px; } .empty-row td { color:var(--muted); text-align:left; background:rgba(43,42,61,.02); }
+.search-result-group { margin:10px 0; overflow:hidden; border:1px solid var(--line); border-radius:14px; background:var(--surface-2); } .search-result-group summary { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:12px 14px; color:var(--text); font-size:13px; font-weight:850; cursor:pointer; list-style:none; } .search-result-group summary::-webkit-details-marker { display:none; } .search-result-group summary::before { content:'▸'; display:inline-block; margin-right:8px; color:var(--ink-faint); font-size:16px; transition:transform .16s ease; } .search-result-group[open] summary::before { transform:rotate(90deg); } .search-result-group summary strong { margin-right:auto; } .search-result-group summary span { color:var(--muted); font-size:11px; font-weight:750; white-space:nowrap; } .search-result-group[open] summary { border-bottom:1px solid var(--line); background:var(--indigo-soft); } .search-result-group .table-wrap { border:0; border-radius:0; }
+tbody tr.site-amazon { --site-bg:rgba(217,158,45,.16); --site-bg-strong:rgba(217,158,45,.28); --site-line:rgba(217,158,45,.75); --site-link:#9a6a15; }
+tbody tr.site-hepsiburada { --site-bg:rgba(230,110,55,.16); --site-bg-strong:rgba(230,110,55,.28); --site-line:rgba(230,110,55,.75); --site-link:#a6491b; }
+tbody tr.site-trendyol { --site-bg:rgba(211,74,140,.16); --site-bg-strong:rgba(211,74,140,.28); --site-line:rgba(211,74,140,.75); --site-link:#a1215f; }
+tbody tr.site-network { --site-bg:rgba(32,158,138,.16); --site-bg-strong:rgba(32,158,138,.28); --site-line:rgba(32,158,138,.75); --site-link:#147d6f; }
+tbody tr.site-beymenclub { --site-bg:rgba(180,120,60,.16); --site-bg-strong:rgba(180,120,60,.28); --site-line:rgba(180,120,60,.75); --site-link:#8a5a2e; }
+tbody tr.site-nordbron { --site-bg:rgba(66,116,214,.16); --site-bg-strong:rgba(66,116,214,.28); --site-line:rgba(66,116,214,.75); --site-link:#2c5fb8; }
+tbody tr.site-zara { --site-bg:rgba(101,151,55,.16); --site-bg-strong:rgba(101,151,55,.28); --site-line:rgba(101,151,55,.75); --site-link:#4c7a22; }
+tbody tr.site-hm { --site-bg:rgba(140,80,196,.16); --site-bg-strong:rgba(140,80,196,.28); --site-line:rgba(140,80,196,.75); --site-link:#6b3fa0; }
+tbody tr.site-other { --site-bg:rgba(75,71,214,.14); --site-bg-strong:rgba(75,71,214,.24); --site-line:rgba(75,71,214,.6); --site-link:#4b47d6; } tbody tr[class*='site-'] td { background:linear-gradient(90deg,var(--site-bg),rgba(255,255,255,.5)); } tbody tr[class*='site-'] td:first-child { border-left:4px solid var(--site-line); color:var(--site-link); font-weight:800; } tbody tr[class*='site-'] .product-cell a { color:var(--site-link); } tbody tr[class*='site-']:hover td { background:linear-gradient(90deg,rgba(43,42,61,.05),var(--site-bg)); }
+.product-cell { max-width:360px; white-space:normal; line-height:1.22; } .product-cell a { color:var(--text); text-decoration:none; } .product-cell a:hover { color:var(--indigo-ink); text-decoration:underline; } .product-cell .warehouse-tag { display:inline-block; margin:0 8px 0 0; padding:0 7px; border-radius:5px; background:var(--peach-bg); color:var(--peach-ink); font-size:13px; font-weight:900; letter-spacing:.05em; line-height:1.1; vertical-align:top; } .product-cell span { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; text-overflow:ellipsis; } .deal-row td { color:var(--mint-ink); } .deal-row td:first-child { color:var(--site-link); } .deal-row .product-cell a { color:var(--mint-ink); } .note { margin-top:18px; border-left:4px solid var(--ink-faint); padding:12px 14px; background:var(--surface-2); border-radius:10px; font-size:13px; } .footer { margin-top:18px; font-size:12px; color:var(--muted); }
 .public main { max-width:1180px; } .public .hero { padding:18px; } .public .badge { font-size:clamp(22px,4vw,36px); }
 .public-actions { margin:16px 0 6px; } .public-actions .button { min-width:132px; }
 .public-cycle-row { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; margin:10px 0 4px; }
-.public-cycle-pill { min-width:0; min-height:40px; padding:7px 10px; border:1px solid var(--line); border-radius:13px; background:#35393d; }
+.public-cycle-pill { min-width:0; min-height:40px; padding:7px 10px; border:1px solid var(--line); border-radius:13px; background:var(--surface); }
 .public-cycle-pill span { display:block; color:var(--muted); font-size:10px; font-weight:800; letter-spacing:.035em; text-transform:uppercase; }
 .public-cycle-pill strong { display:block; margin-top:2px; font-size:14px; line-height:1.1; color:var(--text); }
 @media (max-width:720px) {
-  body { font-size:13px; background:#111315; }
+  body { font-size:13px; background:var(--bg); }
   main { padding:10px 8px 26px; }
   .hero { border-radius:18px; padding:14px; }
   .public main { padding:0; }
@@ -93,7 +94,7 @@ tbody tr.site-other { --site-bg:rgba(183,177,222,.13); --site-bg-strong:rgba(183
   .summary-head { align-items:flex-start; flex-direction:column; gap:4px; margin-bottom:10px; }
   .summary-head h2 { font-size:16px; }
   .summary-head span { white-space:normal; font-size:11px; }
-  .public .summary-head span { font-size:16px; line-height:1.3; color:#ffd166; font-weight:800; }
+  .public .summary-head span { font-size:16px; line-height:1.3; color:var(--indigo-ink); font-weight:800; }
   .table-section h3 { font-size:13px; }
   .table-wrap { overflow:visible; border:0; border-radius:0; }
   .search-result-group { margin:8px 0; border-radius:13px; }
@@ -102,14 +103,14 @@ tbody tr.site-other { --site-bg:rgba(183,177,222,.13); --site-bg-strong:rgba(183
   table { min-width:0; }
   thead { display:none; }
   table, tbody, td { display:block; width:100%; }
-  tbody tr[class*='site-'] { position:relative; display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:6px 8px; margin:0 0 8px; border:1px solid var(--site-line); border-left:7px solid var(--site-line); border-radius:15px; padding:9px 10px 9px 12px; background:linear-gradient(135deg,var(--site-bg-strong),rgba(36,39,43,.92) 58%),rgba(36,39,43,.90); box-shadow:0 8px 20px rgba(0,0,0,.18); overflow:hidden; }
+  tbody tr[class*='site-'] { position:relative; display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:6px 8px; margin:0 0 8px; border:1px solid var(--site-line); border-left:7px solid var(--site-line); border-radius:15px; padding:9px 10px 9px 12px; background:linear-gradient(135deg,var(--site-bg-strong),rgba(255,255,255,.94) 58%),rgba(255,255,255,.92); box-shadow:0 8px 18px rgba(43,42,61,.08); overflow:hidden; }
   tbody tr[class*='site-'] td { display:flex; justify-content:flex-start; gap:4px; padding:0; border-bottom:0; background:transparent; text-align:left; white-space:normal; font-size:13.5px; line-height:1.18; }
   tbody tr[class*='site-'] td:first-child { border-left:0; color:var(--site-link); }
   tbody tr[class*='site-'] td::before { content:attr(data-label); flex:0 0 auto; color:var(--muted); text-align:left; font-size:10px; font-weight:850; letter-spacing:.045em; text-transform:uppercase; }
   tbody tr[class*='site-'] .seller-cell { grid-column:1 / -1; align-items:center; gap:0; padding-bottom:0; color:var(--site-link); font-size:15px; font-weight:900; }
   tbody tr[class*='site-'] .seller-cell::before, tbody tr[class*='site-'] .product-cell::before { display:none; }
   tbody tr[class*='site-'] .product-cell { grid-column:1 / -1; max-width:none; display:block; padding-bottom:0; text-align:left; line-height:1.22; font-size:14px; }
-  tbody tr[class*='site-'] .price-cell, tbody tr[class*='site-'] .target-cell, tbody tr[class*='site-'] .diff-cell, tbody tr[class*='site-'] .range-cell { min-height:33px; border:1px solid rgba(255,255,255,.06); border-radius:10px; padding:5px 7px; background:rgba(20,22,24,.42); flex-direction:column; justify-content:center; font-size:14.5px; }
+  tbody tr[class*='site-'] .price-cell, tbody tr[class*='site-'] .target-cell, tbody tr[class*='site-'] .diff-cell, tbody tr[class*='site-'] .range-cell { min-height:33px; border:1px solid var(--line); border-radius:10px; padding:5px 7px; background:rgba(255,255,255,.65); flex-direction:column; justify-content:center; font-size:14.5px; }
   tbody tr[class*='site-'] .price-cell, tbody tr[class*='site-'] .target-cell, tbody tr[class*='site-'] .diff-cell { min-width:0; }
   tbody tr[class*='site-'] .range-cell { grid-column:1 / -1; min-height:31px; flex-direction:row; align-items:center; justify-content:flex-start; gap:8px; white-space:nowrap; }
   tbody tr[class*='site-'] .range-cell::before { margin-right:3px; }
@@ -117,6 +118,80 @@ tbody tr.site-other { --site-bg:rgba(183,177,222,.13); --site-bg-strong:rgba(183
   .empty-row td { padding:10px; border:1px solid var(--line); border-radius:12px; }
   .note, .footer { font-size:11px; }
 }
+
+/* --- Hermes mobile panel (hm-*): pastel card dashboard, additive & separate from the table/link-test styles above --- */
+.hm-app { max-width:460px; margin:0 auto; min-height:100vh; background:var(--bg); position:relative; padding-bottom:96px; }
+.hm-header { position:sticky; top:0; z-index:10; background:rgba(245,244,251,.9); backdrop-filter:blur(10px); padding:16px 16px 10px; display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid var(--line); }
+.hm-brand { display:flex; align-items:center; gap:10px; min-width:0; }
+.hm-brand-mark { flex-shrink:0; width:38px; height:38px; border-radius:12px; background:linear-gradient(155deg,var(--indigo-bg),var(--mint-bg)); display:flex; align-items:center; justify-content:center; }
+.hm-brand-mark svg { width:19px; height:19px; }
+.hm-brand-text h1 { font-size:18px; font-weight:700; letter-spacing:-.01em; margin:0; }
+.hm-brand-text p { font-size:12px; color:var(--ink-faint); margin-top:1px; }
+.hm-header-actions { display:flex; gap:8px; flex-shrink:0; }
+.hm-icon-btn { width:36px; height:36px; border-radius:11px; background:var(--surface); border:1px solid var(--line); display:flex; align-items:center; justify-content:center; color:var(--ink-soft); text-decoration:none; position:relative; }
+.hm-icon-btn svg { width:17px; height:17px; }
+.hm-icon-btn.hm-has-dot::after { content:''; position:absolute; top:7px; right:7px; width:6px; height:6px; border-radius:50%; background:var(--rose-ink); }
+.hm-chips { display:flex; gap:8px; padding:14px 16px 4px; overflow-x:auto; scrollbar-width:none; }
+.hm-chips::-webkit-scrollbar { display:none; }
+.hm-chip { flex-shrink:0; font-size:13px; font-weight:600; padding:7px 14px; border-radius:999px; background:var(--surface); border:1px solid var(--line); color:var(--ink-soft); cursor:pointer; white-space:nowrap; }
+.hm-chip.hm-active { background:var(--indigo-bg); color:var(--indigo-ink); border-color:var(--indigo-bg); }
+.hm-section-title { font-size:13px; font-weight:700; color:var(--ink-soft); padding:20px 16px 10px; letter-spacing:.01em; }
+.hm-deals { display:flex; gap:12px; padding:0 16px 4px; overflow-x:auto; scroll-snap-type:x proximity; scrollbar-width:none; }
+.hm-deals::-webkit-scrollbar { display:none; }
+.hm-deal-card { scroll-snap-align:start; flex-shrink:0; width:168px; background:var(--mint-soft); border-radius:var(--radius-md); padding:14px; text-decoration:none; color:inherit; display:block; }
+.hm-deal-drop { display:inline-flex; align-items:center; gap:3px; background:var(--mint-bg); color:var(--mint-ink); font-size:11px; font-weight:700; padding:3px 8px; border-radius:999px; margin-bottom:10px; }
+.hm-deal-name { font-size:13px; font-weight:600; line-height:1.3; margin-bottom:8px; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+.hm-deal-price { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:17px; font-weight:700; color:var(--mint-ink); }
+.hm-deal-site { font-size:11px; color:var(--ink-faint); margin-top:2px; }
+.hm-empty { margin:0 16px; padding:16px; border:1px dashed var(--line); border-radius:var(--radius-md); color:var(--muted); font-size:13px; background:var(--surface-2); }
+.hm-list { padding:0 16px; display:flex; flex-direction:column; gap:12px; }
+.hm-card { background:var(--surface); border:1px solid var(--line); border-radius:var(--radius-lg); padding:16px; }
+.hm-card.hm-paused { opacity:.6; }
+.hm-card-top { display:flex; justify-content:space-between; align-items:flex-start; gap:10px; margin-bottom:12px; }
+.hm-card-name { font-size:14.5px; font-weight:700; line-height:1.35; }
+.hm-status { flex-shrink:0; font-size:11px; font-weight:700; padding:4px 9px; border-radius:999px; white-space:nowrap; }
+.hm-status-below { background:var(--mint-bg); color:var(--mint-ink); }
+.hm-status-watch { background:var(--indigo-soft); color:var(--indigo-ink); }
+.hm-status-stock { background:var(--peach-bg); color:var(--peach-ink); }
+.hm-status-error { background:var(--rose-bg); color:var(--rose-ink); }
+.hm-price-row { display:flex; align-items:baseline; gap:10px; margin-bottom:10px; flex-wrap:wrap; }
+.hm-price-best { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:20px; font-weight:700; }
+.hm-price-best.hm-below { color:var(--mint-ink); }
+.hm-price-best.hm-error { color:var(--rose-ink); font-family:inherit; font-size:13px; font-weight:600; }
+.hm-price-target { font-size:12px; color:var(--ink-faint); font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
+.hm-gauge { height:6px; border-radius:999px; background:var(--surface-2); border:1px solid var(--line); position:relative; margin-bottom:12px; overflow:visible; }
+.hm-gauge-fill { position:absolute; top:0; left:0; height:100%; border-radius:999px; }
+.hm-gauge-fill.hm-below { background:var(--mint-bg); }
+.hm-gauge-fill.hm-watch { background:var(--indigo-bg); }
+.hm-gauge-marker { position:absolute; top:50%; width:2px; height:12px; background:var(--ink-faint); transform:translate(-50%,-50%); }
+.hm-card-bottom { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+.hm-sites { display:flex; gap:5px; flex-wrap:wrap; }
+.hm-site-dot { width:22px; height:22px; border-radius:7px; background:var(--surface-2); border:1px solid var(--line); display:flex; align-items:center; justify-content:center; font-size:9px; font-weight:700; color:var(--ink-soft); }
+.hm-meta { font-size:11px; color:var(--ink-faint); }
+.hm-toggle-form { margin:0; flex-shrink:0; }
+.hm-toggle { width:34px; height:20px; border-radius:999px; background:var(--line); position:relative; border:0; padding:0; cursor:pointer; flex-shrink:0; }
+.hm-toggle.hm-on { background:var(--indigo-bg); }
+.hm-toggle .hm-knob { position:absolute; top:2px; left:2px; width:16px; height:16px; border-radius:50%; background:var(--surface); box-shadow:0 1px 2px rgba(43,42,61,.2); }
+.hm-toggle.hm-on .hm-knob { transform:translateX(14px); }
+.hm-more-results { margin-top:10px; border-top:1px solid var(--line); padding-top:10px; }
+.hm-more-results summary { cursor:pointer; font-size:12px; font-weight:700; color:var(--indigo-ink); list-style:none; }
+.hm-more-results summary::-webkit-details-marker { display:none; }
+.hm-more-row { display:flex; justify-content:space-between; gap:8px; padding:8px 0; border-bottom:1px solid var(--line); font-size:12.5px; }
+.hm-more-row:last-child { border-bottom:0; }
+.hm-more-row a { color:var(--text); text-decoration:none; }
+.hm-more-row span { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; color:var(--ink-soft); flex-shrink:0; }
+.hm-panel { margin:20px 16px 0; background:var(--surface); border:1px solid var(--line); border-radius:var(--radius-lg); padding:16px; }
+.hm-panel h2 { font-size:15px; font-weight:700; margin:0 0 10px; }
+.hm-panel-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
+.hm-panel-actions form { margin:0; }
+.hm-btn { display:inline-flex; align-items:center; justify-content:center; min-height:38px; padding:0 14px; border-radius:12px; border:1px solid var(--line); background:var(--indigo-soft); color:var(--text); font-weight:700; font-size:12.5px; cursor:pointer; text-decoration:none; }
+.hm-fab { position:fixed; bottom:82px; left:50%; transform:translateX(calc(-50% + 165px)); width:52px; height:52px; border-radius:16px; background:var(--indigo-ink); display:flex; align-items:center; justify-content:center; color:#fff; text-decoration:none; box-shadow:0 8px 20px rgba(75,71,214,.28); }
+.hm-fab svg { width:22px; height:22px; }
+.hm-nav { position:fixed; bottom:0; left:50%; transform:translateX(-50%); width:100%; max-width:460px; background:rgba(255,255,255,.92); backdrop-filter:blur(10px); border-top:1px solid var(--line); display:flex; justify-content:space-around; padding:10px 12px 14px; }
+.hm-nav-item { display:flex; flex-direction:column; align-items:center; gap:3px; color:var(--ink-faint); font-size:10.5px; font-weight:600; text-decoration:none; }
+.hm-nav-item svg { width:20px; height:20px; }
+.hm-nav-item.hm-active { color:var(--indigo-ink); }
+@media (max-width:380px) { .hm-deal-card { width:150px; } }
 """
 
 
@@ -1056,6 +1131,394 @@ def _render_error_details(error_details):
     return "".join(items)
 
 
+# --- Hermes mobile panel: pastel card dashboard built on top of the same real data ---
+
+_HM_STATUS_LABELS = {"below": "Hedef altı", "watch": "İzleniyor", "stock": "Stok bekliyor", "error": "Hata"}
+_HM_STATUS_PILL = {"below": "hm-status-below", "watch": "hm-status-watch", "stock": "hm-status-stock", "error": "hm-status-error"}
+_HM_STATUS_ORDER = ("below", "watch", "stock", "error")
+_HM_SITE_ABBR = {
+    "amazon": "AZ",
+    "hepsiburada": "HB",
+    "trendyol": "TY",
+    "network": "AĞ",
+    "beymenclub": "BC",
+    "nordbron": "NB",
+    "zara": "ZR",
+    "hm": "HM",
+}
+
+
+def _hm_site_abbr(seller_text: str) -> str:
+    site = _site_theme_class(seller_text).removeprefix("site-")
+    if site in _HM_SITE_ABBR:
+        return _HM_SITE_ABBR[site]
+    fallback = repair_mojibake(seller_text).strip()[:2].upper()
+    return fallback or "?"
+
+
+def _hm_gauge(price, target, min_price, max_price):
+    """Gauge fill (progress from the observed peak) + marker (where target sits) as 0-100 floats."""
+    if price is None or target is None or min_price is None or max_price is None:
+        return None
+    span = max_price - min_price
+    if span <= 0:
+        fill = Decimal("100") if price <= target else Decimal("55")
+        marker = Decimal("90")
+    else:
+        fill = max(Decimal("0"), min(Decimal("100"), ((max_price - price) / span) * 100))
+        marker = max(Decimal("0"), min(Decimal("100"), ((max_price - target) / span) * 100))
+    return float(fill), float(marker)
+
+
+def _hm_build_cards(options, summary_payload, state):
+    """One card per configured takip_edilenler entry, matched to its real price/state data via tracking_id."""
+    watches = options.get("takip_edilenler") if isinstance(options.get("takip_edilenler"), list) else []
+    rows = _deduplicate_dashboard_rows(
+        summary_payload.get("rows") if isinstance(summary_payload.get("rows"), list) else []
+    )
+    stock_rows = summary_payload.get("stock_rows") if isinstance(summary_payload.get("stock_rows"), list) else []
+    contexts = _error_contexts(options)
+    state_items = [(key, value) for key, value in state.items() if key != "_meta" and isinstance(value, dict)]
+
+    cards = []
+    for index, item in enumerate(watches):
+        if not isinstance(item, dict):
+            continue
+        tracking_id = tracking_id_for_watch(item)
+        configured_urls = _watch_urls_from_options(item)
+        canon_urls = {canonical_tracking_url(url) for url in configured_urls}
+
+        matching_rows = [row for row in rows if tracking_id and str(row.get("tracking_id") or "") == tracking_id]
+        if not matching_rows and canon_urls:
+            matching_rows = [row for row in rows if canonical_tracking_url(row.get("product_url")) in canon_urls]
+
+        matching_stock = (
+            [row for row in stock_rows if isinstance(row, dict) and canonical_tracking_url(row.get("product_url")) in canon_urls]
+            if canon_urls
+            else []
+        )
+
+        matching_state = [
+            (key, value) for key, value in state_items if tracking_id and str(value.get("tracking_id") or "") == tracking_id
+        ]
+        if not matching_state and canon_urls:
+            matching_state = [
+                (key, value)
+                for key, value in state_items
+                if canonical_tracking_url(value.get("configured_url")) in canon_urls
+                or canonical_tracking_url(value.get("url")) in canon_urls
+            ]
+
+        active = parse_bool(item.get("active"), default=True)
+        name = str(item.get("name") or "").strip()
+        if not name and matching_rows:
+            name = repair_mojibake(matching_rows[0].get("product_title") or "")
+        if not name and matching_stock:
+            name = repair_mojibake(matching_stock[0].get("product_title") or "")
+        if not name and configured_urls:
+            try:
+                name = f"{site_label(detect_site_from_url(configured_urls[0]))} ürünü"
+            except Exception:  # noqa: BLE001
+                name = configured_urls[0]
+        name = name or f"Takip {index + 1}"
+
+        has_error = any(value.get("last_error") for _, value in matching_state)
+
+        best_row = None
+        if matching_rows:
+            best_row = min(
+                matching_rows,
+                key=lambda row: _parse_turkish_money(row.get("price")) if _parse_turkish_money(row.get("price")) is not None else Decimal("Infinity"),
+            )
+        extra_rows = [row for row in matching_rows if row is not best_row]
+
+        if matching_rows:
+            status = "below" if any(_is_target_hit(row) for row in matching_rows) else "watch"
+        elif matching_stock:
+            status = "stock"
+        elif has_error:
+            status = "error"
+        else:
+            status = "watch"
+
+        price_text = target_text = None
+        price_dec = target_dec = min_dec = max_dec = None
+        gauge = None
+        if best_row:
+            price_text = best_row.get("price")
+            target_text = best_row.get("target")
+            price_dec = _parse_turkish_money(price_text)
+            target_dec = _parse_turkish_money(target_text)
+            min_dec = _parse_turkish_money(best_row.get("min_price"))
+            max_dec = _parse_turkish_money(best_row.get("max_price"))
+            gauge = _hm_gauge(price_dec, target_dec, min_dec, max_dec)
+        elif matching_stock:
+            target_text = matching_stock[0].get("target")
+
+        drop_pct = None
+        if status == "below" and price_dec is not None and max_dec and max_dec > 0:
+            drop_pct = round(float((max_dec - price_dec) / max_dec * 100))
+
+        last_checked_raw = ""
+        last_checked_dt = None
+        for _, value in matching_state:
+            candidate_raw = value.get("last_checked_at")
+            candidate_dt = parse_iso_datetime(candidate_raw)
+            if candidate_dt and (last_checked_dt is None or candidate_dt > last_checked_dt):
+                last_checked_dt = candidate_dt
+                last_checked_raw = candidate_raw
+
+        error_detail = None
+        if status == "error":
+            for key, value in matching_state:
+                if value.get("last_error"):
+                    error_detail = _error_detail(key, value, contexts)
+                    break
+
+        sellers = []
+        seen_sellers = set()
+        for row in matching_rows + matching_stock:
+            seller_text = repair_mojibake(row.get("seller") or "").strip()
+            seller_key = seller_text.casefold()
+            if not seller_text or seller_key in seen_sellers:
+                continue
+            seen_sellers.add(seller_key)
+            sellers.append(seller_text)
+
+        product_url = str((best_row or {}).get("product_url") or (configured_urls[0] if configured_urls else "")).strip()
+
+        cards.append(
+            {
+                "index": index,
+                "name": name,
+                "active": active,
+                "status": status,
+                "price_text": price_text,
+                "target_text": target_text,
+                "gauge": gauge,
+                "drop_pct": drop_pct,
+                "extra_rows": extra_rows,
+                "sellers": sellers,
+                "last_checked_text": _relative_time_text(last_checked_raw) if last_checked_raw else "-",
+                "error_detail": error_detail,
+                "product_url": product_url,
+            }
+        )
+    return cards
+
+
+def _hm_render_status_block(card):
+    status = card["status"]
+    if status == "error":
+        message = "Sayfa okunamadı, tekrar denenecek."
+        if card.get("error_detail"):
+            message = card["error_detail"].get("message") or message
+        return f'<div class="hm-price-row"><span class="hm-price-best hm-error">{escape(message)}</span></div>'
+    if status == "stock":
+        return (
+            '<div class="hm-price-row">'
+            '<span class="hm-price-best" style="color:var(--peach-ink)">Stokta yok</span>'
+            f'<span class="hm-price-target">hedef {escape(_display_tl(card["target_text"]))}</span>'
+            "</div>"
+        )
+    price_class = "hm-below" if status == "below" else ""
+    price_html = escape(_display_tl(card["price_text"])) if card["price_text"] is not None else "Henüz kontrol edilmedi"
+    target_html = (
+        f'<span class="hm-price-target">hedef {escape(_display_tl(card["target_text"]))}</span>'
+        if card["target_text"] is not None
+        else ""
+    )
+    return f'<div class="hm-price-row"><span class="hm-price-best {price_class}">{price_html}</span>{target_html}</div>'
+
+
+def _hm_render_gauge(card):
+    if card["status"] in {"error", "stock"} or not card.get("gauge"):
+        return ""
+    fill, marker = card["gauge"]
+    fill_class = "hm-below" if card["status"] == "below" else "hm-watch"
+    return (
+        f'<div class="hm-gauge"><div class="hm-gauge-fill {fill_class}" style="width:{fill:.1f}%"></div>'
+        f'<div class="hm-gauge-marker" style="left:{marker:.1f}%"></div></div>'
+    )
+
+
+def _hm_render_sites(card):
+    if not card["sellers"]:
+        return ""
+    dots = "".join(
+        f'<div class="hm-site-dot" title="{escape(seller)}">{escape(_hm_site_abbr(seller))}</div>'
+        for seller in card["sellers"][:4]
+    )
+    return f'<div class="hm-sites">{dots}</div>'
+
+
+def _hm_render_extra_results(card):
+    rows = card["extra_rows"]
+    if not rows:
+        return ""
+    items = []
+    for row in rows[:8]:
+        seller = escape(repair_mojibake(row.get("seller") or "-"))
+        title = escape(repair_mojibake(row.get("product_title") or "-"))
+        price = escape(_display_tl(row.get("price", "-")))
+        url = str(row.get("product_url") or "").strip()
+        label = (
+            f'<a href="{escape(url, quote=True)}" target="_blank" rel="noopener noreferrer">{seller}: {title}</a>'
+            if url
+            else f"{seller}: {title}"
+        )
+        items.append(f'<div class="hm-more-row">{label}<span>{price}</span></div>')
+    return (
+        f'<details class="hm-more-results"><summary>+{len(rows)} sonuç daha</summary>{"".join(items)}</details>'
+    )
+
+
+def _hm_render_card(card, base_path):
+    status = card["status"]
+    classes = "hm-card" + ("" if card["active"] else " hm-paused")
+    paused_suffix = " · Duraklatıldı" if not card["active"] else ""
+    pill = f'<span class="hm-status {_HM_STATUS_PILL[status]}">{escape(_HM_STATUS_LABELS[status])}{escape(paused_suffix)}</span>'
+    toggle_value = "0" if card["active"] else "1"
+    toggle_label = "Duraklat" if card["active"] else "Devam ettir"
+    toggle_html = (
+        f'<form class="hm-toggle-form" method="post" action="{base_path}/toggle-watch">'
+        f'<input type="hidden" name="watch_index" value="{card["index"]}">'
+        f'<input type="hidden" name="desired_active" value="{toggle_value}">'
+        f'<button type="submit" class="hm-toggle{" hm-on" if card["active"] else ""}" aria-label="{escape(toggle_label, quote=True)}">'
+        '<span class="hm-knob"></span></button>'
+        "</form>"
+    )
+    return (
+        f'<div class="{classes}" data-hm-status="{status}">'
+        f'<div class="hm-card-top"><div class="hm-card-name">{escape(card["name"])}</div>{pill}</div>'
+        f"{_hm_render_status_block(card)}"
+        f"{_hm_render_gauge(card)}"
+        f'<div class="hm-card-bottom">{_hm_render_sites(card)}<div class="hm-meta">{escape(card["last_checked_text"])}</div>{toggle_html}</div>'
+        f"{_hm_render_extra_results(card)}"
+        "</div>"
+    )
+
+
+def _hm_render_card_list(cards, base_path):
+    if not cards:
+        return '<div class="hm-empty">Henüz takip edilen bir ürün yok. Ayarlar sayfasından ekleyebilirsin.</div>'
+    return f'<div class="hm-list">{"".join(_hm_render_card(card, base_path) for card in cards)}</div>'
+
+
+def _hm_render_chips(cards):
+    counts = dict.fromkeys(_HM_STATUS_ORDER, 0)
+    for card in cards:
+        counts[card["status"]] += 1
+    chips = [f'<button type="button" class="hm-chip hm-active" data-hm-filter="all">Tümü · {len(cards)}</button>']
+    chips.extend(
+        f'<button type="button" class="hm-chip" data-hm-filter="{key}">{escape(_HM_STATUS_LABELS[key])} · {counts[key]}</button>'
+        for key in _HM_STATUS_ORDER
+    )
+    return f'<div class="hm-chips">{"".join(chips)}</div>'
+
+
+def _hm_render_deal_carousel(cards):
+    deals = sorted(
+        (card for card in cards if card["status"] == "below" and card["drop_pct"] is not None),
+        key=lambda card: card["drop_pct"],
+        reverse=True,
+    )[:6]
+    if not deals:
+        return ""
+    items = []
+    for card in deals:
+        seller = card["sellers"][0] if card["sellers"] else ""
+        url = card["product_url"]
+        href = escape(url, quote=True) if url else "#"
+        target_attr = ' target="_blank" rel="noopener noreferrer"' if url else ""
+        items.append(
+            f'<a class="hm-deal-card" href="{href}"{target_attr}>'
+            '<span class="hm-deal-drop"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">'
+            f'<path d="M12 5v14M5 12l7 7 7-7"/></svg>%{card["drop_pct"]} düştü</span>'
+            f'<div class="hm-deal-name">{escape(card["name"])}</div>'
+            f'<div class="hm-deal-price">{escape(_display_tl(card["price_text"]))}</div>'
+            f'<div class="hm-deal-site">{escape(seller)}</div>'
+            "</a>"
+        )
+    return '<div class="hm-section-title">Yeni fırsatlar</div>' f'<div class="hm-deals">{"".join(items)}</div>'
+
+
+def _hm_render_header(base_path, last_update_text, has_alert):
+    dot_class = " hm-has-dot" if has_alert else ""
+    return f"""
+    <header class="hm-header" id="top">
+      <div class="hm-brand">
+        <div class="hm-brand-mark"><svg viewBox="0 0 24 24" fill="none"><path d="M4 16L9 9L14 13L20 5" stroke="#4B47D6" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+        <div class="hm-brand-text"><h1>Hermes</h1><p>Son kontrol: {escape(last_update_text)}</p></div>
+      </div>
+      <div class="hm-header-actions">
+        <a class="hm-icon-btn{dot_class}" href="#hm-panel" aria-label="Bildirimler ve bakım"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 8a6 6 0 10-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 01-3.4 0"/></svg></a>
+        <a class="hm-icon-btn" href="{base_path}/settings" aria-label="Ayarlar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 00.3 1.9l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.9-.3 1.7 1.7 0 00-1 1.6V21a2 2 0 11-4 0v-.2a1.7 1.7 0 00-1-1.5 1.7 1.7 0 00-1.9.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.9 1.7 1.7 0 00-1.5-1H3a2 2 0 110-4h.2a1.7 1.7 0 001.5-1 1.7 1.7 0 00-.3-1.9l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 001.9.3H9a1.7 1.7 0 001-1.5V3a2 2 0 114 0v.2a1.7 1.7 0 001 1.5 1.7 1.7 0 001.9-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.9V9a1.7 1.7 0 001.5 1h.2a2 2 0 110 4h-.2a1.7 1.7 0 00-1.5 1z"/></svg></a>
+      </div>
+    </header>
+    """
+
+
+def _hm_render_nav(base_path):
+    return f"""
+    <nav class="hm-nav">
+      <a class="hm-nav-item hm-active" href="#top"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 9l9-6 9 6v11a1 1 0 01-1 1h-5v-7H9v7H4a1 1 0 01-1-1z"/></svg>Panel</a>
+      <a class="hm-nav-item" href="#hm-list"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 5h16M4 12h16M4 19h10"/></svg>Takipler</a>
+      <a class="hm-nav-item" href="#hm-telegram"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 5L2 12l6 3m13-10l-4 16-6-6m10-10L8 15"/></svg>Telegram</a>
+      <a class="hm-nav-item" href="{base_path}/settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 00.3 1.9l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.9-.3 1.7 1.7 0 00-1 1.6V21a2 2 0 11-4 0v-.2a1.7 1.7 0 00-1-1.5 1.7 1.7 0 00-1.9.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.9 1.7 1.7 0 00-1.5-1H3a2 2 0 110-4h.2a1.7 1.7 0 001.5-1 1.7 1.7 0 00-.3-1.9l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 001.9.3H9a1.7 1.7 0 001-1.5V3a2 2 0 114 0v.2a1.7 1.7 0 001 1.5 1.7 1.7 0 001.9-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.9V9a1.7 1.7 0 001.5 1h.2a2 2 0 110 4h-.2a1.7 1.7 0 00-1.5 1z"/></svg>Ayarlar</a>
+    </nav>
+    """
+
+
+def _hm_render_fab(base_path):
+    return (
+        f'<a class="hm-fab" href="{base_path}/settings#new-watch" aria-label="Yeni takip ekle">'
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 5v14M5 12h14"/></svg>'
+        "</a>"
+    )
+
+
+_HM_SCRIPT = """
+<script>
+  document.querySelectorAll('.hm-chip').forEach((chip) => {
+    chip.addEventListener('click', () => {
+      document.querySelectorAll('.hm-chip').forEach((c) => c.classList.remove('hm-active'));
+      chip.classList.add('hm-active');
+      const filter = chip.dataset.hmFilter;
+      document.querySelectorAll('.hm-list > .hm-card').forEach((card) => {
+        card.hidden = filter !== 'all' && card.dataset.hmStatus !== filter;
+      });
+    });
+  });
+</script>"""
+
+
+def _toggle_watch_active(body) -> tuple[bool, str]:
+    """Flip one configured watch's active flag in place and persist through the normal save+restart flow."""
+    try:
+        if not isinstance(body, (bytes, bytearray)):
+            raise ValueError("Geçersiz istek.")
+        form = urllib.parse.parse_qs(body.decode("utf-8", errors="replace"))
+        index = int(form.get("watch_index", [""])[0])
+        desired_active = parse_bool(form.get("desired_active", ["1"])[0], default=True)
+        options = load_json(OPTIONS_PATH, {})
+        if not isinstance(options, dict):
+            raise ValueError("Ayarlar okunamadı.")
+        watches = options.get("takip_edilenler")
+        if not isinstance(watches, list) or not (0 <= index < len(watches)) or not isinstance(watches[index], dict):
+            raise ValueError("Takip kaydı bulunamadı.")
+        watches[index]["active"] = desired_active
+        name = str(watches[index].get("name") or "").strip() or f"Takip {index + 1}"
+
+        from .settings_ui import save_options_and_restart
+
+        save_options_and_restart(options)
+        verb = "devam ettiriliyor" if desired_active else "duraklatıldı"
+        return True, f"{name} takibi {verb}."
+    except Exception as exc:  # noqa: BLE001
+        return False, f"Takip durumu değiştirilemedi: {exc}"
+
+
 def _render_page(path: str = "/", error_detail_limit: int | None = 4) -> bytes:
     return _render_dashboard_page(path, ".", error_detail_limit)
 
@@ -1105,7 +1568,7 @@ def _render_dashboard_page(path: str, base_path: str, error_detail_limit: int | 
     params = urllib.parse.parse_qs(urllib.parse.urlparse(path).query)
     action_status = ""
     action_message = ""
-    for key in ("test", "reset", "history", "settings"):
+    for key in ("test", "reset", "history", "settings", "toggle"):
         status = params.get(key, [""])[0]
         if status in {"ok", "fail"}:
             action_status = status
@@ -1118,7 +1581,10 @@ def _render_dashboard_page(path: str, base_path: str, error_detail_limit: int | 
     web_app_head = render_web_app_head(base_path)
     base_path = escape(base_path, quote=True)
     options = load_json(OPTIONS_PATH, {})
-    telegram_summary = _collect_telegram_summary(options if isinstance(options, dict) else {})
+    options = options if isinstance(options, dict) else {}
+    state = load_json(STATE_PATH, {})
+    state = state if isinstance(state, dict) else {}
+    telegram_summary = _collect_telegram_summary(options)
     telegram_recent_html = _render_telegram_recent_notifications(
         telegram_summary.get("recent_notifications") or []
     )
@@ -1150,8 +1616,33 @@ def _render_dashboard_page(path: str, base_path: str, error_detail_limit: int | 
     });
   });
 </script>"""
+
+    cards = _hm_build_cards(options, payload if isinstance(payload, dict) else {}, state)
+    has_alert = any(card["status"] == "error" for card in cards)
+    header_html = _hm_render_header(base_path, last_update, has_alert)
+    chips_html = _hm_render_chips(cards)
+    deals_html = _hm_render_deal_carousel(cards)
+    card_list_html = _hm_render_card_list(cards, base_path)
+    telegram_section_html = f'<div id="hm-telegram" style="padding:0 16px; margin-top:20px;">{telegram_recent_html}</div>'
+    fab_html = _hm_render_fab(base_path)
+    nav_html = _hm_render_nav(base_path)
+    classic_html = f"""
+    <details class="hm-panel" id="hm-panel">
+      <summary>Klasik özet ve bakım</summary>
+      <div class="actions public-actions" style="margin-top:12px">
+        <a class="button secondary" href="{base_path}/settings">Ayarlar</a>
+        <a class="button secondary" href="{base_path}/link-test">Test</a>
+        <form class="inline-form" method="post" action="{base_path}/test-pushover"><button class="button test" type="submit">Pushover</button></form>
+        <form class="inline-form" method="post" action="{base_path}/reset-notifications" data-confirm="Bildirim susturma hafızası sıfırlanacak ve hedef altında kalan fırsatlar için tek seferlik kontrol başlatılacak. Devam etmek istiyor musun?"><button class="button secondary" type="submit">Bildirim Sıfırla</button></form>
+        <form class="inline-form" method="post" action="{base_path}/reset-price-history" data-confirm="Min/maks fiyat geçmişi temizlenecek ve güncel fiyattan yeniden başlayacak. Devam etmek istiyor musun?"><button class="button secondary" type="submit">Min/Maks Sıfırla</button></form>
+      </div>
+      {public_cycle_row}
+      {_render_table()}
+      {error_card_html}
+    </details>
+    """
     html = f"""<!doctype html>
-<html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="theme-color" content="#111315"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Hermes">{web_app_head}<meta http-equiv="refresh" content="60"><title>Hermes</title><style>{DASHBOARD_CSS}</style></head><body class="public"><main><div class="hero"><div class="badge">Hermes</div><div class="actions public-actions"><a class="button secondary" href="{base_path}/settings">Ayarlar</a><a class="button secondary" href="{base_path}/link-test">Test</a><form class="inline-form" method="post" action="{base_path}/test-pushover"><button class="button test" type="submit">Pushover</button></form><form class="inline-form" method="post" action="{base_path}/reset-notifications" data-confirm="Bildirim susturma hafızası sıfırlanacak ve hedef altında kalan fırsatlar için tek seferlik kontrol başlatılacak. Devam etmek istiyor musun?"><button class="button secondary" type="submit">Bildirim Sıfırla</button></form><form class="inline-form" method="post" action="{base_path}/reset-price-history" data-confirm="Min/maks fiyat geçmişi temizlenecek ve güncel fiyattan yeniden başlayacak. Devam etmek istiyor musun?"><button class="button secondary" type="submit">Min/Maks Sıfırla</button></form></div>{public_cycle_row}{notice_html}{_render_table()}{telegram_recent_html}{error_card_html}</div></main>{confirm_script}</body></html>"""
+<html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="theme-color" content="#F5F4FB"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Hermes">{web_app_head}<meta http-equiv="refresh" content="60"><title>Hermes</title><style>{DASHBOARD_CSS}</style></head><body class="public"><div class="hm-app">{header_html}{notice_html}{chips_html}{deals_html}<div class="hm-section-title" id="hm-list">Takip edilenler</div>{card_list_html}{telegram_section_html}<div style="padding:0 16px; margin-top:20px;">{classic_html}</div></div>{fab_html}{nav_html}{confirm_script}{_HM_SCRIPT}</body></html>"""
     return html.encode("utf-8")
 
 

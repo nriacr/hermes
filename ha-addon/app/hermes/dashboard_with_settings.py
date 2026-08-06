@@ -12,6 +12,7 @@ from .dashboard import (
     _reset_notifications_async,
     _reset_price_history,
     _send_test_notification,
+    _toggle_watch_active,
 )
 from .link_test_ui import render_link_test_from_request, render_link_test_page
 from .settings_ui import (
@@ -221,6 +222,28 @@ class SettingsDashboardHandler(_StatusHandler):
         if path.endswith("/reset-price-history"):
             ok, message = _reset_price_history()
             self._redirect_with_message("history", ok, message)
+            return
+        is_public_toggle = path.startswith("/public/") and path.endswith("/toggle-watch")
+        if path == "/toggle-watch" or is_public_toggle:
+            if is_public_toggle and not _public_dashboard_allowed(self.path):
+                self.send_error(404)
+                return
+            ok, message = _toggle_watch_active(body)
+            if is_public_toggle:
+                base_path = _public_base_path(self.path)
+                restart_path = f"{base_path}/settings/restarting"
+                target_path = base_path
+            else:
+                restart_path = "./settings/restarting"
+                target_path = "."
+            if ok:
+                location = f"{restart_path}?msg={urllib.parse.quote(message)}&return_to_main=1"
+            else:
+                location = f"{target_path}?toggle=fail&msg={urllib.parse.quote(message)}"
+            self.send_response(303)
+            self.send_header("Location", location)
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
             return
         self.send_error(404)
 

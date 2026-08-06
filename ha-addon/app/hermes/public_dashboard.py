@@ -9,6 +9,7 @@ from .dashboard import (
     _reset_notifications_async,
     _reset_price_history,
     _send_test_notification,
+    _toggle_watch_active,
 )
 from .link_test_ui import render_link_test_from_request, render_link_test_page
 from .web_assets import HERMES_ICON_PNG, HERMES_ICON_SVG, render_web_manifest
@@ -150,6 +151,13 @@ class _PublicDashboardHandler(BaseHTTPRequestHandler):
         if suffix == "/test-pushover":
             ok, message = _send_test_notification()
             self._redirect_with_message(base_path, "test", ok, message)
+            return
+        if suffix == "/toggle-watch":
+            ok, message = _toggle_watch_active(body)
+            if ok:
+                self._redirect(f"{base_path}/settings/restarting?msg={urllib.parse.quote(message)}&return_to_main=1")
+            else:
+                self._redirect_with_message(base_path, "toggle", False, message)
             return
 
         self.send_error(404)

@@ -73,6 +73,29 @@ def _supported_watch_urls(urls: List[str], context_name: str) -> List[tuple[str,
     return supported_urls
 
 
+def tracking_id_for_watch(item: Dict[str, object]) -> str:
+    """Shared tracking id for one takip_edilenler card (all its URLs collapse to this id).
+
+    Used both to build WatchRule.tracking_id here and by the dashboard to match
+    summary rows / state entries back to the configured card that produced them.
+    """
+    name = str(item.get("name") or "").strip()
+    size = str(item.get("size") or "").strip()
+    context_name = name or "adsız ürün"
+    supported_urls = _supported_watch_urls(_watch_urls(item), context_name)
+    try:
+        target_price = parse_decimal(_required_value(item, "target_price", context_name))
+    except HermesError:
+        return ""
+    return normalize_item_key(
+        "tracking_card",
+        name,
+        str(target_price),
+        size,
+        "|".join(sorted(url for url, _ in supported_urls)),
+    )
+
+
 DEFAULT_TELEGRAM_CHANNELS = [
     "@yaniyocom",
     "@firsatz",
@@ -165,13 +188,7 @@ def _prepare_watches(raw_watches: object) -> List[WatchRule]:
         notify_once_in_24h = parse_bool(item.get("notify_once_in_24H"), default=True)
         # A card may contain several links, but all of them belong to the same
         # tracking rule. This keeps their results separate from another card.
-        tracking_id = normalize_item_key(
-            "tracking_card",
-            name,
-            str(target_price),
-            size,
-            "|".join(sorted(url for url, _ in supported_urls)),
-        )
+        tracking_id = tracking_id_for_watch(item)
         for url, site in supported_urls:
             watches.append(
                 WatchRule(
