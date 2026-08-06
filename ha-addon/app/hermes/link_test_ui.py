@@ -78,7 +78,7 @@ def render_link_test_page(
         """
 
     html = f"""<!doctype html>
-    <html lang='tr'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1, viewport-fit=cover'><meta name='theme-color' content='#F5F4FB'><title>Hermes Bağlantı Testi</title><style>{css}</style></head>
+    <html lang='tr'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1, viewport-fit=cover'><meta name='theme-color' content='#121118'><title>Hermes Bağlantı Testi</title><style>{css}</style></head>
     <body><main><div class='hero'>
       <div class='badge'>Hermes</div>
       <div class='actions'><a class='button secondary' href='{escape(back_path, quote=True)}'>Ana ekran</a></div>
