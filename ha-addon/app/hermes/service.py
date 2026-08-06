@@ -1107,6 +1107,7 @@ def offers_from_amazon_search_results(
             seller="Amazon",
             url=item.url,
             is_warehouse=item.is_warehouse,
+            stock_quantity=item.stock_quantity,
         )
         for item in matches
     ]
@@ -1202,6 +1203,7 @@ def _fetch_amazon_detail_offers(
             url=offer.url or candidate.url,
             price=offer.price,
             is_warehouse=bool(offer.is_warehouse),
+            stock_quantity=offer.stock_quantity,
         )
         for offer in parsed_offers
     ]
@@ -1263,13 +1265,31 @@ def _fetch_amazon_search_watch_offers(
             if not warehouse_search and candidate_matches_watch:
                 warehouse_detail_scans += 1
                 try:
+                    detailed_results = _fetch_amazon_detail_offers(
+                        session,
+                        candidate,
+                        config,
+                    )
+                    normal_detail = next(
+                        (item for item in detailed_results if not item.is_warehouse and item.stock_quantity is not None),
+                        None,
+                    )
+                    if normal_detail is not None:
+                        # The search card remains the authoritative normal
+                        # price. The product page only contributes its explicit
+                        # low-stock count to that same card result.
+                        results.append(
+                            SearchResultItem(
+                                title=candidate.title,
+                                url=candidate.url,
+                                price=candidate.price,
+                                is_warehouse=False,
+                                stock_quantity=normal_detail.stock_quantity,
+                            )
+                        )
                     used_results = [
                         item
-                        for item in _fetch_amazon_detail_offers(
-                            session,
-                            candidate,
-                            config,
-                        )
+                        for item in detailed_results
                         if item.is_warehouse
                     ]
                     warehouse_detail_hits += len(used_results)
@@ -1345,6 +1365,7 @@ def _fetch_amazon_product_watch_offers(
                 seller=offer.seller,
                 url=watch.url,
                 is_warehouse=offer.is_warehouse,
+                stock_quantity=offer.stock_quantity,
             )
             for offer in _extract_amazon_page_offers(
                 session,
@@ -1367,6 +1388,7 @@ def _fetch_amazon_product_watch_offers(
                 seller=offer.seller,
                 url=watch.url,
                 is_warehouse=offer.is_warehouse,
+                stock_quantity=offer.stock_quantity,
             )
             for offer in _extract_amazon_page_offers(
                 session,
@@ -1409,6 +1431,7 @@ def _fetch_amazon_product_watch_offers(
                         seller=offer.seller,
                         url=variation.url,
                         is_warehouse=offer.is_warehouse,
+                        stock_quantity=offer.stock_quantity,
                     )
                 )
         except Exception as exc:  # noqa: BLE001
@@ -1809,6 +1832,8 @@ def check_once(config: HermesConfig) -> None:
                 offer_display_name = offer.title or watch.name or watch.url
                 if watch.site == SITE_HEPSIBURADA:
                     offer_display_name = hepsiburada_provider.clean_display_title(offer_display_name)
+                if watch.site == SITE_AMAZON and offer.stock_quantity is not None:
+                    offer_display_name = f"{offer_display_name} (Stok {offer.stock_quantity})"
                 skip_reason = skipped_offer_reason(watch, offer, offer_display_name)
                 if skip_reason:
                     log(f"Sonuç dikkate alınmadı: {seller} | {offer_display_name} | {skip_reason}")

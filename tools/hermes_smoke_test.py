@@ -60,6 +60,7 @@ from hermes.providers.network import (  # noqa: E402
 from hermes.providers.zara import extract_offers as extract_zara_offers  # noqa: E402
 from hermes.providers.amazon import (  # noqa: E402
     extract_color_variations,
+    extract_low_stock_quantity,
     extract_offer as extract_amazon_offer,
     extract_offers as extract_amazon_offers,
     extract_used_offer_listing_url,
@@ -1722,6 +1723,33 @@ class HermesSmokeTests(unittest.TestCase):
         self.assertFalse(
             is_warehouse_search_url("https://www.amazon.com.tr/dp/B0D95QG8W4?condition=used")
         )
+
+    def test_amazon_reads_only_explicit_numeric_low_stock_message(self):
+        low_stock_html = """
+        <html><head><title>Amazon ürünü</title></head><body>
+          <div id="corePriceDisplay_desktop_feature_div">
+            <span class="a-price"><span class="a-offscreen">18.999,00 TL</span></span>
+          </div>
+          <div id="availability">Stokta sadece 20 adet kaldı.</div>
+        </body></html>
+        """
+        generic_stock_html = '<div id="availability">Stokta var.</div>'
+
+        self.assertEqual(extract_low_stock_quantity(low_stock_html), 20)
+        self.assertIsNone(extract_low_stock_quantity(generic_stock_html))
+        self.assertEqual(extract_amazon_offer(low_stock_html).stock_quantity, 20)
+
+    def test_amazon_search_deduplication_prefers_low_stock_metadata(self):
+        url = "https://www.amazon.com.tr/dp/B000000001"
+        rows = dedupe_results(
+            [
+                SearchResultItem("Amazon ürünü", url, Decimal("18999")),
+                SearchResultItem("Amazon ürünü", url, Decimal("18999"), stock_quantity=20),
+            ]
+        )
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].stock_quantity, 20)
 
     def test_amazon_product_page_never_relabels_primary_price_as_warehouse(self):
         html = """

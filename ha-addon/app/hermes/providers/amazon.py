@@ -70,6 +70,13 @@ AMAZON_USED_OFFER_CONTAINER_SELECTORS = (
     "[id^='aod-offer']",
     "#olpOfferList .a-row",
 )
+AMAZON_LOW_STOCK_SELECTORS = (
+    "#availability",
+    "#availabilityInsideBuyBox_feature_div",
+    "#availability_feature_div",
+    "#outOfStock",
+)
+AMAZON_LOW_STOCK_PATTERN = re.compile(r"stokta\s+sadece\s+(?P<quantity>\d+)\s+adet\s+kaldi")
 
 
 @dataclass(frozen=True)
@@ -351,6 +358,28 @@ def _extract_visible_primary_price(soup):
     return None
 
 
+def extract_low_stock_quantity(html: str) -> Optional[int]:
+    """Return Amazon's explicit low-stock quantity, never a generic stock status."""
+    soup = soup_from_html(html)
+    texts = [
+        element.get_text(" ", strip=True)
+        for selector in AMAZON_LOW_STOCK_SELECTORS
+        for element in soup.select(selector)
+    ]
+    # Amazon occasionally moves the availability copy outside its usual block.
+    # The exact wording remains mandatory, so this fallback cannot turn a plain
+    # "Stokta var" message into a numeric stock result.
+    texts.append(soup.get_text(" ", strip=True))
+    for text in texts:
+        match = AMAZON_LOW_STOCK_PATTERN.search(normalize_offer_text(text))
+        if not match:
+            continue
+        quantity = int(match.group("quantity"))
+        if quantity > 0:
+            return quantity
+    return None
+
+
 def is_warehouse_search_url(source_url: str) -> bool:
     """Return true only for an explicit Amazon Depo search category."""
     parsed = urlsplit(str(source_url or ""))
@@ -451,6 +480,7 @@ def extract_offers(html: str, source_url: str = "") -> list[OfferResult]:
     soup = soup_from_html(html)
     jsonld_title, jsonld_price = extract_jsonld_product(soup)
     title: Optional[str] = jsonld_title or extract_title(soup) or "Amazon ürünü"
+    stock_quantity = extract_low_stock_quantity(html)
     offers: list[OfferResult] = []
 
     primary_price = _extract_visible_primary_price(soup)
@@ -464,6 +494,7 @@ def extract_offers(html: str, source_url: str = "") -> list[OfferResult]:
                 # new offer. A separate second-hand row is added only after
                 # its own price and Amazon Depo seller are verified below.
                 is_warehouse=False,
+                stock_quantity=stock_quantity,
             )
         )
 
@@ -478,6 +509,7 @@ def extract_offers(html: str, source_url: str = "") -> list[OfferResult]:
                     price=price,
                     seller=None,
                     is_warehouse=False,
+                    stock_quantity=stock_quantity,
                 )
             ]
 

@@ -28,6 +28,7 @@ class SearchResultItem:
     url: str
     price: Decimal
     is_warehouse: bool = False
+    stock_quantity: Optional[int] = None
 
 
 @dataclass
@@ -65,6 +66,7 @@ class OfferResult:
     seller: Optional[str] = None
     url: Optional[str] = None
     is_warehouse: bool = False
+    stock_quantity: Optional[int] = None
 
 
 @dataclass

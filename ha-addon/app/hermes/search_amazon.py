@@ -264,7 +264,15 @@ def dedupe_results(results: List[SearchResultItem]) -> List[SearchResultItem]:
     for item in results:
         key = (item.url, bool(item.is_warehouse))
         existing = deduped.get(key)
-        if existing is None or item.price < existing.price:
+        if (
+            existing is None
+            or item.price < existing.price
+            or (
+                item.price == existing.price
+                and item.stock_quantity is not None
+                and existing.stock_quantity is None
+            )
+        ):
             deduped[key] = item
     return list(deduped.values())
 
