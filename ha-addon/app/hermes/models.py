@@ -44,6 +44,7 @@ class PriceSummaryRow:
     search_group_label: str = ""
     is_warehouse: bool = False
     tracking_id: str = ""
+    image_url: Optional[str] = None
 
     @property
     def difference(self) -> Decimal:
@@ -57,6 +58,7 @@ class StockSummaryRow:
     product_url: str
     target_price: Decimal
     reason: str
+    image_url: Optional[str] = None
 
 
 @dataclass
@@ -67,6 +69,7 @@ class OfferResult:
     url: Optional[str] = None
     is_warehouse: bool = False
     stock_quantity: Optional[int] = None
+    image_url: Optional[str] = None
 
 
 @dataclass

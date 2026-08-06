@@ -6,7 +6,7 @@ from typing import Any, Iterable, List
 from ..errors import HermesError, OutOfStockHermesError
 from ..models import OfferResult
 from ..utils import normalize_offer_text, parse_decimal, repair_mojibake
-from .base import iter_json_objects, soup_from_html
+from .base import extract_image, iter_json_objects, soup_from_html
 
 OUT_OF_STOCK_MARKERS = ("outofstock", "discontinued", "benzer urunler", "benzer ürünler")
 
@@ -174,6 +174,7 @@ def _stock_identity_from_variant(product: dict, variant: dict, source_url: str) 
 
 
 def extract_offers(html: str, source_url: str = "", size: str = "") -> List[OfferResult]:
+    image_url = extract_image(soup_from_html(html))
     requested_size = _clean_part(size)
     offers: List[OfferResult] = []
     seen_offer_keys: set[tuple[str, str, str]] = set()
@@ -223,10 +224,14 @@ def extract_offers(html: str, source_url: str = "", size: str = "") -> List[Offe
             raise OutOfStockHermesError(f"Zara beden stokta değil: {requested_size}", title, url)
         if not offers:
             raise OutOfStockHermesError(f"Zara beden fiyatı bulunamadı: {requested_size}", title, url)
+        for offer in offers:
+            offer.image_url = image_url
         return offers
 
     if offers:
-        return [min(offers, key=lambda item: item.price)]
+        best = min(offers, key=lambda item: item.price)
+        best.image_url = image_url
+        return [best]
     raise OutOfStockHermesError("Zara sayfasından stokta ürün fiyatı bulunamadı.")
 
 

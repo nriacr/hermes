@@ -9,7 +9,7 @@ from ..errors import EmptySearchResultsHermesError, HermesError
 from ..logging_utils import log
 from ..models import OfferResult
 from ..utils import format_tl, normalize_offer_text, parse_decimal, repair_mojibake
-from .base import extract_price_from_selectors, extract_title, soup_from_html
+from .base import extract_image, extract_price_from_selectors, extract_title, soup_from_html
 
 BASE_URL = "https://www.hepsiburada.com"
 MIN_PRICE = Decimal("50")
@@ -1278,6 +1278,7 @@ def extract_embedded_variant_offer(html: str, source_url: str) -> Optional[Offer
         price=best.price,
         seller=best.seller,
         url=source_url,
+        image_url=extract_image(soup),
     )
 
 
@@ -1412,4 +1413,5 @@ def extract_offer(html: str, source_url: str = "") -> OfferResult:
         price=best.price,
         seller=best.seller,
         url=best.url or None,
+        image_url=extract_image(soup),
     )

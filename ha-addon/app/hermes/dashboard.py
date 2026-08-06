@@ -140,6 +140,11 @@ tbody tr.site-other { --site-bg:rgba(156,151,255,.13); --site-bg-strong:rgba(156
 .hm-list { padding:0 16px; display:flex; flex-direction:column; gap:12px; }
 .hm-card { background:var(--surface); border:1px solid var(--line); border-radius:var(--radius-lg); padding:16px; }
 .hm-card.hm-paused { opacity:.55; }
+.hm-card-row { display:flex; gap:12px; align-items:flex-start; }
+.hm-card-thumb { position:relative; flex-shrink:0; width:60px; height:60px; border-radius:var(--radius-md); background:var(--surface-2); border:1px solid var(--line); overflow:hidden; display:flex; align-items:center; justify-content:center; }
+.hm-card-thumb-placeholder { width:22px; height:22px; color:var(--ink-faint); }
+.hm-card-thumb img { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; background:var(--surface-2); }
+.hm-card-body { flex:1; min-width:0; }
 .hm-card-top { display:flex; justify-content:space-between; align-items:flex-start; gap:10px; margin-bottom:12px; }
 .hm-card-name { font-size:14.5px; font-weight:700; line-height:1.35; color:var(--text); }
 .hm-status { flex-shrink:0; font-size:11px; font-weight:700; padding:4px 9px; border-radius:999px; white-space:nowrap; }
@@ -1276,6 +1281,7 @@ def _hm_build_cards(options, summary_payload, state):
             sellers.append(seller_text)
 
         product_url = str((best_row or {}).get("product_url") or (configured_urls[0] if configured_urls else "")).strip()
+        image_url = str((best_row or {}).get("image_url") or (matching_stock[0].get("image_url") if matching_stock else "") or "").strip()
 
         cards.append(
             {
@@ -1286,6 +1292,7 @@ def _hm_build_cards(options, summary_payload, state):
                 "price_text": price_text,
                 "target_text": target_text,
                 "configured_target_price": item.get("target_price"),
+                "image_url": image_url,
                 "gauge": gauge,
                 "drop_pct": drop_pct,
                 "extra_rows": extra_rows,
@@ -1408,6 +1415,20 @@ def _hm_render_manage_panel(card, base_path):
     )
 
 
+def _hm_render_thumb(card):
+    """Product thumbnail with a graceful icon fallback if the scraped image fails to load."""
+    placeholder = (
+        '<svg class="hm-card-thumb-placeholder" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">'
+        '<rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/>'
+        "</svg>"
+    )
+    image_html = ""
+    if card.get("image_url"):
+        url = escape(card["image_url"], quote=True)
+        image_html = f'<img src="{url}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">'
+    return f'<div class="hm-card-thumb">{placeholder}{image_html}</div>'
+
+
 def _hm_render_card(card, base_path):
     status = card["status"]
     classes = "hm-card" + ("" if card["active"] else " hm-paused")
@@ -1419,12 +1440,15 @@ def _hm_render_card(card, base_path):
         '<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 013 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>'
         "</button>"
     )
-    return (
-        f'<div class="{classes}" data-hm-status="{status}">'
+    body = (
         f'<div class="hm-card-top"><div class="hm-card-name">{escape(card["name"])}</div>{pill}</div>'
         f"{_hm_render_status_block(card)}"
         f"{_hm_render_gauge(card)}"
         f'<div class="hm-card-bottom">{_hm_render_sites(card)}<div class="hm-meta">{escape(card["last_checked_text"])}</div>{manage_trigger}</div>'
+    )
+    return (
+        f'<div class="{classes}" data-hm-status="{status}">'
+        f'<div class="hm-card-row">{_hm_render_thumb(card)}<div class="hm-card-body">{body}</div></div>'
         f"{_hm_render_manage_panel(card, base_path)}"
         f"{_hm_render_extra_results(card)}"
         "</div>"
