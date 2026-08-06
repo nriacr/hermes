@@ -154,14 +154,14 @@ tbody tr.site-other { --site-bg:rgba(156,151,255,.13); --site-bg-strong:rgba(156
 .hm-price-target { font-size:12px; color:var(--ink-faint); font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
 .hm-drop-badge { display:inline-flex; align-items:center; gap:3px; background:var(--mint-bg); color:var(--mint-ink); font-size:11px; font-weight:700; padding:3px 8px; border-radius:999px; }
 .hm-drop-badge svg { width:10px; height:10px; }
-.hm-gauge { height:6px; border-radius:999px; background:var(--surface-2); border:1px solid var(--line); position:relative; margin-bottom:12px; overflow:visible; }
+.hm-gauge { height:12px; border-radius:999px; background:var(--surface-2); border:1px solid var(--line); position:relative; margin-bottom:16px; overflow:visible; }
 .hm-gauge-fill { position:absolute; top:0; left:0; height:100%; border-radius:999px; }
 .hm-gauge-fill.hm-below { background:var(--mint-ink); }
 .hm-gauge-fill.hm-watch { background:var(--indigo-ink); }
-.hm-gauge-marker { position:absolute; top:50%; width:2px; height:12px; background:var(--ink-faint); transform:translate(-50%,-50%); }
+.hm-gauge-marker { position:absolute; top:50%; width:4px; height:22px; border-radius:2px; background:#fff; box-shadow:0 0 0 1px rgba(0,0,0,.45), 0 0 4px rgba(0,0,0,.3); transform:translate(-50%,-50%); }
 .hm-card-bottom { display:flex; align-items:center; justify-content:space-between; gap:10px; }
 .hm-sites { display:flex; gap:5px; flex-wrap:wrap; }
-.hm-site-dot { width:22px; height:22px; border-radius:7px; background:var(--surface-2); border:1px solid var(--line); display:flex; align-items:center; justify-content:center; font-size:9px; font-weight:700; color:var(--ink-soft); }
+.hm-site-dot { height:22px; padding:0 8px; border-radius:999px; background:var(--surface-2); border:1px solid var(--line); display:inline-flex; align-items:center; justify-content:center; font-size:10.5px; font-weight:700; color:var(--ink-soft); white-space:nowrap; }
 .hm-meta { font-size:11px; color:var(--ink-faint); }
 .hm-toggle-form { margin:0; flex-shrink:0; }
 .hm-toggle { width:34px; height:20px; border-radius:999px; background:var(--line); position:relative; border:0; padding:0; cursor:pointer; flex-shrink:0; }
@@ -1135,24 +1135,6 @@ def _render_error_details(error_details):
 _HM_STATUS_LABELS = {"below": "Hedef altı", "watch": "İzleniyor", "stock": "Stok bekliyor", "error": "Hata"}
 _HM_STATUS_PILL = {"below": "hm-status-below", "watch": "hm-status-watch", "stock": "hm-status-stock", "error": "hm-status-error"}
 _HM_STATUS_ORDER = ("below", "watch", "stock", "error")
-_HM_SITE_ABBR = {
-    "amazon": "AZ",
-    "hepsiburada": "HB",
-    "trendyol": "TY",
-    "network": "AĞ",
-    "beymenclub": "BC",
-    "nordbron": "NB",
-    "zara": "ZR",
-    "hm": "HM",
-}
-
-
-def _hm_site_abbr(seller_text: str) -> str:
-    site = _site_theme_class(seller_text).removeprefix("site-")
-    if site in _HM_SITE_ABBR:
-        return _HM_SITE_ABBR[site]
-    fallback = repair_mojibake(seller_text).strip()[:2].upper()
-    return fallback or "?"
 
 
 def _hm_gauge(price, target, min_price, max_price):
@@ -1352,10 +1334,7 @@ def _hm_render_gauge(card):
 def _hm_render_sites(card):
     if not card["sellers"]:
         return ""
-    dots = "".join(
-        f'<div class="hm-site-dot" title="{escape(seller)}">{escape(_hm_site_abbr(seller))}</div>'
-        for seller in card["sellers"][:4]
-    )
+    dots = "".join(f'<div class="hm-site-dot">{escape(seller)}</div>' for seller in card["sellers"][:4])
     return f'<div class="hm-sites">{dots}</div>'
 
 
