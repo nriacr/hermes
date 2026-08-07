@@ -7,7 +7,7 @@ from urllib.parse import urljoin
 from ..errors import HermesError, OutOfStockHermesError
 from ..models import OfferResult
 from ..utils import normalize_offer_text, parse_decimal, repair_mojibake
-from .base import extract_image, extract_jsonld_product, extract_price_from_meta, iter_json_objects, soup_from_html
+from .base import extract_jsonld_product, extract_price_from_meta, iter_json_objects, soup_from_html
 
 OUT_OF_STOCK_MARKERS = (
     "benzer urunler",
@@ -273,9 +273,7 @@ def _fallback_offer(html: str, source_url: str) -> OfferResult | None:
     color = ""
     if color_element:
         color = re.sub(r"^(Renk|Colour|Color)\s*:?\s*", "", _clean(color_element), flags=re.I)
-    return OfferResult(
-        title=_display_title(title, color, ""), price=price, seller="H&M", url=source_url, image_url=extract_image(soup)
-    )
+    return OfferResult(title=_display_title(title, color, ""), price=price, seller="H&M", url=source_url)
 
 
 def _fallback_text_price(html: str) -> Decimal | None:
@@ -290,7 +288,6 @@ def _fallback_text_price(html: str) -> Decimal | None:
 
 
 def extract_offers(html: str, source_url: str = "", size: str = "") -> List[OfferResult]:
-    image_url = extract_image(soup_from_html(html))
     requested_size = _clean(size)
     offers: List[OfferResult] = []
     seen: set[tuple[str, str, str]] = set()
@@ -325,8 +322,6 @@ def extract_offers(html: str, source_url: str = "", size: str = "") -> List[Offe
             offers.append(offer)
 
     if offers:
-        for offer in offers:
-            offer.image_url = image_url
         return offers
     if requested_size:
         title = stock_title or fallback_title

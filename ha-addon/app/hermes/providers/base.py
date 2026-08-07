@@ -24,13 +24,6 @@ PRICE_META_SELECTORS = [
     ("meta", {"name": "twitter:data1"}, "content"),
 ]
 
-IMAGE_META_SELECTORS = [
-    ("meta", {"property": "og:image:secure_url"}, "content"),
-    ("meta", {"property": "og:image"}, "content"),
-    ("meta", {"name": "twitter:image:src"}, "content"),
-    ("meta", {"name": "twitter:image"}, "content"),
-]
-
 SCRIPT_PRICE_PATTERNS = [
     re.compile(
         r'"(?:price|sellingPrice|discountedPrice|currentPrice|amount)"\s*:\s*"?(?P<price>\d+(?:[.,]\d{1,2})?)"?',
@@ -68,105 +61,6 @@ def extract_price_from_meta(soup: BeautifulSoup):
             except HermesError:
                 continue
     return None
-
-
-def extract_image(soup: BeautifulSoup) -> Optional[str]:
-    """Best-effort product image URL (og:image / twitter:image / JSON-LD).
-
-    Purely cosmetic for the dashboard thumbnail, so any failure here must
-    never interrupt price/stock extraction — always returns None instead
-    of raising.
-    """
-    try:
-        for tag_name, attrs, attr_name in IMAGE_META_SELECTORS:
-            element = soup.find(tag_name, attrs=attrs)
-            if not element:
-                continue
-            url = str(element.get(attr_name) or "").strip()
-            if url.startswith(("http://", "https://")):
-                return url
-        for script in soup.find_all("script", attrs={"type": re.compile(r"ld\+json", re.I)}):
-            raw = script.string or script.get_text(" ", strip=True)
-            if not raw:
-                continue
-            try:
-                payload = json.loads(raw)
-            except (json.JSONDecodeError, TypeError):
-                continue
-            for node in iter_json_objects(payload):
-                image = node.get("image")
-                if isinstance(image, list) and image:
-                    image = image[0]
-                if isinstance(image, dict):
-                    image = image.get("url")
-                if isinstance(image, str) and image.startswith(("http://", "https://")):
-                    return image
-        return _largest_product_img(soup)
-    except Exception:  # noqa: BLE001
-        return None
-
-
-IMAGE_JUNK_MARKERS = (
-    "logo",
-    "icon",
-    "sprite",
-    "placeholder",
-    "banner",
-    "avatar",
-    "pixel",
-    "spacer",
-    "loader",
-    "badge",
-    "flag",
-)
-IMAGE_LAZY_ATTRS = ("src", "data-src", "data-original", "data-lazy", "data-zoom-image", "data-image")
-
-
-def _img_candidate_url(element) -> Optional[str]:
-    for attr in IMAGE_LAZY_ATTRS:
-        url = str(element.get(attr) or "").strip()
-        if url.startswith(("http://", "https://")):
-            return url
-    srcset = str(element.get("srcset") or element.get("data-srcset") or "").strip()
-    for part in srcset.split(","):
-        url = part.strip().split(" ")[0]
-        if url.startswith(("http://", "https://")):
-            return url
-    return None
-
-
-def _img_declared_size(element) -> int:
-    """Largest declared dimension, or 0 when the page does not state one."""
-    best = 0
-    for attr in ("width", "height"):
-        raw = str(element.get(attr) or "").strip().rstrip("px")
-        if raw.isdigit():
-            best = max(best, int(raw))
-    return best
-
-
-def _largest_product_img(soup: BeautifulSoup) -> Optional[str]:
-    """Fallback for pages without og:image/JSON-LD: pick the most product-looking <img>."""
-    best_url = None
-    best_score = 0
-    for element in soup.find_all("img", limit=180):
-        url = _img_candidate_url(element)
-        if not url:
-            continue
-        haystack = f"{url} {element.get('class') or ''} {element.get('id') or ''} {element.get('alt') or ''}".casefold()
-        if any(marker in haystack for marker in IMAGE_JUNK_MARKERS):
-            continue
-        size = _img_declared_size(element)
-        if 0 < size < 100:
-            continue
-        # An explicit product hint outranks a merely large decorative image.
-        score = size or 120
-        if any(marker in haystack for marker in ("product", "urun", "ürün", "detail", "gallery", "zoom")):
-            score += 400
-        if score > best_score:
-            best_score = score
-            best_url = url
-    return best_url
 
 
 def extract_price_from_selectors(soup: BeautifulSoup, selectors: list[str]):

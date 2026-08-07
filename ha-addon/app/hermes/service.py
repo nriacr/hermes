@@ -44,7 +44,6 @@ from .providers import amazon as amazon_provider
 from .providers import bengurme as bengurme_provider
 from .providers import beymenclub as beymenclub_provider
 from .providers import network as network_provider
-from .providers.base import extract_image, soup_from_html
 from .providers.registry import extract_offer
 from .search_amazon import (
     dedupe_results,
@@ -363,8 +362,6 @@ def summary_row_from_state(watch: WatchRule, state_entry: Dict[str, Any], seller
         search_group_label=search_group_label,
         tracking_id=str(state_entry.get("tracking_id") or watch.tracking_id or ""),
         is_warehouse=bool(state_entry.get("is_warehouse", False)),
-        image_url=state_entry.get("image_url") or None,
-        stock_quantity=_optional_stock_quantity(state_entry.get("stock_quantity")),
     )
 
 
@@ -457,8 +454,6 @@ def save_price_summary(
                 "search_group_label": row.search_group_label,
                 "is_warehouse": row.is_warehouse,
                 "tracking_id": row.tracking_id,
-                "image_url": row.image_url,
-                "stock_quantity": row.stock_quantity,
             }
             for idx, row in enumerate(sorted_rows, start=1)
         ],
@@ -470,21 +465,11 @@ def save_price_summary(
                 "product_url": row.product_url,
                 "target": format_tl(row.target_price, with_currency=True),
                 "reason": row.reason,
-                "image_url": row.image_url,
             }
             for idx, row in enumerate(sorted_stock, start=1)
         ],
     }
     save_json(SUMMARY_PATH, payload)
-
-
-def _optional_stock_quantity(raw_value: Any) -> int | None:
-    if raw_value in (None, ""):
-        return None
-    try:
-        return int(raw_value)
-    except (TypeError, ValueError):
-        return None
 
 
 def _summary_rows_from_payload(payload: Dict[str, Any]) -> List[PriceSummaryRow]:
@@ -511,8 +496,6 @@ def _summary_rows_from_payload(payload: Dict[str, Any]) -> List[PriceSummaryRow]
                     search_group_label=str(raw_row.get("search_group_label") or ""),
                     is_warehouse=bool(raw_row.get("is_warehouse", False)),
                     tracking_id=str(raw_row.get("tracking_id") or ""),
-                    image_url=raw_row.get("image_url") or None,
-                    stock_quantity=_optional_stock_quantity(raw_row.get("stock_quantity")),
                 )
             )
         except HermesError:
@@ -537,7 +520,6 @@ def _stock_rows_from_payload(payload: Dict[str, Any]) -> List[StockSummaryRow]:
                     product_url=str(raw_row.get("product_url") or ""),
                     target_price=parse_decimal(str(raw_row.get("target") or "")),
                     reason=str(raw_row.get("reason") or ""),
-                    image_url=raw_row.get("image_url") or None,
                 )
             )
         except HermesError:
@@ -1384,7 +1366,6 @@ def _fetch_amazon_product_watch_offers(
                 url=watch.url,
                 is_warehouse=offer.is_warehouse,
                 stock_quantity=offer.stock_quantity,
-                image_url=offer.image_url,
             )
             for offer in _extract_amazon_page_offers(
                 session,
@@ -1408,7 +1389,6 @@ def _fetch_amazon_product_watch_offers(
                 url=watch.url,
                 is_warehouse=offer.is_warehouse,
                 stock_quantity=offer.stock_quantity,
-                image_url=offer.image_url,
             )
             for offer in _extract_amazon_page_offers(
                 session,
@@ -1452,7 +1432,6 @@ def _fetch_amazon_product_watch_offers(
                         url=variation.url,
                         is_warehouse=offer.is_warehouse,
                         stock_quantity=offer.stock_quantity,
-                        image_url=offer.image_url,
                     )
                 )
         except Exception as exc:  # noqa: BLE001
@@ -1496,10 +1475,7 @@ def _enrich_hepsiburada_search_offer_titles(
             )
             title = hepsiburada_provider.title_with_variant_label(offer.title, variant_label)
             title = hepsiburada_provider.clean_display_title(title)
-            image_url = extract_image(soup_from_html(html)) or offer.image_url
-            enriched.append(
-                OfferResult(title=title, price=offer.price, seller=offer.seller, url=offer.url, image_url=image_url)
-            )
+            enriched.append(OfferResult(title=title, price=offer.price, seller=offer.seller, url=offer.url))
         except Exception as exc:  # noqa: BLE001
             log(f"Hepsiburada arama karti varyasyon etiketi tamamlanamadi: {offer.url} | {exc}")
             enriched.append(offer)
@@ -1611,7 +1587,6 @@ def _fetch_hepsiburada_watch_offers(
                     price=offer.price,
                     seller=offer.seller,
                     url=variant_url,
-                    image_url=offer.image_url,
                 )
             )
         except Exception as exc:  # noqa: BLE001
@@ -1896,8 +1871,6 @@ def check_once(config: HermesConfig) -> None:
                         search_group_label=search_group_label,
                         is_warehouse=offer.is_warehouse,
                         tracking_id=watch.tracking_id,
-                        image_url=offer.image_url,
-                        stock_quantity=offer.stock_quantity,
                     )
                 )
                 log(
@@ -1955,8 +1928,6 @@ def check_once(config: HermesConfig) -> None:
                 state[offer_key]["search_group_label"] = search_group_label
                 state[offer_key]["is_warehouse"] = offer.is_warehouse
                 state[offer_key]["warehouse_evidence"] = bool(offer.is_warehouse)
-                state[offer_key]["image_url"] = offer.image_url
-                state[offer_key]["stock_quantity"] = offer.stock_quantity
                 state[offer_key]["last_error"] = None
                 state[offer_key]["last_error_status"] = None
 

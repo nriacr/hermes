@@ -14,7 +14,6 @@ from ..errors import HermesError, OutOfStockHermesError
 from ..models import OfferResult
 from ..utils import normalize_offer_text, parse_decimal, repair_mojibake
 from .base import (
-    extract_image,
     extract_jsonld_product,
     extract_price_from_meta,
     extract_price_from_scripts,
@@ -197,13 +196,12 @@ def _fallback_offer(html: str, source_url: str) -> OfferResult:
         extract_price_from_scripts(html),
     ):
         if price is not None:
-            return OfferResult(title=title, price=price, seller="Ben Gurme", url=source_url, image_url=extract_image(soup))
+            return OfferResult(title=title, price=price, seller="Ben Gurme", url=source_url)
     raise HermesError("Ben Gurme sayfasından fiyat veya varyant verisi bulunamadı.")
 
 
 def extract_offers(html: str, source_url: str = "", size: str = "") -> List[OfferResult]:
     """Return each in-stock Shopify variant as a separate Hermes offer."""
-    image_url = extract_image(soup_from_html(html))
     requested_size = _clean_text(size)
     payloads = _product_payloads(html)
     if not payloads:
@@ -225,8 +223,6 @@ def extract_offers(html: str, source_url: str = "", size: str = "") -> List[Offe
                 offers.append(offer)
 
     if offers:
-        for offer in offers:
-            offer.image_url = image_url
         return offers
     if out_of_stock is not None:
         raise out_of_stock

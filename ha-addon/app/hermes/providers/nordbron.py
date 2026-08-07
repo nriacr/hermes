@@ -1,7 +1,6 @@
 from ..errors import HermesError
 from ..models import OfferResult
 from .base import (
-    extract_image,
     extract_jsonld_product,
     extract_price_from_meta,
     extract_price_from_scripts,
@@ -21,7 +20,6 @@ def extract_offer(html: str) -> OfferResult:
     soup = soup_from_html(html)
     jsonld_title, jsonld_price = extract_jsonld_product(soup)
     title = jsonld_title or extract_title(soup) or "Nordbron ürünü"
-    image_url = extract_image(soup)
 
     for price in (
         jsonld_price,
@@ -30,6 +28,6 @@ def extract_offer(html: str) -> OfferResult:
         extract_price_from_scripts(html),
     ):
         if price is not None:
-            return OfferResult(title=title, price=price, seller=None, image_url=image_url)
+            return OfferResult(title=title, price=price, seller=None)
 
     raise HermesError("Nordbron sayfasından fiyat bulunamadı.")

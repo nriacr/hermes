@@ -15,7 +15,6 @@ from ..utils import (
     repair_mojibake,
 )
 from .base import (
-    extract_image,
     extract_jsonld_product,
     extract_price_from_meta,
     extract_title,
@@ -446,7 +445,6 @@ def extract_verified_warehouse_offers_from_listing(html: str, source_url: str) -
     soup = soup_from_html(html)
     title, _ = extract_jsonld_product(soup)
     title = title or extract_title(soup) or "Amazon ürünü"
-    image_url = extract_image(soup)
     offers: list[OfferResult] = []
     seen_prices: set = set()
     containers = []
@@ -472,7 +470,6 @@ def extract_verified_warehouse_offers_from_listing(html: str, source_url: str) -
                 seller="Amazon Depo",
                 url=source_url,
                 is_warehouse=True,
-                image_url=image_url,
             )
         )
     return offers
@@ -483,7 +480,6 @@ def extract_offers(html: str, source_url: str = "") -> list[OfferResult]:
     soup = soup_from_html(html)
     jsonld_title, jsonld_price = extract_jsonld_product(soup)
     title: Optional[str] = jsonld_title or extract_title(soup) or "Amazon ürünü"
-    image_url = extract_image(soup)
     stock_quantity = extract_low_stock_quantity(html)
     offers: list[OfferResult] = []
 
@@ -499,7 +495,6 @@ def extract_offers(html: str, source_url: str = "") -> list[OfferResult]:
                 # its own price and Amazon Depo seller are verified below.
                 is_warehouse=False,
                 stock_quantity=stock_quantity,
-                image_url=image_url,
             )
         )
 
@@ -515,7 +510,6 @@ def extract_offers(html: str, source_url: str = "") -> list[OfferResult]:
                     seller=None,
                     is_warehouse=False,
                     stock_quantity=stock_quantity,
-                    image_url=image_url,
                 )
             ]
 
