@@ -45,6 +45,7 @@ class PriceSummaryRow:
     is_warehouse: bool = False
     tracking_id: str = ""
     image_url: Optional[str] = None
+    stock_quantity: Optional[int] = None
 
     @property
     def difference(self) -> Decimal:

@@ -364,6 +364,7 @@ def summary_row_from_state(watch: WatchRule, state_entry: Dict[str, Any], seller
         tracking_id=str(state_entry.get("tracking_id") or watch.tracking_id or ""),
         is_warehouse=bool(state_entry.get("is_warehouse", False)),
         image_url=state_entry.get("image_url") or None,
+        stock_quantity=_optional_stock_quantity(state_entry.get("stock_quantity")),
     )
 
 
@@ -457,6 +458,7 @@ def save_price_summary(
                 "is_warehouse": row.is_warehouse,
                 "tracking_id": row.tracking_id,
                 "image_url": row.image_url,
+                "stock_quantity": row.stock_quantity,
             }
             for idx, row in enumerate(sorted_rows, start=1)
         ],
@@ -474,6 +476,15 @@ def save_price_summary(
         ],
     }
     save_json(SUMMARY_PATH, payload)
+
+
+def _optional_stock_quantity(raw_value: Any) -> int | None:
+    if raw_value in (None, ""):
+        return None
+    try:
+        return int(raw_value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _summary_rows_from_payload(payload: Dict[str, Any]) -> List[PriceSummaryRow]:
@@ -501,6 +512,7 @@ def _summary_rows_from_payload(payload: Dict[str, Any]) -> List[PriceSummaryRow]
                     is_warehouse=bool(raw_row.get("is_warehouse", False)),
                     tracking_id=str(raw_row.get("tracking_id") or ""),
                     image_url=raw_row.get("image_url") or None,
+                    stock_quantity=_optional_stock_quantity(raw_row.get("stock_quantity")),
                 )
             )
         except HermesError:
@@ -1885,6 +1897,7 @@ def check_once(config: HermesConfig) -> None:
                         is_warehouse=offer.is_warehouse,
                         tracking_id=watch.tracking_id,
                         image_url=offer.image_url,
+                        stock_quantity=offer.stock_quantity,
                     )
                 )
                 log(
@@ -1943,6 +1956,7 @@ def check_once(config: HermesConfig) -> None:
                 state[offer_key]["is_warehouse"] = offer.is_warehouse
                 state[offer_key]["warehouse_evidence"] = bool(offer.is_warehouse)
                 state[offer_key]["image_url"] = offer.image_url
+                state[offer_key]["stock_quantity"] = offer.stock_quantity
                 state[offer_key]["last_error"] = None
                 state[offer_key]["last_error_status"] = None
 

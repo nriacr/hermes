@@ -18,10 +18,12 @@ from .web_assets import HERMES_ICON_PNG, HERMES_ICON_SVG, render_web_app_head, r
 from .utils import (
     canonical_tracking_url,
     detect_site_from_url,
+    format_tl,
     is_amazon_search_url,
     is_hepsiburada_search_url,
     normalize_item_key,
     parse_bool,
+    parse_decimal,
     parse_iso_datetime,
     repair_mojibake,
     site_label,
@@ -137,37 +139,45 @@ tbody tr.site-other { --site-bg:rgba(156,151,255,.13); --site-bg-strong:rgba(156
 .hm-chip.hm-active { background:var(--indigo-bg); color:var(--indigo-ink); border-color:rgba(156,151,255,.4); }
 .hm-section-title { font-size:13px; font-weight:700; color:var(--ink-soft); padding:20px 16px 10px; letter-spacing:.01em; }
 .hm-empty { margin:0 16px; padding:16px; border:1px dashed var(--line); border-radius:var(--radius-md); color:var(--muted); font-size:13px; background:var(--surface-2); }
-.hm-list { padding:0 16px; display:flex; flex-direction:column; gap:12px; }
-.hm-card { background:var(--surface); border:1px solid var(--line); border-radius:var(--radius-lg); padding:16px; }
+.hm-list { padding:0 16px; display:grid; grid-template-columns:1fr; gap:12px; align-items:stretch; }
+.hm-card { display:flex; flex-direction:column; height:100%; background:var(--surface); border:1px solid var(--line); border-radius:var(--radius-lg); padding:14px; }
 .hm-card.hm-paused { opacity:.55; }
-.hm-card-row { display:flex; gap:12px; align-items:flex-start; }
-.hm-card-thumb { position:relative; flex-shrink:0; width:60px; height:60px; border-radius:var(--radius-md); background:var(--surface-2); border:1px solid var(--line); overflow:hidden; display:flex; align-items:center; justify-content:center; }
-.hm-card-thumb-placeholder { width:22px; height:22px; color:var(--ink-faint); }
+.hm-card.hm-is-depot { border-color:rgba(255,201,120,.45); box-shadow:inset 3px 0 0 var(--peach-ink); }
+.hm-card-row { display:flex; gap:12px; align-items:flex-start; flex:1; min-height:0; }
+.hm-card-thumb { position:relative; flex-shrink:0; width:84px; height:84px; border-radius:var(--radius-md); background:var(--surface-2); border:1px solid var(--line); overflow:hidden; display:flex; align-items:center; justify-content:center; }
+.hm-card-thumb-placeholder { width:26px; height:26px; color:var(--ink-faint); }
 .hm-card-thumb img { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; background:var(--surface-2); }
-.hm-card-body { flex:1; min-width:0; }
-.hm-card-top { display:flex; justify-content:space-between; align-items:flex-start; gap:10px; margin-bottom:12px; }
-.hm-card-name { font-size:14.5px; font-weight:700; line-height:1.35; color:var(--text); }
-.hm-status { flex-shrink:0; font-size:11px; font-weight:700; padding:4px 9px; border-radius:999px; white-space:nowrap; }
+.hm-card-body { flex:1; min-width:0; display:flex; flex-direction:column; }
+.hm-card-top { display:flex; justify-content:space-between; align-items:flex-start; gap:8px; margin-bottom:6px; }
+.hm-card-name { font-size:13px; font-weight:700; line-height:1.3; color:var(--text); min-width:0; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; overflow-wrap:anywhere; }
+.hm-card-name a { color:inherit; text-decoration:none; }
+.hm-card-name a:hover { color:var(--indigo-ink); text-decoration:underline; }
+.hm-card-tags { display:flex; flex-wrap:wrap; gap:5px; margin-bottom:6px; }
+.hm-depot-tag { display:inline-flex; align-items:center; padding:2px 7px; border-radius:6px; background:var(--peach-bg); color:var(--peach-ink); font-size:10px; font-weight:900; letter-spacing:.05em; }
+.hm-stock-tag { display:inline-flex; align-items:center; padding:2px 7px; border-radius:6px; background:var(--indigo-soft); color:var(--indigo-ink); font-size:10px; font-weight:800; }
+.hm-more-row .hm-depot-tag, .hm-more-row .hm-stock-tag { margin-right:5px; }
+.hm-status { flex-shrink:0; font-size:10px; font-weight:700; padding:3px 8px; border-radius:999px; white-space:nowrap; }
 .hm-status-below { background:var(--mint-bg); color:var(--mint-ink); }
 .hm-status-watch { background:var(--indigo-soft); color:var(--indigo-ink); }
 .hm-status-stock { background:var(--peach-bg); color:var(--peach-ink); }
 .hm-status-error { background:var(--rose-bg); color:var(--rose-ink); }
-.hm-price-row { display:flex; align-items:baseline; gap:10px; margin-bottom:10px; flex-wrap:wrap; }
-.hm-price-best { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:20px; font-weight:700; color:var(--text); }
+.hm-price-row { display:flex; align-items:baseline; gap:8px; margin-bottom:8px; flex-wrap:wrap; }
+.hm-price-best { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:17px; font-weight:700; color:var(--text); }
 .hm-price-best.hm-below { color:var(--mint-ink); }
-.hm-price-best.hm-error { color:var(--rose-ink); font-family:inherit; font-size:13px; font-weight:600; }
-.hm-price-target { font-size:12px; color:var(--ink-faint); font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
-.hm-drop-badge { display:inline-flex; align-items:center; gap:3px; background:var(--mint-bg); color:var(--mint-ink); font-size:11px; font-weight:700; padding:3px 8px; border-radius:999px; }
-.hm-drop-badge svg { width:10px; height:10px; }
-.hm-gauge { height:12px; border-radius:999px; background:var(--surface-2); border:1px solid var(--line); position:relative; margin-bottom:16px; overflow:visible; }
+.hm-price-best.hm-error { color:var(--rose-ink); font-family:inherit; font-size:12px; font-weight:600; line-height:1.35; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+.hm-price-target { font-size:11px; color:var(--ink-faint); font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
+.hm-drop-badge { display:inline-flex; align-items:center; gap:3px; background:var(--mint-bg); color:var(--mint-ink); font-size:10px; font-weight:700; padding:2px 7px; border-radius:999px; }
+.hm-drop-badge svg { width:9px; height:9px; }
+.hm-gauge { height:10px; border-radius:999px; background:var(--surface-2); border:1px solid var(--line); position:relative; margin:auto 0 12px; overflow:visible; }
+.hm-gauge-empty { opacity:.45; }
 .hm-gauge-fill { position:absolute; top:0; left:0; height:100%; border-radius:999px; }
 .hm-gauge-fill.hm-below { background:var(--mint-ink); }
 .hm-gauge-fill.hm-watch { background:var(--indigo-ink); }
-.hm-gauge-marker { position:absolute; top:50%; width:4px; height:22px; border-radius:2px; background:#fff; box-shadow:0 0 0 1px rgba(0,0,0,.45), 0 0 4px rgba(0,0,0,.3); transform:translate(-50%,-50%); }
-.hm-card-bottom { display:flex; align-items:center; justify-content:space-between; gap:10px; }
-.hm-sites { display:flex; gap:5px; flex-wrap:wrap; }
-.hm-site-dot { height:22px; padding:0 8px; border-radius:999px; background:var(--surface-2); border:1px solid var(--line); display:inline-flex; align-items:center; justify-content:center; font-size:10.5px; font-weight:700; color:var(--ink-soft); white-space:nowrap; }
-.hm-meta { font-size:11px; color:var(--ink-faint); }
+.hm-gauge-marker { position:absolute; top:50%; width:4px; height:20px; border-radius:2px; background:#fff; box-shadow:0 0 0 1px rgba(0,0,0,.45), 0 0 4px rgba(0,0,0,.3); transform:translate(-50%,-50%); }
+.hm-card-bottom { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-top:auto; }
+.hm-sites { display:flex; gap:4px; flex-wrap:wrap; min-width:0; }
+.hm-site-dot { height:20px; max-width:110px; padding:0 7px; border-radius:999px; background:var(--surface-2); border:1px solid var(--line); display:inline-flex; align-items:center; justify-content:center; font-size:10px; font-weight:700; color:var(--ink-soft); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.hm-meta { font-size:10.5px; color:var(--ink-faint); white-space:nowrap; }
 .hm-toggle-form { margin:0; flex-shrink:0; }
 .hm-icon-btn-sm { width:30px; height:30px; border-radius:9px; background:var(--surface-2); border:1px solid var(--line); display:flex; align-items:center; justify-content:center; color:var(--ink-soft); cursor:pointer; flex-shrink:0; }
 .hm-icon-btn-sm svg { width:14px; height:14px; }
@@ -203,7 +213,9 @@ tbody tr.site-other { --site-bg:rgba(156,151,255,.13); --site-bg-strong:rgba(156
 @media (min-width:760px) {
   .hm-app { max-width:1080px; }
   .hm-nav { max-width:1080px; }
-  .hm-list { display:grid; grid-template-columns:repeat(auto-fill,minmax(300px,1fr)); align-items:start; gap:14px; }
+  /* Uniform tiles: equal column widths, and every card in a row shares that
+     row's height (without stretching short rows to the tallest row's height). */
+  .hm-list { grid-template-columns:repeat(auto-fill,minmax(320px,1fr)); gap:14px; }
 }
 """
 
@@ -1149,6 +1161,21 @@ def _render_error_details(error_details):
 _HM_STATUS_LABELS = {"below": "Hedef altı", "watch": "İzleniyor", "stock": "Stok bekliyor", "error": "Hata"}
 _HM_STATUS_PILL = {"below": "hm-status-below", "watch": "hm-status-watch", "stock": "hm-status-stock", "error": "hm-status-error"}
 _HM_STATUS_ORDER = ("below", "watch", "stock", "error")
+_HM_STOCK_SUFFIX_PATTERN = re.compile(r"\s*\(\s*Stok\s+\d+\s*\)\s*$", re.IGNORECASE)
+
+
+def _hm_stock_quantity(row):
+    """Prefer the persisted field, falling back to the "(Stok N)" title suffix."""
+    if not isinstance(row, dict):
+        return None
+    raw = row.get("stock_quantity")
+    if raw not in (None, ""):
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            pass
+    match = _HM_STOCK_SUFFIX_PATTERN.search(str(row.get("product_title") or ""))
+    return int(re.sub(r"\D", "", match.group(0))) if match else None
 
 
 def _hm_gauge(price, target, min_price, max_price):
@@ -1282,6 +1309,11 @@ def _hm_build_cards(options, summary_payload, state):
 
         product_url = str((best_row or {}).get("product_url") or (configured_urls[0] if configured_urls else "")).strip()
         image_url = str((best_row or {}).get("image_url") or (matching_stock[0].get("image_url") if matching_stock else "") or "").strip()
+        is_warehouse = parse_bool((best_row or {}).get("is_warehouse"), default=False)
+        stock_quantity = _hm_stock_quantity(best_row)
+        # service.py appends "(Stok N)" to Amazon titles; the card shows that as
+        # its own badge, so drop the duplicate from the displayed name.
+        name = _HM_STOCK_SUFFIX_PATTERN.sub("", name).strip() or name
 
         cards.append(
             {
@@ -1293,6 +1325,8 @@ def _hm_build_cards(options, summary_payload, state):
                 "target_text": target_text,
                 "configured_target_price": item.get("target_price"),
                 "image_url": image_url,
+                "is_warehouse": is_warehouse,
+                "stock_quantity": stock_quantity,
                 "gauge": gauge,
                 "drop_pct": drop_pct,
                 "extra_rows": extra_rows,
@@ -1338,8 +1372,9 @@ def _hm_render_status_block(card):
 
 
 def _hm_render_gauge(card):
+    """Always render the track so every card keeps the same height in the grid."""
     if card["status"] in {"error", "stock"} or not card.get("gauge"):
-        return ""
+        return '<div class="hm-gauge hm-gauge-empty"></div>'
     fill, marker = card["gauge"]
     fill_class = "hm-below" if card["status"] == "below" else "hm-watch"
     return (
@@ -1350,8 +1385,8 @@ def _hm_render_gauge(card):
 
 def _hm_render_sites(card):
     if not card["sellers"]:
-        return ""
-    dots = "".join(f'<div class="hm-site-dot">{escape(seller)}</div>' for seller in card["sellers"][:4])
+        return "<div class='hm-sites'></div>"
+    dots = "".join(f'<div class="hm-site-dot">{escape(seller)}</div>' for seller in card["sellers"][:3])
     return f'<div class="hm-sites">{dots}</div>'
 
 
@@ -1362,13 +1397,16 @@ def _hm_render_extra_results(card):
     items = []
     for row in rows[:8]:
         seller = escape(repair_mojibake(row.get("seller") or "-"))
-        title = escape(repair_mojibake(row.get("product_title") or "-"))
+        title = escape(_HM_STOCK_SUFFIX_PATTERN.sub("", repair_mojibake(row.get("product_title") or "-")).strip())
         price = escape(_display_tl(row.get("price", "-")))
         url = str(row.get("product_url") or "").strip()
+        depot = '<span class="hm-depot-tag">DEPO</span>' if parse_bool(row.get("is_warehouse"), default=False) else ""
+        quantity = _hm_stock_quantity(row)
+        stock = f'<span class="hm-stock-tag">Stok {quantity}</span>' if quantity is not None else ""
         label = (
-            f'<a href="{escape(url, quote=True)}" target="_blank" rel="noopener noreferrer">{seller}: {title}</a>'
+            f'<a href="{escape(url, quote=True)}" target="_blank" rel="noopener noreferrer">{depot}{stock}{seller}: {title}</a>'
             if url
-            else f"{seller}: {title}"
+            else f"{depot}{stock}{seller}: {title}"
         )
         items.append(f'<div class="hm-more-row">{label}<span>{price}</span></div>')
     return (
@@ -1377,12 +1415,18 @@ def _hm_render_extra_results(card):
 
 
 def _hm_price_input_value(raw):
+    """Format a configured target price for the edit field.
+
+    options.json stores this as a JSON number, so `.` is a decimal point here —
+    never a thousands separator. Reuse the settings parser instead of the
+    Turkish-text one, which would read 3000.0 as 30.000.
+    """
     if raw in (None, ""):
         return ""
-    amount = _parse_turkish_money(str(raw))
-    if amount is None:
+    try:
+        return format_tl(parse_decimal(str(raw)))
+    except Exception:  # noqa: BLE001
         return ""
-    return f"{amount.quantize(Decimal('1'), rounding=ROUND_DOWN):,}".replace(",", ".")
 
 
 def _hm_render_manage_panel(card, base_path):
@@ -1431,7 +1475,7 @@ def _hm_render_thumb(card):
 
 def _hm_render_card(card, base_path):
     status = card["status"]
-    classes = "hm-card" + ("" if card["active"] else " hm-paused")
+    classes = "hm-card" + ("" if card["active"] else " hm-paused") + (" hm-is-depot" if card["is_warehouse"] else "")
     paused_suffix = " · Duraklatıldı" if not card["active"] else ""
     pill = f'<span class="hm-status {_HM_STATUS_PILL[status]}">{escape(_HM_STATUS_LABELS[status])}{escape(paused_suffix)}</span>'
     manage_trigger = (
@@ -1440,8 +1484,20 @@ def _hm_render_card(card, base_path):
         '<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 013 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>'
         "</button>"
     )
+    name_html = escape(card["name"])
+    if card["product_url"]:
+        name_html = (
+            f'<a href="{escape(card["product_url"], quote=True)}" target="_blank" rel="noopener noreferrer">{name_html}</a>'
+        )
+    tags = ""
+    if card["is_warehouse"]:
+        tags += '<span class="hm-depot-tag">DEPO</span>'
+    if card["stock_quantity"] is not None:
+        tags += f'<span class="hm-stock-tag">Stok {card["stock_quantity"]}</span>'
+    tags_html = f'<div class="hm-card-tags">{tags}</div>' if tags else ""
     body = (
-        f'<div class="hm-card-top"><div class="hm-card-name">{escape(card["name"])}</div>{pill}</div>'
+        f'<div class="hm-card-top"><div class="hm-card-name">{name_html}</div>{pill}</div>'
+        f"{tags_html}"
         f"{_hm_render_status_block(card)}"
         f"{_hm_render_gauge(card)}"
         f'<div class="hm-card-bottom">{_hm_render_sites(card)}<div class="hm-meta">{escape(card["last_checked_text"])}</div>{manage_trigger}</div>'

@@ -101,9 +101,72 @@ def extract_image(soup: BeautifulSoup) -> Optional[str]:
                     image = image.get("url")
                 if isinstance(image, str) and image.startswith(("http://", "https://")):
                     return image
+        return _largest_product_img(soup)
     except Exception:  # noqa: BLE001
         return None
+
+
+IMAGE_JUNK_MARKERS = (
+    "logo",
+    "icon",
+    "sprite",
+    "placeholder",
+    "banner",
+    "avatar",
+    "pixel",
+    "spacer",
+    "loader",
+    "badge",
+    "flag",
+)
+IMAGE_LAZY_ATTRS = ("src", "data-src", "data-original", "data-lazy", "data-zoom-image", "data-image")
+
+
+def _img_candidate_url(element) -> Optional[str]:
+    for attr in IMAGE_LAZY_ATTRS:
+        url = str(element.get(attr) or "").strip()
+        if url.startswith(("http://", "https://")):
+            return url
+    srcset = str(element.get("srcset") or element.get("data-srcset") or "").strip()
+    for part in srcset.split(","):
+        url = part.strip().split(" ")[0]
+        if url.startswith(("http://", "https://")):
+            return url
     return None
+
+
+def _img_declared_size(element) -> int:
+    """Largest declared dimension, or 0 when the page does not state one."""
+    best = 0
+    for attr in ("width", "height"):
+        raw = str(element.get(attr) or "").strip().rstrip("px")
+        if raw.isdigit():
+            best = max(best, int(raw))
+    return best
+
+
+def _largest_product_img(soup: BeautifulSoup) -> Optional[str]:
+    """Fallback for pages without og:image/JSON-LD: pick the most product-looking <img>."""
+    best_url = None
+    best_score = 0
+    for element in soup.find_all("img", limit=180):
+        url = _img_candidate_url(element)
+        if not url:
+            continue
+        haystack = f"{url} {element.get('class') or ''} {element.get('id') or ''} {element.get('alt') or ''}".casefold()
+        if any(marker in haystack for marker in IMAGE_JUNK_MARKERS):
+            continue
+        size = _img_declared_size(element)
+        if 0 < size < 100:
+            continue
+        # An explicit product hint outranks a merely large decorative image.
+        score = size or 120
+        if any(marker in haystack for marker in ("product", "urun", "ürün", "detail", "gallery", "zoom")):
+            score += 400
+        if score > best_score:
+            best_score = score
+            best_url = url
+    return best_url
 
 
 def extract_price_from_selectors(soup: BeautifulSoup, selectors: list[str]):
