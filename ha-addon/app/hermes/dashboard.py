@@ -1311,6 +1311,15 @@ def _hm_build_cards(options, summary_payload, state):
         image_url = str((best_row or {}).get("image_url") or (matching_stock[0].get("image_url") if matching_stock else "") or "").strip()
         is_warehouse = parse_bool((best_row or {}).get("is_warehouse"), default=False)
         stock_quantity = _hm_stock_quantity(best_row)
+        # The edit field must always agree with the "hedef" figure printed on this
+        # same card, so prefer that over re-reading options.json.
+        target_input = ""
+        if target_text not in (None, ""):
+            target_amount = _parse_turkish_money(target_text)
+            if target_amount is not None:
+                target_input = format_tl(target_amount)
+        if not target_input:
+            target_input = _hm_price_input_value(item.get("target_price"))
         # service.py appends "(Stok N)" to Amazon titles; the card shows that as
         # its own badge, so drop the duplicate from the displayed name.
         name = _HM_STOCK_SUFFIX_PATTERN.sub("", name).strip() or name
@@ -1324,6 +1333,7 @@ def _hm_build_cards(options, summary_payload, state):
                 "price_text": price_text,
                 "target_text": target_text,
                 "configured_target_price": item.get("target_price"),
+                "target_input": target_input,
                 "image_url": image_url,
                 "is_warehouse": is_warehouse,
                 "stock_quantity": stock_quantity,
@@ -1440,12 +1450,18 @@ def _hm_render_manage_panel(card, base_path):
         '<span class="hm-knob"></span></button>'
         "</form>"
     )
-    price_value = escape(_hm_price_input_value(card.get("configured_target_price")), quote=True)
+    price_value = escape(card.get("target_input") or "", quote=True)
+    field_id = f"hm-target-{card['index']}"
+    # Every card posts the same field name, so browsers and password managers
+    # will happily autofill all of them with one remembered value and hide the
+    # per-product target. Opt out explicitly.
     price_form = (
-        f'<form class="hm-price-edit-form" method="post" action="{base_path}/update-target-price">'
+        f'<form class="hm-price-edit-form" method="post" action="{base_path}/update-target-price" autocomplete="off">'
         f'<input type="hidden" name="watch_index" value="{card["index"]}">'
-        "<label>Hedef fiyat"
-        f'<input type="text" name="target_price" value="{price_value}" inputmode="decimal" placeholder="ör. 17.600">'
+        f'<label for="{field_id}">Hedef fiyat'
+        f'<input id="{field_id}" type="text" name="target_price" value="{price_value}" inputmode="decimal" '
+        'placeholder="ör. 17.600" autocomplete="off" autocorrect="off" spellcheck="false" '
+        'data-1p-ignore data-lpignore="true" data-form-type="other">'
         "</label>"
         '<button type="submit" class="hm-btn">Kaydet</button>'
         "</form>"
