@@ -952,6 +952,12 @@ def _price_context_is_premium(context: str) -> bool:
     return any(marker in normalized for marker in PREMIUM_PRICE_MARKERS_NORMALIZED)
 
 
+def _price_context_key(context: str) -> str:
+    """Normalize API price labels regardless of dash/underscore formatting."""
+    normalized = normalize_offer_text(context)
+    return re.sub(r"[^a-z0-9]+", " ", normalized).strip()
+
+
 def _premium_entries_from_nested_value(value: Any, parent_context: str = "") -> list[tuple[Decimal, str]]:
     entries: list[tuple[Decimal, str]] = []
     if isinstance(value, dict):
@@ -1005,7 +1011,7 @@ def _mapping_price_entries(mapping: dict) -> list[tuple[Decimal, str]]:
             if not isinstance(item, dict):
                 continue
             context = " ".join(str(value) for value in item.values() if isinstance(value, str))
-            normalized_context = normalize_offer_text(context)
+            normalized_context = _price_context_key(context)
             if (
                 collection_key == "minimumPrices"
                 and not _price_context_is_premium(context)
@@ -1056,7 +1062,7 @@ def _listing_mapping_price(mapping: dict) -> Optional[Decimal]:
     minimum_prices = mapping.get("minimumPrices")
     if isinstance(minimum_prices, list):
         for item in minimum_prices:
-            if isinstance(item, dict) and item.get("name") == "non-segmented-price":
+            if isinstance(item, dict) and _price_context_key(str(item.get("name") or "")) == "non segmented price":
                 price = _number_price(item.get("value"))
                 if price is not None:
                     return price

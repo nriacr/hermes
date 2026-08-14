@@ -2399,6 +2399,40 @@ class HermesSmokeTests(unittest.TestCase):
 
         self.assertEqual(offer.price, Decimal("2196"))
 
+    def test_hepsiburada_product_url_reads_real_cart_special_mapping(self):
+        html = """
+        <html><head><title>Magly Manyetik Yapı Blokları Fiyatı</title></head>
+        <body>
+          <h1>Magly Manyetik Yapı Blokları</h1>
+          <script>
+            window.__HB_STATE__ = {
+              "variants": [
+                {"sku": "HBCV00007BHN4Z", "variantListing": [
+                  {"listingId": "listing-magly", "merchantName": "Magly",
+                   "finalPriceOnSale": 2745, "minimumPrice": 1921.5,
+                   "minimumPrices": [
+                     {"name": "10", "value": 1921.5},
+                     {"name": "30", "value": 1921.5},
+                     {"name": "non-segmented-price", "value": 2196}
+                   ]}
+                ]}
+              ]
+            };
+          </script>
+        </body></html>
+        """
+        source_url = (
+            "https://www.hepsiburada.com/magly-manyetik-yapi-bloklari-cocuklar-icin-renkli-"
+            "3-boyutlu-72-parca-manyetik-karo-oyun-seti-p-HBCV00007BHN4Z"
+        )
+
+        embedded_offer = extract_embedded_variant_offer(html, source_url)
+        offer = extract_hepsiburada_offer(html, source_url=source_url)
+
+        self.assertIsNotNone(embedded_offer)
+        self.assertEqual(embedded_offer.price, Decimal("2196"))
+        self.assertEqual(offer.price, Decimal("2196"))
+
     def test_hepsiburada_detail_ignores_cart_special_discount_amount(self):
         html = """
         <html><head><title>Magly Manyetik Yapı Blokları Fiyatı</title></head>
