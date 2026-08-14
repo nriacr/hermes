@@ -2369,6 +2369,52 @@ class HermesSmokeTests(unittest.TestCase):
 
         self.assertEqual(offer.price, Decimal("18049"))
 
+    def test_hepsiburada_product_url_prefers_visible_cart_special_price(self):
+        html = """
+        <html><head><title>Magly Manyetik Yapı Blokları Fiyatı</title></head>
+        <body>
+          <h1>Magly Manyetik Yapı Blokları</h1>
+          <span>Satıcı: Hepsiburada</span>
+          <div data-test-id="price-current-price">2.745,00 TL</div>
+          <div class="cart-special-price">Sepete özel fiyat <strong>2.196 TL</strong></div>
+          <button>Sepete ekle</button>
+          <script>
+            window.__HB_STATE__ = {
+              "variants": [
+                {"sku": "HBCV00007BHN4Z", "variantListing": [
+                  {"aiBasedShipmentDay": null, "listingId": "listing-hb", "merchantName": "Hepsiburada",
+                   "finalPriceOnSale": 2745,
+                   "minimumPrices": [{"name": "non-segmented-price", "value": 2745}]}
+                ]}
+              ]
+            };
+          </script>
+        </body></html>
+        """
+
+        offer = extract_hepsiburada_offer(
+            html,
+            source_url="https://www.hepsiburada.com/magly-manyetik-yapi-bloklari-p-HBCV00007BHN4Z",
+        )
+
+        self.assertEqual(offer.price, Decimal("2196"))
+
+    def test_hepsiburada_detail_ignores_cart_special_discount_amount(self):
+        html = """
+        <html><head><title>Magly Manyetik Yapı Blokları Fiyatı</title></head>
+        <body>
+          <h1>Magly Manyetik Yapı Blokları</h1>
+          <span>Satıcı: Hepsiburada</span>
+          <div>Sepete özel 250 TL indirim</div>
+          <div data-test-id="price-current-price">2.745,00 TL</div>
+          <button>Sepete ekle</button>
+        </body></html>
+        """
+
+        offer = extract_hepsiburada_offer(html)
+
+        self.assertEqual(offer.price, Decimal("2745"))
+
     def test_hepsiburada_product_url_reads_escaped_premium_ile_price(self):
         html = r"""
         <html><head><title>Samsung Galaxy Tab S10 FE+ Fiyatı</title></head>

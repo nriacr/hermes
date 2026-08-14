@@ -197,7 +197,7 @@ class HepsiburadaCandidate:
     url: str
     seller: str = "Hepsiburada"
     identity: str = ""
-    is_premium: bool = False
+    has_preferred_price: bool = False
 
 
 def _absolute_url(url: str) -> str:
@@ -341,14 +341,7 @@ def _price_from_aria_label(card) -> Optional[Decimal]:
 
 
 def _cart_special_prices(text: str) -> list[Decimal]:
-    clean = _clean_text(text)
-    normalized = normalize_offer_text(clean)
-    marker_positions = [normalized.find(marker) for marker in CART_SPECIAL_MARKERS]
-    marker_positions = [position for position in marker_positions if position >= 0]
-    if not marker_positions:
-        return []
-    segment = clean[min(marker_positions) :]
-    return [price for price in (_parse_price(match.group(0)) for match in PRICE_RE.finditer(segment)) if price is not None]
+    return _prices_after_markers(text, CART_SPECIAL_MARKERS, skip_campaign_amounts=True)
 
 
 def _is_premium_campaign_amount(segment: str, price_start: int, price_end: int) -> bool:
@@ -356,7 +349,13 @@ def _is_premium_campaign_amount(segment: str, price_start: int, price_end: int) 
     return any(marker in close_context for marker in PREMIUM_CAMPAIGN_MARKERS_NORMALIZED)
 
 
-def _prices_after_markers(text: str, markers: tuple[str, ...], window: int = 160) -> list[Decimal]:
+def _prices_after_markers(
+    text: str,
+    markers: tuple[str, ...],
+    window: int = 160,
+    *,
+    skip_campaign_amounts: bool = False,
+) -> list[Decimal]:
     clean = _clean_text(text)
     searchable = clean.casefold().replace("’", "'").replace("`", "'").replace("´", "'")
     prices: list[Decimal] = []
@@ -366,7 +365,7 @@ def _prices_after_markers(text: str, markers: tuple[str, ...], window: int = 160
             position = match.start()
             segment = clean[position : position + window]
             for match in PRICE_RE.finditer(segment):
-                if _is_premium_campaign_amount(segment, match.start(), match.end()):
+                if skip_campaign_amounts and _is_premium_campaign_amount(segment, match.start(), match.end()):
                     continue
                 price = _parse_price(match.group(0))
                 if price is not None:
@@ -374,7 +373,7 @@ def _prices_after_markers(text: str, markers: tuple[str, ...], window: int = 160
                     break
             else:
                 for match in PRICE_LIKE_RE.finditer(segment):
-                    if _is_premium_campaign_amount(segment, match.start(), match.end()):
+                    if skip_campaign_amounts and _is_premium_campaign_amount(segment, match.start(), match.end()):
                         continue
                     price = _parse_price(match.group(0))
                     if price is not None:
@@ -384,7 +383,7 @@ def _prices_after_markers(text: str, markers: tuple[str, ...], window: int = 160
 
 
 def _premium_prices(text: str) -> list[Decimal]:
-    return _prices_after_markers(text, PREMIUM_PRICE_MARKERS)
+    return _prices_after_markers(text, PREMIUM_PRICE_MARKERS, skip_campaign_amounts=True)
 
 
 def _has_premium_marker(text: str) -> bool:
@@ -1339,14 +1338,19 @@ def _detail_candidate(soup) -> Optional[HepsiburadaCandidate]:
     lines = _visible_lines_until_details(soup)
     seller = _detail_seller(lines)
     line_text = "\n".join(lines)
+    cart_special_prices = _cart_special_prices(line_text)
     premium_prices = _premium_prices(line_text)
     readable_source_text = ""
-    if not premium_prices:
+    if not cart_special_prices or not premium_prices:
         readable_source_text = _readable_source_text(soup)
-        premium_prices = _premium_prices(readable_source_text)
+        if not cart_special_prices:
+            cart_special_prices = _cart_special_prices(readable_source_text)
+        if not premium_prices:
+            premium_prices = _premium_prices(readable_source_text)
     if not premium_prices and (_has_premium_marker(line_text) or _has_premium_marker(readable_source_text)):
         log("Hepsiburada Premium metni bulundu ama fiyat ayrıştırılamadı.")
-    price = min(premium_prices) if premium_prices else None
+    preferred_prices = [*cart_special_prices, *premium_prices]
+    price = min(preferred_prices) if preferred_prices else None
     if price is None:
         price = extract_price_from_selectors(soup, DETAIL_PRICE_SELECTORS)
     if price is None:
@@ -1354,7 +1358,13 @@ def _detail_candidate(soup) -> Optional[HepsiburadaCandidate]:
         price = min(line_prices) if line_prices else None
     if price is None:
         return None
-    return HepsiburadaCandidate(title=title, price=price, url="", seller=seller, is_premium=bool(premium_prices))
+    return HepsiburadaCandidate(
+        title=title,
+        price=price,
+        url="",
+        seller=seller,
+        has_preferred_price=bool(preferred_prices),
+    )
 
 
 def _log_candidates(candidates: list[HepsiburadaCandidate]) -> None:
@@ -1389,7 +1399,7 @@ def extract_offer(html: str, source_url: str = "") -> OfferResult:
     if selected_product_id:
         candidates = _embedded_detail_candidates(soup, source_url=source_url)
         detail = _detail_candidate(soup)
-        if detail and (detail.is_premium or not candidates):
+        if detail and (detail.has_preferred_price or not candidates):
             detail.identity = f"{selected_product_id}:{normalize_offer_text(detail.seller)}"
             candidates.append(detail)
         candidates = _dedupe_candidates(candidates)
