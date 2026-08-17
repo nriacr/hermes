@@ -2,6 +2,19 @@
 
 Hermes, Home Assistant üzerinde çalışan çok siteli fiyat ve Telegram fırsat takip add-on'udur.
 
+## Cursor ile geliştirme
+
+Cursor'a geçiş için gerekli kalıcı proje bağlamı repoya eklenmiştir:
+
+- [`AGENTS.md`](AGENTS.md): bağlayıcı mimari, güvenlik, test ve yayın kuralları
+- [`.cursor/rules/hermes.mdc`](.cursor/rules/hermes.mdc): Cursor'un her sohbette otomatik okuyacağı kurallar
+- [`docs/CURSOR_HANDOFF.md`](docs/CURSOR_HANDOFF.md): güncel mimari, davranışlar, site algoritmaları ve riskler
+- [`docs/CURSOR_START_PROMPT.md`](docs/CURSOR_START_PROMPT.md): ilk Cursor Agent sohbetine yapıştırılacak hazır metin
+
+Cursor'da bu repo klasörünü açın ve başlangıç metnini ilk Agent sohbetine
+gönderin. Kullanıcı verileri ve gizli anahtarlar repoda değil, Home Assistant
+`/data` alanında kalır.
+
 Takip edilen alanlar:
 - `takip_edilenler`: tek kayıt altında en fazla 5 ürün veya arama linki
 - Hermes linkten siteyi ve link tipini otomatik algılar

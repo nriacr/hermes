@@ -1,0 +1,35 @@
+---
+description: Hermes repository architecture, safety, UI, testing, and release rules
+globs:
+  - "**/*"
+alwaysApply: true
+---
+
+# Hermes Cursor Rules
+
+Before editing, read `AGENTS.md` and `docs/CURSOR_HANDOFF.md`.
+
+Core rules:
+
+1. Work from the current source and tests, not assumptions or old chat history.
+2. Site parsing is isolated in `ha-addon/app/hermes/providers/<site>.py`.
+   Never alter another provider while fixing a site-specific issue.
+3. Do not add temporary patches, duplicate implementations, runtime source
+   rewriting, or compatibility layers for removed models.
+4. Preserve current Home Assistant option names, `/data` state, ports, routes,
+   ingress behavior, and public token protection unless migration is approved.
+5. Ingress, public desktop, and public mobile have functional parity and share
+   render/handler logic.
+6. User-facing text is correct Turkish. UI remains dark charcoal/gray, compact,
+   readable, and uses muted distinct provider colors.
+7. Never commit credentials, Telegram sessions, tokens, `/data` files, captured
+   authenticated pages, or private URLs containing secrets.
+8. Add focused regression tests for provider/parser/business-rule changes. Run
+   focused tests first and `sh tools/check.sh` before release.
+9. Runtime changes require reading and incrementing the actual version in
+   `ha-addon/config.yaml`. Documentation-only changes do not.
+10. Remove superseded code and update documentation. Push completed releases to
+    `main`; Home Assistant updates are sourced from GitHub.
+
+When in doubt, preserve behavior and ask before changing user data, notification
+semantics, persistent identity, or external interfaces.

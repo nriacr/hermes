@@ -1,0 +1,22 @@
+.git/
+.venv/
+.ruff_cache/
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+.DS_Store
+
+# Runtime state and secrets must never enter Cursor indexing or commits.
+data/
+**/options.json
+**/state.json
+**/telegram.session*
+**/login_state.json
+**/seen_messages.json
+**/telegram_quick_add.json
+
+# Generated or captured diagnostics.
+*.html.dump
+*.har
+*.trace
+screenshots/
