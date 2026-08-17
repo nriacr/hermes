@@ -1,0 +1,572 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#111315">
+<title>Hermes · arayüz demosu</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #111315;
+    --panel: #181b1e;
+    --card: #1f2327;
+    --line: #2f3439;
+    --text: #f3f4f2;
+    --muted: #9aa1a8;
+    --faint: #6e757c;
+    --deal: #86dfb7;
+    --deal-dim: rgba(134, 223, 183, 0.14);
+    --warn: #ffd07a;
+    --warn-dim: rgba(255, 208, 122, 0.14);
+    --bad: #ff9caf;
+    --bad-dim: rgba(255, 156, 175, 0.12);
+    --amazon: #e0b36a;
+    --hepsiburada: #e39a72;
+    --trendyol: #e0a0bc;
+    --network: #7ecfc3;
+    --beymenclub: #d7b08a;
+    --nordbron: #8fb4e8;
+    --zara: #b0da8b;
+    --hm: #cbb0ee;
+    --radius: 16px;
+    --font: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    min-height: 100vh;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font);
+    -webkit-font-smoothing: antialiased;
+  }
+  button, input { font: inherit; color: inherit; }
+
+  .shell {
+    width: min(100%, 520px);
+    min-height: 100vh;
+    margin: 0 auto;
+    padding: 0 0 96px;
+    background: var(--bg);
+    border-left: 1px solid transparent;
+    border-right: 1px solid transparent;
+  }
+  @media (min-width: 560px) {
+    body { background: #0c0d0e; }
+    .shell { border-color: var(--line); }
+  }
+
+  .demo-bar {
+    padding: 8px 18px;
+    background: #1c1f22;
+    color: var(--muted);
+    font-size: 11px;
+    letter-spacing: 0.02em;
+    text-align: center;
+    border-bottom: 1px solid var(--line);
+  }
+
+  header {
+    position: sticky;
+    top: 0;
+    z-index: 8;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 16px 18px 12px;
+    background: rgba(17, 19, 21, 0.92);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--line);
+  }
+  .brand h1 {
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: -0.03em;
+  }
+  .brand p { margin-top: 2px; color: var(--muted); font-size: 12px; }
+  .icon-btn {
+    width: 38px;
+    height: 38px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--card);
+    color: var(--muted);
+    display: grid;
+    place-items: center;
+    cursor: pointer;
+  }
+  .icon-btn svg { width: 17px; height: 17px; }
+
+  .search-wrap { padding: 12px 18px 0; }
+  .search-wrap input {
+    width: 100%;
+    height: 42px;
+    padding: 0 14px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--panel);
+  }
+  .search-wrap input::placeholder { color: var(--faint); }
+  .search-wrap input:focus { outline: 2px solid rgba(228, 229, 227, 0.28); outline-offset: 1px; }
+
+  .chips {
+    display: flex;
+    gap: 8px;
+    padding: 12px 18px 4px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .chips::-webkit-scrollbar { display: none; }
+  .chip {
+    flex: 0 0 auto;
+    height: 34px;
+    padding: 0 12px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--panel);
+    color: var(--muted);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .chip[aria-pressed="true"] {
+    background: #ecece8;
+    border-color: #ecece8;
+    color: #16181a;
+  }
+
+  .section {
+    padding: 18px 18px 0;
+  }
+  .section h2 {
+    margin-bottom: 10px;
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+  .empty {
+    padding: 18px;
+    border: 1px dashed var(--line);
+    border-radius: var(--radius);
+    color: var(--muted);
+    font-size: 13px;
+    line-height: 1.45;
+  }
+
+  .deals {
+    display: flex;
+    gap: 10px;
+    overflow-x: auto;
+    scroll-snap-type: x proximity;
+    scrollbar-width: none;
+  }
+  .deals::-webkit-scrollbar { display: none; }
+  .deal {
+    flex: 0 0 188px;
+    scroll-snap-align: start;
+    padding: 14px;
+    border: 1px solid rgba(134, 223, 183, 0.28);
+    border-radius: 14px;
+    background: var(--deal-dim);
+    text-align: left;
+    cursor: pointer;
+  }
+  .deal .save {
+    display: inline-block;
+    margin-bottom: 8px;
+    color: var(--deal);
+    font-size: 11px;
+    font-weight: 800;
+  }
+  .deal .name {
+    min-height: 34px;
+    margin-bottom: 10px;
+    font-size: 13px;
+    font-weight: 650;
+    line-height: 1.3;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .deal .price {
+    font-size: 18px;
+    font-weight: 750;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.03em;
+  }
+  .deal .shop { margin-top: 4px; color: var(--muted); font-size: 11px; }
+
+  .list { display: grid; gap: 10px; }
+  .card {
+    padding: 14px;
+    border: 1px solid var(--line);
+    border-left: 4px solid var(--accent, var(--line));
+    border-radius: var(--radius);
+    background: var(--card);
+    cursor: pointer;
+    text-align: left;
+  }
+  .card-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 10px;
+    margin-bottom: 8px;
+  }
+  .card .name { font-size: 14.5px; font-weight: 650; line-height: 1.3; }
+  .tag {
+    flex: 0 0 auto;
+    padding: 3px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 750;
+    white-space: nowrap;
+  }
+  .tag.deal { background: var(--deal-dim); color: var(--deal); }
+  .tag.watch { background: #2a2e33; color: var(--muted); }
+  .tag.stock { background: var(--warn-dim); color: var(--warn); }
+  .tag.error { background: var(--bad-dim); color: var(--bad); }
+  .tag.depo { background: rgba(224, 179, 106, 0.16); color: var(--amazon); margin-right: 6px; }
+
+  .price-row {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 8px 10px;
+    margin-bottom: 6px;
+  }
+  .now {
+    font-size: 22px;
+    font-weight: 750;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.03em;
+  }
+  .now.deal { color: var(--deal); }
+  .now.stock { color: var(--warn); font-size: 15px; }
+  .now.error { color: var(--bad); font-size: 14px; font-weight: 600; }
+  .target { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .diff { width: 100%; font-size: 12px; font-weight: 650; }
+  .diff.deal { color: var(--deal); }
+  .diff.watch { color: var(--muted); }
+
+  .range { color: var(--faint); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .meta-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    margin-top: 10px;
+  }
+  .shop-pill {
+    padding: 3px 8px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--accent, var(--muted));
+    font-size: 11px;
+    font-weight: 750;
+  }
+  .ago { color: var(--faint); font-size: 11px; }
+
+  .group {
+    overflow: hidden;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--panel);
+  }
+  .group > summary {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    padding: 14px;
+    list-style: none;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 650;
+  }
+  .group > summary::-webkit-details-marker { display: none; }
+  .group > summary span { color: var(--muted); font-size: 12px; font-weight: 600; }
+  .group .list { padding: 0 10px 10px; }
+
+  nav {
+    position: fixed;
+    left: 50%;
+    bottom: 0;
+    z-index: 8;
+    width: min(100%, 520px);
+    transform: translateX(-50%);
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    padding: 8px 8px calc(10px + env(safe-area-inset-bottom));
+    background: rgba(17, 19, 21, 0.94);
+    border-top: 1px solid var(--line);
+    backdrop-filter: blur(12px);
+  }
+  .nav-item {
+    display: grid;
+    justify-items: center;
+    gap: 3px;
+    padding: 6px 0;
+    border: 0;
+    background: transparent;
+    color: var(--faint);
+    font-size: 10.5px;
+    font-weight: 650;
+    cursor: pointer;
+  }
+  .nav-item svg { width: 20px; height: 20px; }
+  .nav-item[aria-current="page"] { color: var(--text); }
+
+  .screen { display: none; }
+  .screen.is-on { display: block; }
+  .placeholder {
+    margin: 24px 18px;
+    padding: 22px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--panel);
+    color: var(--muted);
+    font-size: 14px;
+    line-height: 1.5;
+  }
+</style>
+</head>
+<body>
+<div class="shell">
+  <div class="demo-bar">Canlı Hermes değil · örnek verilerle arayüz demosu</div>
+
+  <header>
+    <div class="brand">
+      <h1>Hermes</h1>
+      <p>Son kontrol 3 dk önce</p>
+    </div>
+    <button class="icon-btn" type="button" data-nav="settings" aria-label="Ayarlar">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 110-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+    </button>
+  </header>
+
+  <div id="screen-panel" class="screen is-on">
+    <div class="search-wrap">
+      <input id="search" type="search" placeholder="Ürün veya site ara" autocomplete="off">
+    </div>
+    <div class="chips" id="chips"></div>
+    <section class="section" id="deals-section">
+      <h2>Alınabilir fırsatlar</h2>
+      <div class="deals" id="deals"></div>
+    </section>
+    <section class="section">
+      <h2 id="list-title">Takip edilenler</h2>
+      <div class="list" id="list"></div>
+    </section>
+  </div>
+
+  <div id="screen-watches" class="screen">
+    <p class="placeholder">Takipler ekranı bu demoda yok. Canlıda Ayarlar’daki takip kartları buraya taşınabilir.</p>
+  </div>
+  <div id="screen-telegram" class="screen">
+    <section class="section">
+      <h2>Son Telegram bildirimi</h2>
+      <article class="card" style="--accent:var(--trendyol)">
+        <div class="card-top"><div class="name">air max</div><span class="tag watch">@firsatz</span></div>
+        <p class="target">Bugün 14:22 · kanal mesajı olduğu gibi iletilir, fiyat okunmaz.</p>
+      </article>
+    </section>
+  </div>
+  <div id="screen-settings" class="screen">
+    <p class="placeholder">Ayarlar, Test ve sıfırlama düğmeleri canlıda durur. Bu dosya yalnız görünümü gösterir; hiçbir kayıt değişmez.</p>
+  </div>
+
+  <nav>
+    <button class="nav-item" type="button" data-nav="panel" aria-current="page">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 10.5 12 4l8 6.5V20a1 1 0 01-1 1h-5v-7H10v7H5a1 1 0 01-1-1z"/></svg>
+      Fırsatlar
+    </button>
+    <button class="nav-item" type="button" data-nav="watches">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+      Takipler
+    </button>
+    <button class="nav-item" type="button" data-nav="telegram">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 5 3 12l7 2 2 7 9-16z"/></svg>
+      Telegram
+    </button>
+    <button class="nav-item" type="button" data-nav="settings">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82 2 2 0 11-2.83 2.83 1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33 2 2 0 11-2.83-2.83 1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 110-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82 2 2 0 112.83-2.83 1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33 2 2 0 112.83 2.83 1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+      Ayarlar
+    </button>
+  </nav>
+</div>
+
+<script>
+  const money = (n) => `${Math.trunc(n).toLocaleString("tr-TR")} TL`;
+
+  const rows = [
+    { id: 1, kind: "deal", seller: "Hepsiburada", product: "Galaxy Tab S10 FE+ 8GB 256GB", price: 16450, target: 17600, min: 16360, max: 18990, group: "Galaxy Tab S10 FE+" },
+    { id: 2, kind: "deal", seller: "Zara", product: "Oversize kaban / Siyah / M", price: 1199, target: 1450, min: 1199, max: 1790, group: "Oversize kaban" },
+    { id: 3, kind: "deal", seller: "Trendyol", product: "Nike Air Max 90", price: 3299, target: 3600, min: 3299, max: 4490, group: "Air Max 90" },
+    { id: 4, kind: "watch", seller: "Amazon", product: "Galaxy Tab S10 FE+ 8GB 256GB", price: 17890, target: 17600, min: 16360, max: 18990, group: "Galaxy Tab S10 FE+" },
+    { id: 5, kind: "deal", seller: "Amazon", product: "Galaxy Tab S10 FE+ 8GB 256GB", price: 15490, target: 17600, min: 15490, max: 18990, warehouse: true, group: "Galaxy Tab S10 FE+" },
+    { id: 6, kind: "watch", seller: "Network", product: "Keten gömlek / Mavi / L", price: 1890, target: 1290, min: 1890, max: 2190, group: "Keten gömlek" },
+    { id: 7, kind: "watch", seller: "Beymen Club", product: "Yün hırka / Ekru / M", price: 2490, target: 2100, min: 2490, max: 2890, group: "Yün hırka" },
+    { id: 8, kind: "watch", seller: "Zara", product: "Oversize kaban / Bej / M", price: 1590, target: 1450, min: 1590, max: 1790, group: "Oversize kaban" },
+    { id: 9, kind: "watch", seller: "Zara", product: "Oversize kaban / Bej / L", price: 1590, target: 1450, min: 1590, max: 1790, group: "Oversize kaban" },
+    { id: 10, kind: "stock", seller: "H&M", product: "Kaşmir kazak / M", target: 899, reason: "İstenen beden stokta yok", group: "Kaşmir kazak" },
+    { id: 11, kind: "error", seller: "Nordbron", product: "Deri ceket", reason: "Sayfa koruması nedeniyle okunamadı", group: "Deri ceket" }
+  ];
+
+  const filters = [
+    { id: "all", label: "Tümü" },
+    { id: "deal", label: "Alınabilir" },
+    { id: "watch", label: "Yaklaşıyor" },
+    { id: "stock", label: "Stokta yok" },
+    { id: "error", label: "Hata" }
+  ];
+
+  let filter = "all";
+  let query = "";
+
+  const $ = (id) => document.getElementById(id);
+
+  function matches(row) {
+    if (filter !== "all" && row.kind !== filter) return false;
+    const hay = `${row.product} ${row.seller} ${row.group}`.toLocaleLowerCase("tr-TR");
+    return hay.includes(query);
+  }
+
+  function tag(row) {
+    if (row.kind === "deal") return ["Alınabilir", "deal"];
+    if (row.kind === "watch") return ["Yaklaşıyor", "watch"];
+    if (row.kind === "stock") return ["Stokta yok", "stock"];
+    return ["Okunamadı", "error"];
+  }
+
+  function shopClass(seller) {
+    const key = seller.toLowerCase().replace("&", "").replace(/\s+/g, "");
+    return key === "hm" ? "hm" : key;
+  }
+
+  function cardHTML(row) {
+    const [label, kind] = tag(row);
+    const accent = `var(--${shopClass(row.seller)})`;
+    const depo = row.warehouse ? '<span class="tag depo">DEPO</span>' : "";
+    let priceBlock = "";
+    if (row.kind === "deal") {
+      const save = row.target - row.price;
+      priceBlock = `
+        <div class="price-row">
+          <span class="now deal">${money(row.price)}</span>
+          <span class="target">hedef ${money(row.target)}</span>
+          <span class="diff deal">${money(save)} daha ucuz</span>
+        </div>
+        <div class="range">Görülen aralık ${money(row.min)} – ${money(row.max)}</div>`;
+    } else if (row.kind === "watch") {
+      const left = row.price - row.target;
+      priceBlock = `
+        <div class="price-row">
+          <span class="now">${money(row.price)}</span>
+          <span class="target">hedef ${money(row.target)}</span>
+          <span class="diff watch">hedefe ${money(left)} kaldı</span>
+        </div>
+        <div class="range">Görülen aralık ${money(row.min)} – ${money(row.max)}</div>`;
+    } else if (row.kind === "stock") {
+      priceBlock = `
+        <div class="price-row">
+          <span class="now stock">${row.reason}</span>
+          <span class="target">hedef ${money(row.target)}</span>
+        </div>`;
+    } else {
+      priceBlock = `<div class="price-row"><span class="now error">${row.reason}</span></div>`;
+    }
+    return `
+      <article class="card" style="--accent:${accent}">
+        <div class="card-top">
+          <div class="name">${depo}${row.product}</div>
+          <span class="tag ${kind}">${label}</span>
+        </div>
+        ${priceBlock}
+        <div class="meta-row">
+          <span class="shop-pill">${row.seller}</span>
+          <span class="ago">3 dk önce</span>
+        </div>
+      </article>`;
+  }
+
+  function render() {
+    const visible = rows.filter(matches);
+    const deals = visible.filter((row) => row.kind === "deal");
+    const rest = visible.filter((row) => row.kind !== "deal" || filter !== "all");
+
+    $("chips").innerHTML = filters.map((item) => {
+      const count = item.id === "all" ? rows.length : rows.filter((row) => row.kind === item.id).length;
+      return `<button class="chip" type="button" data-filter="${item.id}" aria-pressed="${filter === item.id}">${item.label} · ${count}</button>`;
+    }).join("");
+
+    const dealsSection = $("deals-section");
+    if (filter === "all" && !query && deals.length) {
+      dealsSection.hidden = false;
+      $("deals").innerHTML = deals.map((row) => `
+        <button class="deal" type="button">
+          <span class="save">${money(row.target - row.price)} daha ucuz</span>
+          <div class="name">${row.warehouse ? '<span class="tag depo">DEPO</span>' : ""}${row.product}</div>
+          <div class="price">${money(row.price)}</div>
+          <div class="shop">${row.seller}</div>
+        </button>`).join("");
+    } else {
+      dealsSection.hidden = true;
+    }
+
+    const listRows = filter === "all" && !query ? visible.filter((row) => row.kind !== "deal") : visible;
+    if (!listRows.length) {
+      $("list").innerHTML = `<p class="empty">Bu süzgeçte gösterilecek ürün yok.</p>`;
+      return;
+    }
+
+    const groups = new Map();
+    for (const row of listRows) {
+      const key = row.kind === "watch" ? row.group : `__single_${row.id}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(row);
+    }
+
+    $("list").innerHTML = [...groups.entries()].map(([key, items]) => {
+      if (items.length === 1 || key.startsWith("__single_")) return cardHTML(items[0]);
+      return `<details class="group">
+        <summary><strong>${items[0].group}</strong><span>${items.length} sonuç</span></summary>
+        <div class="list">${items.map(cardHTML).join("")}</div>
+      </details>`;
+    }).join("");
+  }
+
+  document.addEventListener("click", (event) => {
+    const chip = event.target.closest("[data-filter]");
+    if (chip) {
+      filter = chip.dataset.filter;
+      render();
+    }
+    const nav = event.target.closest("[data-nav]");
+    if (nav) {
+      const name = nav.dataset.nav;
+      document.querySelectorAll(".screen").forEach((screen) => {
+        screen.classList.toggle("is-on", screen.id === `screen-${name}`);
+      });
+      document.querySelectorAll(".nav-item").forEach((item) => {
+        if (item.dataset.nav === name) item.setAttribute("aria-current", "page");
+        else item.removeAttribute("aria-current");
+      });
+    }
+  });
+
+  $("search").addEventListener("input", (event) => {
+    query = event.target.value.trim().toLocaleLowerCase("tr-TR");
+    render();
+  });
+
+  render();
+</script>
+</body>
+</html>

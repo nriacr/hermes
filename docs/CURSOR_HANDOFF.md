@@ -1,7 +1,7 @@
 # Hermes Cursor Handoff
 
 This document is the current technical and product handoff for continuing Hermes
-in Cursor. It describes the real repository at version `2.5.5`; source code and
+in Cursor. It describes the real repository at version `2.5.6`; source code and
 tests remain authoritative when this document and code ever differ.
 
 ## 1. Product snapshot
@@ -268,10 +268,16 @@ Visual contract:
 - muted but clearly distinct provider accents;
 - compact mobile cards without dropping seller, product, current, target,
   difference, min/max, stock, or links;
+- opportunity-first card panel rather than a spreadsheet: deals say
+  `daha ucuz`, watches say `hedefe … kaldı`;
 - whole-lira display (`1.500 TL`), correct Turkish grammar and characters;
 - confirmation for destructive actions and clear save/restart progress;
 - working settings search/group filters;
 - temporary link-test data never enters real state or summary.
+
+The table UI from 2.5.5 is preserved at `docs/backups/dashboard-2.5.5.py` and in
+git history at commit `06ef450`. Restoring it is a runtime change and needs a
+new patch version.
 
 Provider colors live in `dashboard.py`. Re-evaluate all colors when adding a new
 provider so adjacent providers remain distinguishable.
