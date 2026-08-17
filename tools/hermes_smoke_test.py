@@ -2165,7 +2165,7 @@ class HermesSmokeTests(unittest.TestCase):
             patch.object(dashboard, "_public_dashboard_allowed", return_value=True),
             patch.object(dashboard, "_collect_summary", return_value=summary),
             patch.object(dashboard, "load_json", return_value={}),
-            patch.object(dashboard, "_render_panel", return_value="<section id='opportunity-panel'></section>"),
+            patch.object(dashboard, "_render_table", return_value="<section id='summary-table'></section>"),
         ):
             status, payload = dashboard._render_public_page("/public/demo-token")
 
@@ -2173,7 +2173,7 @@ class HermesSmokeTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIn("Hata sayısı (son 24 saat)", html)
         self.assertIn("Nordbron bot korumasi nedeniyle captcha sayfasi dondu.", html)
-        self.assertGreater(html.index("Hata sayısı (son 24 saat)"), html.index("opportunity-panel"))
+        self.assertGreater(html.index("Hata sayısı (son 24 saat)"), html.index("summary-table"))
 
     def test_stock_missing_rows_are_saved_separately_from_price_rows(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -3249,35 +3249,6 @@ class HermesSmokeTests(unittest.TestCase):
             }
         )
         self.assertIn('class="warehouse-tag">DEPO</strong>', row_html)
-
-    def test_dashboard_panel_uses_plain_language_deal_cards(self):
-        html = dashboard._render_deal_card(
-            {
-                "seller": "Hepsiburada",
-                "product_title": "Galaxy Tab S10 FE+",
-                "product_url": "https://example.test/tab",
-                "price": "16.450,00",
-                "target": "17.600,00",
-                "is_warehouse": False,
-            }
-        )
-        self.assertIn("daha ucuz", html)
-        self.assertIn("16.450 TL", html)
-        self.assertNotIn("<table", html)
-
-    def test_dashboard_panel_labels_warehouse_deals(self):
-        html = dashboard._render_deal_card(
-            {
-                "seller": "Amazon",
-                "product_title": "Depo ürünü",
-                "product_url": "https://www.amazon.com.tr/dp/B000000001",
-                "price": "12.999 TL",
-                "target": "13.000 TL",
-                "is_warehouse": True,
-            }
-        )
-        self.assertIn('class="warehouse-tag">DEPO</strong>', html)
-        self.assertIn("daha ucuz", html)
 
     def test_watch_settings_show_configured_groups_as_a_dropdown(self):
         html = settings_ui._watch_form(

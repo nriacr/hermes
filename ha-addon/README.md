@@ -16,7 +16,7 @@ Hermes, Home Assistant üzerinde çalışan çok siteli ürün ve Telegram fırs
 - 24 saat tekrar bildirimi kontrolü (`notify_once_in_24H`)
 - Aktif/pasif kural yönetimi (`active`)
 - Log tablosu ve özet dosyası (`/data/latest_price_summary.json`)
-- Ingress paneli üzerinden durum ekranı, fırsat kartları ve Pushover test butonu
+- Ingress paneli üzerinden durum ekranı ve Pushover test butonu
 - Token ile korunan isteğe bağlı public panel ve public ayarlar ekranı
 
 ## Konfigürasyon

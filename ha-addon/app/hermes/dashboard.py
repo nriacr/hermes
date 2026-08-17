@@ -117,74 +117,6 @@ tbody tr.site-other { --site-bg:rgba(183,177,222,.13); --site-bg-strong:rgba(183
   .empty-row td { padding:10px; border:1px solid var(--line); border-radius:12px; }
   .note, .footer { font-size:11px; }
 }
-body.app-body { background:var(--bg); }
-body.app-body main.app-shell { width:min(100%,520px); max-width:520px; min-height:100vh; margin:0 auto; padding:0 0 96px; }
-.app-header { position:sticky; top:0; z-index:8; display:flex; align-items:center; justify-content:space-between; gap:12px; padding:16px 18px 12px; background:rgba(17,19,21,.92); border-bottom:1px solid var(--line); }
-.app-brand h1 { margin:0; font-size:20px; font-weight:750; letter-spacing:-.03em; }
-.app-brand p { margin:2px 0 0; color:var(--muted); font-size:12px; }
-.app-icon { width:38px; height:38px; border:1px solid var(--line); border-radius:12px; background:var(--card); color:var(--muted); display:grid; place-items:center; text-decoration:none; }
-.app-icon svg { width:17px; height:17px; }
-.app-search { padding:12px 18px 0; }
-.app-search input { width:100%; height:42px; padding:0 14px; border:1px solid var(--line); border-radius:12px; background:var(--panel); color:var(--text); font:inherit; }
-.app-search input:focus { outline:2px solid rgba(228,229,227,.28); outline-offset:1px; }
-.app-chips { display:flex; gap:8px; padding:12px 18px 4px; overflow-x:auto; scrollbar-width:none; }
-.app-chips::-webkit-scrollbar { display:none; }
-.app-chip { flex:0 0 auto; height:34px; padding:0 12px; border:1px solid var(--line); border-radius:999px; background:var(--panel); color:var(--muted); font-size:13px; font-weight:700; cursor:pointer; white-space:nowrap; }
-.app-chip[aria-pressed='true'] { background:#ecece8; border-color:#ecece8; color:#16181a; }
-.app-section { padding:18px 18px 0; }
-.app-section h2 { margin:0 0 10px; color:var(--muted); font-size:12px; font-weight:750; letter-spacing:.04em; text-transform:uppercase; }
-.app-empty { padding:18px; border:1px dashed var(--line); border-radius:16px; color:var(--muted); font-size:13px; line-height:1.45; }
-.app-deals { display:flex; gap:10px; overflow-x:auto; scroll-snap-type:x proximity; scrollbar-width:none; }
-.app-deals::-webkit-scrollbar { display:none; }
-.deal-card { flex:0 0 188px; scroll-snap-align:start; padding:14px; border:1px solid rgba(134,223,183,.28); border-radius:14px; background:rgba(134,223,183,.14); color:inherit; text-decoration:none; }
-.deal-card .save { display:block; margin-bottom:8px; color:var(--ok); font-size:11px; font-weight:800; }
-.deal-card .name { min-height:34px; margin-bottom:10px; font-size:13px; font-weight:650; line-height:1.3; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
-.deal-card .price { font-size:18px; font-weight:750; font-variant-numeric:tabular-nums; letter-spacing:-.03em; }
-.deal-card .shop { margin-top:4px; color:var(--muted); font-size:11px; }
-.offer-list { display:grid; gap:10px; }
-.offer-card { display:block; padding:14px; border:1px solid var(--line); border-left:4px solid var(--site-line,#3c4147); border-radius:16px; background:var(--card); color:inherit; text-decoration:none; }
-.offer-card .card-top { display:flex; justify-content:space-between; align-items:flex-start; gap:10px; margin-bottom:8px; }
-.offer-card .name { font-size:14.5px; font-weight:650; line-height:1.3; color:inherit; text-decoration:none; }
-.offer-tag { flex:0 0 auto; padding:3px 8px; border-radius:999px; font-size:11px; font-weight:750; white-space:nowrap; }
-.offer-tag.deal { background:rgba(134,223,183,.14); color:var(--ok); }
-.offer-tag.watch { background:#2a2e33; color:var(--muted); }
-.offer-tag.stock { background:rgba(255,208,122,.14); color:var(--warn); }
-.offer-tag.error { background:rgba(255,156,175,.12); color:var(--bad); }
-.offer-price { display:flex; align-items:baseline; flex-wrap:wrap; gap:8px 10px; margin-bottom:6px; }
-.offer-price .now { font-size:22px; font-weight:750; font-variant-numeric:tabular-nums; letter-spacing:-.03em; }
-.offer-price .now.deal { color:var(--ok); }
-.offer-price .now.stock { color:var(--warn); font-size:15px; }
-.offer-price .now.error { color:var(--bad); font-size:14px; font-weight:650; }
-.offer-price .target, .offer-range { color:var(--muted); font-size:12px; font-variant-numeric:tabular-nums; }
-.offer-price .diff { width:100%; font-size:12px; font-weight:650; }
-.offer-price .diff.deal { color:var(--ok); }
-.offer-meta { display:flex; justify-content:space-between; align-items:center; gap:8px; margin-top:10px; color:var(--muted); font-size:11px; font-weight:750; }
-.offer-group { overflow:hidden; border:1px solid var(--line); border-radius:16px; background:var(--panel); }
-.offer-group > summary { display:flex; justify-content:space-between; align-items:center; gap:10px; padding:14px; list-style:none; cursor:pointer; font-size:14px; font-weight:650; }
-.offer-group > summary::-webkit-details-marker { display:none; }
-.offer-group > summary span { color:var(--muted); font-size:12px; font-weight:600; }
-.offer-group .offer-list { padding:0 10px 10px; }
-.app-tools { display:grid; gap:10px; padding:18px; }
-.app-tools .button, .app-tools .inline-form { width:100%; }
-.app-tools .button { min-height:44px; }
-.app-nav { position:fixed; left:50%; bottom:0; z-index:8; width:min(100%,520px); transform:translateX(-50%); display:grid; grid-template-columns:repeat(4,1fr); padding:8px 8px calc(10px + env(safe-area-inset-bottom)); background:rgba(17,19,21,.94); border-top:1px solid var(--line); }
-.app-nav a, .app-nav button { display:grid; justify-items:center; gap:3px; padding:6px 0; border:0; background:transparent; color:#6e757c; font-size:10.5px; font-weight:650; text-decoration:none; cursor:pointer; }
-.app-nav a[aria-current='page'], .app-nav button[aria-current='page'] { color:var(--text); }
-.app-nav svg { width:20px; height:20px; }
-.app-screen { display:none; }
-.app-screen.is-on { display:block; }
-body.app-body .notice { margin:12px 18px 0; }
-body.app-body .telegram-recent, body.app-body .error-card { margin:0 18px 18px; }
-.offer-card.site-amazon, .deal-card.site-amazon { --site-line:#e0b36a; }
-.offer-card.site-hepsiburada, .deal-card.site-hepsiburada { --site-line:#e39a72; }
-.offer-card.site-trendyol, .deal-card.site-trendyol { --site-line:#e0a0bc; }
-.offer-card.site-network, .deal-card.site-network { --site-line:#7ecfc3; }
-.offer-card.site-beymenclub, .deal-card.site-beymenclub { --site-line:#d7b08a; }
-.offer-card.site-nordbron, .deal-card.site-nordbron { --site-line:#8fb4e8; }
-.offer-card.site-zara, .deal-card.site-zara { --site-line:#b0da8b; }
-.offer-card.site-hm, .deal-card.site-hm { --site-line:#cbb0ee; }
-.offer-card.site-other, .deal-card.site-other { --site-line:#b7b1de; }
-@media (min-width:560px) { body.app-body { background:#0c0d0e; } body.app-body main.app-shell { border-left:1px solid var(--line); border-right:1px solid var(--line); } }
 """
 
 
@@ -835,199 +767,6 @@ def _render_stock_section(rows):
     """
 
 
-def _offer_kind(row):
-    return "deal" if _is_target_hit(row) else "watch"
-
-
-def _search_blob(*parts):
-    return escape(" ".join(repair_mojibake(part) for part in parts if part).casefold())
-
-
-def _product_heading_html(row):
-    seller_text = repair_mojibake(row.get("seller") or "-")
-    raw_title = repair_mojibake(row.get("product_title") or "-")
-    if seller_text == "Hepsiburada":
-        raw_title = hepsiburada_provider.clean_display_title(raw_title)
-    product_title = escape(raw_title)
-    warehouse_tag = '<strong class="warehouse-tag">DEPO</strong>' if row.get("is_warehouse") else ""
-    product_url = str(row.get("product_url") or "").strip()
-    heading = f"{warehouse_tag}{product_title}"
-    if product_url:
-        return (
-            f'<a class="name" href="{escape(product_url, quote=True)}" target="_blank" rel="noopener noreferrer">'
-            f"{heading}</a>"
-        )
-    return f'<div class="name">{heading}</div>'
-
-
-def _gap_text(row, kind):
-    price = _parse_turkish_money(row.get("price"))
-    target = _parse_turkish_money(row.get("target"))
-    if price is None or target is None:
-        return ""
-    if kind == "deal":
-        return f"{escape(_display_tl(target - price))} daha ucuz"
-    return f"hedefe {escape(_display_tl(price - target))} kaldı"
-
-
-def _kind_label(kind):
-    return {
-        "deal": ("Alınabilir", "deal"),
-        "watch": ("Yaklaşıyor", "watch"),
-        "stock": ("Stokta yok", "stock"),
-        "error": ("Okunamadı", "error"),
-    }.get(kind, ("Yaklaşıyor", "watch"))
-
-
-def _render_deal_card(row):
-    seller_text = repair_mojibake(row.get("seller") or "-")
-    raw_title = repair_mojibake(row.get("product_title") or "-")
-    if seller_text == "Hepsiburada":
-        raw_title = hepsiburada_provider.clean_display_title(raw_title)
-    warehouse_tag = '<strong class="warehouse-tag">DEPO</strong>' if row.get("is_warehouse") else ""
-    product_url = str(row.get("product_url") or "").strip()
-    gap = _gap_text(row, "deal")
-    body = (
-        f'<span class="save">{gap}</span>'
-        f'<div class="name">{warehouse_tag}{escape(raw_title)}</div>'
-        f'<div class="price">{escape(_display_tl(row.get("price", "-")))}</div>'
-        f'<div class="shop">{escape(seller_text)}</div>'
-    )
-    css = f"deal-card {_site_theme_class(seller_text)}"
-    if product_url:
-        return (
-            f'<a class="{css}" href="{escape(product_url, quote=True)}" target="_blank" rel="noopener noreferrer">'
-            f"{body}</a>"
-        )
-    return f'<div class="{css}">{body}</div>'
-
-
-def _render_offer_card(row, kind):
-    seller_text = repair_mojibake(row.get("seller") or "-")
-    label, tag_kind = _kind_label(kind)
-    gap = _gap_text(row, kind)
-    price_class = "now deal" if kind == "deal" else "now"
-    price_html = (
-        "<div class='offer-price'>"
-        f"<span class='{price_class}'>{escape(_display_tl(row.get('price', '-')))}</span>"
-        f"<span class='target'>hedef {escape(_display_tl(row.get('target', '-')))}</span>"
-        f"<span class='diff {tag_kind}'>{gap}</span>"
-        "</div>"
-        "<div class='offer-range'>Görülen aralık "
-        f"{escape(_display_tl_range(row.get('price_range'), row.get('min_price', '-'), row.get('max_price', '-')))}"
-        "</div>"
-    )
-    return (
-        f'<article class="offer-card {_site_theme_class(seller_text)}" data-kind="{kind}" '
-        f'data-search="{_search_blob(seller_text, row.get("product_title"))}">'
-        f'<div class="card-top">{_product_heading_html(row)}<span class="offer-tag {tag_kind}">{label}</span></div>'
-        f"{price_html}"
-        f'<div class="offer-meta"><span>{escape(seller_text)}</span></div>'
-        "</article>"
-    )
-
-
-def _render_stock_card(row):
-    seller_text = repair_mojibake(row.get("seller") or "-")
-    reason = repair_mojibake(row.get("reason") or "Stokta yok")
-    return (
-        f'<article class="offer-card {_site_theme_class(seller_text)}" data-kind="stock" '
-        f'data-search="{_search_blob(seller_text, row.get("product_title"), reason)}">'
-        f'<div class="card-top">{_product_heading_html(row)}<span class="offer-tag stock">Stokta yok</span></div>'
-        "<div class='offer-price'>"
-        f"<span class='now stock'>{escape(reason)}</span>"
-        f"<span class='target'>hedef {escape(_display_tl(row.get('target', '-')))}</span>"
-        "</div>"
-        f'<div class="offer-meta"><span>{escape(seller_text)}</span></div>'
-        "</article>"
-    )
-
-
-def _render_error_offer_card(detail):
-    title = repair_mojibake(detail.get("title") or "Hata")
-    message = repair_mojibake(detail.get("message") or "Hata ayrıntısı yok.")
-    url = str(detail.get("url") or "").strip()
-    title_html = escape(title)
-    if url:
-        title_html = (
-            f'<a class="name" href="{escape(url, quote=True)}" target="_blank" rel="noopener noreferrer">'
-            f"{title_html}</a>"
-        )
-    else:
-        title_html = f'<div class="name">{title_html}</div>'
-    return (
-        f'<article class="offer-card site-other" data-kind="error" data-search="{_search_blob(title, message)}">'
-        f'<div class="card-top">{title_html}<span class="offer-tag error">Okunamadı</span></div>'
-        f"<div class='offer-price'><span class='now error'>{escape(message)}</span></div>"
-        "</article>"
-    )
-
-
-def _render_offer_group(label, rows, kind):
-    if len(rows) < 2:
-        return "".join(_render_offer_card(row, kind) for row in rows)
-    search = _search_blob(label, *[row.get("product_title") for row in rows])
-    cards = "".join(_render_offer_card(row, kind) for row in rows)
-    return (
-        f'<details class="offer-group" data-kind="{kind}" data-search="{search}">'
-        f"<summary><strong>{escape(label)}</strong><span>{len(rows)} sonuç</span></summary>"
-        f'<div class="offer-list">{cards}</div></details>'
-    )
-
-
-def _render_panel(error_details=None):
-    payload = load_json(SUMMARY_PATH, {})
-    rows = payload.get("rows") if isinstance(payload.get("rows"), list) else []
-    stock_rows = payload.get("stock_rows") if isinstance(payload.get("stock_rows"), list) else []
-    rows = _attach_state_search_groups(
-        rows,
-        load_json(STATE_PATH, {}),
-        load_json(OPTIONS_PATH, {}),
-    )
-    error_details = error_details if isinstance(error_details, list) else []
-    if not rows and not stock_rows and not error_details:
-        return """
-        <section id="opportunity-panel" class="app-section">
-          <p class="app-empty">İlk kontrol döngüsü tamamlandığında fırsatlar burada görünecek.</p>
-        </section>
-        """
-
-    deal_rows = [row for row in rows if _is_target_hit(row)]
-    watch_rows = [row for row in rows if not _is_target_hit(row)]
-    watch_open, watch_groups = _split_search_result_groups(watch_rows)
-    list_html = "".join(_render_offer_card(row, "watch") for row in watch_open)
-    list_html += "".join(_render_offer_group(label, group_rows, "watch") for label, group_rows in watch_groups)
-    list_html += "".join(_render_offer_card(row, "deal") for row in deal_rows)
-    list_html += "".join(_render_stock_card(row) for row in stock_rows)
-    list_html += "".join(_render_error_offer_card(detail) for detail in error_details)
-    deals_html = "".join(_render_deal_card(row) for row in deal_rows)
-    deals_section = ""
-    if deal_rows:
-        deals_section = (
-            '<section class="app-section" id="deals-section" data-panel="deals">'
-            "<h2>Alınabilir fırsatlar</h2>"
-            f'<div class="app-deals">{deals_html}</div></section>'
-        )
-    chips = (
-        f'<button class="app-chip" type="button" data-filter="all" aria-pressed="true">Tümü · {len(rows) + len(stock_rows) + len(error_details)}</button>'
-        f'<button class="app-chip" type="button" data-filter="deal" aria-pressed="false">Alınabilir · {len(deal_rows)}</button>'
-        f'<button class="app-chip" type="button" data-filter="watch" aria-pressed="false">Yaklaşıyor · {len(watch_rows)}</button>'
-        f'<button class="app-chip" type="button" data-filter="stock" aria-pressed="false">Stokta yok · {len(stock_rows)}</button>'
-        f'<button class="app-chip" type="button" data-filter="error" aria-pressed="false">Hata · {len(error_details)}</button>'
-    )
-    return f"""
-    <div id="opportunity-panel">
-      <div class="app-search"><input id="panel-search" type="search" placeholder="Ürün veya site ara" autocomplete="off"></div>
-      <div class="app-chips">{chips}</div>
-      {deals_section}
-      <section class="app-section">
-        <h2>Takip edilenler</h2>
-        <div class="offer-list" id="offer-list">{list_html or '<p class="app-empty">Gösterilecek ürün yok.</p>'}</div>
-      </section>
-    </div>
-    """
-
-
 def _is_search_result_source(site: str, configured_url: str) -> bool:
     return (
         (site == "amazon" and is_amazon_search_url(configured_url))
@@ -1379,12 +1118,14 @@ def _render_dashboard_page(path: str, base_path: str, error_detail_limit: int | 
     web_app_head = render_web_app_head(base_path)
     base_path = escape(base_path, quote=True)
     options = load_json(OPTIONS_PATH, {})
-    summary = _collect_summary(error_detail_limit=error_detail_limit)
     telegram_summary = _collect_telegram_summary(options if isinstance(options, dict) else {})
     telegram_recent_html = _render_telegram_recent_notifications(
         telegram_summary.get("recent_notifications") or []
     )
-    error_card_html = _render_error_card(summary, "public-error-card")
+    error_card_html = _render_error_card(
+        _collect_summary(error_detail_limit=error_detail_limit),
+        "public-error-card",
+    )
     cycle_duration = "-"
     last_update = "-"
     if isinstance(payload, dict):
@@ -1392,7 +1133,12 @@ def _render_dashboard_page(path: str, base_path: str, error_detail_limit: int | 
             _duration_text(payload.get("cycle_duration_seconds"), payload.get("cycle_duration_minutes") or "-")
         )
         last_update = escape(_relative_time_text(payload.get("checked_at")))
-    panel_html = _render_panel(summary.get("error_details") or [])
+    public_cycle_row = (
+        "<div class='public-cycle-row'>"
+        f"<section class='public-cycle-pill'><span>Çevrim süresi</span><strong>{cycle_duration}</strong></section>"
+        f"<section class='public-cycle-pill'><span>Son güncelleme</span><strong>{last_update}</strong></section>"
+        "</div>"
+    )
     confirm_script = """
 <script>
   document.querySelectorAll('form[data-confirm]').forEach((form) => {
@@ -1403,92 +1149,9 @@ def _render_dashboard_page(path: str, base_path: str, error_detail_limit: int | 
       }
     });
   });
-  const screens = {
-    panel: document.getElementById('screen-panel'),
-    telegram: document.getElementById('screen-telegram'),
-    tools: document.getElementById('screen-tools'),
-  };
-  const showScreen = (name) => {
-    Object.entries(screens).forEach(([key, screen]) => {
-      screen?.classList.toggle('is-on', key === name);
-    });
-    document.querySelectorAll('[data-nav]').forEach((item) => {
-      if (item.dataset.nav === name) item.setAttribute('aria-current', 'page');
-      else item.removeAttribute('aria-current');
-    });
-  };
-  document.querySelectorAll('[data-nav]').forEach((item) => {
-    item.addEventListener('click', () => showScreen(item.dataset.nav));
-  });
-  const dealsSection = document.getElementById('deals-section');
-  const searchInput = document.getElementById('panel-search');
-  const applyFilter = () => {
-    const filter = document.querySelector('.app-chip[aria-pressed="true"]')?.dataset.filter || 'all';
-    const query = (searchInput?.value || '').trim().toLocaleLowerCase('tr-TR');
-    document.querySelectorAll('#offer-list [data-kind]').forEach((item) => {
-      const kindMatch = filter === 'all' ? item.dataset.kind !== 'deal' : item.dataset.kind === filter;
-      const searchMatch = !query || (item.dataset.search || '').includes(query);
-      item.hidden = !(kindMatch && searchMatch);
-    });
-    if (dealsSection) dealsSection.hidden = filter !== 'all' || Boolean(query);
-  };
-  document.querySelectorAll('.app-chip').forEach((chip) => {
-    chip.addEventListener('click', () => {
-      document.querySelectorAll('.app-chip').forEach((item) => item.setAttribute('aria-pressed', 'false'));
-      chip.setAttribute('aria-pressed', 'true');
-      applyFilter();
-    });
-  });
-  searchInput?.addEventListener('input', applyFilter);
-  applyFilter();
 </script>"""
     html = f"""<!doctype html>
-<html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="theme-color" content="#111315"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Hermes">{web_app_head}<meta http-equiv="refresh" content="60"><title>Hermes</title><style>{DASHBOARD_CSS}</style></head>
-<body class="app-body">
-<main class="app-shell">
-  <header class="app-header">
-    <div class="app-brand">
-      <h1>Hermes</h1>
-      <p>Son kontrol {last_update} · çevrim {cycle_duration}</p>
-    </div>
-    <a class="app-icon" href="{base_path}/settings" aria-label="Ayarlar">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 110-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
-    </a>
-  </header>
-  {notice_html}
-  <div id="screen-panel" class="app-screen is-on">{panel_html}</div>
-  <div id="screen-telegram" class="app-screen">{telegram_recent_html}</div>
-  <div id="screen-tools" class="app-screen">
-    <div class="app-tools">
-      <a class="button secondary" href="{base_path}/settings">Takip ayarları</a>
-      <a class="button secondary" href="{base_path}/link-test">Test</a>
-      <form class="inline-form" method="post" action="{base_path}/test-pushover"><button class="button test" type="submit">Pushover</button></form>
-      <form class="inline-form" method="post" action="{base_path}/reset-notifications" data-confirm="Bildirim susturma hafızası sıfırlanacak ve hedef altında kalan fırsatlar için tek seferlik kontrol başlatılacak. Devam etmek istiyor musun?"><button class="button secondary" type="submit">Bildirim Sıfırla</button></form>
-      <form class="inline-form" method="post" action="{base_path}/reset-price-history" data-confirm="Min/maks fiyat geçmişi temizlenecek ve güncel fiyattan yeniden başlayacak. Devam etmek istiyor musun?"><button class="button secondary" type="submit">Min/Maks Sıfırla</button></form>
-    </div>
-    {error_card_html}
-  </div>
-  <nav class="app-nav">
-    <button type="button" data-nav="panel" aria-current="page">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 10.5 12 4l8 6.5V20a1 1 0 01-1 1h-5v-7H10v7H5a1 1 0 01-1-1z"/></svg>
-      Fırsatlar
-    </button>
-    <a href="{base_path}/settings">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
-      Takipler
-    </a>
-    <button type="button" data-nav="telegram">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 5 3 12l7 2 2 7 9-16z"/></svg>
-      Telegram
-    </button>
-    <button type="button" data-nav="tools">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82 2 2 0 11-2.83 2.83 1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33 2 2 0 11-2.83-2.83 1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 110-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82 2 2 0 112.83-2.83 1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33 2 2 0 112.83 2.83 1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
-      Ayarlar
-    </button>
-  </nav>
-</main>
-{confirm_script}
-</body></html>"""
+<html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="theme-color" content="#111315"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Hermes">{web_app_head}<meta http-equiv="refresh" content="60"><title>Hermes</title><style>{DASHBOARD_CSS}</style></head><body class="public"><main><div class="hero"><div class="badge">Hermes</div><div class="actions public-actions"><a class="button secondary" href="{base_path}/settings">Ayarlar</a><a class="button secondary" href="{base_path}/link-test">Test</a><form class="inline-form" method="post" action="{base_path}/test-pushover"><button class="button test" type="submit">Pushover</button></form><form class="inline-form" method="post" action="{base_path}/reset-notifications" data-confirm="Bildirim susturma hafızası sıfırlanacak ve hedef altında kalan fırsatlar için tek seferlik kontrol başlatılacak. Devam etmek istiyor musun?"><button class="button secondary" type="submit">Bildirim Sıfırla</button></form><form class="inline-form" method="post" action="{base_path}/reset-price-history" data-confirm="Min/maks fiyat geçmişi temizlenecek ve güncel fiyattan yeniden başlayacak. Devam etmek istiyor musun?"><button class="button secondary" type="submit">Min/Maks Sıfırla</button></form></div>{public_cycle_row}{notice_html}{_render_table()}{telegram_recent_html}{error_card_html}</div></main>{confirm_script}</body></html>"""
     return html.encode("utf-8")
 
 
