@@ -81,7 +81,8 @@ repository. Read it before making changes. The detailed system handoff is in
   URL must not prevent Hermes from starting or checking valid watches.
 - Keep Supervisor options and the settings UI in sync. A UI save must preserve
   unrelated fields, display actionable validation errors, show restart progress,
-  and work through both ingress and public access.
+  and work through both ingress and public access. Watch and Telegram edits stay
+  on the page until the user applies them once; that single save restarts Hermes.
 
 ## UI and UX contract
 

@@ -1,7 +1,7 @@
 # Hermes Cursor Handoff
 
 This document is the current technical and product handoff for continuing Hermes
-in Cursor. It describes the real repository at version `2.5.7`; source code and
+in Cursor. It describes the real repository at version `2.5.8`; source code and
 tests remain authoritative when this document and code ever differ.
 
 ## 1. Product snapshot
@@ -270,6 +270,8 @@ Visual contract:
   difference, min/max, stock, or links;
 - whole-lira display (`1.500 TL`), correct Turkish grammar and characters;
 - confirmation for destructive actions and clear save/restart progress;
+- settings edits stay on the page until `Değişiklikleri uygula`; one save writes
+  all watch and Telegram changes and restarts Hermes once;
 - working settings search/group filters;
 - temporary link-test data never enters real state or summary.
 

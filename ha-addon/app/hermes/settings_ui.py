@@ -30,7 +30,7 @@ h1 { margin:0 0 8px; color:#ffd166; font-size:34px; letter-spacing:-.04em; } h2 
 .saving-overlay { position:fixed; inset:0; z-index:20; display:grid; place-items:center; padding:20px; background:rgba(7,8,9,.78); backdrop-filter:blur(5px); } .saving-overlay[hidden] { display:none; } .saving-dialog { width:min(100%,430px); border:1px solid rgba(214,216,215,.45); border-radius:18px; padding:22px; background:#24272b; box-shadow:0 22px 50px rgba(0,0,0,.5); } .saving-dialog h2 { margin:0 0 9px; font-size:20px; } .saving-dialog p { font-size:14px; } .saving-spinner { width:28px; height:28px; margin:0 0 14px; border:4px solid rgba(214,216,215,.22); border-top-color:#d6d8d7; border-radius:50%; animation:hermes-spin .8s linear infinite; } @keyframes hermes-spin { to { transform:rotate(360deg); } }
 .form-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:12px; padding:0 14px 14px; } label { display:grid; gap:6px; color:var(--muted); font-size:12px; font-weight:700; } input[type='text'], input[type='number'], input[type='url'], select, textarea { width:100%; min-height:40px; border-radius:11px; border:1px solid var(--line); background:#141619; color:var(--text); padding:10px 11px; font-size:13px; font-family:inherit; } textarea { resize:vertical; line-height:1.35; }
 .checkbox-row { display:flex; align-items:center; gap:9px; min-height:40px; color:var(--text); } .danger { color:#ffd8e3; } .footer-note { margin-top:14px; border-left:4px solid #a9adaf; padding:12px 14px; background:rgba(169,173,175,.14); border-radius:10px; font-size:13px; }
-.watch-layout { grid-column:1 / -1; display:grid; gap:12px; } .watch-top { display:grid; grid-template-columns:minmax(105px,.7fr) minmax(210px,2fr) minmax(100px,.65fr) minmax(115px,.75fr) minmax(90px,.6fr); gap:12px; align-items:end; } .watch-links { display:grid; gap:10px; } .watch-bottom { display:flex; flex-wrap:wrap; align-items:end; gap:12px; } .watch-bottom > label:first-child { flex:0 1 205px; max-width:205px; } .watch-exclude { flex:1 1 240px; } .watch-bottom .checkbox-row { flex:0 0 auto; padding-bottom:1px; } .watch-bottom .watch-actions { margin-left:auto; } @media (max-width:900px) { .watch-top { grid-template-columns:repeat(2,minmax(0,1fr)); } } @media (max-width:700px) { .watch-bottom > label:first-child { flex:1 1 100%; max-width:none; } .watch-bottom .watch-actions { width:100%; margin-left:0; } .watch-bottom .watch-actions .button { width:100%; } } @media (max-width:420px) { .watch-top { grid-template-columns:1fr; } }
+.watch-layout { grid-column:1 / -1; display:grid; gap:12px; } .watch-top { display:grid; grid-template-columns:minmax(105px,.7fr) minmax(210px,2fr) minmax(100px,.65fr) minmax(115px,.75fr) minmax(90px,.6fr); gap:12px; align-items:end; } .watch-links { display:grid; gap:10px; } .watch-bottom { display:flex; flex-wrap:wrap; align-items:end; gap:12px; } .watch-bottom > label:first-child { flex:0 1 205px; max-width:205px; } .watch-exclude { flex:1 1 240px; } .watch-bottom .checkbox-row { flex:0 0 auto; padding-bottom:1px; } .watch-bottom .watch-actions { margin-left:auto; } details.is-deleted { opacity:.55; } details.is-deleted summary { color:var(--bad); } .apply-bar { position:sticky; bottom:0; z-index:8; display:flex; flex-wrap:wrap; gap:12px; align-items:center; justify-content:space-between; margin-top:18px; padding:14px 0 4px; border-top:1px solid var(--line); background:var(--panel); } .apply-bar p { flex:1 1 220px; } .apply-bar .button { min-width:180px; } @media (max-width:900px) { .watch-top { grid-template-columns:repeat(2,minmax(0,1fr)); } } @media (max-width:700px) { .watch-bottom > label:first-child { flex:1 1 100%; max-width:none; } .watch-bottom .watch-actions { width:100%; margin-left:0; } .watch-bottom .watch-actions .button { width:100%; } .apply-bar .button { width:100%; } } @media (max-width:420px) { .watch-top { grid-template-columns:1fr; } }
 """
 
 SETTINGS_SCRIPT = """
@@ -39,6 +39,11 @@ SETTINGS_SCRIPT = """
   const hiddenGroups = new Set(JSON.parse(localStorage.getItem(storageKey) || '[]'));
   const normalize = (value) => String(value || '').toLocaleLowerCase('tr-TR');
   const watchSearch = document.getElementById('watch-search');
+  const settingsForm = document.getElementById('settings-form');
+  const watchesCount = document.getElementById('watches-count');
+  const newWatchList = document.getElementById('new-watch-list');
+  const newWatchTemplate = document.getElementById('new-watch-template');
+  let dirty = false;
 
   const refreshWatchList = () => {
     const searchText = normalize(watchSearch?.value.trim());
@@ -66,32 +71,72 @@ SETTINGS_SCRIPT = """
   watchSearch?.addEventListener('input', refreshWatchList);
   refreshWatchList();
 
+  const nextWatchIndex = () => {
+    const current = Number(watchesCount?.value || 0);
+    const next = current;
+    if (watchesCount) watchesCount.value = String(current + 1);
+    return next;
+  };
+
+  document.getElementById('add-watch-card')?.addEventListener('click', () => {
+    if (!newWatchTemplate || !newWatchList) return;
+    const index = nextWatchIndex();
+    newWatchList.insertAdjacentHTML(
+      'beforeend',
+      newWatchTemplate.innerHTML.replaceAll('__INDEX__', String(index)),
+    );
+    dirty = true;
+  });
+
+  document.addEventListener('click', (event) => {
+    const removeButton = event.target.closest('[data-remove-new-watch]');
+    if (removeButton) {
+      const card = removeButton.closest('[data-watch-card]');
+      card?.remove();
+      dirty = true;
+      return;
+    }
+    const deleteButton = event.target.closest('[data-delete-watch]');
+    if (!deleteButton) return;
+    const card = deleteButton.closest('[data-watch-card]');
+    const flag = card?.querySelector('[data-delete-flag]');
+    if (!card || !flag) return;
+    const marked = flag.value === '1';
+    if (marked) {
+      flag.value = '0';
+      card.classList.remove('is-deleted');
+      deleteButton.textContent = 'Sil';
+    } else {
+      if (!window.confirm('Bu takip, değişiklikleri uygulayınca silinecek. Devam etmek istiyor musun?')) return;
+      flag.value = '1';
+      card.classList.add('is-deleted');
+      deleteButton.textContent = 'Vazgeç';
+    }
+    dirty = true;
+  });
+
+  settingsForm?.addEventListener('input', () => { dirty = true; });
+  settingsForm?.addEventListener('change', () => { dirty = true; });
+  window.addEventListener('beforeunload', (event) => {
+    if (!dirty) return;
+    event.preventDefault();
+    event.returnValue = '';
+  });
+
   const savingOverlay = document.getElementById('saving-overlay');
   const savingTitle = document.getElementById('saving-title');
   const savingMessage = document.getElementById('saving-message');
-  document.querySelectorAll('form[data-settings-save]').forEach((form) => {
-    form.addEventListener('submit', (event) => {
-      const button = event.submitter;
-      const isDelete = button?.dataset.deleteWatch === 'true';
-      const operation = form.querySelector('input[name="operation"]');
-      // New-watch and Telegram forms already declare their own operation.
-      // Only an existing watch card can switch between update and delete.
-      if (operation?.value === 'update_watch') {
-        operation.value = isDelete ? 'delete_watch' : 'update_watch';
-      }
-      if (button) {
-        // Do not disable the submitter here: mobile Safari then excludes its
-        // name/value from the submitted form and turns a delete into an update.
-        button.classList.add('is-submitting');
-        button.setAttribute('aria-disabled', 'true');
-        button.textContent = isDelete ? 'Siliniyor...' : 'Kaydediliyor...';
-      }
-      savingTitle.textContent = isDelete ? 'Takip siliniyor' : 'Ayarlar kaydediliyor';
-      savingMessage.textContent = isDelete
-        ? 'Takip kaydı kaldırılıyor. Hermes yeniden başlatılacak; hazır olduğunda ayarlara otomatik dönülecek.'
-        : 'Hermes değişiklikleri Home Assistant’a yazıyor. Ardından kısa bir yeniden başlatma yapılacak; hazır olduğunda ayarlara otomatik dönülecek.';
-      savingOverlay.hidden = false;
-    });
+  settingsForm?.addEventListener('submit', (event) => {
+    const button = event.submitter;
+    if (button) {
+      button.classList.add('is-submitting');
+      button.setAttribute('aria-disabled', 'true');
+      button.textContent = 'Kaydediliyor...';
+    }
+    dirty = false;
+    savingTitle.textContent = 'Ayarlar kaydediliyor';
+    savingMessage.textContent = 'Tüm değişiklikler tek seferde Home Assistant’a yazılıyor. Hermes bir kez yeniden başlayacak; hazır olduğunda ayarlara otomatik dönülecek.';
+    savingOverlay.hidden = false;
   });
 })();
 """.strip()
@@ -307,7 +352,7 @@ def _watch_display_name(item, index, known_titles):
     return f"Takip {index + 1}"
 
 
-def _watch_form(item, index, is_new=False, groups=None, known_titles=None):
+def _watch_form(item, index, is_new=False, groups=None, known_titles=None, show_remove=False):
     prefix = f"watches_{index}_"
     group = _watch_group(item)
     display_name = _watch_display_name(item, index, known_titles or {})
@@ -355,19 +400,21 @@ def _watch_form(item, index, is_new=False, groups=None, known_titles=None):
             _checkbox(prefix, "active", "Aktif", active),
         ]
     )
-    action_fields = (
-        "<div class='watch-actions'><button class='button primary' type='submit'>Yeni Takibi Ekle</button></div>"
-        if is_new
-        else (
+    action_fields = ""
+    if is_new and show_remove:
+        action_fields = (
             "<div class='watch-actions'>"
-            f"<button class='button primary' type='submit' name='update_watch_index' value='{index}' "
-            "data-update-watch='true'>Güncelle</button>"
-            f"<button class='button danger' type='submit' name='delete_watch_index' value='{index}' "
-            "data-delete-watch='true' formnovalidate>Sil</button>"
+            "<button class='button secondary' type='button' data-remove-new-watch>Bu kartı kaldır</button>"
             "</div>"
         )
-    )
+    elif not is_new:
+        action_fields = (
+            "<div class='watch-actions'>"
+            "<button class='button danger' type='button' data-delete-watch>Sil</button>"
+            "</div>"
+        )
     inner = (
+        f"<input type='hidden' name='{escape(prefix + 'delete', quote=True)}' value='0' data-delete-flag>"
         "<div class='watch-layout'>"
         "<div class='watch-top'>"
         f"{_select(prefix, 'group', 'Grup', selected_group, group_choices)}"
@@ -383,32 +430,34 @@ def _watch_form(item, index, is_new=False, groups=None, known_titles=None):
     )
     group_attribute = "" if is_new else f" data-watch-group='{escape(group, quote=True)}'"
     search_attribute = "" if is_new else f" data-watch-search='{escape(display_name, quote=True)}'"
-    details = (
-        f"<details{group_attribute}{search_attribute}>"
-        f"<summary>{escape(title)}</summary><div class='form-grid'>{inner}</div></details>"
-    )
-    if is_new:
-        return details
+    new_attribute = " data-new-watch='true'" if is_new else ""
     return (
-        "<form method='post' action='./settings/save' data-settings-save>"
-        "<input type='hidden' name='operation' value='update_watch'>"
-        f"<input type='hidden' name='watch_index' value='{index}'>"
-        "<input type='hidden' name='return_to_main' value='1'>"
-        f"{details}</form>"
+        f"<details data-watch-card{new_attribute}{group_attribute}{search_attribute}>"
+        f"<summary>{escape(title)}</summary><div class='form-grid'>{inner}</div></details>"
     )
 
 
 def _watch_section(items, configured_groups, known_titles=None):
     safe_items = _as_list(items)
-    groups = []
-    for group in configured_groups or []:
-        value = str(group or "").strip()
-        if value and value.casefold() not in {existing.casefold() for existing in groups}:
-            groups.append(value)
-    for item in safe_items:
-        group = _watch_group(item)
-        if group.casefold() not in {value.casefold() for value in groups}:
-            groups.append(group)
+    groups = _group_choices(configured_groups, safe_items)
+
+    def render_watch(item, index):
+        return _watch_form(
+            item if isinstance(item, dict) else {},
+            index,
+            groups=groups,
+            known_titles=known_titles,
+        )
+
+    watches_html = "".join(render_watch(item, index) for index, item in enumerate(safe_items))
+    return (
+        "<section class='settings-section'><h2>Takip edilenler</h2>"
+        f"{watches_html}</section>"
+    )
+
+
+def _watch_tools_section(items, configured_groups):
+    groups = _group_choices(configured_groups, items)
     filters = "".join(
         f"<button class='watch-group-filter' type='button' data-watch-group-filter='{escape(group, quote=True)}' aria-pressed='true'>{escape(group)}</button>"
         for group in groups
@@ -424,29 +473,44 @@ def _watch_section(items, configured_groups, known_titles=None):
         "<input id='watch-search' type='search' placeholder='Ürün adında ara' autocomplete='off'>"
         "</label>"
     )
-    def render_watch(item, index):
-        return _watch_form(
-            item if isinstance(item, dict) else {},
-            index,
-            groups=groups,
-            known_titles=known_titles,
-        )
+    return f"<section class='settings-section watch-tools'>{search_html}{filters_html}</section>"
 
-    watches_html = "".join(render_watch(item, index) for index, item in enumerate(safe_items))
-    return (
-        "<section class='settings-section watch-tools'>"
-        f"{search_html}{filters_html}</section>"
-        "<section class='settings-section'><h2>Takip edilenler</h2>"
-        f"{watches_html}</section>"
+
+def _group_choices(configured_groups, items):
+    groups = []
+    for group in configured_groups or []:
+        value = str(group or "").strip()
+        if value and value.casefold() not in {existing.casefold() for existing in groups}:
+            groups.append(value)
+    for item in _as_list(items):
+        group = _watch_group(item)
+        if group.casefold() not in {value.casefold() for value in groups}:
+            groups.append(group)
+    return groups
+
+
+def _new_watch_section(groups, known_titles=None, start_index=0):
+    first_card = _watch_form(
+        {},
+        start_index,
+        is_new=True,
+        groups=groups,
+        known_titles=known_titles,
+        show_remove=False,
     )
-
-
-def _new_watch_section(groups, known_titles=None):
+    template_html = _watch_form(
+        {},
+        0,
+        is_new=True,
+        groups=groups,
+        known_titles=known_titles,
+        show_remove=True,
+    ).replace("watches_0_", "watches___INDEX___")
     return (
-        "<section class='settings-section'><form method='post' action='./settings/save' data-settings-save>"
-        "<input type='hidden' name='operation' value='add_watch'><input type='hidden' name='watches_count' value='1'>"
-        f"{_watch_form({}, 0, is_new=True, groups=groups, known_titles=known_titles)}"
-        "</form>"
+        "<section class='settings-section'><h2>Yeni takip ekle</h2>"
+        f"<div id='new-watch-list'>{first_card}</div>"
+        "<div class='actions'><button class='button secondary' type='button' id='add-watch-card'>Başka takip ekle</button></div>"
+        f"<template id='new-watch-template'>{template_html}</template>"
         "</section>"
     )
 
@@ -550,6 +614,9 @@ def _build_watches(form):
     watches = []
     count = int(_first(form, "watches_count", "0") or 0)
     for index in range(count):
+        prefix = f"watches_{index}_"
+        if _first(form, prefix + "delete") in {"1", "true", "on", "yes"}:
+            continue
         item = _build_watch(form, index)
         if item:
             watches.append(item)
@@ -616,7 +683,7 @@ def _apply_settings_operation(existing_options, form):
     if operation == "update_existing":
         options["takip_edilenler"] = _build_watches(form)
         _update_telegram_options(options, form)
-        return options, f"{len(options['takip_edilenler'])} mevcut takip kaydı güncellendi."
+        return options, "Ayarlar kaydedildi."
 
     if operation == "add_watch":
         new_watches = _build_watches(form)
@@ -792,6 +859,10 @@ def render_settings_page(path="/"):
         "groups",
     )
     known_titles = _stored_watch_titles()
+    watches = _as_list(options.get("takip_edilenler"))
+    group_choices = _group_choices(groups, watches)
+    new_watch_index = len(watches)
+    watches_count = new_watch_index + 1
     params = urllib.parse.parse_qs(urllib.parse.urlparse(path).query)
     status = params.get("saved", [""])[0]
     message = params.get("msg", [""])[0]
@@ -802,12 +873,16 @@ def render_settings_page(path="/"):
     html = f"""<!doctype html>
 <html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Hermes Ayarlar</title><style>{SETTINGS_CSS}</style></head>
 <body><main><div class="hero"><h1>Hermes Ayarlar</h1><div class="actions"><a class="button secondary" href="./">Ana ekran</a></div>{notice}
-{_new_watch_section(groups, known_titles)}
-{_watch_section(options.get("takip_edilenler"), groups, known_titles)}
-<form method="post" action="./settings/save" data-settings-save>{_telegram_section(options)}
-<input type="hidden" name="operation" value="update_telegram">
-<div class="actions"><button class="button primary" type="submit">Telegram Ayarlarını Güncelle</button></div></form>
-</div></main><div id="saving-overlay" class="saving-overlay" hidden><div class="saving-dialog"><div class="saving-spinner"></div><h2 id="saving-title">Ayarlar kaydediliyor</h2><p id="saving-message">Hermes değişiklikleri Home Assistant'a yazıyor. Ardından kısa bir yeniden başlatma yapılacak; hazır olduğunda ayarlara otomatik dönülecek.</p></div></div><script src="./settings.js" defer></script></body></html>"""
+<form id="settings-form" method="post" action="./settings/save" data-settings-save>
+<input type="hidden" name="operation" value="update_existing">
+<input type="hidden" name="watches_count" id="watches-count" value="{watches_count}">
+{_new_watch_section(group_choices, known_titles, start_index=new_watch_index)}
+{_watch_tools_section(watches, groups)}
+{_watch_section(watches, groups, known_titles)}
+{_telegram_section(options)}
+<div class="apply-bar"><p>Grup, fiyat, yeni kayıt ve silme işlemlerini sırayla yap; bitince bir kez uygula. Hermes yalnız o zaman yeniden başlar.</p><button class="button primary" type="submit">Değişiklikleri uygula</button></div>
+</form>
+</div></main><div id="saving-overlay" class="saving-overlay" hidden><div class="saving-dialog"><div class="saving-spinner"></div><h2 id="saving-title">Ayarlar kaydediliyor</h2><p id="saving-message">Tüm değişiklikler tek seferde Home Assistant'a yazılıyor. Hermes bir kez yeniden başlayacak; hazır olduğunda ayarlara otomatik dönülecek.</p></div></div><script src="./settings.js" defer></script></body></html>"""
     return html.encode("utf-8")
 
 

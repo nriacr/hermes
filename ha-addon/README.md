@@ -18,6 +18,7 @@ Hermes, Home Assistant üzerinde çalışan çok siteli ürün ve Telegram fırs
 - Log tablosu ve özet dosyası (`/data/latest_price_summary.json`)
 - Ingress paneli üzerinden durum ekranı ve Pushover test butonu
 - Token ile korunan isteğe bağlı public panel ve public ayarlar ekranı
+- Ayarlar ekranında tüm takip ve Telegram değişiklikleri alttaki `Değişiklikleri uygula` ile tek seferde kaydedilir
 
 ## Konfigürasyon
 

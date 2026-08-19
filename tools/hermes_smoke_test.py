@@ -1035,7 +1035,8 @@ class HermesSmokeTests(unittest.TestCase):
                 page = settings_ui.render_settings_page("/public/secret-token/settings").decode("utf-8")
 
                 self.assertIn('id="saving-overlay"', page)
-                self.assertEqual(page.count("data-settings-save"), 2)
+                self.assertEqual(page.count("data-settings-save"), 1)
+                self.assertIn("Değişiklikleri uygula", page)
                 self.assertIn("Ayarlar kaydediliyor", page)
             finally:
                 settings_ui.OPTIONS_PATH = original_options_path
@@ -1083,9 +1084,11 @@ class HermesSmokeTests(unittest.TestCase):
                 self.assertIn("id='watch-search'", page)
                 self.assertIn("data-watch-search='Mevcut'", page)
                 self.assertIn("class='button danger'", page)
-                self.assertIn("name='delete_watch_index'", page)
-                self.assertIn("name='update_watch_index'", page)
-                self.assertIn("name='watch_index'", page)
+                self.assertIn("data-delete-watch", page)
+                self.assertIn("Değişiklikleri uygula", page)
+                self.assertNotIn("name='delete_watch_index'", page)
+                self.assertNotIn("name='update_watch_index'", page)
+                self.assertNotIn("name='watch_index'", page)
                 self.assertNotIn("Güncellemeleri Kaydet", page)
                 self.assertNotIn("Arama linklerinde taranacak maksimum ürün", page)
                 self.assertIn("value='100'", page)
@@ -1172,6 +1175,44 @@ class HermesSmokeTests(unittest.TestCase):
         self.assertEqual(options["takip_edilenler"][1]["group"], "Teknoloji")
         self.assertEqual(options["takip_edilenler"][1]["target_price"], 1500)
 
+    def test_batch_settings_save_applies_edits_deletes_and_new_watches(self):
+        options, message = settings_ui._apply_settings_operation(
+            {
+                "takip_edilenler": [
+                    {"name": "Silinecek", "target_price": 100, "url_1": "https://www.amazon.com.tr/dp/B000000001"},
+                    {"name": "Kalacak", "group": "Diğer", "target_price": 200, "url_1": "https://www.amazon.com.tr/dp/B000000002"},
+                ],
+                "telegram_enabled": False,
+                "channels": ["@firsatz"],
+            },
+            {
+                "operation": ["update_existing"],
+                "watches_count": ["3"],
+                "watches_0_delete": ["1"],
+                "watches_0_name": ["Silinecek"],
+                "watches_0_target_price": ["100"],
+                "watches_0_url_1": ["https://www.amazon.com.tr/dp/B000000001"],
+                "watches_1_name": ["Kalacak"],
+                "watches_1_group": ["Teknoloji"],
+                "watches_1_target_price": ["250"],
+                "watches_1_url_1": ["https://www.amazon.com.tr/dp/B000000002"],
+                "watches_1_active": ["1"],
+                "watches_2_name": ["Yeni kayıt"],
+                "watches_2_target_price": ["1.500"],
+                "watches_2_url_1": ["https://www.hepsiburada.com/ara?q=yeni"],
+                "watches_2_active": ["1"],
+                "telegram_enabled": ["1"],
+                "channels": ["@firsatz"],
+            },
+        )
+
+        self.assertEqual(message, "Ayarlar kaydedildi.")
+        self.assertEqual([item["name"] for item in options["takip_edilenler"]], ["Kalacak", "Yeni kayıt"])
+        self.assertEqual(options["takip_edilenler"][0]["group"], "Teknoloji")
+        self.assertEqual(options["takip_edilenler"][0]["target_price"], 250)
+        self.assertEqual(options["takip_edilenler"][1]["target_price"], 1500)
+        self.assertTrue(options["telegram_enabled"])
+
     def test_card_update_uses_hidden_index_when_submit_button_index_is_missing(self):
         options, message = settings_ui._apply_settings_operation(
             {
@@ -1246,7 +1287,8 @@ class HermesSmokeTests(unittest.TestCase):
         self.assertIn("watchSearch?.addEventListener('input', refreshWatchList)", interaction_script)
         self.assertIn("data-watch-group-filter", interaction_script)
         self.assertIn("waitForHermes", restart_script)
-        self.assertIn("operation.value = isDelete ? 'delete_watch' : 'update_watch'", interaction_script)
+        self.assertIn("data-delete-watch", interaction_script)
+        self.assertIn("add-watch-card", interaction_script)
         self.assertNotIn("button.disabled = true", interaction_script)
 
     def test_amazon_page_fetch_is_cached_per_session(self):
@@ -3263,7 +3305,7 @@ class HermesSmokeTests(unittest.TestCase):
         self.assertIn("Market", html)
 
     def test_watch_settings_keep_configured_groups_without_existing_watches(self):
-        html = settings_ui._watch_section([], ["Moda", "Teknoloji", "Market"])
+        html = settings_ui._watch_tools_section([], ["Moda", "Teknoloji", "Market"])
 
         self.assertIn("data-watch-group-filter='Moda'", html)
         self.assertIn("data-watch-group-filter='Teknoloji'", html)
@@ -3375,7 +3417,7 @@ class HermesSmokeTests(unittest.TestCase):
         )
 
         self.assertEqual(options["takip_edilenler"][0]["group"], "Teknoloji")
-        self.assertIn("güncellendi", message)
+        self.assertIn("kaydedildi", message)
 
         added_options, add_message = settings_ui._apply_settings_operation(
             options,
