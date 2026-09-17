@@ -4,6 +4,7 @@ import time
 from datetime import timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, List
+from itertools import chain
 import requests
 
 from .config_loader import load_config
@@ -57,6 +58,7 @@ from .telegram_listener import start_telegram_listener
 from .utils import (
     canonical_tracking_url,
     detect_site_from_url,
+    extract_asin_from_url,
     format_local_datetime,
     format_signed_tl,
     format_tl,
@@ -1130,9 +1132,8 @@ def _extract_amazon_page_offers(
 ) -> List[OfferResult]:
     """Keep the selected new offer separate from a verified Amazon Depo offer.
 
-    Depot offers are always checked for Amazon links. A used offer is added only
-    when its dedicated offer-listing row explicitly confirms both condition and
-    seller, so normal offers can never inherit the DEPO label.
+    Read an explicit product-page used accordion first. Fetch the separate
+    listing only when needed; both paths verify condition and seller together.
     """
     offers = amazon_provider.extract_offers(html, source_url=source_url)
     if any(offer.is_warehouse for offer in offers):
@@ -1154,14 +1155,7 @@ def _extract_amazon_page_offers(
         log(f"Amazon Depo teklif listesi okunamadı: {log_cell(source_url, 70)} | {exc}")
         return offers
 
-    normal_prices = {offer.price for offer in offers if not offer.is_warehouse}
-    verified_warehouse_offers = [
-        offer
-        for offer in warehouse_offers
-        # A separate offer requires its own, different price. This prevents a
-        # normal offer from being duplicated with a DEPO label.
-        if offer.price not in normal_prices
-    ]
+    verified_warehouse_offers = warehouse_offers
     if verified_warehouse_offers:
         log(
             "Amazon Depo teklifi doğrulandı: "
@@ -1346,107 +1340,71 @@ def _fetch_amazon_search_watch_offers(
     return offers
 
 
+def _iter_amazon_product_watch_offers(
+    session: requests.Session,
+    watch: WatchRule,
+    config: HermesConfig,
+):
+    """Yield verified depot offers before continuing to the next variant.
+
+    Follow actual Twister ASIN edges on every fetched page. A single dimension
+    change can reveal additional combinations absent from the original page.
+    """
+    pending = [amazon_provider.AmazonProductVariation(label="", url=watch.url)]
+    queued = {extract_asin_from_url(watch.url) or watch.url}
+    limit = 60 if watch.include_variations else 1
+    errors: List[str] = []
+    found = 0
+    for variation in pending:
+        try:
+            if variation.url != watch.url:
+                wait_before_request(request_log_label("Amazon varyasyon", variation.label or variation.url), config)
+            response = fetch_amazon_page(session, variation.url, config.request_timeout_seconds)
+            html = cleaned_html(response)
+            raise_if_age_verification(html)
+            if "captcha" in html.lower() and "robot" in html.lower():
+                raise HermesError("Amazon bot korumasi nedeniyle captcha sayfasi dondu.")
+            if watch.include_variations:
+                for item in amazon_provider.extract_product_variations(html, variation.url, limit):
+                    identity = extract_asin_from_url(item.url) or item.url
+                    if identity == (extract_asin_from_url(variation.url) or variation.url) and item.label:
+                        variation = amazon_provider.AmazonProductVariation(label=item.label, url=item.url)
+                    if identity not in queued and len(pending) < limit:
+                        queued.add(identity)
+                        pending.append(item)
+            label = amazon_provider.selected_variation_label(html) or variation.label
+            page_offers = _extract_amazon_page_offers(session, variation.url, html, config)
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"{variation.label or variation.url} | {exc}")
+            log(f"Amazon varyasyonu okunamadı: {errors[-1]}")
+            continue
+        # Yield outside the fetch exception handler: notification failures belong
+        # to the caller, not to the provider's parsing/error handling.
+        for offer in sorted(page_offers, key=lambda item: (not item.is_warehouse, item.price)):
+            found += 1
+            yield OfferResult(
+                title=amazon_provider.title_with_variation(offer.title, label),
+                price=offer.price,
+                seller=offer.seller,
+                url=variation.url,
+                is_warehouse=offer.is_warehouse,
+                stock_quantity=offer.stock_quantity,
+            )
+    log(
+        "Amazon varyasyon taraması: "
+        f"{watch.name or watch.url} | varyant={len(pending)} | teklif={found} | hatalı={len(errors)}"
+    )
+    if not found:
+        raise HermesError(errors[-1] if errors else "Amazon sayfasından fiyat bulunamadı.")
+
+
 def _fetch_amazon_product_watch_offers(
     session: requests.Session,
     watch: WatchRule,
     config: HermesConfig,
 ) -> List[OfferResult]:
-    response = fetch_amazon_page(session, watch.url, config.request_timeout_seconds)
-    html = cleaned_html(response)
-    raise_if_age_verification(html)
-    if "captcha" in html.lower() and "robot" in html.lower():
-        raise HermesError("Amazon bot korumasi nedeniyle captcha sayfasi dondu.")
-
-    if not watch.include_variations:
-        return [
-            OfferResult(
-                title=offer.title,
-                price=offer.price,
-                seller=offer.seller,
-                url=watch.url,
-                is_warehouse=offer.is_warehouse,
-                stock_quantity=offer.stock_quantity,
-            )
-            for offer in _extract_amazon_page_offers(
-                session,
-                watch.url,
-                html,
-                config,
-            )
-        ]
-
-    variations = amazon_provider.extract_color_variations(html, watch.url, watch.max_items_to_scan)
-    if len(variations) <= 1:
-        log(
-            "Amazon varyasyon taramasi: "
-            f"{watch.name or watch.url} | ayar=acik | bulunan={len(variations)} | tek urunle devam edildi"
-        )
-        return [
-            OfferResult(
-                title=offer.title,
-                price=offer.price,
-                seller=offer.seller,
-                url=watch.url,
-                is_warehouse=offer.is_warehouse,
-                stock_quantity=offer.stock_quantity,
-            )
-            for offer in _extract_amazon_page_offers(
-                session,
-                watch.url,
-                html,
-                config,
-            )
-        ]
-
-    log(f"Amazon renk varyasyonları bulundu: {watch.name or watch.url} | adet={len(variations)}")
-    offers: List[OfferResult] = []
-    errors: List[str] = []
-    seen_variation_ids: set[str] = set()
-    source_url = str(watch.url).strip()
-    for variation in variations:
-        variation_id = amazon_provider.color_variation_identity(variation.url)
-        if not variation_id or variation_id in seen_variation_ids:
-            continue
-        seen_variation_ids.add(variation_id)
-        try:
-            if amazon_provider.is_same_color_variation(variation.url, source_url):
-                variation_html = html
-            else:
-                wait_before_request(request_log_label("Amazon varyasyon", variation.label), config)
-                variation_response = fetch_amazon_page(session, variation.url, config.request_timeout_seconds)
-                variation_html = cleaned_html(variation_response)
-                raise_if_age_verification(variation_html)
-                if "captcha" in variation_html.lower() and "robot" in variation_html.lower():
-                    raise HermesError("Amazon bot korumasi nedeniyle captcha sayfasi dondu.")
-            for offer in _extract_amazon_page_offers(
-                session,
-                variation.url,
-                variation_html,
-                config,
-            ):
-                offers.append(
-                    OfferResult(
-                        title=amazon_provider.title_with_color(offer.title, variation.label),
-                        price=offer.price,
-                        seller=offer.seller,
-                        url=variation.url,
-                        is_warehouse=offer.is_warehouse,
-                        stock_quantity=offer.stock_quantity,
-                    )
-                )
-        except Exception as exc:  # noqa: BLE001
-            errors.append(f"{variation.label or variation.url} | {exc}")
-            log(f"Amazon renk varyasyonu okunamadi: {variation.label or variation.url} | {exc}")
-
-    if offers:
-        log(
-            "Amazon varyasyon taramasi: "
-            f"{watch.name or watch.url} | ayar=acik | bulunan={len(variations)} | okunan={len(offers)} | hatali={len(errors)}"
-        )
-        return offers
-    if errors:
-        raise HermesError(errors[-1])
-    raise HermesError("Amazon sayfasından fiyat bulunamadı.")
+    """Materialize the same stream for link inspection and list-based callers."""
+    return list(_iter_amazon_product_watch_offers(session, watch, config))
 
 
 def _hepsiburada_variant_scan_limit(watch: WatchRule) -> int:
@@ -1793,7 +1751,10 @@ def check_once(config: HermesConfig) -> None:
         try:
             display_name = watch.name or watch.url
             wait_before_request(request_log_label(seller, display_name), config)
-            offers = _fetch_watch_offers(session, watch, config)
+            if watch.site == SITE_AMAZON and not is_amazon_search_url(watch.url):
+                offers = _iter_amazon_product_watch_offers(session, watch, config)
+            else:
+                offers = _fetch_watch_offers(session, watch, config)
             stock_returned = watch.site == SITE_BENGURME and bool(state_entry.get("last_out_of_stock_at"))
             stock_return_notification_sent = False
             if stock_returned and offers:
@@ -1819,14 +1780,10 @@ def check_once(config: HermesConfig) -> None:
                 state_entry.pop("last_out_of_stock_at", None)
                 log(f"Stok geri geldi bildirimi gonderildi: {seller} | {returned_title}")
             offer_keys: List[str] = []
-            group_fallback_title = next(
-                (
-                    str(offer.title).split(" / ", 1)[0].strip()
-                    for offer in offers
-                    if str(offer.title or "").strip()
-                ),
-                "",
-            )
+            offer_iterator = iter(offers)
+            first_offer = next(offer_iterator, None)
+            group_fallback_title = str(first_offer.title or "").split(" / ", 1)[0].strip() if first_offer else ""
+            offers = chain([first_offer], offer_iterator) if first_offer else iter(())
             search_group, search_group_label = search_result_group_for_watch(watch, group_fallback_title)
             for offer in offers:
                 offer_display_name = offer.title or watch.name or watch.url
@@ -1847,6 +1804,17 @@ def check_once(config: HermesConfig) -> None:
                     watch.size,
                     "warehouse" if offer.is_warehouse else "normal",
                 )
+                if watch.site == SITE_AMAZON:
+                    # Twister can return the same ASIN with th/psc or a title
+                    # slug. Reuse its previous key to preserve owned history
+                    # and notification suppression without a state migration.
+                    for previous_key in state_entry.get("offer_keys", []):
+                        previous = state.get(previous_key, {})
+                        if (isinstance(previous, dict)
+                                and bool(previous.get("is_warehouse")) == offer.is_warehouse
+                                and canonical_tracking_url(previous.get("url", "")) == canonical_tracking_url(matched_url)):
+                            offer_key = previous_key
+                            break
                 offer_state_entry = state.get(offer_key, {})
                 if not isinstance(offer_state_entry, dict):
                     offer_state_entry = {}
@@ -1887,7 +1855,7 @@ def check_once(config: HermesConfig) -> None:
                     else should_alert(offer_state_entry, offer.price, watch.target_price, watch.notify_once_in_24h)
                 )
                 if alert_sent:
-                    seller_note = f" ({offer.seller})" if offer.seller and watch.site == SITE_HEPSIBURADA else ""
+                    seller_note = f" ({offer.seller})" if offer.seller and (watch.site == SITE_HEPSIBURADA or offer.is_warehouse) else ""
                     message = (
                         f"Site: {seller}\n"
                         f"{offer_display_name}\n"
@@ -1898,7 +1866,7 @@ def check_once(config: HermesConfig) -> None:
                         session,
                         config.pushover_user_key,
                         config.pushover_api_token,
-                        f"{seller} fiyat alarmi",
+                        f"{seller} Depo fırsatı" if offer.is_warehouse else f"{seller} fiyat alarmi",
                         message,
                         matched_url,
                         config.request_timeout_seconds,
@@ -1935,6 +1903,7 @@ def check_once(config: HermesConfig) -> None:
                     log(f"Bildirim gonderildi: {seller} | {offer_display_name}")
                     # Keep all previous successful rows visible while this cycle continues.
                     save_incremental_price_summary(summary_rows, stock_rows)
+                    save_json(STATE_PATH, state)
 
             state[watch_key] = {
                 **dict(state_entry),

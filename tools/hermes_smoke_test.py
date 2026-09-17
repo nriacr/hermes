@@ -59,20 +59,194 @@ from hermes.providers.network import (  # noqa: E402
 )
 from hermes.providers.zara import extract_offers as extract_zara_offers  # noqa: E402
 from hermes.providers.amazon import (  # noqa: E402
-    extract_color_variations,
+    extract_product_variations,
     extract_low_stock_quantity,
     extract_offer as extract_amazon_offer,
     extract_offers as extract_amazon_offers,
     extract_used_offer_listing_url,
     extract_verified_warehouse_offers_from_listing,
     is_warehouse_search_url,
-    title_with_color,
+    title_with_variation,
 )
 from hermes.search_amazon import dedupe_results, extract_result_candidates  # noqa: E402
 from hermes.utils import detect_site_from_url, parse_decimal, utc_now  # noqa: E402
 
 
 class HermesSmokeTests(unittest.TestCase):
+    def test_amazon_variant_url_change_preserves_alert_suppression_and_history(self):
+        watch = WatchRule(name="iPhone", site="amazon", url="https://www.amazon.com.tr/dp/B000000001",
+                          target_price=Decimal("100000"), include_variations=True)
+        watch_key = service.normalize_item_key("watch", "amazon", "iPhone", watch.url, "")
+        state = {"_meta": {"warehouse_state_migration_version": service.WAREHOUSE_STATE_MIGRATION_VERSION},
+                 watch_key: {"offer_keys": ["existing-offer"]},
+                 "existing-offer": {"url": watch.url + "?th=1", "is_warehouse": True,
+                     "last_alerted_price": "90000", "last_alerted_at": utc_now(),
+                     "min_price": "85000", "max_price": "95000"}}
+        config = SimpleNamespace(watches=[watch], interval_seconds=60, request_timeout_seconds=20,
+                                 pushover_user_key="test", pushover_api_token="test")
+        with (patch.object(service, "load_json", return_value=state),
+              patch.object(service, "save_json"), patch.object(service, "wait_before_request"),
+              patch.object(service, "_iter_amazon_product_watch_offers", return_value=iter([
+                  OfferResult("iPhone", Decimal("90000"), "Amazon Depo", watch.url + "?psc=1", True)])),
+              patch.object(service, "send_pushover") as notify,
+              patch.object(service, "save_incremental_price_summary"),
+              patch.object(service, "publish_price_summary"),
+              patch.object(service, "maybe_alert_summary_drop"),
+              patch.object(service, "maybe_alert_search_failures")):
+            service.check_once(config)
+        notify.assert_not_called()
+        self.assertEqual(state[watch_key]["offer_keys"], ["existing-offer"])
+        self.assertEqual(state["existing-offer"]["min_price"], "85000")
+
+    def test_amazon_used_evidence_cannot_leak_across_offer_rows_or_asins(self):
+        html = '''<div data-cy="all-offers"><div id="corePrice_feature_div">
+        <span class="a-price"><span class="a-offscreen">123.058,99 TL</span></span></div>
+        <div data-csa-c-slot-id="usedAccordionRow" role="button" data-csa-c-asin="B000000002">
+        Kullanılmış ve yeni gibi Satıcı: Amazon Depo
+        <span class="a-price"><span class="a-offscreen">89.040,87 TL</span></span></div></div>'''
+        self.assertEqual(extract_verified_warehouse_offers_from_listing(
+            html, "https://www.amazon.com.tr/dp/B000000001"), [])
+        matched = extract_verified_warehouse_offers_from_listing(
+            html, "https://www.amazon.com.tr/dp/B000000002")
+        self.assertEqual([o.price for o in matched], [Decimal("89040.87")])
+
+    def test_amazon_cycle_notifies_and_saves_before_scanning_next_variant(self):
+        watch = WatchRule(name="iPhone", site="amazon", url="https://www.amazon.com.tr/dp/B000000001",
+                          target_price=Decimal("100000"), include_variations=True)
+        config = SimpleNamespace(watches=[watch], interval_seconds=60, request_timeout_seconds=20,
+                                 pushover_user_key="test", pushover_api_token="test")
+        events = []
+
+        def stream(*args):
+            events.append("first")
+            yield OfferResult("iPhone Gümüş 256 GB", Decimal("89040.87"), "Amazon Depo", watch.url, True)
+            self.assertIn("notify", events)
+            self.assertIn("save", events)
+            events.append("second")
+            yield OfferResult("iPhone Abis 512 GB", Decimal("132000"), url="https://www.amazon.com.tr/dp/B000000002")
+
+        with (patch.object(service, "load_json", return_value={}),
+              patch.object(service, "save_json", side_effect=lambda *a: events.append("save")),
+              patch.object(service, "_iter_amazon_product_watch_offers", side_effect=stream),
+              patch.object(service, "wait_before_request"),
+              patch.object(service, "send_pushover", side_effect=lambda *a: events.append("notify")) as notify,
+              patch.object(service, "save_incremental_price_summary"),
+              patch.object(service, "publish_price_summary"),
+              patch.object(service, "maybe_alert_summary_drop"),
+              patch.object(service, "maybe_alert_search_failures")):
+            service.check_once(config)
+        self.assertLess(events.index("notify"), events.index("second"))
+        self.assertEqual(notify.call_count, 1)
+        self.assertIn("Depo", notify.call_args.args[3])
+        self.assertIn("Amazon Depo", notify.call_args.args[4])
+
+    def test_amazon_live_used_accordion_does_not_contaminate_new_price(self):
+        # Minimized structure observed on B0FQF9XY3L on 2026-09-17.
+        html = '''<span id="productTitle">iPhone 17 Pro Max 2 TB Kozmik Turuncu</span>
+        <div data-csa-c-slot-id="usedAccordionRow" role="button">
+          <div id="usedAccordionCaption_feature_div">Kullanılmış ve yeni gibi</div>
+          <div id="corePrice_feature_div" data-csa-c-is-in-initial-active-row="true">
+            <input name="items[0.base][customerVisiblePrice][amount]" value="149742.75">
+            <span class="a-price"><span class="a-price-whole">149.742</span>
+            <span class="a-price-fraction">75</span></span>
+          </div><span>Gönderen: Amazon</span><span>Satıcı: Amazon Depo</span>
+        </div>
+        <div id="corePriceDisplay_desktop_feature_div">
+          <span class="a-price"><span class="a-offscreen">168.249,00 TL</span></span>
+        </div>'''
+        offers = extract_amazon_offers(html, "https://www.amazon.com.tr/dp/B0FQF9XY3L")
+        self.assertEqual([(o.price, o.is_warehouse) for o in offers], [
+            (Decimal("168249"), False), (Decimal("149742.75"), True)])
+
+    def test_amazon_walks_color_capacity_graph_and_yields_depot_immediately(self):
+        watch = WatchRule(name="iPhone", site="amazon", url="https://www.amazon.com.tr/dp/B000000001",
+                          target_price=Decimal("100000"), include_variations=True)
+        config = SimpleNamespace(request_timeout_seconds=20)
+        fetched = []
+
+        def page_for(_session, url, _timeout):
+            asin = service.extract_asin_from_url(url)
+            fetched.append(asin)
+            index = int(asin[-1]) - 1
+            color, capacity = divmod(index, 3)
+            neighbors = {color * 3 + n for n in range(3)} | {n * 3 + capacity for n in range(3)}
+            swatches = ''.join(f'<li data-asin="B00000000{n+1}" class="swatchUnavailable">Option {n}</li>'
+                               for n in sorted(neighbors))
+            return f'''<span id="productTitle">iPhone color {color} capacity {capacity}</span>
+                <div id="variation_size_name"><ul>{swatches}</ul></div>
+                <div id="corePriceDisplay_desktop_feature_div">
+                <span class="a-price"><span class="a-offscreen">{120000+index},00 TL</span></span></div>
+                <div id="usedBuySection">Kullanılmış ve yeni gibi Satıcı: Amazon Depo
+                <span class="a-price"><span class="a-offscreen">{90000+index},87 TL</span></span></div>'''
+
+        with (patch.object(service, "fetch_amazon_page", side_effect=page_for),
+              patch.object(service, "cleaned_html", side_effect=lambda r:r),
+              patch.object(service, "wait_before_request")):
+            stream = service._iter_amazon_product_watch_offers(object(), watch, config)
+            first = next(stream)
+            self.assertTrue(first.is_warehouse)
+            self.assertEqual(fetched, ["B000000001"])
+            offers = [first, *stream]
+        self.assertEqual(len(fetched), 9)
+        self.assertEqual(len(set(fetched)), 9)
+        self.assertEqual(len(offers), 18)
+        for offer in offers:
+            index = int(service.extract_asin_from_url(offer.url)[-1]) - 1
+            expected = Decimal(90000 + index) + Decimal(".87") if offer.is_warehouse else Decimal(120000 + index)
+            self.assertEqual(offer.price, expected)
+
+    def test_amazon_modern_family_asins_are_deduplicated_and_recommendations_ignored(self):
+        html = '''<script type="a-state" data-a-state='{"key":"twister-plus-desktop-inline-twister-collapse-view-asins-data"}'>
+        {"asinsInCollapsedView":["B000000001","B000000002","B000000002"]}</script>
+        <div id="inline-twister-row-color_name"><li data-asin="B000000002"><img alt="Abis"></li></div>
+        <div id="recommendations"><a href="/dp/B000000003">iPhone 18</a></div>'''
+        variants = extract_product_variations(html, "https://www.amazon.com.tr/dp/B000000001?th=1", 60)
+        self.assertEqual([service.extract_asin_from_url(v.url) for v in variants], ["B000000001", "B000000002"])
+
+    def test_amazon_depot_only_page_does_not_require_a_new_offer(self):
+        html = '''<span id="productTitle">iPhone</span><div id="usedBuySection">
+        Kullanılmış ve yeni gibi Satıcı: Amazon Depo
+        <span class="a-price"><span class="a-offscreen">89.040,87 TL</span></span></div>'''
+        offers = extract_amazon_offers(html, "https://www.amazon.com.tr/dp/B000000001")
+        self.assertEqual(len(offers), 1)
+        self.assertTrue(offers[0].is_warehouse)
+
+    def test_amazon_used_like_new_text_can_open_used_listing(self):
+        url = "https://www.amazon.com.tr/dp/B000000001"
+        html = '<div id="usedBuySection">Kullanılmış ve yeni gibi</div>'
+        self.assertIn("condition=used", extract_used_offer_listing_url(html, url))
+
+    def test_amazon_inline_depot_keeps_its_own_price_and_condition(self):
+        html = '''<span id="productTitle">iPhone 17 Pro Max Gümüş 256 GB</span>
+        <div id="corePriceDisplay_desktop_feature_div">
+          <span class="a-price"><span class="a-offscreen">123.058,99 TL</span></span>
+        </div>
+        <div id="usedBuySection">Kullanılmış ve yeni gibi
+          <span class="a-price"><span class="a-price-whole">89.040</span>
+          <span class="a-price-fraction">87</span></span>
+          Gönderen: Amazon Satıcı: Amazon Depo
+        </div>'''
+        offers = extract_amazon_offers(html, "https://www.amazon.com.tr/dp/B000000001")
+        self.assertEqual([(o.price, o.is_warehouse) for o in offers], [
+            (Decimal("123058.99"), False), (Decimal("89040.87"), True)])
+        self.assertFalse(any(o.is_warehouse for o in extract_amazon_offers(
+            html.replace("Satıcı: Amazon Depo", "Satıcı: Başka Satıcı"))))
+
+    def test_amazon_variation_dimensions_include_capacity_and_unavailable_asins(self):
+        html = '''<script type="a-state" data-a-state='{"key":"desktop-twister-sort-filter-data"}'>
+        {"sortedDimValuesForAllDims":{
+          "color_name":[{"defaultAsin":"B000000002","dimensionValueState":"AVAILABLE",
+            "dimensionValueDisplayText":"Abis"}],
+          "size_name":[{"defaultAsin":"B000000003","dimensionValueState":"UNAVAILABLE",
+            "dimensionValueDisplayText":"512 GB"}]}}
+        </script>'''
+        variants = service.amazon_provider.extract_product_variations(
+            html, "https://www.amazon.com.tr/dp/B000000001", 60)
+        self.assertEqual({v.url for v in variants}, {
+            "https://www.amazon.com.tr/dp/B000000001",
+            "https://www.amazon.com.tr/dp/B000000002",
+            "https://www.amazon.com.tr/dp/B000000003"})
+
     def test_bengurme_fetch_prefers_shopify_variant_json(self):
         class Response:
             status_code = 200
@@ -487,16 +661,17 @@ class HermesSmokeTests(unittest.TestCase):
           <li class="swatchUnavailable" data-defaultasin="B000000003"><a href="/dp/B000000003"><img alt="Renk: Pembe"></a></li>
         </ul></div>
         """
-        variations = extract_color_variations(html, "https://www.amazon.com.tr/dp/B000000001?th=1", 60)
+        variations = extract_product_variations(html, "https://www.amazon.com.tr/dp/B000000001?th=1", 60)
         self.assertEqual(
             [(item.label, item.url) for item in variations],
             [
                 ("Antrasit", "https://www.amazon.com.tr/dp/B000000001?th=1"),
                 ("Mavi", "https://www.amazon.com.tr/dp/B000000002?psc=1"),
+                ("Pembe", "https://www.amazon.com.tr/dp/B000000003"),
             ],
         )
-        self.assertEqual(title_with_color("Örnek ürün", "Mavi"), "Örnek ürün / Mavi")
-        self.assertEqual(title_with_color("Örnek ürün Mavi", "Mavi"), "Örnek ürün Mavi")
+        self.assertEqual(title_with_variation("Örnek ürün", "Mavi"), "Örnek ürün / Mavi")
+        self.assertEqual(title_with_variation("Örnek ürün Mavi", "Mavi"), "Örnek ürün Mavi")
 
     def test_amazon_product_color_variations_read_modern_twister_state(self):
         html = '''
@@ -508,7 +683,7 @@ class HermesSmokeTests(unittest.TestCase):
         ]}}
         </script>
         '''
-        variations = extract_color_variations(
+        variations = extract_product_variations(
             html,
             "https://www.amazon.com.tr/dp/B000000001?smid=A1&th=1",
             60,
@@ -518,6 +693,7 @@ class HermesSmokeTests(unittest.TestCase):
             [
                 ("ANTRASİT", "https://www.amazon.com.tr/dp/B000000001?smid=A1&th=1"),
                 ("BEYAZ", "https://www.amazon.com.tr/dp/B000000002?psc=1"),
+                ("PEMBE", "https://www.amazon.com.tr/dp/B000000003?psc=1"),
             ],
         )
 
@@ -557,7 +733,7 @@ class HermesSmokeTests(unittest.TestCase):
             patch.object(service, "fetch_amazon_page", side_effect=lambda _session, url, _timeout: url) as fetch_page,
             patch.object(service, "cleaned_html", side_effect=lambda value: value),
             patch.object(service, "wait_before_request"),
-            patch.object(service.amazon_provider, "extract_color_variations", return_value=variations),
+            patch.object(service.amazon_provider, "extract_product_variations", return_value=variations),
             patch.object(service.amazon_provider, "extract_offers", side_effect=offers_for_url),
         ):
             offers = service._fetch_amazon_product_watch_offers(object(), watch, config)

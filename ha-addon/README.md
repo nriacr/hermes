@@ -132,3 +132,22 @@ sh tools/check.sh
 ```
 
 GitHub Actions aynı kontrolleri ve add-on container build işlemini her `main` gönderiminde yürütür. Bu sayede Docker kurulu olmayan geliştirme makinelerinde de container yapısı doğrulanır.
+
+### Amazon Depo ve varyasyon taraması (2.5.9)
+
+`Varyasyonları ekle` açık olduğunda renk ve kapasite/ölçü seçeneklerinin gerçek
+ürün bağlantıları izlenir; keşfedilen her ASIN bir turda yalnızca bir kez okunur
+(en fazla 60). Yeni ürün seçeneği pasif olsa da depo teklifi bulunabileceği için
+bağlantı taranır. Her birleşimin fiyatı kendi sayfasından alınır.
+
+Ürün sayfasındaki “Kullanılmış ve yeni gibi” kutusu, kendi fiyatı ve Amazon Depo
+satıcısı birlikte doğrulanırsa doğrudan kullanılır. Gerekirse ayrı ikinci el
+teklif listesi okunur. Depo teklifleri sıfır fiyatından ve takas tutarından ayrıdır.
+Hedef fiyat ve mevcut filtreleri sağlayan teklif, diğer varyantların bitmesi
+beklenmeden “Amazon Depo fırsatı” bildirimiyle iletilir. 24 saatlik bildirim
+baskılama ve düşük fiyat istisnası korunur.
+
+Bu akış taramalar arasındaki süreyi ortadan kaldırmaz: yeniden kontrol süresi
+diğer takipler, istek aralıkları ve tur sonu beklemesine bağlıdır. Çok kısa
+süreli stokların tamamını yakalama garantisi yoktur. `Test` sayfası aynı
+varyasyon okuyucusunu kullanır, kayıt veya bildirim oluşturmaz.

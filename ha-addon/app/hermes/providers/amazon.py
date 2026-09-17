@@ -54,21 +54,26 @@ BUYING_OPTION_PRICE_PATTERNS = [
 ]
 
 AMAZON_VARIATION_QUERY_PARAMS = {"smid", "psc", "th"}
-AMAZON_COLOR_VARIATION_SELECTORS = (
+AMAZON_VARIATION_SELECTORS = (
     "#inline-twister-row-color_name li",
     "[id*='inline-twister-row-color'] li",
     "#variation_color_name li",
     "#variation_color li",
     "[id*='variation_color'] li",
+    "[id^='variation_'] li",
+    "[id^='inline-twister-row-'] li",
 )
 
 AMAZON_USED_OFFER_LINK_SELECTOR = "a[href*='offer-listing']"
 AMAZON_USED_OFFER_CONTAINER_SELECTORS = (
     ".aod-offer",
     "[data-cy='aod-offer']",
-    "[data-cy*='offer']",
-    "[id^='aod-offer']",
-    "#olpOfferList .a-row",
+    "#aod-offer",
+    "#aod-pinned-offer",
+    "#olpOfferList .olpOffer",
+    "#usedBuySection",
+    "#usedAccordionRow",
+    "[data-csa-c-slot-id='usedAccordionRow'][role='button']",
 )
 AMAZON_LOW_STOCK_SELECTORS = (
     "#availability",
@@ -80,7 +85,7 @@ AMAZON_LOW_STOCK_PATTERN = re.compile(r"stokta\s+sadece\s+(?P<quantity>\d+)\s+ad
 
 
 @dataclass(frozen=True)
-class AmazonColorVariation:
+class AmazonProductVariation:
     label: str
     url: str
 
@@ -101,20 +106,6 @@ def _normalized_variation_url(raw_url: str, asin: str = "") -> str:
     return urlunsplit(("https", "www.amazon.com.tr", urlsplit(canonical_url).path, urlencode(stable_params), ""))
 
 
-def is_same_color_variation(first_url: str, second_url: str) -> bool:
-    """Compare product variations without tracking-only Amazon URL differences."""
-    first = color_variation_identity(first_url)
-    second = color_variation_identity(second_url)
-    if first and second:
-        return first == second
-    return False
-
-
-def color_variation_identity(url: str) -> str:
-    """Return the stable identifier used to avoid duplicate color variations."""
-    return _normalized_variation_url(url, extract_asin_from_url(url) or "")
-
-
 def _variation_url_from_element(element) -> str:
     link = element.select_one("a[href]")
     raw_url = str(link.get("href") or "") if link else ""
@@ -128,7 +119,7 @@ def _variation_url_from_element(element) -> str:
     return _normalized_variation_url(raw_url, asin or extract_asin_from_url(raw_url) or "")
 
 
-def _clean_color_label(value: str) -> str:
+def _clean_variation_label(value: str) -> str:
     text = repair_mojibake(value).strip()
     text = re.sub(r"\s+", " ", text)
     text = re.sub(r"^(?:renk|color|colour)\s*[:\-]\s*", "", text, flags=re.IGNORECASE)
@@ -141,7 +132,7 @@ def _clean_color_label(value: str) -> str:
     return text
 
 
-def _color_label_from_element(element) -> str:
+def _variation_label_from_element(element) -> str:
     candidates = []
     for node in (element, element.select_one("a"), element.select_one("img")):
         if not node:
@@ -152,7 +143,7 @@ def _color_label_from_element(element) -> str:
         )
     candidates.append(element.get_text(" ", strip=True))
     for candidate in candidates:
-        label = _clean_color_label(candidate)
+        label = _clean_variation_label(candidate)
         if label:
             return label
     return ""
@@ -166,8 +157,8 @@ def _load_json(value: str) -> dict:
     return loaded if isinstance(loaded, dict) else {}
 
 
-def _script_color_variations(soup, source_url: str, limit: int) -> list[AmazonColorVariation]:
-    """Read Amazon's current Twister state when color swatches are rendered dynamically."""
+def _script_product_variations(soup, source_url: str, limit: int) -> list[AmazonProductVariation]:
+    """Read concrete ASIN edges in every dimension of the current Twister."""
     for script in soup.select("script[type='a-state'][data-a-state]"):
         state = _load_json(str(script.get("data-a-state") or ""))
         if "twister" not in normalize_offer_text(str(state.get("key") or "")):
@@ -175,82 +166,100 @@ def _script_color_variations(soup, source_url: str, limit: int) -> list[AmazonCo
 
         payload = _load_json(script.get_text("", strip=True))
         dimensions = payload.get("sortedDimValuesForAllDims")
-        colors = dimensions.get("color_name") if isinstance(dimensions, dict) else None
-        if not isinstance(colors, list):
+        if not isinstance(dimensions, dict):
             continue
+        dimension_values = [value for values in dimensions.values() if isinstance(values, list) for value in values]
 
-        variations: list[AmazonColorVariation] = []
+        variations: list[AmazonProductVariation] = []
         seen_urls: set[str] = set()
-        for color in colors:
-            if not isinstance(color, dict) or len(variations) >= max(1, limit):
+        for value in dimension_values:
+            if not isinstance(value, dict) or len(variations) >= max(1, limit):
                 continue
-            state_name = normalize_offer_text(str(color.get("dimensionValueState") or ""))
-            if state_name not in {"available", "selected"}:
-                continue
-
-            label = _clean_color_label(str(color.get("dimensionValueDisplayText") or ""))
-            asin = str(color.get("defaultAsin") or "").strip()
-            raw_url = str(color.get("pageLoadURL") or "")
+            state_name = normalize_offer_text(str(value.get("dimensionValueState") or ""))
+            label = _clean_variation_label(str(value.get("dimensionValueDisplayText") or ""))
+            asin = str(value.get("defaultAsin") or "").strip()
+            raw_url = str(value.get("pageLoadURL") or "")
             if not raw_url and state_name == "selected":
                 raw_url = source_url
             url = _normalized_variation_url(raw_url, asin)
             if not label or not url or url in seen_urls:
                 continue
             seen_urls.add(url)
-            variations.append(AmazonColorVariation(label=label, url=url))
+            variations.append(AmazonProductVariation(label=label, url=url))
 
         if variations:
             return variations
     return []
 
 
-def extract_color_variations(html: str, source_url: str, limit: int) -> list[AmazonColorVariation]:
-    """Return concrete Amazon color URLs from the product-page twister."""
-    soup = soup_from_html(html)
-    variations = _script_color_variations(soup, source_url, limit)
-    if variations:
-        return variations[: max(1, limit)]
+def extract_product_variations(html: str, source_url: str, limit: int) -> list[AmazonProductVariation]:
+    """Discover real variant ASINs; callers follow these edges across dimensions.
 
-    variations: list[AmazonColorVariation] = []
-    seen_urls: set[str] = set()
-    for selector in AMAZON_COLOR_VARIATION_SELECTORS:
+    A disabled new-product swatch can still have a used offer, so retain its ASIN.
+    Never manufacture a color/capacity Cartesian product or reuse swatch prices.
+    """
+    soup = soup_from_html(html)
+    variations = _script_product_variations(soup, source_url, limit)
+    seen_urls: set[str] = {extract_asin_from_url(item.url) or item.url for item in variations}
+    # The modern Twister exposes the entire family, not just the currently
+    # selected color/capacity's neighbours. These are explicit real ASINs.
+    for script in soup.select("script[type='a-state'][data-a-state]"):
+        state = _load_json(str(script.get("data-a-state") or ""))
+        if state.get("key") != "twister-plus-desktop-inline-twister-collapse-view-asins-data":
+            continue
+        payload = _load_json(script.get_text("", strip=True))
+        for asin in payload.get("asinsInCollapsedView", []):
+            if not isinstance(asin, str) or not re.fullmatch(r"[A-Z0-9]{10}", asin):
+                continue
+            url = _normalized_variation_url("", asin)
+            if asin not in seen_urls and len(variations) < max(1, limit):
+                seen_urls.add(asin)
+                variations.append(AmazonProductVariation(label="", url=url))
+    for selector in AMAZON_VARIATION_SELECTORS:
         elements = soup.select(selector)
         if not elements:
             continue
         for element in elements:
             if len(variations) >= max(1, limit):
                 break
-            classes = set(element.get("class") or [])
-            if "swatchUnavailable" in classes or "a-button-unavailable" in classes:
-                continue
             url = _variation_url_from_element(element)
-            if not url or url in seen_urls:
+            identity = extract_asin_from_url(url) or url
+            if not url or identity in seen_urls:
                 continue
-            label = _color_label_from_element(element)
+            label = _variation_label_from_element(element)
             if not label:
                 continue
-            seen_urls.add(url)
-            variations.append(AmazonColorVariation(label=label, url=url))
-        if variations:
-            break
+            seen_urls.add(identity)
+            variations.append(AmazonProductVariation(label=label, url=url))
 
     if not variations:
         return []
 
     source_variation_url = _normalized_variation_url(source_url, extract_asin_from_url(source_url) or "")
-    if source_variation_url and all(item.url != source_variation_url for item in variations):
+    if source_variation_url and (extract_asin_from_url(source_variation_url) or source_variation_url) not in seen_urls:
         selected = soup.select_one("#variation_color_name .selection, #variation_color .selection")
-        selected_label = _clean_color_label(selected.get_text(" ", strip=True)) if selected else ""
-        variations.insert(0, AmazonColorVariation(label=selected_label, url=source_variation_url))
+        selected_label = _clean_variation_label(selected.get_text(" ", strip=True)) if selected else ""
+        variations.insert(0, AmazonProductVariation(label=selected_label, url=source_variation_url))
     return variations[: max(1, limit)]
 
 
-def title_with_color(title: str, color: str) -> str:
+def selected_variation_label(html: str) -> str:
+    soup = soup_from_html(html)
+    values = []
+    for node in soup.select("[id^='inline-twister-expanded-dimension-text-'], [id^='variation_'] .selection"):
+        label = _clean_variation_label(node.get_text(" ", strip=True))
+        if label and label not in values:
+            values.append(label)
+    return " / ".join(values)
+
+
+def title_with_variation(title: str, color: str) -> str:
     clean_title = repair_mojibake(title).strip() or "Amazon ürünü"
-    clean_color = _clean_color_label(color)
-    if not clean_color or normalize_offer_text(clean_color) in normalize_offer_text(clean_title):
-        return clean_title
-    return f"{clean_title} / {clean_color}"
+    clean_color = _clean_variation_label(color)
+    for value in clean_color.split(" / "):
+        if value and normalize_offer_text(value) not in normalize_offer_text(clean_title):
+            clean_title = f"{clean_title} / {value}"
+    return clean_title
 
 
 def _parse_visible_price(text: str):
@@ -414,7 +423,7 @@ def extract_used_offer_listing_url(html: str, source_url: str = "") -> str:
     # second-hand offer exists.
     page_text = normalize_offer_text(soup.get_text(" ", strip=True))
     asin = extract_asin_from_url(source_url)
-    if asin and "ikinci el" in page_text:
+    if asin and any(marker in page_text for marker in ("ikinci el", "kullanilmis")):
         return f"https://www.amazon.com.tr/gp/offer-listing/{asin}?condition=used"
     return ""
 
@@ -454,6 +463,14 @@ def extract_verified_warehouse_offers_from_listing(html: str, source_url: str) -
                 containers.append(container)
 
     for container in containers:
+        # An outer used accordion may enclose a more precise offer header.
+        # Never read one row's price together with another row's seller.
+        if any(other is not container and container in other.parents for other in containers):
+            continue
+        container_asin = str(container.get("data-csa-c-asin") or "")
+        source_asin = extract_asin_from_url(source_url)
+        if container_asin and source_asin and container_asin != source_asin:
+            continue
         text = normalize_offer_text(container.get_text(" ", strip=True))
         # Both conditions are mandatory. A generic used-offer panel or another
         # merchant must never receive Hermes' DEPO label.
@@ -478,9 +495,14 @@ def extract_verified_warehouse_offers_from_listing(html: str, source_url: str) -
 def extract_offers(html: str, source_url: str = "") -> list[OfferResult]:
     """Extract normal and used offers separately when Amazon shows both on one page."""
     soup = soup_from_html(html)
+    warehouse_offers = extract_verified_warehouse_offers_from_listing(html, source_url)
+    # Amazon repeats corePrice IDs inside the USED accordion. Its form amount
+    # and price must never become the selected new offer, even when active.
+    for used_section in soup.select("#usedBuySection, #usedAccordionRow, [data-csa-c-slot-id='usedAccordionRow']"):
+        used_section.decompose()
     jsonld_title, jsonld_price = extract_jsonld_product(soup)
     title: Optional[str] = jsonld_title or extract_title(soup) or "Amazon ürünü"
-    stock_quantity = extract_low_stock_quantity(html)
+    stock_quantity = extract_low_stock_quantity(str(soup))
     offers: list[OfferResult] = []
 
     primary_price = _extract_visible_primary_price(soup)
@@ -498,6 +520,7 @@ def extract_offers(html: str, source_url: str = "") -> list[OfferResult]:
             )
         )
 
+    offers.extend(warehouse_offers)
     if offers:
         return offers
 

@@ -1,7 +1,7 @@
 # Hermes Cursor Handoff
 
 This document is the current technical and product handoff for continuing Hermes
-in Cursor. It describes the real repository at version `2.5.8`; source code and
+in Cursor. It describes the real repository at version `2.5.9`; source code and
 tests remain authoritative when this document and code ever differ.
 
 ## 1. Product snapshot
@@ -189,7 +189,15 @@ verified warehouse offers remain separate identities.
 - Supports product and search URLs with isolated rescue diagnostics.
 - Search names use phrase matching; recommendation sections are cut.
 - Parsing stops before `All Departments içindeki sonuçlar gösteriliyor`.
-- Product variation expansion is opt-in with `include_variations`.
+- Product variation expansion is opt-in with `include_variations`: follow actual
+  Twister ASINs across all dimensions (including color and storage/size), with a
+  60-ASIN cap. Disabled new-product swatches still get checked for used offers.
+- Read verified used accordions on the product page before requesting a separate
+  offer list. Exclude used accordions from every normal-price extraction path.
+- Product-watch scans stream depot offers first per variant into the normal
+  notification/state pipeline; do not wait for remaining variants. Save alert
+  suppression immediately after sending. Link Test materializes the same stream
+  without notifications or persistent writes.
 - A product may yield normal and genuine used Amazon Warehouse offers as separate
   rows and prices.
 - `DEPO` requires positive second-hand text/offer evidence and Amazon Warehouse
