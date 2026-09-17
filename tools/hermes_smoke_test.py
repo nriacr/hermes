@@ -3468,6 +3468,27 @@ class HermesSmokeTests(unittest.TestCase):
         )
         self.assertIn('class="warehouse-tag">DEPO</strong>', row_html)
 
+    def test_dashboard_shortens_long_product_titles_to_100_characters(self):
+        full_title = "Çok uzun ürün adı " * 12
+        row_html = dashboard._render_table_row(
+            {
+                "seller": "Amazon",
+                "product_title": full_title,
+                "product_url": "https://www.amazon.com.tr/dp/B000000001",
+                "price": "12.999 TL",
+                "target": "13.000 TL",
+                "difference": "-1 TL",
+                "min_price": "12.999 TL",
+                "max_price": "12.999 TL",
+            }
+        )
+        visible_title, tooltip = dashboard._table_title(full_title)
+        self.assertEqual(len(visible_title), 100)
+        self.assertTrue(visible_title.endswith("..."))
+        self.assertEqual(tooltip, full_title.strip())
+        self.assertIn(visible_title, row_html)
+        self.assertIn(tooltip, row_html)
+
     def test_watch_settings_show_configured_groups_as_a_dropdown(self):
         html = settings_ui._watch_form(
             {"name": "Polo tişört", "group": "Moda"},

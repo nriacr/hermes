@@ -508,13 +508,27 @@ def _collect_telegram_summary(options):
     }
 
 
+TABLE_TITLE_MAX_LENGTH = 100
+
+
+def _table_title(value):
+    """Keep dashboard rows compact while retaining the full title as a tooltip."""
+    full_title = repair_mojibake(value or "-").strip() or "-"
+    if len(full_title) <= TABLE_TITLE_MAX_LENGTH:
+        return full_title, full_title
+    visible_title = f"{full_title[:TABLE_TITLE_MAX_LENGTH - 3].rstrip()}..."
+    return visible_title, full_title
+
+
 def _render_table_row(row):
     seller_text = repair_mojibake(row.get("seller") or "-")
     seller = escape(seller_text)
     raw_title = repair_mojibake(row.get("product_title") or "-")
     if seller_text == "Hepsiburada":
         raw_title = hepsiburada_provider.clean_display_title(raw_title)
-    product_title = escape(raw_title)
+    visible_title, full_title = _table_title(raw_title)
+    product_title = escape(visible_title)
+    product_title_tooltip = escape(full_title, quote=True)
     warehouse_tag = '<strong class="warehouse-tag">DEPO</strong>' if row.get("is_warehouse") else ""
     product_url = str(row.get("product_url") or "").strip()
     if product_url:
@@ -540,7 +554,7 @@ def _render_table_row(row):
     row_class = f' class="{" ".join(row_classes)}"'
     return (
         f'<tr{row_class}><td data-label="Satıcı" class="seller-cell">{seller}</td>'
-        f'<td data-label="Ürün" class="product-cell" title="{product_title}">{label}</td>'
+        f'<td data-label="Ürün" class="product-cell" title="{product_title_tooltip}">{label}</td>'
         f'<td data-label="Güncel" class="price-cell">{price}</td>'
         f'<td data-label="Hedef" class="target-cell">{target}</td>'
         f'<td data-label="Fark" class="diff-cell">{difference}</td>'
@@ -703,7 +717,9 @@ def _render_table_section(title, rows, empty_text, extra_class="", collapse_sear
 def _render_stock_row(row):
     seller_text = repair_mojibake(row.get("seller") or "-")
     seller = escape(seller_text)
-    product_title = escape(repair_mojibake(row.get("product_title") or "-"))
+    visible_title, full_title = _table_title(row.get("product_title"))
+    product_title = escape(visible_title)
+    product_title_tooltip = escape(full_title, quote=True)
     product_url = str(row.get("product_url") or "").strip()
     if product_url:
         label = (
@@ -717,7 +733,7 @@ def _render_stock_row(row):
     row_class = f' class="{_site_theme_class(seller_text)} stock-missing-row"'
     return (
         f'<tr{row_class}><td data-label="Satıcı" class="seller-cell">{seller}</td>'
-        f'<td data-label="Ürün" class="product-cell" title="{product_title}">{label}</td>'
+        f'<td data-label="Ürün" class="product-cell" title="{product_title_tooltip}">{label}</td>'
         f'<td data-label="Hedef" class="target-cell">{target}</td>'
         f'<td data-label="Durum" class="diff-cell">{reason}</td></tr>'
     )

@@ -151,3 +151,9 @@ Bu akış taramalar arasındaki süreyi ortadan kaldırmaz: yeniden kontrol sür
 diğer takipler, istek aralıkları ve tur sonu beklemesine bağlıdır. Çok kısa
 süreli stokların tamamını yakalama garantisi yoktur. `Test` sayfası aynı
 varyasyon okuyucusunu kullanır, kayıt veya bildirim oluşturmaz.
+
+### Tablo başlıkları (2.5.10)
+
+Fırsat ve stok dışı tablolarındaki ürün başlıkları, satırların okunabilir
+kalması için en fazla 100 karakter gösterir. Tam ürün adı hücrenin üzerine
+gelindiğinde görünür; bağlantı ve takip verisi kısaltılmaz.
