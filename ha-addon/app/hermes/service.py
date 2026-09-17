@@ -73,6 +73,7 @@ from .utils import (
     parse_iso_datetime,
     site_label,
     tracking_offer_identity,
+    tracking_offer_title_identity,
     utc_now,
 )
 
@@ -248,6 +249,7 @@ def sorted_summary_rows(rows: List[PriceSummaryRow]) -> List[PriceSummaryRow]:
 def deduplicate_summary_rows(rows: List[PriceSummaryRow]) -> List[PriceSummaryRow]:
     """Keep one row per product offer without collapsing normal and Warehouse stock."""
     unique_rows: Dict[str, PriceSummaryRow] = {}
+    title_keys: Dict[str, str] = {}
     for row in rows:
         row_key = tracking_offer_identity(row.product_url, row.is_warehouse)
         if not row_key:
@@ -255,9 +257,31 @@ def deduplicate_summary_rows(rows: List[PriceSummaryRow]) -> List[PriceSummaryRo
             continue
         if row.tracking_id:
             row_key = f"{row.tracking_id}|{row_key}"
-        current = unique_rows.get(row_key)
-        if current is None or row.price < current.price:
+        title_key = tracking_offer_title_identity(
+            row.product_title,
+            row.tracking_id,
+            row.seller,
+            row.is_warehouse,
+        )
+        existing_key = title_keys.get(title_key, row_key) if title_key else row_key
+        current = unique_rows.get(existing_key)
+        if current is None:
             unique_rows[row_key] = row
+            if title_key:
+                title_keys[title_key] = row_key
+            continue
+
+        # Preserve the best visible price and the complete price range when
+        # normal and Warehouse search paths report the same offer.
+        if row.price < current.price:
+            row.min_price = min(row.min_price, current.min_price)
+            row.max_price = max(row.max_price, current.max_price)
+            unique_rows[existing_key] = row
+        elif row.price == current.price:
+            current.min_price = min(current.min_price, row.min_price)
+            current.max_price = max(current.max_price, row.max_price)
+        if title_key:
+            title_keys[title_key] = existing_key
     return list(unique_rows.values())
 
 

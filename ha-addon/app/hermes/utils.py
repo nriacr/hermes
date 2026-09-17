@@ -225,6 +225,30 @@ def tracking_offer_identity(raw_url: str, is_warehouse: bool = False) -> str:
     return f"{url}|{'warehouse' if is_warehouse else 'normal'}"
 
 
+def tracking_offer_title_identity(
+    title: str,
+    tracking_id: str,
+    seller: str,
+    is_warehouse: bool = False,
+) -> str:
+    """Identify one displayed offer when Amazon publishes it through two searches.
+
+    Amazon's regular search and its Warehouse search can expose the same offer
+    with different product links. A configured tracking card is the boundary:
+    within it, an equal seller, condition and display title represent one offer.
+    The stock suffix is transient page metadata, not a different product.
+    """
+    card_id = str(tracking_id or "").strip()
+    if not card_id:
+        return ""
+    normalized_title = normalize_offer_text(re.sub(r"\s*\(stok\s+\d+\)\s*$", "", str(title or ""), flags=re.IGNORECASE))
+    normalized_seller = normalize_offer_text(seller)
+    if not normalized_title or not normalized_seller:
+        return ""
+    condition = "warehouse" if is_warehouse else "normal"
+    return f"{card_id}|{normalized_seller}|{condition}|{normalized_title}"
+
+
 def detect_site_from_url(url: str) -> str:
     host = urlparse(url).netloc.casefold()
     if "hepsiburada" in host:

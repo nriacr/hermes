@@ -3452,6 +3452,42 @@ class HermesSmokeTests(unittest.TestCase):
 
         self.assertEqual(len(unique_rows), 2)
 
+    def test_summary_merges_same_amazon_offer_from_normal_and_warehouse_searches(self):
+        rows = [
+            PriceSummaryRow(
+                "Amazon", "Edifier M60 Compact Masa Hoparlörü - Siyah (Stok 10)",
+                "https://www.amazon.com.tr/dp/B000000001?th=1", Decimal("7799"), Decimal("9000"),
+                Decimal("7799"), Decimal("9421"), is_warehouse=True, tracking_id="edifier-m60",
+            ),
+            PriceSummaryRow(
+                "Amazon", "Edifier M60 Compact Masa Hoparlörü - Siyah",
+                "https://www.amazon.com.tr/dp/B000000002", Decimal("7799"), Decimal("9000"),
+                Decimal("7799"), Decimal("7799"), is_warehouse=True, tracking_id="edifier-m60",
+            ),
+        ]
+
+        unique_rows = service.deduplicate_summary_rows(rows)
+
+        self.assertEqual(len(unique_rows), 1)
+        self.assertEqual(unique_rows[0].min_price, Decimal("7799"))
+        self.assertEqual(unique_rows[0].max_price, Decimal("9421"))
+
+    def test_dashboard_merges_same_offer_from_two_amazon_searches(self):
+        rows = [
+            {
+                "seller": "Amazon", "product_title": "Edifier M60 - Siyah (Stok 10)",
+                "product_url": "https://www.amazon.com.tr/dp/B000000001", "difference": "-1.201 TL",
+                "is_warehouse": True, "tracking_id": "edifier-m60",
+            },
+            {
+                "seller": "Amazon", "product_title": "Edifier M60 - Siyah",
+                "product_url": "https://www.amazon.com.tr/dp/B000000002", "difference": "-1.201 TL",
+                "is_warehouse": True, "tracking_id": "edifier-m60",
+            },
+        ]
+
+        self.assertEqual(len(dashboard._deduplicate_dashboard_rows(rows)), 1)
+
     def test_dashboard_labels_warehouse_rows(self):
         row_html = dashboard._render_table_row(
             {
@@ -3468,7 +3504,7 @@ class HermesSmokeTests(unittest.TestCase):
         )
         self.assertIn('class="warehouse-tag">DEPO</strong>', row_html)
 
-    def test_dashboard_shortens_long_product_titles_to_100_characters(self):
+    def test_dashboard_shortens_long_product_titles_to_80_characters(self):
         full_title = "Çok uzun ürün adı " * 12
         row_html = dashboard._render_table_row(
             {
@@ -3483,7 +3519,7 @@ class HermesSmokeTests(unittest.TestCase):
             }
         )
         visible_title, tooltip = dashboard._table_title(full_title)
-        self.assertEqual(len(visible_title), 100)
+        self.assertEqual(len(visible_title), 80)
         self.assertTrue(visible_title.endswith("..."))
         self.assertEqual(tooltip, full_title.strip())
         self.assertIn(visible_title, row_html)

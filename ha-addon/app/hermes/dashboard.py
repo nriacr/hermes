@@ -25,6 +25,7 @@ from .utils import (
     repair_mojibake,
     site_label,
     tracking_offer_identity,
+    tracking_offer_title_identity,
 )
 
 WEB_PORT = 8099
@@ -508,7 +509,7 @@ def _collect_telegram_summary(options):
     }
 
 
-TABLE_TITLE_MAX_LENGTH = 100
+TABLE_TITLE_MAX_LENGTH = 80
 
 
 def _table_title(value):
@@ -602,17 +603,28 @@ def _summary_row_sort_key(row):
 def _deduplicate_dashboard_rows(rows):
     """Hide duplicate offers while keeping new and Amazon Depo rows separate."""
     unique_rows = {}
+    title_keys = {}
     for row in rows:
         if not isinstance(row, dict):
             continue
-        key = tracking_offer_identity(row.get("product_url"), parse_bool(row.get("is_warehouse"), default=False))
+        is_warehouse = parse_bool(row.get("is_warehouse"), default=False)
+        key = tracking_offer_identity(row.get("product_url"), is_warehouse)
         tracking_id = str(row.get("tracking_id") or "").strip()
         if key and tracking_id:
             key = f"{tracking_id}|{key}"
         key = key or f"__missing_url__:{len(unique_rows)}"
-        current = unique_rows.get(key)
+        title_key = tracking_offer_title_identity(
+            row.get("product_title"),
+            tracking_id,
+            row.get("seller"),
+            is_warehouse,
+        )
+        existing_key = title_keys.get(title_key, key) if title_key else key
+        current = unique_rows.get(existing_key)
         if current is None or _summary_difference_sort_value(row) < _summary_difference_sort_value(current):
-            unique_rows[key] = row
+            unique_rows[existing_key] = row
+        if title_key:
+            title_keys[title_key] = existing_key
     return list(unique_rows.values())
 
 
