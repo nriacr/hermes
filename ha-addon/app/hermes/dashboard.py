@@ -509,16 +509,27 @@ def _collect_telegram_summary(options):
     }
 
 
-TABLE_TITLE_MAX_LENGTH = 60
+TABLE_TITLE_MAX_LENGTH = 70
+GROUP_TITLE_MAX_LENGTH = 70
+
+
+def _shortened_title(value, max_length):
+    """Keep a dashboard label compact while retaining its full tooltip text."""
+    full_title = repair_mojibake(value or "-").strip() or "-"
+    if len(full_title) <= max_length:
+        return full_title, full_title
+    visible_title = f"{full_title[:max_length - 3].rstrip()}..."
+    return visible_title, full_title
 
 
 def _table_title(value):
-    """Keep dashboard rows compact while retaining the full title as a tooltip."""
-    full_title = repair_mojibake(value or "-").strip() or "-"
-    if len(full_title) <= TABLE_TITLE_MAX_LENGTH:
-        return full_title, full_title
-    visible_title = f"{full_title[:TABLE_TITLE_MAX_LENGTH - 3].rstrip()}..."
-    return visible_title, full_title
+    """Keep dashboard row titles compact while retaining the full tooltip."""
+    return _shortened_title(value, TABLE_TITLE_MAX_LENGTH)
+
+
+def _group_title(value):
+    """Keep collapsible product-group labels compact with a full tooltip."""
+    return _shortened_title(value, GROUP_TITLE_MAX_LENGTH)
 
 
 def _render_table_row(row):
@@ -698,9 +709,10 @@ def _split_search_result_groups(rows):
 
 def _render_collapsible_search_group(label, rows):
     count = len(rows)
+    visible_label, full_label = _group_title(label)
     return f"""
       <details class="search-result-group">
-        <summary><strong>{escape(label)}</strong><span>{count} sonuç</span></summary>
+        <summary><strong title="{escape(full_label, quote=True)}">{escape(visible_label)}</strong><span>{count} sonuç</span></summary>
         {_render_rows_table(rows, "")}
       </details>
     """

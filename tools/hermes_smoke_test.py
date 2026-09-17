@@ -3504,7 +3504,7 @@ class HermesSmokeTests(unittest.TestCase):
         )
         self.assertIn('class="warehouse-tag">DEPO</strong>', row_html)
 
-    def test_dashboard_shortens_long_product_titles_to_60_characters(self):
+    def test_dashboard_shortens_long_product_titles_to_70_characters(self):
         full_title = "Çok uzun ürün adı " * 12
         row_html = dashboard._render_table_row(
             {
@@ -3519,11 +3519,23 @@ class HermesSmokeTests(unittest.TestCase):
             }
         )
         visible_title, tooltip = dashboard._table_title(full_title)
-        self.assertEqual(len(visible_title), 60)
+        self.assertEqual(len(visible_title), 70)
         self.assertTrue(visible_title.endswith("..."))
         self.assertEqual(tooltip, full_title.strip())
         self.assertIn(visible_title, row_html)
         self.assertIn(tooltip, row_html)
+
+    def test_dashboard_shortens_long_collapsible_group_titles_to_70_characters(self):
+        full_title = "Çok uzun grup başlığı " * 8
+
+        group_html = dashboard._render_collapsible_search_group(full_title, [])
+        visible_title, tooltip = dashboard._group_title(full_title)
+
+        self.assertEqual(len(visible_title), 70)
+        self.assertTrue(visible_title.endswith("..."))
+        self.assertEqual(tooltip, full_title.strip())
+        self.assertIn(visible_title, group_html)
+        self.assertIn(f'title="{tooltip}"', group_html)
 
     def test_watch_settings_show_configured_groups_as_a_dropdown(self):
         html = settings_ui._watch_form(
