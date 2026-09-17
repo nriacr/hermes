@@ -152,10 +152,10 @@ diğer takipler, istek aralıkları ve tur sonu beklemesine bağlıdır. Çok k�
 süreli stokların tamamını yakalama garantisi yoktur. `Test` sayfası aynı
 varyasyon okuyucusunu kullanır, kayıt veya bildirim oluşturmaz.
 
-### Tablo başlıkları (2.5.11)
+### Tablo başlıkları (2.5.12)
 
 Fırsat ve stok dışı tablolarındaki ürün başlıkları, satırların okunabilir
-kalması için en fazla 80 karakter gösterir. Tam ürün adı hücrenin üzerine
+kalması için en fazla 60 karakter gösterir. Tam ürün adı hücrenin üzerine
 gelindiğinde görünür; bağlantı ve takip verisi kısaltılmaz.
 
 Amazon'un normal araması ile Amazon Depo araması aynı teklifi ayrı kaynaklardan

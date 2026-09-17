@@ -3504,7 +3504,7 @@ class HermesSmokeTests(unittest.TestCase):
         )
         self.assertIn('class="warehouse-tag">DEPO</strong>', row_html)
 
-    def test_dashboard_shortens_long_product_titles_to_80_characters(self):
+    def test_dashboard_shortens_long_product_titles_to_60_characters(self):
         full_title = "Çok uzun ürün adı " * 12
         row_html = dashboard._render_table_row(
             {
@@ -3519,7 +3519,7 @@ class HermesSmokeTests(unittest.TestCase):
             }
         )
         visible_title, tooltip = dashboard._table_title(full_title)
-        self.assertEqual(len(visible_title), 80)
+        self.assertEqual(len(visible_title), 60)
         self.assertTrue(visible_title.endswith("..."))
         self.assertEqual(tooltip, full_title.strip())
         self.assertIn(visible_title, row_html)

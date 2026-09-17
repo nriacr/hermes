@@ -509,7 +509,7 @@ def _collect_telegram_summary(options):
     }
 
 
-TABLE_TITLE_MAX_LENGTH = 80
+TABLE_TITLE_MAX_LENGTH = 60
 
 
 def _table_title(value):
