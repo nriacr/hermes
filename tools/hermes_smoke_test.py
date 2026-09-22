@@ -108,6 +108,24 @@ class HermesSmokeTests(unittest.TestCase):
         )
         self.assertEqual(list(service.filter_official_seller_offers(watch, offers)), [])
 
+    def test_amazon_plain_text_official_seller_survives_extra_buybox_text(self):
+        html = '''<span id="productTitle">Apple iPhone 17 Pro Max 256 GB</span>
+        <div id="corePriceDisplay_desktop_feature_div"><span class="a-price">
+          <span class="a-offscreen">123.058,99 TL</span></span></div>
+        <div id="merchantInfoFeature_feature_div">
+          <span>Gönderici / Satıcı:</span><span>Amazon.com.tr</span>
+          <a href="/gp/help/customer/display.html">Satıcı bilgileri</a>
+        </div>'''
+
+        offers = extract_amazon_offers(html, "https://www.amazon.com.tr/dp/B000000003")
+
+        self.assertEqual(offers[0].seller, "Amazon.com.tr")
+        watch = WatchRule(
+            name="iPhone", site="amazon", url="https://www.amazon.com.tr/dp/B000000003",
+            target_price=Decimal("130000"), official_seller_only=True,
+        )
+        self.assertEqual(list(service.filter_official_seller_offers(watch, offers)), offers)
+
     def test_official_seller_filter_excludes_other_new_sellers_but_always_keeps_depot(self):
         watch = WatchRule(
             name="iPhone", site="amazon", url="https://www.amazon.com.tr/dp/B000000001",

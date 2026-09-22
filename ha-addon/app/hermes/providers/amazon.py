@@ -463,6 +463,16 @@ def _is_in_used_offer(element) -> bool:
 
 def _seller_name_from_text(value: str) -> Optional[str]:
     text = repair_mojibake(value).strip()
+    # Amazon's own seller row is sometimes rendered as plain text rather than
+    # the sellerProfileTriggerId link. Extra buy-box text after the seller name
+    # must not make an otherwise exact Amazon.com.tr value fail the filter.
+    official_seller = re.search(
+        r"(?:satıcı|satici|seller)\s*[:：]?\s*(amazon\.com\.tr)(?![\w])",
+        text,
+        re.IGNORECASE,
+    )
+    if official_seller:
+        return "Amazon.com.tr"
     match = re.search(
         r"(?:satıcı|satici|seller)\s*:?\s*(.+?)"
         r"(?=\s+(?:gönderen|gönderici|ships\s+from|fulfilled\s+by)\s*:?|$)",

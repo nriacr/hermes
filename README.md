@@ -23,6 +23,7 @@ Takip edilen alanlar:
 - Her takip kartında öncelik seçilebilir: yüksek her çevrimde, orta en az 2 saatte, düşük en az 6 saatte kontrol edilir. Yüksek öncelikli işler önce yürütülür; yeni eklenen veya tek kart olarak düzenlenen takip hemen kontrol edilir.
 - Sonuç tablosunda normal ürünlerin adının başındaki renkli daire kontrol önceliğini gösterir: yüksek kırmızı, orta sarı, düşük yeşil. Amazon Depo satırları bu göstergeden etkilenmez.
 - `Yalnızca platformun kendi satıcısı` filtresi Amazon sıfır ürünlerinde yalnızca `Amazon.com.tr` satıcısını tutar. Satıcı bilgisi okunamayan teklifler elenir; doğrulanmış Amazon Depo teklifleri her zaman korunur. Diğer mağazalar için filtre desteği ileride eklenecektir.
+- Amazon'un bağlantı yerine düz metin olarak sunduğu `Amazon.com.tr` satıcı bilgisi de resmi satıcı filtresinde tanınır.
 - Ana ekrandaki `Test` sayfası bağlantıyı anlık ve geçici olarak okur; arama anahtar kelimesi, beden, hariç tut ve varyasyon seçenekleri bu test için ayrıca uygulanabilir.
 - Telegram kanalları: keyword ve exclude keyword tabanlı fırsat bildirimi
 - Telegram Kayıtlı Mesajlar: bağlantıyı gönder, Hermes hedef fiyatı sorup takibi ekler
