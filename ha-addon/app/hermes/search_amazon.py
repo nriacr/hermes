@@ -47,6 +47,7 @@ class AmazonSearchCandidate:
     url: str
     price: Optional[Decimal] = None
     is_warehouse: bool = False
+    seller: Optional[str] = None
 
 
 def _extract_card_title(card: BeautifulSoup) -> Optional[str]:

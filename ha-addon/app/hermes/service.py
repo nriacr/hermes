@@ -1,9 +1,10 @@
 import os
 import random
+import re
 import time
 from datetime import timedelta, timezone
 from decimal import Decimal, InvalidOperation
-from typing import Any, Dict, List
+from typing import Any, Dict, Iterable, List
 from itertools import chain
 import requests
 
@@ -342,7 +343,16 @@ def sanitized_price_bounds(
 
 
 def watch_check_due(watch: WatchRule, state_entry: Dict[str, Any], global_interval_seconds: int) -> bool:
-    interval_seconds = watch.check_interval_minutes * 60 if watch.check_interval_minutes else global_interval_seconds
+    check_now_token = str(getattr(watch, "check_now_token", "") or "")
+    if check_now_token and check_now_token != str(state_entry.get("check_now_token") or ""):
+        return True
+    legacy_interval = getattr(watch, "check_interval_minutes", None)
+    if legacy_interval:
+        interval_seconds = legacy_interval * 60
+    else:
+        priority = getattr(watch, "priority", "high")
+        priority_interval = {"low": 6 * 60 * 60, "medium": 2 * 60 * 60}.get(priority, global_interval_seconds)
+        interval_seconds = max(global_interval_seconds, priority_interval)
     last_checked = parse_iso_datetime(state_entry.get("last_checked_at"))
     if not last_checked:
         return True
@@ -830,6 +840,38 @@ def balanced_request_order(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return ordered
 
 
+def priority_request_order(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Prioritize high watches while still balancing sites within each tier."""
+    ordered: List[Dict[str, Any]] = []
+    for priority in ("high", "medium", "low"):
+        ordered.extend(
+            balanced_request_order(
+                [item for item in items if getattr(item.get("watch"), "priority", "high") == priority]
+            )
+        )
+    return ordered
+
+
+def _is_amazon_platform_seller(seller: str | None) -> bool:
+    normalized = re.sub(r"[^a-z0-9]", "", normalize_offer_text(str(seller or "")))
+    return normalized == "amazoncomtr"
+
+
+def filter_official_seller_offers(watch: WatchRule, offers: Iterable[OfferResult]) -> Iterable[OfferResult]:
+    """For Amazon, keep Amazon's own new offers and always keep verified Depot offers."""
+    if not getattr(watch, "official_seller_only", False) or watch.site != SITE_AMAZON:
+        yield from offers
+        return
+    for offer in offers:
+        if offer.is_warehouse or _is_amazon_platform_seller(offer.seller):
+            yield offer
+        else:
+            log(
+                "Platformın kendi satıcısı filtresi nedeniyle sonuç atlandı: "
+                f"{log_cell(offer.seller or 'satıcı bilgisi yok', 70)} | {log_cell(offer.title, 70)}"
+            )
+
+
 def update_error_notification_state(state_entry: Dict[str, Any]) -> Dict[str, Any]:
     updated = dict(state_entry)
     updated["last_error_notified_at"] = utc_now()
@@ -1130,7 +1172,10 @@ def offers_from_amazon_search_results(
         OfferResult(
             title=item.title,
             price=item.price,
-            seller="Amazon",
+            # A search result does not prove the offer is sold by Amazon.
+            # Leave unknown sellers unknown so the opt-in own-seller filter
+            # never treats a marketplace listing as verified.
+            seller=item.seller,
             url=item.url,
             is_warehouse=item.is_warehouse,
             stock_quantity=item.stock_quantity,
@@ -1222,6 +1267,7 @@ def _fetch_amazon_detail_offers(
             price=offer.price,
             is_warehouse=bool(offer.is_warehouse),
             stock_quantity=offer.stock_quantity,
+            seller=offer.seller,
         )
         for offer in parsed_offers
     ]
@@ -1267,7 +1313,9 @@ def _fetch_amazon_search_watch_offers(
             # A normal search card can mention a second-hand price without
             # exposing the actual seller. Never trust that card-level signal
             # as DEPO; obtain it from the dedicated offer list below instead.
-            if warehouse_search or not candidate.is_warehouse:
+            if (warehouse_search or not candidate.is_warehouse) and (
+                not getattr(watch, "official_seller_only", False) or candidate.is_warehouse
+            ):
                 results.append(
                     SearchResultItem(
                         title=candidate.title,
@@ -1288,11 +1336,12 @@ def _fetch_amazon_search_watch_offers(
                         candidate,
                         config,
                     )
-                    normal_detail = next(
-                        (item for item in detailed_results if not item.is_warehouse and item.stock_quantity is not None),
-                        None,
-                    )
-                    if normal_detail is not None:
+                    normal_detail = next((item for item in detailed_results if not item.is_warehouse), None)
+                    if normal_detail is not None and (
+                        _is_amazon_platform_seller(normal_detail.seller)
+                        if getattr(watch, "official_seller_only", False)
+                        else normal_detail.stock_quantity is not None
+                    ):
                         # The search card remains the authoritative normal
                         # price. The product page only contributes its explicit
                         # low-stock count to that same card result.
@@ -1303,6 +1352,7 @@ def _fetch_amazon_search_watch_offers(
                                 price=candidate.price,
                                 is_warehouse=False,
                                 stock_quantity=normal_detail.stock_quantity,
+                                seller=normal_detail.seller,
                             )
                         )
                     used_results = [
@@ -1779,6 +1829,7 @@ def check_once(config: HermesConfig) -> None:
                 offers = _iter_amazon_product_watch_offers(session, watch, config)
             else:
                 offers = _fetch_watch_offers(session, watch, config)
+            offers = filter_official_seller_offers(watch, offers)
             stock_returned = watch.site == SITE_BENGURME and bool(state_entry.get("last_out_of_stock_at"))
             stock_return_notification_sent = False
             if stock_returned and offers:
@@ -1943,6 +1994,7 @@ def check_once(config: HermesConfig) -> None:
                 "last_error": None,
                 "last_error_status": None,
                 "last_checked_at": utc_now(),
+                "check_now_token": getattr(watch, "check_now_token", ""),
             }
         except OutOfStockHermesError as exc:
             stale_summary_offer_ids = cached_summary_offer_ids_for_watch(watch, watch_key, state, seller)
@@ -1968,6 +2020,7 @@ def check_once(config: HermesConfig) -> None:
             failed["last_error"] = None
             failed["last_error_status"] = None
             failed["last_checked_at"] = utc_now()
+            failed["check_now_token"] = getattr(watch, "check_now_token", "")
             failed["last_out_of_stock_at"] = utc_now()
             state[watch_key] = failed
             # A missing item must not keep its previous price visible until the cycle ends.
@@ -2017,6 +2070,7 @@ def check_once(config: HermesConfig) -> None:
             failed["last_error"] = None if normal_empty_search else str(exc)
             failed["last_error_status"] = None if normal_empty_search else getattr(exc, "status_code", None)
             failed["last_checked_at"] = utc_now()
+            failed["check_now_token"] = getattr(watch, "check_now_token", "")
             state[watch_key] = failed
             # State records the current error while the dashboard may still show the last
             # successful cycle. Remove only this watch's stale rows immediately.
@@ -2035,6 +2089,7 @@ def check_once(config: HermesConfig) -> None:
         request_tasks.append(
             {
                 "site": watch.site,
+                "watch": watch,
                 "name": watch.name or watch.url,
                 "run": lambda watch=watch, watch_key=watch_key, state_entry=state_entry, seller=seller: check_watch(
                     watch, watch_key, state_entry, seller
@@ -2042,7 +2097,7 @@ def check_once(config: HermesConfig) -> None:
             }
         )
 
-    for task in balanced_request_order(request_tasks):
+    for task in priority_request_order(request_tasks):
         task["run"]()
 
     if config.watches:

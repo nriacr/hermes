@@ -444,6 +444,65 @@ def _offer_container_price(container):
     return None
 
 
+def _is_in_used_offer(element) -> bool:
+    current = element
+    while current is not None and getattr(current, "name", None):
+        element_id = str(current.get("id") or "")
+        classes = set(current.get("class") or [])
+        slot_id = str(current.get("data-csa-c-slot-id") or "")
+        if (
+            element_id in {"usedBuySection", "usedAccordionRow", "aod-offer", "aod-pinned-offer"}
+            or slot_id == "usedAccordionRow"
+            or "aod-offer" in classes
+            or current.get("data-cy") == "aod-offer"
+        ):
+            return True
+        current = current.parent
+    return False
+
+
+def _seller_name_from_text(value: str) -> Optional[str]:
+    text = repair_mojibake(value).strip()
+    match = re.search(
+        r"(?:satıcı|satici|seller)\s*:?\s*(.+?)"
+        r"(?=\s+(?:gönderen|gönderici|ships\s+from|fulfilled\s+by)\s*:?|$)",
+        text,
+        re.IGNORECASE,
+    )
+    if not match:
+        return None
+    seller = re.sub(r"\s+", " ", match.group(1)).strip(" :-/|\t\n")
+    return seller or None
+
+
+def extract_primary_seller(soup) -> Optional[str]:
+    """Read the selected new offer's seller, excluding all used-offer panels."""
+    for selector in (
+        "#sellerProfileTriggerId",
+        "#merchantInfoFeature_feature_div a[href*='seller']",
+        "#tabular-buybox a[href*='seller']",
+    ):
+        for element in soup.select(selector):
+            if not _is_in_used_offer(element):
+                seller = element.get_text(" ", strip=True)
+                if seller:
+                    return repair_mojibake(seller).strip()
+
+    for selector in (
+        "#merchantInfoFeature_feature_div",
+        "#tabular-buybox",
+        "#desktop_buybox",
+        "#buybox",
+    ):
+        for element in soup.select(selector):
+            if _is_in_used_offer(element):
+                continue
+            seller = _seller_name_from_text(element.get_text(" ", strip=True))
+            if seller:
+                return seller
+    return None
+
+
 def extract_verified_warehouse_offers_from_listing(html: str, source_url: str) -> list[OfferResult]:
     """Read only explicit Amazon Depo second-hand offers from Amazon's offer list.
 
@@ -496,6 +555,7 @@ def extract_offers(html: str, source_url: str = "") -> list[OfferResult]:
     """Extract normal and used offers separately when Amazon shows both on one page."""
     soup = soup_from_html(html)
     warehouse_offers = extract_verified_warehouse_offers_from_listing(html, source_url)
+    primary_seller = extract_primary_seller(soup)
     # Amazon repeats corePrice IDs inside the USED accordion. Its form amount
     # and price must never become the selected new offer, even when active.
     for used_section in soup.select("#usedBuySection, #usedAccordionRow, [data-csa-c-slot-id='usedAccordionRow']"):
@@ -511,7 +571,7 @@ def extract_offers(html: str, source_url: str = "") -> list[OfferResult]:
             OfferResult(
                 title=title,
                 price=primary_price,
-                seller=None,
+                seller=primary_seller,
                 # A product page's main price always belongs to the selected
                 # new offer. A separate second-hand row is added only after
                 # its own price and Amazon Depo seller are verified below.
@@ -530,7 +590,7 @@ def extract_offers(html: str, source_url: str = "") -> list[OfferResult]:
                 OfferResult(
                     title=title,
                     price=price,
-                    seller=None,
+                    seller=primary_seller,
                     is_warehouse=False,
                     stock_quantity=stock_quantity,
                 )

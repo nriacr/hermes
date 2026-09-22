@@ -14,6 +14,9 @@ class WatchRule:
     group: str = ""
     size: str = ""
     include_variations: bool = False
+    priority: str = "high"
+    official_seller_only: bool = False
+    check_now_token: str = ""
     max_items_to_scan: int = 60
     check_interval_minutes: Optional[int] = None
     notify_once_in_24h: bool = True
@@ -29,6 +32,7 @@ class SearchResultItem:
     price: Decimal
     is_warehouse: bool = False
     stock_quantity: Optional[int] = None
+    seller: Optional[str] = None
 
 
 @dataclass

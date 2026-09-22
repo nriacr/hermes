@@ -161,6 +161,11 @@ def _prepare_watches(raw_watches: object) -> List[WatchRule]:
             group = "Moda"
         size = str(item.get("size") or "").strip()
         include_variations = parse_bool(item.get("include_variations"), default=False)
+        priority = str(item.get("priority") or "high").strip().casefold()
+        if priority not in {"low", "medium", "high"}:
+            log(f"Bilinmeyen takip önceliği varsayılan yapıldı: {context_name} | {priority}")
+            priority = "high"
+        official_seller_only = parse_bool(item.get("official_seller_only"), default=False)
         check_interval_minutes = _optional_bounded_integer(item, "check_interval_minutes", 1, 1440)
         notify_once_in_24h = parse_bool(item.get("notify_once_in_24H"), default=True)
         # A card may contain several links, but all of them belong to the same
@@ -184,6 +189,9 @@ def _prepare_watches(raw_watches: object) -> List[WatchRule]:
                     group=group,
                     size=size,
                     include_variations=include_variations,
+                    priority=priority,
+                    official_seller_only=official_seller_only,
+                    check_now_token=str(item.get("check_now_token") or "").strip(),
                     max_items_to_scan=DEFAULT_SEARCH_MAX_ITEMS_TO_SCAN,
                     check_interval_minutes=check_interval_minutes,
                     notify_once_in_24h=notify_once_in_24h,

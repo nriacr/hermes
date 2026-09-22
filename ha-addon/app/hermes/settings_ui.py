@@ -12,7 +12,7 @@ from .config_loader import DEFAULT_TELEGRAM_CHANNELS
 from .constants import OPTIONS_PATH, SITE_HM, SITE_ZARA, STATE_PATH, SUMMARY_PATH
 from .logging_utils import log
 from .storage import load_json, save_json
-from .utils import detect_site_from_url, format_tl, parse_bool, parse_decimal, site_label, watch_name_required_for_url
+from .utils import detect_site_from_url, format_tl, parse_bool, parse_decimal, site_label, utc_now, watch_name_required_for_url
 
 ADDON_SLUG = "hermes"
 SUPERVISOR_BASE_URL = "http://supervisor"
@@ -30,7 +30,7 @@ h1 { margin:0 0 8px; color:#ffd166; font-size:34px; letter-spacing:-.04em; } h2 
 .saving-overlay { position:fixed; inset:0; z-index:20; display:grid; place-items:center; padding:20px; background:rgba(7,8,9,.78); backdrop-filter:blur(5px); } .saving-overlay[hidden] { display:none; } .saving-dialog { width:min(100%,430px); border:1px solid rgba(214,216,215,.45); border-radius:18px; padding:22px; background:#24272b; box-shadow:0 22px 50px rgba(0,0,0,.5); } .saving-dialog h2 { margin:0 0 9px; font-size:20px; } .saving-dialog p { font-size:14px; } .saving-spinner { width:28px; height:28px; margin:0 0 14px; border:4px solid rgba(214,216,215,.22); border-top-color:#d6d8d7; border-radius:50%; animation:hermes-spin .8s linear infinite; } @keyframes hermes-spin { to { transform:rotate(360deg); } }
 .form-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:12px; padding:0 14px 14px; } label { display:grid; gap:6px; color:var(--muted); font-size:12px; font-weight:700; } input[type='text'], input[type='number'], input[type='url'], select, textarea { width:100%; min-height:40px; border-radius:11px; border:1px solid var(--line); background:#141619; color:var(--text); padding:10px 11px; font-size:13px; font-family:inherit; } textarea { resize:vertical; line-height:1.35; }
 .checkbox-row { display:flex; align-items:center; gap:9px; min-height:40px; color:var(--text); } .danger { color:#ffd8e3; } .footer-note { margin-top:14px; border-left:4px solid #a9adaf; padding:12px 14px; background:rgba(169,173,175,.14); border-radius:10px; font-size:13px; }
-.watch-layout { grid-column:1 / -1; display:grid; gap:12px; } .watch-top { display:grid; grid-template-columns:minmax(105px,.7fr) minmax(210px,2fr) minmax(100px,.65fr) minmax(115px,.75fr) minmax(90px,.6fr); gap:12px; align-items:end; } .watch-links { display:grid; gap:10px; } .watch-bottom { display:flex; flex-wrap:wrap; align-items:end; gap:12px; } .watch-bottom > label:first-child { flex:0 1 205px; max-width:205px; } .watch-exclude { flex:1 1 240px; } .watch-bottom .checkbox-row { flex:0 0 auto; padding-bottom:1px; } .watch-bottom .watch-actions { margin-left:auto; } details.is-deleted { opacity:.55; } details.is-deleted summary { color:var(--bad); } .apply-bar { position:sticky; bottom:0; z-index:8; display:flex; flex-wrap:wrap; gap:12px; align-items:center; justify-content:space-between; margin-top:18px; padding:14px 0 4px; border-top:1px solid var(--line); background:var(--panel); } .apply-bar p { flex:1 1 220px; } .apply-bar .button { min-width:180px; } @media (max-width:900px) { .watch-top { grid-template-columns:repeat(2,minmax(0,1fr)); } } @media (max-width:700px) { .watch-bottom > label:first-child { flex:1 1 100%; max-width:none; } .watch-bottom .watch-actions { width:100%; margin-left:0; } .watch-bottom .watch-actions .button { width:100%; } .apply-bar .button { width:100%; } } @media (max-width:420px) { .watch-top { grid-template-columns:1fr; } }
+.watch-layout { grid-column:1 / -1; display:grid; gap:12px; } .watch-top { display:grid; grid-template-columns:minmax(105px,.7fr) minmax(210px,2fr) minmax(100px,.65fr) minmax(115px,.75fr) minmax(90px,.6fr); gap:12px; align-items:end; } .watch-links { display:grid; gap:10px; } .watch-bottom { display:flex; flex-wrap:wrap; align-items:end; gap:12px; } .watch-bottom > label:first-child { flex:0 1 205px; max-width:205px; } .watch-exclude { flex:1 1 240px; } .watch-bottom .checkbox-row { flex:0 0 auto; padding-bottom:1px; } .watch-bottom .watch-actions { margin-left:auto; } .watch-priority { flex:0 1 170px; max-width:170px; } .watch-priority select { width:100%; min-height:40px; border-radius:11px; border:1px solid var(--line); background:#141619; color:var(--text); padding:10px 11px; font-size:13px; font-family:inherit; } .watch-hint { flex:1 1 100%; margin:-4px 0 0; font-size:11px; } details.is-deleted { opacity:.55; } details.is-deleted summary { color:var(--bad); } .apply-bar { position:sticky; bottom:0; z-index:8; display:flex; flex-wrap:wrap; gap:12px; align-items:center; justify-content:space-between; margin-top:18px; padding:14px 0 4px; border-top:1px solid var(--line); background:var(--panel); } .apply-bar p { flex:1 1 220px; } .apply-bar .button { min-width:180px; } @media (max-width:900px) { .watch-top { grid-template-columns:repeat(2,minmax(0,1fr)); } } @media (max-width:700px) { .watch-bottom > label:first-child { flex:1 1 100%; max-width:none; } .watch-bottom .watch-actions { width:100%; margin-left:0; } .watch-bottom .watch-actions .button { width:100%; } .apply-bar .button { width:100%; } } @media (max-width:420px) { .watch-top { grid-template-columns:1fr; } }
 """
 
 SETTINGS_SCRIPT = """
@@ -69,6 +69,13 @@ SETTINGS_SCRIPT = """
     });
   });
   watchSearch?.addEventListener('input', refreshWatchList);
+  document.addEventListener('change', (event) => {
+    const priority = event.target.closest('[data-watch-priority]');
+    if (!priority) return;
+    const card = priority.closest('[data-watch-card]');
+    const legacyInterval = card?.querySelector('[data-legacy-check-interval]');
+    if (legacyInterval) legacyInterval.value = '';
+  });
   refreshWatchList();
 
   const nextWatchIndex = () => {
@@ -364,6 +371,18 @@ def _watch_form(item, index, is_new=False, groups=None, known_titles=None, show_
     notify_once = True if is_new else item.get("notify_once_in_24H", True)
     active = True if is_new else item.get("active", True)
     include_variations = False if is_new else item.get("include_variations", False)
+    if is_new:
+        priority = "high"
+    else:
+        priority = str(item.get("priority") or "").strip().casefold()
+        if priority not in {"low", "medium", "high"}:
+            legacy_interval = item.get("check_interval_minutes")
+            try:
+                legacy_interval = int(legacy_interval) if legacy_interval not in (None, "") else None
+            except (TypeError, ValueError):
+                legacy_interval = None
+            priority = "low" if legacy_interval and legacy_interval > 120 else "medium" if legacy_interval else "high"
+    official_seller_only = False if is_new else item.get("official_seller_only", False)
     selected_group = "" if is_new else str(item.get("group") or "").strip()
     if not selected_group and group == "Moda":
         selected_group = "Moda"
@@ -380,12 +399,17 @@ def _watch_form(item, index, is_new=False, groups=None, known_titles=None, show_
         )
         for url_index, field_name in enumerate(WATCH_URL_FIELDS, start=1)
     )
-    interval_field = _field(
-        prefix,
-        "check_interval_minutes",
-        "Özel kontrol aralığı (dk)",
-        item.get("check_interval_minutes", ""),
-        "number",
+    interval_field = (
+        f"<input type='hidden' name='{escape(prefix + 'check_interval_minutes', quote=True)}' "
+        f"value='{escape(str(item.get('check_interval_minutes') or ''), quote=True)}' data-legacy-check-interval>"
+    )
+    priority_field = (
+        f"<label class='watch-priority'>Öncelik"
+        f"<select name='{escape(prefix + 'priority', quote=True)}' data-watch-priority>"
+        f"<option value='low'{ ' selected' if priority == 'low' else '' }>Düşük · 6 saatte bir</option>"
+        f"<option value='medium'{ ' selected' if priority == 'medium' else '' }>Orta · 2 saatte bir</option>"
+        f"<option value='high'{ ' selected' if priority == 'high' else '' }>Yüksek · her çevrim</option>"
+        "</select></label>"
     )
     exclude_field = _field(
         prefix,
@@ -396,6 +420,7 @@ def _watch_form(item, index, is_new=False, groups=None, known_titles=None, show_
     notification_fields = "".join(
         [
             _checkbox(prefix, "include_variations", "Varyasyonları ekle", include_variations),
+            _checkbox(prefix, "official_seller_only", "Yalnızca platformun kendi satıcısı", official_seller_only),
             _checkbox(prefix, "notify_once_in_24H", "24 saat sustur", notify_once),
             _checkbox(prefix, "active", "Aktif", active),
         ]
@@ -425,7 +450,8 @@ def _watch_form(item, index, is_new=False, groups=None, known_titles=None, show_
         "</div>"
         f"<div class='watch-links'>{link_fields}</div>"
         "<div class='watch-bottom'>"
-        f"{interval_field}{exclude_field}{notification_fields}{action_fields}"
+        f"{priority_field}{exclude_field}{notification_fields}{action_fields}{interval_field}"
+        "<p class='watch-hint'>Yüksek öncelik her çevrimde kontrol edilir. Satıcı filtresi şu an Amazon’da uygulanır; doğrulanmış Depo teklifleri korunur.</p>"
         "</div></div>"
     )
     group_attribute = "" if is_new else f" data-watch-group='{escape(group, quote=True)}'"
@@ -567,6 +593,9 @@ def _build_watch(form, index):
     size = _first(form, prefix + "size")
     exclude_terms = _first(form, prefix + "exclude_terms")
     interval = _first(form, prefix + "check_interval_minutes")
+    priority = _first(form, prefix + "priority", "high").casefold()
+    if priority not in {"low", "medium", "high"}:
+        raise ValueError(f"{_watch_form_context(index, name, [])}: öncelik geçersiz.")
     urls = []
     for field_name in WATCH_URL_FIELDS:
         url = _first(form, prefix + field_name)
@@ -594,6 +623,8 @@ def _build_watch(form, index):
         "group": group,
         "target_price": _price_from_form(target),
         "include_variations": _bool_from_form(form, prefix + "include_variations"),
+        "priority": priority,
+        "official_seller_only": _bool_from_form(form, prefix + "official_seller_only"),
         "notify_once_in_24H": _bool_from_form(form, prefix + "notify_once_in_24H"),
         "active": _bool_from_form(form, prefix + "active"),
     }
@@ -676,6 +707,7 @@ def _apply_settings_operation(existing_options, form):
         updated = _build_watch(form, index)
         if not updated:
             raise ValueError(f"Takip {index + 1}: hedef fiyat ve en az bir link alanı zorunlu.")
+        updated["check_now_token"] = utc_now()
         existing_watches[index] = updated
         options["takip_edilenler"] = existing_watches
         return options, f"{_watch_display_name(updated, index, {})} takip kaydı güncellendi."
@@ -691,6 +723,7 @@ def _apply_settings_operation(existing_options, form):
             raise ValueError("Yeni takip eklemek için hedef fiyat ve en az bir link alanı zorunlu.")
         if len(new_watches) != 1:
             raise ValueError("Yeni takip ekleme formunda yalnızca bir kayıt bulunmalı.")
+        new_watches[0]["check_now_token"] = utc_now()
         options["takip_edilenler"] = existing_watches + new_watches
         return options, "Yeni takip kaydı eklendi."
 

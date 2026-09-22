@@ -1,7 +1,7 @@
 # Hermes Cursor Handoff
 
 This document is the current technical and product handoff for continuing Hermes
-in Cursor. It describes the real repository at version `2.5.13`; source code and
+in Cursor. It describes the real repository at version `2.5.14`; source code and
 tests remain authoritative when this document and code ever differ.
 
 ## 1. Product snapshot
@@ -122,8 +122,15 @@ Each `takip_edilenler` card supports:
 - optional comma-separated `exclude_terms`;
 - optional `size` (case-insensitive, provider-normalized);
 - `include_variations`;
+- `priority`: `high` checks every existing cycle, `medium` at least every two
+  hours, and `low` at least every six hours. Due work is ordered high to low,
+  with site balancing inside a tier. A missing priority preserves the old
+  every-cycle behavior;
+- `official_seller_only`: currently filters Amazon new offers to exact seller
+  `Amazon.com.tr`. Verified Amazon Depo offers are always retained. The setting
+  is generic for later provider support; no Hepsiburada seller rule is active;
 - up to five mixed URLs (`url_1` ... `url_5`);
-- optional per-watch interval override;
+- optional legacy per-watch interval override, retained for saved configurations;
 - `notify_once_in_24H` and `active` flags.
 
 `max_items_to_scan` is deprecated compatibility input; the effective search cap

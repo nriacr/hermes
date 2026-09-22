@@ -3,6 +3,7 @@ import requests
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
@@ -73,6 +74,86 @@ from hermes.utils import detect_site_from_url, parse_decimal, utc_now  # noqa: E
 
 
 class HermesSmokeTests(unittest.TestCase):
+    def test_amazon_primary_seller_is_separate_from_verified_depot_seller(self):
+        html = '''<span id="productTitle">iPhone</span>
+        <div id="corePriceDisplay_desktop_feature_div"><span class="a-price">
+          <span class="a-offscreen">123.058,99 TL</span></span></div>
+        <div id="merchantInfoFeature_feature_div">Gönderici: Amazon Satıcı:
+          <a id="sellerProfileTriggerId">Amazon.com.tr</a></div>
+        <div id="usedBuySection">Kullanılmış ve yeni gibi Satıcı: Amazon Depo
+          <span class="a-price"><span class="a-offscreen">89.040,87 TL</span></span></div>'''
+
+        offers = extract_amazon_offers(html, "https://www.amazon.com.tr/dp/B000000001")
+
+        self.assertEqual([(offer.seller, offer.is_warehouse) for offer in offers], [
+            ("Amazon.com.tr", False), ("Amazon Depo", True),
+        ])
+
+    def test_official_seller_filter_excludes_other_new_sellers_but_always_keeps_depot(self):
+        watch = WatchRule(
+            name="iPhone", site="amazon", url="https://www.amazon.com.tr/dp/B000000001",
+            target_price=Decimal("100000"), official_seller_only=True,
+        )
+        offers = [
+            OfferResult("Üçüncü taraf sıfır", Decimal("90000"), "Başka Satıcı", watch.url),
+            OfferResult("Satıcısı okunmayan sıfır", Decimal("91000"), None, watch.url),
+            OfferResult("Amazon sıfır", Decimal("100000"), "Amazon.com.tr", watch.url),
+            OfferResult("Depo", Decimal("89000"), "Amazon Depo", watch.url, True),
+        ]
+
+        filtered = list(service.filter_official_seller_offers(watch, offers))
+
+        self.assertEqual([offer.title for offer in filtered], ["Amazon sıfır", "Depo"])
+
+    def test_watch_priorities_use_global_cycle_two_hours_and_six_hours(self):
+        now = datetime.now(timezone.utc)
+        checked = {"last_checked_at": now.isoformat()}
+        high = WatchRule("H", "amazon", "https://www.amazon.com.tr/dp/B000000001", Decimal("1"), priority="high")
+        medium = WatchRule("M", "amazon", "https://www.amazon.com.tr/dp/B000000002", Decimal("1"), priority="medium")
+        low = WatchRule("L", "amazon", "https://www.amazon.com.tr/dp/B000000003", Decimal("1"), priority="low")
+
+        with patch.object(service, "local_now", return_value=now + timedelta(seconds=59)):
+            self.assertFalse(service.watch_check_due(high, checked, 60))
+        with patch.object(service, "local_now", return_value=now + timedelta(seconds=60)):
+            self.assertTrue(service.watch_check_due(high, checked, 60))
+        with patch.object(service, "local_now", return_value=now + timedelta(hours=1, minutes=59)):
+            self.assertFalse(service.watch_check_due(medium, checked, 60))
+            self.assertFalse(service.watch_check_due(low, checked, 60))
+        with patch.object(service, "local_now", return_value=now + timedelta(hours=2)):
+            self.assertTrue(service.watch_check_due(medium, checked, 60))
+            self.assertFalse(service.watch_check_due(low, checked, 60))
+        with patch.object(service, "local_now", return_value=now + timedelta(hours=6)):
+            self.assertTrue(service.watch_check_due(low, checked, 60))
+
+    def test_due_watch_order_places_high_priority_before_medium_and_low(self):
+        def task(priority, site):
+            watch = WatchRule(priority, site, f"https://www.amazon.com.tr/dp/{priority + site}", Decimal("1"), priority=priority)
+            return {"watch": watch, "site": site}
+
+        ordered = service.priority_request_order([
+            task("low", "amazon"), task("high", "hepsiburada"), task("medium", "zara"), task("high", "amazon")
+        ])
+
+        self.assertEqual([item["watch"].priority for item in ordered], ["high", "high", "medium", "low"])
+
+    def test_watch_settings_save_generic_seller_filter_and_priority(self):
+        watches = settings_ui._build_watches({
+            "watches_count": ["1"],
+            "watches_0_name": ["iPhone"],
+            "watches_0_target_price": ["100000"],
+            "watches_0_url_1": ["https://www.amazon.com.tr/dp/B000000001"],
+            "watches_0_priority": ["low"],
+            "watches_0_official_seller_only": ["1"],
+        })
+
+        self.assertEqual(watches[0]["priority"], "low")
+        self.assertTrue(watches[0]["official_seller_only"])
+        html = settings_ui._watch_form(watches[0], 0)
+        self.assertIn("Yalnızca platformun kendi satıcısı", html)
+        self.assertIn("Düşük · 6 saatte bir", html)
+        self.assertIn("Orta · 2 saatte bir", html)
+        self.assertIn("Yüksek · her çevrim", html)
+
     def test_amazon_variant_url_change_preserves_alert_suppression_and_history(self):
         watch = WatchRule(name="iPhone", site="amazon", url="https://www.amazon.com.tr/dp/B000000001",
                           target_price=Decimal("100000"), include_variations=True)
