@@ -59,7 +59,7 @@ tbody tr.site-nordbron { --site-bg:rgba(143,190,255,.13); --site-bg-strong:rgba(
 tbody tr.site-zara { --site-bg:rgba(176,218,139,.13); --site-bg-strong:rgba(176,218,139,.25); --site-line:rgba(176,218,139,.84); --site-link:#c9ec9f; }
 tbody tr.site-hm { --site-bg:rgba(214,178,255,.13); --site-bg-strong:rgba(214,178,255,.25); --site-line:rgba(214,178,255,.84); --site-link:#dec4ff; }
 tbody tr.site-other { --site-bg:rgba(183,177,222,.13); --site-bg-strong:rgba(183,177,222,.22); --site-line:rgba(183,177,222,.72); --site-link:#d1caff; } tbody tr[class*='site-'] td { background:linear-gradient(90deg,var(--site-bg),rgba(36,39,43,.40)); } tbody tr[class*='site-'] td:first-child { border-left:4px solid var(--site-line); color:var(--site-link); font-weight:800; } tbody tr[class*='site-'] .product-cell a { color:var(--site-link); } tbody tr[class*='site-']:hover td { background:linear-gradient(90deg,rgba(255,255,255,.055),var(--site-bg)); }
-.product-cell { max-width:360px; white-space:normal; line-height:1.22; } .product-cell a { color:#e4e6e6; text-decoration:none; } .product-cell a:hover { color:#ffd166; text-decoration:underline; } .product-cell .warehouse-tag { display:inline-block; margin:0 8px 0 0; padding:0 7px; border-radius:5px; background:rgba(236,183,82,.20); color:#fff; font-size:13px; font-weight:900; letter-spacing:.05em; line-height:1.1; vertical-align:top; } .product-cell span { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; text-overflow:ellipsis; } .deal-row td { color:#b7f0dc; } .deal-row td:first-child { color:var(--site-link); } .deal-row .product-cell a { color:#b7f0dc; } .note { margin-top:18px; border-left:4px solid #a9adaf; padding:12px 14px; background:rgba(169,173,175,.14); border-radius:10px; font-size:13px; } .footer { margin-top:18px; font-size:12px; color:var(--muted); }
+.product-cell { max-width:360px; white-space:normal; line-height:1.22; } .product-cell a { color:#e4e6e6; text-decoration:none; } .product-cell a:hover { color:#ffd166; text-decoration:underline; } .product-cell .product-title { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; text-overflow:ellipsis; } .product-cell .warehouse-tag { display:inline-block; margin:0 8px 0 0; padding:0 7px; border-radius:5px; background:rgba(236,183,82,.20); color:#fff; font-size:13px; font-weight:900; letter-spacing:.05em; line-height:1.1; vertical-align:top; } .product-cell .priority-dot { display:inline-block; width:8px; height:8px; margin:0 7px 1px 0; border-radius:50%; vertical-align:middle; } .priority-high { background:#ff5c64; } .priority-medium { background:#f2c94c; } .priority-low { background:#57cc7a; } .deal-row td { color:#b7f0dc; } .deal-row td:first-child { color:var(--site-link); } .deal-row .product-cell a { color:#b7f0dc; } .note { margin-top:18px; border-left:4px solid #a9adaf; padding:12px 14px; background:rgba(169,173,175,.14); border-radius:10px; font-size:13px; } .footer { margin-top:18px; font-size:12px; color:var(--muted); }
 .public main { max-width:1180px; } .public .hero { padding:18px; } .public .badge { font-size:clamp(22px,4vw,36px); }
 .public-actions { margin:16px 0 6px; } .public-actions .button { min-width:132px; }
 .public-cycle-row { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; margin:10px 0 4px; }
@@ -114,7 +114,7 @@ tbody tr.site-other { --site-bg:rgba(183,177,222,.13); --site-bg-strong:rgba(183
   tbody tr[class*='site-'] .price-cell, tbody tr[class*='site-'] .target-cell, tbody tr[class*='site-'] .diff-cell { min-width:0; }
   tbody tr[class*='site-'] .range-cell { grid-column:1 / -1; min-height:31px; flex-direction:row; align-items:center; justify-content:flex-start; gap:8px; white-space:nowrap; }
   tbody tr[class*='site-'] .range-cell::before { margin-right:3px; }
-  .product-cell span { -webkit-line-clamp:2; }
+  .product-cell .product-title { -webkit-line-clamp:2; }
   .empty-row td { padding:10px; border:1px solid var(--line); border-radius:12px; }
   .note, .footer { font-size:11px; }
 }
@@ -541,15 +541,24 @@ def _render_table_row(row):
     visible_title, full_title = _table_title(raw_title)
     product_title = escape(visible_title)
     product_title_tooltip = escape(full_title, quote=True)
-    warehouse_tag = '<strong class="warehouse-tag">DEPO</strong>' if row.get("is_warehouse") else ""
+    is_warehouse = parse_bool(row.get("is_warehouse"), default=False)
+    warehouse_tag = '<strong class="warehouse-tag">DEPO</strong>' if is_warehouse else ""
+    priority = str(row.get("priority") or "high").strip().casefold()
+    priority_label = {"high": "Yüksek", "medium": "Orta", "low": "Düşük"}.get(priority, "")
+    priority_dot = (
+        f'<i class="priority-dot priority-{escape(priority)}" title="{priority_label} öncelik" '
+        f'aria-label="{priority_label} öncelik"></i>'
+        if not is_warehouse and priority in {"high", "medium", "low"}
+        else ""
+    )
     product_url = str(row.get("product_url") or "").strip()
     if product_url:
         label = (
             f'<a href="{escape(product_url, quote=True)}" target="_blank" rel="noopener noreferrer">'
-            f"<span>{warehouse_tag}{product_title}</span></a>"
+            f'<span class="product-title">{priority_dot}{warehouse_tag}{product_title}</span></a>'
         )
     else:
-        label = f"<span>{warehouse_tag}{product_title}</span>"
+        label = f'<span class="product-title">{priority_dot}{warehouse_tag}{product_title}</span>'
     price = escape(_display_tl(row.get("price", "-")))
     target = escape(_display_tl(row.get("target", "-")))
     difference = escape(_display_tl(row.get("difference", "-"), signed=True))

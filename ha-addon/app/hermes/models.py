@@ -48,6 +48,7 @@ class PriceSummaryRow:
     search_group_label: str = ""
     is_warehouse: bool = False
     tracking_id: str = ""
+    priority: str = "high"
 
     @property
     def difference(self) -> Decimal:

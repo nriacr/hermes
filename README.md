@@ -21,6 +21,7 @@ Takip edilen alanlar:
 - Ürün linklerinde `name` boş bırakılabilir; Hermes ürün adını linkten okur. Arama linklerinde `name`, aranacak keyword olarak zorunludur.
 - Amazon ürün linklerinde `Varyasyonları ekle` seçilirse, renk × kapasite/ölçü birleşimleri gerçek ürün kimlikleri üzerinden tek tek taranır (en fazla 60 varyant). Sıfır ve Amazon Depo teklifleri ayrı tutulur; uygun depo teklifi bulunduğunda kalan varyantlar beklenmeden bildirilir.
 - Her takip kartında öncelik seçilebilir: yüksek her çevrimde, orta en az 2 saatte, düşük en az 6 saatte kontrol edilir. Yüksek öncelikli işler önce yürütülür; yeni eklenen veya tek kart olarak düzenlenen takip hemen kontrol edilir.
+- Sonuç tablosunda normal ürünlerin adının başındaki renkli daire kontrol önceliğini gösterir: yüksek kırmızı, orta sarı, düşük yeşil. Amazon Depo satırları bu göstergeden etkilenmez.
 - `Yalnızca platformun kendi satıcısı` filtresi Amazon sıfır ürünlerinde yalnızca `Amazon.com.tr` satıcısını tutar. Satıcı bilgisi okunamayan teklifler elenir; doğrulanmış Amazon Depo teklifleri her zaman korunur. Diğer mağazalar için filtre desteği ileride eklenecektir.
 - Ana ekrandaki `Test` sayfası bağlantıyı anlık ve geçici olarak okur; arama anahtar kelimesi, beden, hariç tut ve varyasyon seçenekleri bu test için ayrıca uygulanabilir.
 - Telegram kanalları: keyword ve exclude keyword tabanlı fırsat bildirimi

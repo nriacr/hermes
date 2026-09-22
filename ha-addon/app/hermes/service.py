@@ -398,6 +398,7 @@ def summary_row_from_state(watch: WatchRule, state_entry: Dict[str, Any], seller
         search_group_label=search_group_label,
         tracking_id=str(state_entry.get("tracking_id") or watch.tracking_id or ""),
         is_warehouse=bool(state_entry.get("is_warehouse", False)),
+        priority=str(state_entry.get("priority") or watch.priority or "high"),
     )
 
 
@@ -490,6 +491,7 @@ def save_price_summary(
                 "search_group_label": row.search_group_label,
                 "is_warehouse": row.is_warehouse,
                 "tracking_id": row.tracking_id,
+                "priority": row.priority,
             }
             for idx, row in enumerate(sorted_rows, start=1)
         ],
@@ -532,6 +534,7 @@ def _summary_rows_from_payload(payload: Dict[str, Any]) -> List[PriceSummaryRow]
                     search_group_label=str(raw_row.get("search_group_label") or ""),
                     is_warehouse=bool(raw_row.get("is_warehouse", False)),
                     tracking_id=str(raw_row.get("tracking_id") or ""),
+                    priority=str(raw_row.get("priority") or "high"),
                 )
             )
         except HermesError:
@@ -1914,6 +1917,7 @@ def check_once(config: HermesConfig) -> None:
                         search_group_label=search_group_label,
                         is_warehouse=offer.is_warehouse,
                         tracking_id=watch.tracking_id,
+                        priority=watch.priority,
                     )
                 )
                 log(
@@ -1967,6 +1971,7 @@ def check_once(config: HermesConfig) -> None:
                 state[offer_key]["size"] = watch.size
                 state[offer_key]["site"] = watch.site
                 state[offer_key]["include_variations"] = watch.include_variations
+                state[offer_key]["priority"] = watch.priority
                 state[offer_key]["search_group"] = search_group
                 state[offer_key]["search_group_label"] = search_group_label
                 state[offer_key]["is_warehouse"] = offer.is_warehouse

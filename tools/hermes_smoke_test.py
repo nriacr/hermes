@@ -89,6 +89,25 @@ class HermesSmokeTests(unittest.TestCase):
             ("Amazon.com.tr", False), ("Amazon Depo", True),
         ])
 
+    def test_amazon_sender_is_not_mistaken_for_marketplace_seller(self):
+        html = '''<span id="productTitle">Apple iPhone 17 Pro Max 512 GB Gümüş</span>
+        <div id="corePriceDisplay_desktop_feature_div"><span class="a-price">
+          <span class="a-offscreen">131.624,00 TL</span></span></div>
+        <div id="merchantInfoFeature_feature_div">
+          <span>Gönderici</span><span>Amazon</span>
+          <span>Satıcı</span><a id="sellerProfileTriggerId">Gürgençler Apple Premium Partner</a>
+        </div>'''
+
+        offers = extract_amazon_offers(html, "https://www.amazon.com.tr/dp/B000000002")
+
+        self.assertEqual(len(offers), 1)
+        self.assertEqual(offers[0].seller, "Gürgençler Apple Premium Partner")
+        watch = WatchRule(
+            name="iPhone", site="amazon", url="https://www.amazon.com.tr/dp/B000000002",
+            target_price=Decimal("140000"), official_seller_only=True,
+        )
+        self.assertEqual(list(service.filter_official_seller_offers(watch, offers)), [])
+
     def test_official_seller_filter_excludes_other_new_sellers_but_always_keeps_depot(self):
         watch = WatchRule(
             name="iPhone", site="amazon", url="https://www.amazon.com.tr/dp/B000000001",
@@ -2112,6 +2131,7 @@ class HermesSmokeTests(unittest.TestCase):
             target_price=Decimal("9000"),
             min_price=Decimal("8899"),
             max_price=Decimal("8899"),
+            priority="low",
         )
         warehouse = PriceSummaryRow(
             seller="Amazon",
@@ -2132,6 +2152,7 @@ class HermesSmokeTests(unittest.TestCase):
 
         self.assertEqual(len(payload["rows"]), 2)
         self.assertEqual(sorted(row["is_warehouse"] for row in payload["rows"]), [False, True])
+        self.assertEqual(next(row["priority"] for row in payload["rows"] if not row["is_warehouse"]), "low")
 
     def test_dashboard_keeps_normal_and_warehouse_rows_for_the_same_amazon_asin(self):
         rows = [
@@ -3584,6 +3605,26 @@ class HermesSmokeTests(unittest.TestCase):
             }
         )
         self.assertIn('class="warehouse-tag">DEPO</strong>', row_html)
+        self.assertNotIn("priority-dot", row_html)
+
+    def test_dashboard_shows_priority_dots_for_normal_rows(self):
+        for priority, label in (("high", "Yüksek"), ("medium", "Orta"), ("low", "Düşük")):
+            with self.subTest(priority=priority):
+                row_html = dashboard._render_table_row(
+                    {
+                        "seller": "Amazon",
+                        "product_title": "iPhone 17 Pro Max",
+                        "product_url": "https://www.amazon.com.tr/dp/B000000001",
+                        "price": "131.624 TL",
+                        "target": "130.000 TL",
+                        "difference": "+1.624 TL",
+                        "min_price": "131.624 TL",
+                        "max_price": "131.624 TL",
+                        "priority": priority,
+                    }
+                )
+                self.assertIn(f"priority-{priority}", row_html)
+                self.assertIn(f'title="{label} öncelik"', row_html)
 
     def test_dashboard_shortens_long_product_titles_to_70_characters(self):
         full_title = "Çok uzun ürün adı " * 12
