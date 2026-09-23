@@ -326,19 +326,66 @@ class HermesSmokeTests(unittest.TestCase):
 
         with (patch.object(service, "fetch_amazon_page", side_effect=page_for),
               patch.object(service, "cleaned_html", side_effect=lambda r:r),
-              patch.object(service, "wait_before_request")):
+              patch.object(service, "wait_before_request"),
+              patch.object(service.amazon_provider, "extract_product_variations",
+                           wraps=service.amazon_provider.extract_product_variations) as discover):
             stream = service._iter_amazon_product_watch_offers(object(), watch, config)
             first = next(stream)
             self.assertTrue(first.is_warehouse)
             self.assertEqual(fetched, ["B000000001"])
             offers = [first, *stream]
         self.assertEqual(len(fetched), 9)
+        self.assertEqual(discover.call_count, 9)
         self.assertEqual(len(set(fetched)), 9)
         self.assertEqual(len(offers), 18)
         for offer in offers:
             index = int(service.extract_asin_from_url(offer.url)[-1]) - 1
             expected = Decimal(90000 + index) + Decimal(".87") if offer.is_warehouse else Decimal(120000 + index)
             self.assertEqual(offer.price, expected)
+
+    def test_amazon_complete_family_is_discovered_once_but_every_variant_is_checked(self):
+        watch = WatchRule(
+            name="iPhone", site="amazon", url="https://www.amazon.com.tr/dp/B000000001",
+            target_price=Decimal("100000"), include_variations=True,
+        )
+        config = SimpleNamespace(request_timeout_seconds=20)
+        urls = [f"https://www.amazon.com.tr/dp/B00000000{number}" for number in range(1, 4)]
+        variations = [service.amazon_provider.AmazonProductVariation(str(number), url)
+                      for number, url in enumerate(urls)]
+        html = '''<script type="a-state"
+        data-a-state='{"key":"twister-plus-desktop-inline-twister-collapse-view-asins-data"}'>
+        {"asinsInCollapsedView":["B000000002","B000000003"]}</script>'''
+        session = SimpleNamespace()
+        fetched = []
+
+        def page_for(_session, url, _timeout):
+            fetched.append(url)
+            return html
+
+        def offer_for(_session, url, _html, _config, soup=None):
+            return [service.SearchResultItem("iPhone", url, Decimal("90000"))]
+
+        with (
+            patch.object(service, "fetch_amazon_page", side_effect=page_for),
+            patch.object(service, "cleaned_html", return_value=html),
+            patch.object(service, "wait_before_request"),
+            patch.object(service.amazon_provider, "extract_product_variations", return_value=variations) as discover,
+            patch.object(service.amazon_provider, "selected_variation_label", return_value="Gümüş"),
+            patch.object(service, "_extract_amazon_page_offers", side_effect=offer_for) as offers_reader,
+            patch.object(service, "log") as scan_log,
+        ):
+            offers = list(service._iter_amazon_product_watch_offers(session, watch, config))
+
+        self.assertEqual(fetched, urls)
+        self.assertEqual(discover.call_count, 1)
+        self.assertEqual(offers_reader.call_count, 3)
+        self.assertEqual([offer.url for offer in offers], urls)
+        summary = next(
+            call.args[0] for call in scan_log.call_args_list
+            if call.args[0].startswith("Amazon varyasyon taraması:")
+        )
+        self.assertIn("varyant_keşif_sayfası=1", summary)
+        self.assertIn("aile_listesi=tam", summary)
 
     def test_amazon_excluded_variants_are_refetched_each_cycle(self):
         watch = WatchRule(
@@ -397,6 +444,7 @@ class HermesSmokeTests(unittest.TestCase):
             patch.object(service, "cleaned_html", return_value="html"),
             patch.object(service.amazon_provider, "parse_product_page", return_value=object()) as parse,
             patch.object(service.amazon_provider, "extract_product_variations", return_value=[]) as variations,
+            patch.object(service.amazon_provider, "has_complete_product_variation_family", return_value=False),
             patch.object(service.amazon_provider, "selected_variation_label", return_value="Gümüş"),
             patch.object(service, "_extract_amazon_page_offers", return_value=[offer]) as extract,
             patch.object(service, "wait_before_request"),

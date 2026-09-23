@@ -253,6 +253,23 @@ def extract_product_variations(
     return variations[: max(1, limit)]
 
 
+def has_complete_product_variation_family(html: str, soup=None) -> bool:
+    """Return whether Amazon supplied its explicit full-family ASIN list."""
+    soup = soup or parse_product_page(html)
+    for script in soup.select("script[type='a-state'][data-a-state]"):
+        state = _load_json(str(script.get("data-a-state") or ""))
+        if state.get("key") != "twister-plus-desktop-inline-twister-collapse-view-asins-data":
+            continue
+        payload = _load_json(script.get_text("", strip=True))
+        asins = payload.get("asinsInCollapsedView")
+        if isinstance(asins, list):
+            return any(
+                isinstance(asin, str) and re.fullmatch(r"[A-Z0-9]{10}", asin)
+                for asin in asins
+            )
+    return False
+
+
 def selected_variation_label(html: str, soup=None) -> str:
     soup = soup or parse_product_page(html)
     values = []
