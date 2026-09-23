@@ -71,6 +71,11 @@ and can test links without adding them to the real table.
 - `/app` contains application code; `/data` contains persistent data.
 - `run.sh` starts ingress and public servers in the background, then runs the
   monitor service in the foreground so Supervisor manages its lifecycle.
+- After pushing a runtime release to `main`, update the Raspberry Pi by running
+  `sh tools/install_rpi.sh`. It refreshes the Hermes store entry, updates the
+  installed app `769724e3_hermes`, then verifies installed/latest versions and
+  the running state. It uses the parent Home Assistant workspace's secure
+  `bin/ha-ssh` helper; credentials stay outside this repository.
 
 Do not change ports, slug, Supervisor permissions, routes, or data paths without
 a migration plan and explicit approval.

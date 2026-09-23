@@ -127,6 +127,12 @@ repository. Read it before making changes. The detailed system handoff is in
 7. Update README/docs when behavior, options, providers, or operations change.
 8. Review the diff for secrets, unrelated changes, stale code, and compatibility.
 9. Commit intentionally and push to `main` so Home Assistant receives the update.
+10. After a successful push, run `sh tools/install_rpi.sh` to refresh the
+    configured Hermes repository, install its latest add-on version on the
+    Raspberry Pi, and verify the installed version is running. The script uses
+    the parent Home Assistant workspace's `bin/ha-ssh`; never copy credentials
+    or SSH keys into this repository. If installation or verification fails,
+    report it clearly and do not claim the release is installed.
 
 Documentation-only changes do not require an add-on version bump.
 
@@ -138,4 +144,6 @@ Documentation-only changes do not require an add-on version bump.
 - Ingress/public/mobile parity is preserved.
 - No secrets or runtime state are committed.
 - Runtime changes include a version bump and are pushed to GitHub.
+- The Raspberry Pi add-on is updated after each runtime release and its
+  installed version/state are verified.
 - The user receives a concise Turkish summary of behavior and verification.
