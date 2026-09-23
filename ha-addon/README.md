@@ -47,6 +47,8 @@ Takip kartlarında `max_items_to_scan` ayarı artık kullanılmaz. Hermes her ar
 
 Teknik istek zaman aşımı Hermes içinde yönetilir ve günlük kullanımda config ekranında görünmez.
 
+`interval_seconds`, her tam tarama çevriminin ardından beklenecek süredir ve 1 saniye ile 24 saat arasında ayarlanabilir. Çevrimin toplam süresi, taramanın sürdüğü süreye bu bekleme süresinin eklenmesiyle oluşur.
+
 Takip edilenlerde ayrıca site seçilmez. Hermes, girilen linklerden uygun siteyi ve link tipini otomatik algılar. Ürün linkiyse ilgili sitenin ürün okuyucusunu, arama linkiyse ilgili sitenin arama okuma mantığını çalıştırır.
 
 Bir takip kaydı örneği:

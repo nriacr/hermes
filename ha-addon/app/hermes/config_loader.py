@@ -211,7 +211,7 @@ def load_config() -> HermesConfig:
         payload,
         "interval_seconds",
         60,
-        10,
+        1,
         86400,
     )
     request_timeout_seconds = DEFAULT_REQUEST_TIMEOUT_SECONDS

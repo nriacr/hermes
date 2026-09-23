@@ -30,6 +30,7 @@ from hermes.http_client import (  # noqa: E402
     fetch_beymenclub_size_summary,
 )
 from hermes.config_loader import _prepare_watches  # noqa: E402
+from hermes import config_loader  # noqa: E402
 from hermes.models import HermesConfig, OfferResult, PriceSummaryRow, SearchResultItem, StockSummaryRow, TelegramConfig, WatchRule  # noqa: E402
 from hermes.providers.base import soup_from_html  # noqa: E402
 from hermes.providers.hepsiburada import (  # noqa: E402
@@ -74,6 +75,32 @@ from hermes.utils import detect_site_from_url, parse_decimal, utc_now  # noqa: E
 
 
 class HermesSmokeTests(unittest.TestCase):
+    def test_cycle_interval_accepts_values_below_ten_seconds(self):
+        for interval in (1, 5, 8, 35):
+            with self.subTest(interval=interval), patch.object(
+                config_loader,
+                "load_json",
+                return_value={
+                    "interval_seconds": interval,
+                    "pushover_user_key": "user",
+                    "pushover_api_token": "token",
+                    "takip_edilenler": [
+                        {"name": "Test", "target_price": 100, "url_1": "https://www.amazon.com.tr/dp/B000000001"}
+                    ],
+                },
+            ):
+                config = config_loader.load_config()
+                self.assertEqual(config.interval_seconds, interval)
+
+    def test_cycle_interval_rejects_values_below_one_second(self):
+        with patch.object(
+            config_loader,
+            "load_json",
+            return_value={"interval_seconds": 0, "pushover_user_key": "user", "pushover_api_token": "token"},
+        ):
+            with self.assertRaisesRegex(HermesError, "1 ile 86400 arasında"):
+                config_loader.load_config()
+
     def test_amazon_primary_seller_is_separate_from_verified_depot_seller(self):
         html = '''<span id="productTitle">iPhone</span>
         <div id="corePriceDisplay_desktop_feature_div"><span class="a-price">
