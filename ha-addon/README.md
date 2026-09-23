@@ -106,6 +106,8 @@ Hermes her siteyi kendi sağlayıcısında okur. Bir sitenin fiyat okuma kuralı
 
 Kontrol sırası aynı siteye art arda istek gelmesini azaltacak biçimde dengelenir. Amazon ve Hepsiburada'nın bot koruması veya değişken sayfa yapısı nedeniyle ek kurtarma denemeleri yalnızca ilk okuma başarısız olduğunda çalışır. Amazon Depo teklifi denetimi otomatik yürür; hızlı çevrim için varyasyon taramasını yalnızca gerçekten ihtiyaç duyulan takiplerde etkinleştirmek en verimli yaklaşımdır.
 
+Amazon aramalarında başlığı `Hariç tut` terimleriyle eşleşen sonuçlar, ürün ayrıntısı isteği açılmadan elenir. Varyasyonlu ürünlerde Hermes ilk taramada tüm bağlantıları keşfeder. Amazon sayfası tam varyasyon listesini sağlıyorsa, sonraki taramalarda daha önce tanınan ve seçili varyasyon etiketi `Hariç tut` ile eşleşen seçeneklerin sayfasını açmaz. Fiyat veya depo teklifi önbelleğe alınmaz; izlenen varyasyonların fiyatı her uygun çevrimde yeniden okunur. Yeni varyasyon görüldüğünde ve en geç 30 dakika sonra tam keşif tekrarlanır. Bu hızlandırma sayfada tam liste yoksa devreye girmez.
+
 ## Geliştirme Notu
 
 Hermes mimarisi provider tabanlıdır. Her site için parser/fiyat yakalama kodu ayrı dosyadadır:

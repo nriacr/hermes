@@ -70,7 +70,7 @@ from hermes.providers.amazon import (  # noqa: E402
     is_warehouse_search_url,
     title_with_variation,
 )
-from hermes.search_amazon import dedupe_results, extract_result_candidates  # noqa: E402
+from hermes.search_amazon import AmazonSearchCandidate, dedupe_results, extract_result_candidates  # noqa: E402
 from hermes.utils import detect_site_from_url, parse_decimal, utc_now  # noqa: E402
 
 
@@ -339,6 +339,105 @@ class HermesSmokeTests(unittest.TestCase):
             index = int(service.extract_asin_from_url(offer.url)[-1]) - 1
             expected = Decimal(90000 + index) + Decimal(".87") if offer.is_warehouse else Decimal(120000 + index)
             self.assertEqual(offer.price, expected)
+
+    def test_amazon_known_excluded_variants_are_not_requested_until_graph_refresh(self):
+        watch = WatchRule(
+            name="iPhone", site="amazon", url="https://www.amazon.com.tr/dp/B000000001",
+            target_price=Decimal("100000"), include_variations=True, excluded_terms=["1 TB"],
+        )
+        config = SimpleNamespace(request_timeout_seconds=20)
+        catalog = {}
+        fetched = []
+        variants = {"B000000001": "256 GB", "B000000002": "1 TB", "B000000003": "512 GB"}
+
+        def page_for(_session, url, _timeout):
+            asin = service.extract_asin_from_url(url)
+            fetched.append(asin)
+            index = json.dumps({"asinsInCollapsedView": list(variants)})
+            return f'''<script type="a-state" data-a-state='{{"key":"twister-plus-desktop-inline-twister-collapse-view-asins-data"}}'>{index}</script>
+                <div id="variation_size_name"><span class="selection">{variants[asin]}</span></div>
+                <span id="productTitle">iPhone {variants[asin]}</span>
+                <div id="corePriceDisplay_desktop_feature_div"><span class="a-price">
+                  <span class="a-offscreen">100.000,00 TL</span></span></div>'''
+
+        with (patch.object(service, "fetch_amazon_page", side_effect=page_for),
+              patch.object(service, "cleaned_html", side_effect=lambda response: response),
+              patch.object(service, "wait_before_request")):
+            first = list(service._iter_amazon_product_watch_offers(object(), watch, config, catalog))
+            self.assertEqual(fetched, list(variants))
+            self.assertEqual(len(first), 3)
+            self.assertEqual(catalog["labels"]["B000000002"], "1 TB")
+
+            fetched.clear()
+            second = list(service._iter_amazon_product_watch_offers(object(), watch, config, catalog))
+            self.assertEqual(fetched, ["B000000001", "B000000003"])
+            self.assertEqual(len(second), 2)
+
+            variants["B000000004"] = "2 TB"
+            fetched.clear()
+            list(service._iter_amazon_product_watch_offers(object(), watch, config, catalog))
+            self.assertEqual(fetched, list(variants))
+
+            catalog["last_full_scan_at"] = (datetime.now(timezone.utc) - timedelta(minutes=31)).isoformat()
+            fetched.clear()
+            list(service._iter_amazon_product_watch_offers(object(), watch, config, catalog))
+            self.assertEqual(fetched, list(variants))
+
+            fetched.clear()
+            with patch.object(service.amazon_provider, "has_family_variant_index", return_value=False):
+                list(service._iter_amazon_product_watch_offers(object(), watch, config, catalog))
+            self.assertEqual(fetched, list(variants))
+
+    def test_amazon_variant_catalog_is_saved_with_watch_state(self):
+        watch = WatchRule(
+            name="iPhone", site="amazon", url="https://www.amazon.com.tr/dp/B000000001",
+            target_price=Decimal("100000"), include_variations=True, excluded_terms=["1 TB"],
+        )
+        config = SimpleNamespace(
+            watches=[watch], interval_seconds=1, request_timeout_seconds=20,
+            pushover_user_key="user", pushover_api_token="token",
+        )
+        state = {"_meta": {"warehouse_state_migration_version": service.WAREHOUSE_STATE_MIGRATION_VERSION}}
+        seen_catalogs = []
+
+        def offers_with_catalog(_session, _watch, _config, catalog):
+            seen_catalogs.append(dict(catalog))
+            catalog["root_asins"] = ["B000000001"]
+            yield OfferResult("iPhone 256 GB", Decimal("120000"), "Amazon.com.tr", watch.url)
+
+        with (patch.object(service, "load_json", return_value=state),
+              patch.object(service, "save_json"),
+              patch.object(service, "watch_check_due", return_value=True),
+              patch.object(service, "wait_before_request"),
+              patch.object(service, "_iter_amazon_product_watch_offers", side_effect=offers_with_catalog),
+              patch.object(service, "save_incremental_price_summary"),
+              patch.object(service, "publish_price_summary"),
+              patch.object(service, "maybe_alert_summary_drop"),
+              patch.object(service, "maybe_alert_search_failures")):
+            service.check_once(config)
+            service.check_once(config)
+
+        self.assertEqual(seen_catalogs, [{}, {"root_asins": ["B000000001"]}])
+
+    def test_amazon_search_skips_excluded_cards_before_detail_requests(self):
+        watch = WatchRule(
+            name="iPhone", site="amazon", url="https://www.amazon.com.tr/s?k=iphone",
+            target_price=Decimal("100000"), excluded_terms=["1 TB"],
+        )
+        candidates = [
+            AmazonSearchCandidate("iPhone 1 TB", "https://www.amazon.com.tr/dp/B000000001", Decimal("100000")),
+            AmazonSearchCandidate("iPhone 256 GB", "https://www.amazon.com.tr/dp/B000000002", Decimal("90000")),
+        ]
+        config = SimpleNamespace(request_timeout_seconds=20, watches=[watch])
+        with (patch.object(service, "fetch_amazon_page", return_value="html"),
+              patch.object(service, "cleaned_html", return_value="amazon search result"),
+              patch.object(service, "extract_result_candidates", return_value=candidates),
+              patch.object(service, "_fetch_amazon_detail_offers", return_value=[]) as detail_fetch):
+            offers = service._fetch_amazon_search_watch_offers(object(), watch, config)
+
+        self.assertEqual([offer.title for offer in offers], ["iPhone 256 GB"])
+        self.assertEqual(detail_fetch.call_count, 1)
+        self.assertEqual(detail_fetch.call_args.args[1].title, "iPhone 256 GB")
 
     def test_amazon_modern_family_asins_are_deduplicated_and_recommendations_ignored(self):
         html = '''<script type="a-state" data-a-state='{"key":"twister-plus-desktop-inline-twister-collapse-view-asins-data"}'>

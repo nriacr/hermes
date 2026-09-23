@@ -243,6 +243,22 @@ def extract_product_variations(html: str, source_url: str, limit: int) -> list[A
     return variations[: max(1, limit)]
 
 
+def has_family_variant_index(html: str) -> bool:
+    """Whether the current Twister exposes its collapsed family ASIN list."""
+    soup = soup_from_html(html)
+    for script in soup.select("script[type='a-state'][data-a-state]"):
+        state = _load_json(str(script.get("data-a-state") or ""))
+        if state.get("key") != "twister-plus-desktop-inline-twister-collapse-view-asins-data":
+            continue
+        payload = _load_json(script.get_text("", strip=True))
+        asins = payload.get("asinsInCollapsedView")
+        if isinstance(asins, list) and any(
+            isinstance(asin, str) and re.fullmatch(r"[A-Z0-9]{10}", asin) for asin in asins
+        ):
+            return True
+    return False
+
+
 def selected_variation_label(html: str) -> str:
     soup = soup_from_html(html)
     values = []

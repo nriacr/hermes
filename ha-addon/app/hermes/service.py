@@ -113,6 +113,7 @@ AMAZON_NORMAL_EMPTY_SEARCH_MARKERS = (
     "amazon arama sayfasinda okunabilir fiyat bulunamadi",
 )
 WAREHOUSE_STATE_MIGRATION_VERSION = 4
+AMAZON_VARIANT_FULL_SCAN_SECONDS = 30 * 60
 
 
 def raise_if_age_verification(html: str) -> None:
@@ -958,11 +959,18 @@ def skipped_offer_reason(watch: WatchRule, offer: OfferResult, display_name: str
             f"{format_tl(watch.minimum_price, with_currency=True)}"
         )
 
-    normalized_title = normalize_offer_text(display_name)
-    for excluded_term in watch.excluded_terms:
-        if normalize_offer_text(excluded_term) in normalized_title:
-            return f"hariç tut filtresi: {excluded_term}"
+    excluded_term = excluded_term_in_title(watch, display_name)
+    if excluded_term:
+        return f"hariç tut filtresi: {excluded_term}"
     return ""
+
+
+def excluded_term_in_title(watch: WatchRule, title: str) -> str:
+    normalized_title = normalize_offer_text(title)
+    return next(
+        (term for term in watch.excluded_terms if normalize_offer_text(term) in normalized_title),
+        "",
+    )
 
 
 def search_failure_alert_cooldown_passed(meta: Dict[str, Any], now) -> bool:
@@ -1306,10 +1314,14 @@ def _fetch_amazon_search_watch_offers(
     skipped_detail_count = 0
     warehouse_detail_scans = 0
     warehouse_detail_hits = 0
+    excluded_candidates = 0
     for candidate in candidates:
         # Amazon may append ordinary fallback cards to a Depot-only search.
         # They cannot become used stock through a later product-page lookup.
         if warehouse_search and not candidate.is_warehouse:
+            continue
+        if excluded_term_in_title(watch, candidate.title):
+            excluded_candidates += 1
             continue
         candidate_matches_watch = not target_keywords or title_matches_any_keyword(candidate.title, target_keywords)
         if candidate.price is not None:
@@ -1386,6 +1398,8 @@ def _fetch_amazon_search_watch_offers(
 
     if skipped_detail_count:
         log(f"Amazon product arama detay fiyatı atlandı: eslesmeyen_urun={skipped_detail_count}")
+    if excluded_candidates:
+        log(f"Amazon arama sonucu istekten önce hariç tutuldu: adet={excluded_candidates}")
     if warehouse_detail_scans:
         log(
             "Amazon Depo derin taraması tamamlandı: "
@@ -1421,6 +1435,7 @@ def _iter_amazon_product_watch_offers(
     session: requests.Session,
     watch: WatchRule,
     config: HermesConfig,
+    catalog: Dict[str, Any] | None = None,
 ):
     """Yield verified depot offers before continuing to the next variant.
 
@@ -1432,7 +1447,29 @@ def _iter_amazon_product_watch_offers(
     limit = 60 if watch.include_variations else 1
     errors: List[str] = []
     found = 0
+    skipped_cached = 0
+    previous_labels = catalog.get("labels") if isinstance(catalog, dict) else None
+    labels = dict(previous_labels) if isinstance(previous_labels, dict) else {}
+    previous_root_asins = catalog.get("root_asins") if isinstance(catalog, dict) else None
+    previous_root_set = set(previous_root_asins) if isinstance(previous_root_asins, list) else set()
+    previous_full_scan = parse_iso_datetime(catalog.get("last_full_scan_at")) if isinstance(catalog, dict) else None
+    catalog_is_fresh = bool(
+        previous_full_scan
+        and 0 <= (local_now().astimezone(timezone.utc) - previous_full_scan).total_seconds()
+        < AMAZON_VARIANT_FULL_SCAN_SECONDS
+    )
+    root_asins: set[str] = set()
+    root_has_index = False
+    can_skip_known_exclusions = False
     for variation in pending:
+        identity = extract_asin_from_url(variation.url) or variation.url
+        if (
+            can_skip_known_exclusions
+            and identity != (extract_asin_from_url(watch.url) or watch.url)
+            and excluded_term_in_title(watch, str(labels.get(identity) or ""))
+        ):
+            skipped_cached += 1
+            continue
         try:
             if variation.url != watch.url:
                 wait_before_request(request_log_label("Amazon varyasyon", variation.label or variation.url), config)
@@ -1442,15 +1479,25 @@ def _iter_amazon_product_watch_offers(
             if "captcha" in html.lower() and "robot" in html.lower():
                 raise HermesError("Amazon bot korumasi nedeniyle captcha sayfasi dondu.")
             if watch.include_variations:
-                for item in amazon_provider.extract_product_variations(html, variation.url, limit):
-                    identity = extract_asin_from_url(item.url) or item.url
-                    if identity == (extract_asin_from_url(variation.url) or variation.url) and item.label:
+                discovered = amazon_provider.extract_product_variations(html, variation.url, limit)
+                if variation.url == watch.url and catalog is not None and watch.excluded_terms:
+                    root_asins = {extract_asin_from_url(item.url) or item.url for item in discovered}
+                    root_asins.add(identity)
+                    root_has_index = amazon_provider.has_family_variant_index(html)
+                    can_skip_known_exclusions = bool(
+                        catalog_is_fresh and root_has_index and root_asins == previous_root_set
+                    )
+                for item in discovered:
+                    item_identity = extract_asin_from_url(item.url) or item.url
+                    if item_identity == identity and item.label:
                         variation = amazon_provider.AmazonProductVariation(label=item.label, url=item.url)
-                    if identity not in queued and len(pending) < limit:
-                        queued.add(identity)
+                    if item_identity not in queued and len(pending) < limit:
+                        queued.add(item_identity)
                         pending.append(item)
             label = amazon_provider.selected_variation_label(html) or variation.label
             page_offers = _extract_amazon_page_offers(session, variation.url, html, config)
+            if catalog is not None and label:
+                labels[identity] = label
         except Exception as exc:  # noqa: BLE001
             errors.append(f"{variation.label or variation.url} | {exc}")
             log(f"Amazon varyasyonu okunamadı: {errors[-1]}")
@@ -1469,8 +1516,14 @@ def _iter_amazon_product_watch_offers(
             )
     log(
         "Amazon varyasyon taraması: "
-        f"{watch.name or watch.url} | varyant={len(pending)} | teklif={found} | hatalı={len(errors)}"
+        f"{watch.name or watch.url} | varyant={len(pending)} | teklif={found} | "
+        f"önceden_hariç={skipped_cached} | hatalı={len(errors)}"
     )
+    if catalog is not None:
+        catalog["labels"] = labels
+        if not skipped_cached and not errors and root_has_index and root_asins == queued:
+            catalog["root_asins"] = sorted(root_asins)
+            catalog["last_full_scan_at"] = utc_now()
     if not found:
         raise HermesError(errors[-1] if errors else "Amazon sayfasından fiyat bulunamadı.")
 
@@ -1828,8 +1881,12 @@ def check_once(config: HermesConfig) -> None:
         try:
             display_name = watch.name or watch.url
             wait_before_request(request_log_label(seller, display_name), config)
+            variant_catalog = None
             if watch.site == SITE_AMAZON and not is_amazon_search_url(watch.url):
-                offers = _iter_amazon_product_watch_offers(session, watch, config)
+                if watch.include_variations and watch.excluded_terms:
+                    previous_catalog = state_entry.get("amazon_variant_catalog")
+                    variant_catalog = dict(previous_catalog) if isinstance(previous_catalog, dict) else {}
+                offers = _iter_amazon_product_watch_offers(session, watch, config, variant_catalog)
             else:
                 offers = _fetch_watch_offers(session, watch, config)
             offers = filter_official_seller_offers(watch, offers)
@@ -1996,6 +2053,7 @@ def check_once(config: HermesConfig) -> None:
                 "search_group": search_group,
                 "search_group_label": search_group_label,
                 "offer_keys": offer_keys,
+                **({"amazon_variant_catalog": variant_catalog} if variant_catalog is not None else {}),
                 "last_error": None,
                 "last_error_status": None,
                 "last_checked_at": utc_now(),
