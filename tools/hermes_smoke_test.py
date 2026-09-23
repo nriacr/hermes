@@ -365,12 +365,15 @@ class HermesSmokeTests(unittest.TestCase):
         with (patch.object(service, "fetch_amazon_page", side_effect=page_for),
               patch.object(service, "cleaned_html", side_effect=lambda response: response),
               patch.object(service, "wait_before_request"),
-              patch.object(service, "log") as timing_log):
+              patch.object(service, "log") as timing_log,
+              patch.object(service.amazon_provider, "soup_from_html",
+                           wraps=service.amazon_provider.soup_from_html) as html_parser):
             for _ in range(2):
                 offers = list(service._iter_amazon_product_watch_offers(object(), watch, config))
                 self.assertEqual(len(offers), 3)
 
         self.assertEqual(fetched, list(variants) * 2)
+        self.assertEqual(html_parser.call_count, len(variants) * 2)
         phase_messages = [call.args[0] for call in timing_log.call_args_list
                           if "Amazon varyasyon aşama süreleri:" in call.args[0]]
         self.assertEqual(len(phase_messages), 6)
@@ -921,7 +924,7 @@ class HermesSmokeTests(unittest.TestCase):
             SimpleNamespace(label="Pembe", url=variation_urls[2]),
         ]
 
-        def offers_for_url(html, source_url):
+        def offers_for_url(html, source_url, soup=None):
             return [
                 OfferResult(
                     title="Örnek tablet",

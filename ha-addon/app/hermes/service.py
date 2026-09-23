@@ -1208,17 +1208,19 @@ def _extract_amazon_page_offers(
     source_url: str,
     html: str,
     config: HermesConfig,
+    soup=None,
 ) -> List[OfferResult]:
     """Keep the selected new offer separate from a verified Amazon Depo offer.
 
     Read an explicit product-page used accordion first. Fetch the separate
     listing only when needed; both paths verify condition and seller together.
     """
-    offers = amazon_provider.extract_offers(html, source_url=source_url)
+    soup = soup or amazon_provider.parse_product_page(html)
+    offers = amazon_provider.extract_offers(html, source_url=source_url, soup=soup)
     if any(offer.is_warehouse for offer in offers):
         return offers
 
-    used_listing_url = amazon_provider.extract_used_offer_listing_url(html, source_url=source_url)
+    used_listing_url = amazon_provider.extract_used_offer_listing_url(html, source_url=source_url, soup=soup)
     if not used_listing_url:
         return offers
 
@@ -1471,8 +1473,14 @@ def _iter_amazon_product_watch_offers(
             raise_if_age_verification(html)
             if "captcha" in html.lower() and "robot" in html.lower():
                 raise HermesError("Amazon bot korumasi nedeniyle captcha sayfasi dondu.")
+            page_soup = amazon_provider.parse_product_page(html)
             if watch.include_variations:
-                discovered = amazon_provider.extract_product_variations(html, variation.url, limit)
+                discovered = amazon_provider.extract_product_variations(
+                    html,
+                    variation.url,
+                    limit,
+                    soup=page_soup,
+                )
                 for item in discovered:
                     item_identity = extract_asin_from_url(item.url) or item.url
                     if item_identity == identity and item.label:
@@ -1480,11 +1488,13 @@ def _iter_amazon_product_watch_offers(
                     if item_identity not in queued and len(pending) < limit:
                         queued.add(item_identity)
                         pending.append(item)
-            label = amazon_provider.selected_variation_label(html) or variation.label
+            label = amazon_provider.selected_variation_label(html, soup=page_soup) or variation.label
             page_parse_ms = round((time.monotonic() - parse_started_at) * 1000)
             offers_started_at = time.monotonic()
-            page_offers = _extract_amazon_page_offers(session, variation.url, html, config)
-            offer_stage_ms = round((time.monotonic() - offers_started_at) * 1000)
+            try:
+                page_offers = _extract_amazon_page_offers(session, variation.url, html, config, soup=page_soup)
+            finally:
+                offer_stage_ms = round((time.monotonic() - offers_started_at) * 1000)
         except Exception as exc:  # noqa: BLE001
             errors.append(f"{variation.label or variation.url} | {exc}")
             log(f"Amazon varyasyonu okunamadı: {errors[-1]}")

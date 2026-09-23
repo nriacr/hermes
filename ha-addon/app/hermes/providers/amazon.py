@@ -192,13 +192,23 @@ def _script_product_variations(soup, source_url: str, limit: int) -> list[Amazon
     return []
 
 
-def extract_product_variations(html: str, source_url: str, limit: int) -> list[AmazonProductVariation]:
+def parse_product_page(html: str):
+    """Parse an Amazon product page once for the provider's page-level readers."""
+    return soup_from_html(html)
+
+
+def extract_product_variations(
+    html: str,
+    source_url: str,
+    limit: int,
+    soup=None,
+) -> list[AmazonProductVariation]:
     """Discover real variant ASINs; callers follow these edges across dimensions.
 
     A disabled new-product swatch can still have a used offer, so retain its ASIN.
     Never manufacture a color/capacity Cartesian product or reuse swatch prices.
     """
-    soup = soup_from_html(html)
+    soup = soup or parse_product_page(html)
     variations = _script_product_variations(soup, source_url, limit)
     seen_urls: set[str] = {extract_asin_from_url(item.url) or item.url for item in variations}
     # The modern Twister exposes the entire family, not just the currently
@@ -243,8 +253,8 @@ def extract_product_variations(html: str, source_url: str, limit: int) -> list[A
     return variations[: max(1, limit)]
 
 
-def selected_variation_label(html: str) -> str:
-    soup = soup_from_html(html)
+def selected_variation_label(html: str, soup=None) -> str:
+    soup = soup or parse_product_page(html)
     values = []
     for node in soup.select("[id^='inline-twister-expanded-dimension-text-'], [id^='variation_'] .selection"):
         label = _clean_variation_label(node.get_text(" ", strip=True))
@@ -367,9 +377,9 @@ def _extract_visible_primary_price(soup):
     return None
 
 
-def extract_low_stock_quantity(html: str) -> Optional[int]:
+def extract_low_stock_quantity(html: str = "", soup=None) -> Optional[int]:
     """Return Amazon's explicit low-stock quantity, never a generic stock status."""
-    soup = soup_from_html(html)
+    soup = soup or parse_product_page(html)
     texts = [
         element.get_text(" ", strip=True)
         for selector in AMAZON_LOW_STOCK_SELECTORS
@@ -409,9 +419,9 @@ def _is_used_offer_url(url: str) -> bool:
     return query.get("condition") in {"used", "secondhand"}
 
 
-def extract_used_offer_listing_url(html: str, source_url: str = "") -> str:
+def extract_used_offer_listing_url(html: str, source_url: str = "", soup=None) -> str:
     """Find Amazon's dedicated used-offer listing without guessing a seller."""
-    soup = soup_from_html(html)
+    soup = soup or parse_product_page(html)
     for link in soup.select(AMAZON_USED_OFFER_LINK_SELECTOR):
         raw_url = str(link.get("href") or "").strip()
         absolute_url = make_amazon_absolute_url(raw_url) if raw_url else ""
@@ -513,14 +523,14 @@ def extract_primary_seller(soup) -> Optional[str]:
     return None
 
 
-def extract_verified_warehouse_offers_from_listing(html: str, source_url: str) -> list[OfferResult]:
+def extract_verified_warehouse_offers_from_listing(html: str, source_url: str, soup=None) -> list[OfferResult]:
     """Read only explicit Amazon Depo second-hand offers from Amazon's offer list.
 
     The product's primary price is deliberately never reused here.  Amazon can
     show the normal price and a used offer on the same page, so the seller and
     price must come from one concrete used-offer row.
     """
-    soup = soup_from_html(html)
+    soup = soup or parse_product_page(html)
     title, _ = extract_jsonld_product(soup)
     title = title or extract_title(soup) or "Amazon ürünü"
     offers: list[OfferResult] = []
@@ -561,10 +571,10 @@ def extract_verified_warehouse_offers_from_listing(html: str, source_url: str) -
     return offers
 
 
-def extract_offers(html: str, source_url: str = "") -> list[OfferResult]:
+def extract_offers(html: str, source_url: str = "", soup=None) -> list[OfferResult]:
     """Extract normal and used offers separately when Amazon shows both on one page."""
-    soup = soup_from_html(html)
-    warehouse_offers = extract_verified_warehouse_offers_from_listing(html, source_url)
+    soup = soup or parse_product_page(html)
+    warehouse_offers = extract_verified_warehouse_offers_from_listing(html, source_url, soup=soup)
     primary_seller = extract_primary_seller(soup)
     # Amazon repeats corePrice IDs inside the USED accordion. Its form amount
     # and price must never become the selected new offer, even when active.
@@ -572,7 +582,7 @@ def extract_offers(html: str, source_url: str = "") -> list[OfferResult]:
         used_section.decompose()
     jsonld_title, jsonld_price = extract_jsonld_product(soup)
     title: Optional[str] = jsonld_title or extract_title(soup) or "Amazon ürünü"
-    stock_quantity = extract_low_stock_quantity(str(soup))
+    stock_quantity = extract_low_stock_quantity(soup=soup)
     offers: list[OfferResult] = []
 
     primary_price = _extract_visible_primary_price(soup)
