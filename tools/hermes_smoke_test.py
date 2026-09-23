@@ -343,6 +343,66 @@ class HermesSmokeTests(unittest.TestCase):
             expected = Decimal(90000 + index) + Decimal(".87") if offer.is_warehouse else Decimal(120000 + index)
             self.assertEqual(offer.price, expected)
 
+    def test_amazon_exclusions_skip_offer_read_but_still_expand_and_can_upgrade_cache(self):
+        url = "https://www.amazon.com.tr/dp/B000000001"
+        urls = [f"https://www.amazon.com.tr/dp/B00000000{number}" for number in range(1, 4)]
+        labels = {urls[0]: "256 GB", urls[1]: "1 TB", urls[2]: "512 GB"}
+        variations = [service.amazon_provider.AmazonProductVariation(labels[item], item) for item in urls]
+        filtered_watch = WatchRule(
+            name="iPhone", site="amazon", url=url, target_price=Decimal("100000"),
+            include_variations=True, excluded_terms=["1 TB"],
+        )
+        unfiltered_watch = WatchRule(
+            name="iPhone full", site="amazon", url=url, target_price=Decimal("100000"),
+            include_variations=True,
+        )
+        config = SimpleNamespace(request_timeout_seconds=20)
+        session = SimpleNamespace()
+        fetched = []
+
+        def page_for(_session, page_url, _timeout):
+            fetched.append(page_url)
+            return f'<span id="productTitle">Apple iPhone {labels[page_url]}</span>'
+
+        def offers_for(_session, page_url, _html, _config, soup=None):
+            return [service.SearchResultItem(f"Apple iPhone {labels[page_url]}", page_url, Decimal("90000"))]
+
+        with (
+            patch.object(service, "fetch_amazon_page", side_effect=page_for),
+            patch.object(service, "cleaned_html", side_effect=lambda response: response),
+            patch.object(service, "wait_before_request"),
+            patch.object(service.amazon_provider, "extract_product_variations", return_value=variations) as discover,
+            patch.object(service, "_extract_amazon_page_offers", side_effect=offers_for) as offer_reader,
+            patch.object(service, "log") as event_log,
+        ):
+            filtered_offers = list(service._iter_amazon_product_watch_offers(session, filtered_watch, config))
+            self.assertEqual([offer.url for offer in filtered_offers], [urls[0], urls[2]])
+            self.assertEqual(len(fetched), 3)
+            self.assertEqual(offer_reader.call_count, 2)
+
+            repeated_filtered_offers = list(
+                service._iter_amazon_product_watch_offers(session, filtered_watch, config)
+            )
+            self.assertEqual([offer.url for offer in repeated_filtered_offers], [urls[0], urls[2]])
+            self.assertEqual(len(fetched), 3)
+
+            unfiltered_offers = list(service._iter_amazon_product_watch_offers(session, unfiltered_watch, config))
+
+        self.assertEqual([offer.url for offer in unfiltered_offers], urls)
+        self.assertEqual(fetched, [*urls, urls[1]])
+        self.assertEqual(offer_reader.call_count, 3)
+        self.assertEqual(discover.call_count, 4)
+        self.assertTrue(any(
+            "Amazon varyant fiyat okuması hariç tutuldu" in call.args[0]
+            and "hariç tut filtresi: 1 TB" in call.args[0]
+            for call in event_log.call_args_list
+        ))
+        summaries = [
+            call.args[0] for call in event_log.call_args_list
+            if call.args[0].startswith("Amazon varyasyon taraması:")
+        ]
+        self.assertIn("hariç_nedeniyle_fiyat_okuması_atlandı=1", summaries[0])
+
     def test_amazon_inspects_every_variant_page_even_with_collapsed_family_list(self):
         watch = WatchRule(
             name="iPhone", site="amazon", url="https://www.amazon.com.tr/dp/B000000001",
@@ -416,7 +476,7 @@ class HermesSmokeTests(unittest.TestCase):
                            wraps=service.amazon_provider.soup_from_html) as html_parser):
             for _ in range(2):
                 offers = list(service._iter_amazon_product_watch_offers(object(), watch, config))
-                self.assertEqual(len(offers), 3)
+                self.assertEqual(len(offers), 2)
 
         self.assertEqual(fetched, list(variants) * 2)
         self.assertEqual(html_parser.call_count, len(variants) * 2)
@@ -444,6 +504,7 @@ class HermesSmokeTests(unittest.TestCase):
             patch.object(service.amazon_provider, "parse_product_page", return_value=object()) as parse,
             patch.object(service.amazon_provider, "extract_product_variations", return_value=[]) as variations,
             patch.object(service.amazon_provider, "selected_variation_label", return_value="Gümüş"),
+            patch.object(service.amazon_provider, "extract_title", return_value="iPhone"),
             patch.object(service, "_extract_amazon_page_offers", return_value=[offer]) as extract,
             patch.object(service, "wait_before_request"),
         ):

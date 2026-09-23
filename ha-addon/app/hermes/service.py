@@ -1484,6 +1484,7 @@ def _iter_amazon_product_watch_offers(
     errors: List[str] = []
     found = 0
     variation_discovery_pages = 0
+    excluded_price_reads = 0
     for variation in pending:
         identity = extract_asin_from_url(variation.url) or variation.url
         cache_key = str(variation.url or "").strip()
@@ -1500,7 +1501,12 @@ def _iter_amazon_product_watch_offers(
                 and watch.include_variations
                 and snapshot.get("variations") is None
             )
-            if snapshot is None or needs_variation_upgrade:
+            needs_offer_upgrade = (
+                snapshot is not None
+                and snapshot.get("offers_skipped_by_exclusion")
+                and tuple(snapshot.get("offer_skip_excluded_terms") or ()) != tuple(watch.excluded_terms)
+            )
+            if snapshot is None or needs_variation_upgrade or needs_offer_upgrade:
                 if variation.url != watch.url:
                     wait_before_request(request_log_label("Amazon varyasyon", variation.label or variation.url), config)
                 page_started_at = time.monotonic()
@@ -1528,9 +1534,23 @@ def _iter_amazon_product_watch_offers(
                         limit,
                         soup=page_soup,
                     )
-                if snapshot is None:
-                    label = amazon_provider.selected_variation_label(html, soup=page_soup) or variation.label
-                    page_parse_ms = round((time.monotonic() - parse_started_at) * 1000)
+                selected_label = amazon_provider.selected_variation_label(html, soup=page_soup)
+                page_title = amazon_provider.extract_title(page_soup) or ""
+                exclusion_term = excluded_term_in_title(
+                    watch,
+                    " ".join((page_title, selected_label, variation.label)),
+                )
+                page_parse_ms = round((time.monotonic() - parse_started_at) * 1000)
+                skipped_offer_terms = bool(exclusion_term)
+                if skipped_offer_terms:
+                    excluded_price_reads += 1
+                    page_offers = []
+                    log(
+                        "Amazon varyant fiyat okuması hariç tutuldu: "
+                        f"{log_cell(page_title or selected_label or variation.label, 90)} | "
+                        f"hariç tut filtresi: {exclusion_term}"
+                    )
+                else:
                     offers_started_at = time.monotonic()
                     try:
                         page_offers = _extract_amazon_page_offers(
@@ -1542,16 +1562,24 @@ def _iter_amazon_product_watch_offers(
                         )
                     finally:
                         offer_stage_ms = round((time.monotonic() - offers_started_at) * 1000)
+                if snapshot is None:
                     snapshot = {
-                        "label": label,
+                        "label": selected_label or variation.label,
                         "variations": discovered,
                         "offers": page_offers,
+                        "offers_skipped_by_exclusion": skipped_offer_terms,
+                        "offer_skip_excluded_terms": tuple(watch.excluded_terms) if skipped_offer_terms else (),
                     }
                     _remember_amazon_product_page(page_cache, cache_key, snapshot)
                     _increment_amazon_cycle_metric(session, "product_parse_cache_misses")
                 else:
                     snapshot["variations"] = discovered
-                    page_parse_ms = round((time.monotonic() - parse_started_at) * 1000)
+                    if snapshot.get("offers") is None or needs_offer_upgrade:
+                        snapshot["offers"] = page_offers
+                        snapshot["offers_skipped_by_exclusion"] = skipped_offer_terms
+                        snapshot["offer_skip_excluded_terms"] = (
+                            tuple(watch.excluded_terms) if skipped_offer_terms else ()
+                        )
                     _increment_amazon_cycle_metric(session, "product_parse_cache_upgrades")
             else:
                 _increment_amazon_cycle_metric(session, "product_parse_cache_hits")
@@ -1602,7 +1630,8 @@ def _iter_amazon_product_watch_offers(
     log(
         "Amazon varyasyon taraması: "
         f"{watch.name or watch.url} | varyant={len(pending)} | teklif={found} | "
-        f"hatalı={len(errors)} | varyant_keşif_sayfası={variation_discovery_pages}"
+        f"hatalı={len(errors)} | varyant_keşif_sayfası={variation_discovery_pages} | "
+        f"hariç_nedeniyle_fiyat_okuması_atlandı={excluded_price_reads}"
     )
     if not found:
         raise HermesError(errors[-1] if errors else "Amazon sayfasından fiyat bulunamadı.")

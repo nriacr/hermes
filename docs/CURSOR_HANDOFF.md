@@ -1,7 +1,7 @@
 # Hermes Cursor Handoff
 
 This document is the current technical and product handoff for continuing Hermes
-in Cursor. It describes the real repository at version `2.5.25`; source code and
+in Cursor. It describes the real repository at version `2.5.26`; source code and
 tests remain authoritative when this document and code ever differ.
 
 ## 1. Product snapshot
@@ -217,6 +217,9 @@ verified warehouse offers remain separate identities.
   Amazon provides a collapsed-family ASIN list, so newly exposed combinations
   are not missed. Variation-scan logs report how many pages contributed variant
   discovery.
+- Apply excluded-term matches from the selected variation label and product
+  title before reading offer prices. Still inspect each page's variation edges
+  so excluded capacities do not hide other real combinations.
 - End-of-cycle logs report how many watches of each priority started, were due,
   or were deferred, plus Amazon page calls, transport attempts, response-cache
   hits, and parsed-product-cache hits/misses/upgrades. Use those measurements
