@@ -1483,7 +1483,6 @@ def _iter_amazon_product_watch_offers(
     page_cache = _amazon_product_page_parse_cache(session)
     errors: List[str] = []
     found = 0
-    variation_graph_complete = False
     variation_discovery_pages = 0
     for variation in pending:
         identity = extract_asin_from_url(variation.url) or variation.url
@@ -1496,8 +1495,6 @@ def _iter_amazon_product_watch_offers(
         variation_started_at = 0.0
         try:
             variation_started_at = time.monotonic()
-            if snapshot is not None and snapshot.get("variations_complete"):
-                variation_graph_complete = True
             needs_variation_upgrade = (
                 snapshot is not None
                 and watch.include_variations
@@ -1523,8 +1520,7 @@ def _iter_amazon_product_watch_offers(
                 parse_started_at = time.monotonic()
                 page_soup = amazon_provider.parse_product_page(html)
                 discovered = None
-                discovered_complete = False
-                if watch.include_variations and not variation_graph_complete:
+                if watch.include_variations:
                     variation_discovery_pages += 1
                     discovered = amazon_provider.extract_product_variations(
                         html,
@@ -1532,11 +1528,6 @@ def _iter_amazon_product_watch_offers(
                         limit,
                         soup=page_soup,
                     )
-                    discovered_complete = amazon_provider.has_complete_product_variation_family(
-                        html,
-                        soup=page_soup,
-                    )
-                    variation_graph_complete = variation_graph_complete or discovered_complete
                 if snapshot is None:
                     label = amazon_provider.selected_variation_label(html, soup=page_soup) or variation.label
                     page_parse_ms = round((time.monotonic() - parse_started_at) * 1000)
@@ -1554,14 +1545,12 @@ def _iter_amazon_product_watch_offers(
                     snapshot = {
                         "label": label,
                         "variations": discovered,
-                        "variations_complete": discovered_complete,
                         "offers": page_offers,
                     }
                     _remember_amazon_product_page(page_cache, cache_key, snapshot)
                     _increment_amazon_cycle_metric(session, "product_parse_cache_misses")
                 else:
                     snapshot["variations"] = discovered
-                    snapshot["variations_complete"] = discovered_complete
                     page_parse_ms = round((time.monotonic() - parse_started_at) * 1000)
                     _increment_amazon_cycle_metric(session, "product_parse_cache_upgrades")
             else:
@@ -1610,14 +1599,10 @@ def _iter_amazon_product_watch_offers(
             f"teklif={offer_stage_ms} ms | sonuç={consumer_ms} ms | "
             f"toplam={page_read_ms + page_parse_ms + offer_stage_ms + consumer_ms} ms"
         )
-    family_status = "kapalı"
-    if watch.include_variations:
-        family_status = "tam" if variation_graph_complete else "kademeli"
     log(
         "Amazon varyasyon taraması: "
         f"{watch.name or watch.url} | varyant={len(pending)} | teklif={found} | "
-        f"hatalı={len(errors)} | varyant_keşif_sayfası={variation_discovery_pages} | "
-        f"aile_listesi={family_status}"
+        f"hatalı={len(errors)} | varyant_keşif_sayfası={variation_discovery_pages}"
     )
     if not found:
         raise HermesError(errors[-1] if errors else "Amazon sayfasından fiyat bulunamadı.")

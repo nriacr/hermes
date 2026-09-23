@@ -343,7 +343,7 @@ class HermesSmokeTests(unittest.TestCase):
             expected = Decimal(90000 + index) + Decimal(".87") if offer.is_warehouse else Decimal(120000 + index)
             self.assertEqual(offer.price, expected)
 
-    def test_amazon_complete_family_is_discovered_once_but_every_variant_is_checked(self):
+    def test_amazon_inspects_every_variant_page_even_with_collapsed_family_list(self):
         watch = WatchRule(
             name="iPhone", site="amazon", url="https://www.amazon.com.tr/dp/B000000001",
             target_price=Decimal("100000"), include_variations=True,
@@ -377,15 +377,14 @@ class HermesSmokeTests(unittest.TestCase):
             offers = list(service._iter_amazon_product_watch_offers(session, watch, config))
 
         self.assertEqual(fetched, urls)
-        self.assertEqual(discover.call_count, 1)
+        self.assertEqual(discover.call_count, 3)
         self.assertEqual(offers_reader.call_count, 3)
         self.assertEqual([offer.url for offer in offers], urls)
         summary = next(
             call.args[0] for call in scan_log.call_args_list
             if call.args[0].startswith("Amazon varyasyon taraması:")
         )
-        self.assertIn("varyant_keşif_sayfası=1", summary)
-        self.assertIn("aile_listesi=tam", summary)
+        self.assertIn("varyant_keşif_sayfası=3", summary)
 
     def test_amazon_excluded_variants_are_refetched_each_cycle(self):
         watch = WatchRule(
@@ -444,7 +443,6 @@ class HermesSmokeTests(unittest.TestCase):
             patch.object(service, "cleaned_html", return_value="html"),
             patch.object(service.amazon_provider, "parse_product_page", return_value=object()) as parse,
             patch.object(service.amazon_provider, "extract_product_variations", return_value=[]) as variations,
-            patch.object(service.amazon_provider, "has_complete_product_variation_family", return_value=False),
             patch.object(service.amazon_provider, "selected_variation_label", return_value="Gümüş"),
             patch.object(service, "_extract_amazon_page_offers", return_value=[offer]) as extract,
             patch.object(service, "wait_before_request"),
