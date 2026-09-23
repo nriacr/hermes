@@ -108,6 +108,8 @@ Kontrol sırası aynı siteye art arda istek gelmesini azaltacak biçimde dengel
 
 Amazon aramalarında başlığı `Hariç tut` terimleriyle eşleşen sonuçlar, ürün ayrıntısı isteği açılmadan elenir. Varyasyonlu ürünlerde bulunan her varyasyon her uygun çevrimde yeniden okunur; varyasyon bağlantıları veya fiyatları önbellekten atlanmaz.
 
+Amazon istek günlüklerinde, istek öncesi bekleme süresi ile ağ yanıt süresi ayrı gösterilir. Varyasyon okumalarında ayrıca sayfanın tamamlanma süresi kaydedilir; bu süre yedek bağlantı denemelerini de kapsayabilir.
+
 ## Geliştirme Notu
 
 Hermes mimarisi provider tabanlıdır. Her site için parser/fiyat yakalama kodu ayrı dosyadadır:

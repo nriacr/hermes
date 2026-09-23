@@ -806,7 +806,7 @@ def should_send_search_error_notification(state_entry: Dict[str, Any]) -> bool:
 
 def wait_before_request(label: str, config: HermesConfig) -> None:
     delay = random.randint(config.request_delay_min_seconds, config.request_delay_max_seconds)
-    log(f"{label} istegi oncesi {delay} saniye bekleniyor.")
+    log(f"{label} istegi oncesi {delay} saniye ({delay * 1000} ms) bekleniyor.")
     if delay > 0:
         time.sleep(delay)
 
@@ -1450,7 +1450,15 @@ def _iter_amazon_product_watch_offers(
         try:
             if variation.url != watch.url:
                 wait_before_request(request_log_label("Amazon varyasyon", variation.label or variation.url), config)
-            response = fetch_amazon_page(session, variation.url, config.request_timeout_seconds)
+            page_started_at = time.monotonic()
+            try:
+                response = fetch_amazon_page(session, variation.url, config.request_timeout_seconds)
+            finally:
+                log(
+                    "Amazon varyasyon sayfa okuma süresi: "
+                    f"varyasyon={log_cell(variation.label or identity, 64)} | "
+                    f"toplam={round((time.monotonic() - page_started_at) * 1000)} ms"
+                )
             html = cleaned_html(response)
             raise_if_age_verification(html)
             if "captcha" in html.lower() and "robot" in html.lower():

@@ -1691,13 +1691,18 @@ class HermesSmokeTests(unittest.TestCase):
         original_curl_requests = http_client.curl_requests
         http_client.curl_requests = None
         try:
-            first = fetch_amazon_page(session, url, 10)
-            second = fetch_amazon_page(session, url, 10)
+            with patch.object(http_client, "log") as timing_log:
+                first = fetch_amazon_page(session, url, 10)
+                second = fetch_amazon_page(session, url, 10)
         finally:
             http_client.curl_requests = original_curl_requests
 
         self.assertIs(first, second)
         self.assertEqual(session.calls, 1)
+        messages = [call.args[0] for call in timing_log.call_args_list]
+        self.assertEqual(len(messages), 1)
+        self.assertIn("taşıma=requests", messages[0])
+        self.assertIn("süre=", messages[0])
 
     def test_amazon_hard_curl_block_can_recover_with_requests_after_rescue(self):
         curl_calls = {"count": 0}

@@ -218,6 +218,34 @@ def _is_usable_amazon_response(response, expect_search: bool) -> bool:
     )
 
 
+def _timed_amazon_network_call(transport: str, candidate: str, expect_search: bool, request):
+    started_at = time.monotonic()
+    try:
+        response = request()
+    except Exception as exc:  # noqa: BLE001
+        elapsed_ms = round((time.monotonic() - started_at) * 1000)
+        log(
+            "Amazon ağ yanıt süresi: "
+            f"taşıma={transport} | tip={_amazon_request_type(candidate, expect_search)} | "
+            f"durum={_amazon_error_status(exc) or 'hata'} | süre={elapsed_ms} ms | "
+            f"adres={_amazon_timing_url(candidate)}"
+        )
+        raise
+    elapsed_ms = round((time.monotonic() - started_at) * 1000)
+    log(
+        "Amazon ağ yanıt süresi: "
+        f"taşıma={transport} | tip={_amazon_request_type(candidate, expect_search)} | "
+        f"durum={getattr(response, 'status_code', '-')} | süre={elapsed_ms} ms | "
+        f"adres={_amazon_timing_url(candidate)}"
+    )
+    return response
+
+
+def _amazon_timing_url(url: str) -> str:
+    parsed = urlsplit(str(url or ""))
+    return f"{parsed.netloc}{parsed.path}"[:120]
+
+
 def _get_amazon_response(session, candidate: str, timeout: int, expect_search: bool):
     cache = _amazon_response_cache(session)
     cache_key = _amazon_cache_key(candidate, expect_search)
@@ -225,11 +253,16 @@ def _get_amazon_response(session, candidate: str, timeout: int, expect_search: b
     if cached_response is not None:
         return cached_response
 
-    response = session.get(
+    response = _timed_amazon_network_call(
+        "requests",
         candidate,
-        headers=amazon_headers(candidate),
-        timeout=timeout,
-        allow_redirects=True,
+        expect_search,
+        lambda: session.get(
+            candidate,
+            headers=amazon_headers(candidate),
+            timeout=timeout,
+            allow_redirects=True,
+        ),
     )
     response.raise_for_status()
     if not _is_usable_amazon_response(response, expect_search):
@@ -251,12 +284,17 @@ def _get_amazon_response_with_curl(session: requests.Session, candidate: str, ti
     if curl_session is None:
         curl_session = curl_requests.Session()
         setattr(session, "_hermes_amazon_curl_session", curl_session)
-    response = curl_session.get(
+    response = _timed_amazon_network_call(
+        "curl_chrome",
         candidate,
-        headers=amazon_headers(candidate),
-        timeout=timeout,
-        allow_redirects=True,
-        impersonate="chrome124",
+        expect_search,
+        lambda: curl_session.get(
+            candidate,
+            headers=amazon_headers(candidate),
+            timeout=timeout,
+            allow_redirects=True,
+            impersonate="chrome124",
+        ),
     )
     response.raise_for_status()
     if not _is_usable_amazon_response(response, expect_search):
@@ -313,6 +351,7 @@ def _get_amazon_response_with_browser(session: requests.Session, candidate: str,
             candidate,
         ]
         try:
+            started_at = time.monotonic()
             completed = subprocess.run(
                 command,
                 capture_output=True,
@@ -321,9 +360,21 @@ def _get_amazon_response_with_browser(session: requests.Session, candidate: str,
                 check=False,
             )
         except subprocess.TimeoutExpired as exc:
+            log(
+                "Amazon ağ yanıt süresi: "
+                f"taşıma=browser | tip={_amazon_request_type(candidate, expect_search)} | "
+                f"durum=zaman_aşımı | süre={round((time.monotonic() - started_at) * 1000)} ms | "
+                f"adres={_amazon_timing_url(candidate)}"
+            )
             raise HermesError("Amazon gercek tarayici modu zaman asimina ugradi.") from exc
         except OSError as exc:
             raise HermesError(f"Amazon gercek tarayici modu baslatilamadi: {exc}") from exc
+    log(
+        "Amazon ağ yanıt süresi: "
+        f"taşıma=browser | tip={_amazon_request_type(candidate, expect_search)} | "
+        f"durum={completed.returncode} | süre={round((time.monotonic() - started_at) * 1000)} ms | "
+        f"adres={_amazon_timing_url(candidate)}"
+    )
 
     stdout = completed.stdout or ""
     stderr = completed.stderr or ""
@@ -484,11 +535,16 @@ def _prime_amazon_session(session: requests.Session, timeout: int) -> None:
     if getattr(session, "_hermes_amazon_primed", False):
         return
     _seed_amazon_session(session)
-    response = session.get(
+    response = _timed_amazon_network_call(
+        "requests_prime",
         "https://www.amazon.com.tr/",
-        headers=amazon_headers("https://www.amazon.com.tr/"),
-        timeout=timeout,
-        allow_redirects=True,
+        False,
+        lambda: session.get(
+            "https://www.amazon.com.tr/",
+            headers=amazon_headers("https://www.amazon.com.tr/"),
+            timeout=timeout,
+            allow_redirects=True,
+        ),
     )
     response.raise_for_status()
     if _is_amazon_protection_page(decode_response_text(response)):
