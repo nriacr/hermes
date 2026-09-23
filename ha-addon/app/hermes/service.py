@@ -113,7 +113,6 @@ AMAZON_NORMAL_EMPTY_SEARCH_MARKERS = (
     "amazon arama sayfasinda okunabilir fiyat bulunamadi",
 )
 WAREHOUSE_STATE_MIGRATION_VERSION = 4
-AMAZON_VARIANT_FULL_SCAN_SECONDS = 30 * 60
 
 
 def raise_if_age_verification(html: str) -> None:
@@ -1435,7 +1434,6 @@ def _iter_amazon_product_watch_offers(
     session: requests.Session,
     watch: WatchRule,
     config: HermesConfig,
-    catalog: Dict[str, Any] | None = None,
 ):
     """Yield verified depot offers before continuing to the next variant.
 
@@ -1447,29 +1445,8 @@ def _iter_amazon_product_watch_offers(
     limit = 60 if watch.include_variations else 1
     errors: List[str] = []
     found = 0
-    skipped_cached = 0
-    previous_labels = catalog.get("labels") if isinstance(catalog, dict) else None
-    labels = dict(previous_labels) if isinstance(previous_labels, dict) else {}
-    previous_root_asins = catalog.get("root_asins") if isinstance(catalog, dict) else None
-    previous_root_set = set(previous_root_asins) if isinstance(previous_root_asins, list) else set()
-    previous_full_scan = parse_iso_datetime(catalog.get("last_full_scan_at")) if isinstance(catalog, dict) else None
-    catalog_is_fresh = bool(
-        previous_full_scan
-        and 0 <= (local_now().astimezone(timezone.utc) - previous_full_scan).total_seconds()
-        < AMAZON_VARIANT_FULL_SCAN_SECONDS
-    )
-    root_asins: set[str] = set()
-    root_has_index = False
-    can_skip_known_exclusions = False
     for variation in pending:
         identity = extract_asin_from_url(variation.url) or variation.url
-        if (
-            can_skip_known_exclusions
-            and identity != (extract_asin_from_url(watch.url) or watch.url)
-            and excluded_term_in_title(watch, str(labels.get(identity) or ""))
-        ):
-            skipped_cached += 1
-            continue
         try:
             if variation.url != watch.url:
                 wait_before_request(request_log_label("Amazon varyasyon", variation.label or variation.url), config)
@@ -1480,13 +1457,6 @@ def _iter_amazon_product_watch_offers(
                 raise HermesError("Amazon bot korumasi nedeniyle captcha sayfasi dondu.")
             if watch.include_variations:
                 discovered = amazon_provider.extract_product_variations(html, variation.url, limit)
-                if variation.url == watch.url and catalog is not None and watch.excluded_terms:
-                    root_asins = {extract_asin_from_url(item.url) or item.url for item in discovered}
-                    root_asins.add(identity)
-                    root_has_index = amazon_provider.has_family_variant_index(html)
-                    can_skip_known_exclusions = bool(
-                        catalog_is_fresh and root_has_index and root_asins == previous_root_set
-                    )
                 for item in discovered:
                     item_identity = extract_asin_from_url(item.url) or item.url
                     if item_identity == identity and item.label:
@@ -1496,8 +1466,6 @@ def _iter_amazon_product_watch_offers(
                         pending.append(item)
             label = amazon_provider.selected_variation_label(html) or variation.label
             page_offers = _extract_amazon_page_offers(session, variation.url, html, config)
-            if catalog is not None and label:
-                labels[identity] = label
         except Exception as exc:  # noqa: BLE001
             errors.append(f"{variation.label or variation.url} | {exc}")
             log(f"Amazon varyasyonu okunamadı: {errors[-1]}")
@@ -1517,13 +1485,8 @@ def _iter_amazon_product_watch_offers(
     log(
         "Amazon varyasyon taraması: "
         f"{watch.name or watch.url} | varyant={len(pending)} | teklif={found} | "
-        f"önceden_hariç={skipped_cached} | hatalı={len(errors)}"
+        f"hatalı={len(errors)}"
     )
-    if catalog is not None:
-        catalog["labels"] = labels
-        if not skipped_cached and not errors and root_has_index and root_asins == queued:
-            catalog["root_asins"] = sorted(root_asins)
-            catalog["last_full_scan_at"] = utc_now()
     if not found:
         raise HermesError(errors[-1] if errors else "Amazon sayfasından fiyat bulunamadı.")
 
@@ -1881,12 +1844,8 @@ def check_once(config: HermesConfig) -> None:
         try:
             display_name = watch.name or watch.url
             wait_before_request(request_log_label(seller, display_name), config)
-            variant_catalog = None
             if watch.site == SITE_AMAZON and not is_amazon_search_url(watch.url):
-                if watch.include_variations and watch.excluded_terms:
-                    previous_catalog = state_entry.get("amazon_variant_catalog")
-                    variant_catalog = dict(previous_catalog) if isinstance(previous_catalog, dict) else {}
-                offers = _iter_amazon_product_watch_offers(session, watch, config, variant_catalog)
+                offers = _iter_amazon_product_watch_offers(session, watch, config)
             else:
                 offers = _fetch_watch_offers(session, watch, config)
             offers = filter_official_seller_offers(watch, offers)
@@ -2042,8 +2001,10 @@ def check_once(config: HermesConfig) -> None:
                     save_incremental_price_summary(summary_rows, stock_rows)
                     save_json(STATE_PATH, state)
 
+            updated_state_entry = dict(state_entry)
+            updated_state_entry.pop("amazon_variant_catalog", None)
             state[watch_key] = {
-                **dict(state_entry),
+                **updated_state_entry,
                 "site": watch.site,
                 "watch_name": watch.name,
                 "tracking_id": watch.tracking_id,
@@ -2053,7 +2014,6 @@ def check_once(config: HermesConfig) -> None:
                 "search_group": search_group,
                 "search_group_label": search_group_label,
                 "offer_keys": offer_keys,
-                **({"amazon_variant_catalog": variant_catalog} if variant_catalog is not None else {}),
                 "last_error": None,
                 "last_error_status": None,
                 "last_checked_at": utc_now(),

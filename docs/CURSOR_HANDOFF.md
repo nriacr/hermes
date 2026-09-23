@@ -1,7 +1,7 @@
 # Hermes Cursor Handoff
 
 This document is the current technical and product handoff for continuing Hermes
-in Cursor. It describes the real repository at version `2.5.18`; source code and
+in Cursor. It describes the real repository at version `2.5.19`; source code and
 tests remain authoritative when this document and code ever differ.
 
 ## 1. Product snapshot
