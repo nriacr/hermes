@@ -1447,18 +1447,26 @@ def _iter_amazon_product_watch_offers(
     found = 0
     for variation in pending:
         identity = extract_asin_from_url(variation.url) or variation.url
+        page_read_ms = 0
+        page_parse_ms = 0
+        offer_stage_ms = 0
+        consumer_ms = 0
+        variation_started_at = 0.0
         try:
             if variation.url != watch.url:
                 wait_before_request(request_log_label("Amazon varyasyon", variation.label or variation.url), config)
+            variation_started_at = time.monotonic()
             page_started_at = time.monotonic()
             try:
                 response = fetch_amazon_page(session, variation.url, config.request_timeout_seconds)
             finally:
+                page_read_ms = round((time.monotonic() - page_started_at) * 1000)
                 log(
                     "Amazon varyasyon sayfa okuma süresi: "
                     f"varyasyon={log_cell(variation.label or identity, 64)} | "
-                    f"toplam={round((time.monotonic() - page_started_at) * 1000)} ms"
+                    f"toplam={page_read_ms} ms"
                 )
+            parse_started_at = time.monotonic()
             html = cleaned_html(response)
             raise_if_age_verification(html)
             if "captcha" in html.lower() and "robot" in html.lower():
@@ -1473,13 +1481,24 @@ def _iter_amazon_product_watch_offers(
                         queued.add(item_identity)
                         pending.append(item)
             label = amazon_provider.selected_variation_label(html) or variation.label
+            page_parse_ms = round((time.monotonic() - parse_started_at) * 1000)
+            offers_started_at = time.monotonic()
             page_offers = _extract_amazon_page_offers(session, variation.url, html, config)
+            offer_stage_ms = round((time.monotonic() - offers_started_at) * 1000)
         except Exception as exc:  # noqa: BLE001
             errors.append(f"{variation.label or variation.url} | {exc}")
             log(f"Amazon varyasyonu okunamadı: {errors[-1]}")
+            log(
+                "Amazon varyasyon aşama süreleri: "
+                f"varyasyon={log_cell(variation.label or identity, 64)} | "
+                f"sayfa={page_read_ms} ms | ayrıştırma={page_parse_ms} ms | "
+                f"teklif={offer_stage_ms} ms | sonuç=0 ms | "
+                f"toplam={round((time.monotonic() - variation_started_at) * 1000) if variation_started_at else 0} ms"
+            )
             continue
         # Yield outside the fetch exception handler: notification failures belong
         # to the caller, not to the provider's parsing/error handling.
+        consumer_started_at = time.monotonic()
         for offer in sorted(page_offers, key=lambda item: (not item.is_warehouse, item.price)):
             found += 1
             yield OfferResult(
@@ -1490,6 +1509,14 @@ def _iter_amazon_product_watch_offers(
                 is_warehouse=offer.is_warehouse,
                 stock_quantity=offer.stock_quantity,
             )
+        consumer_ms = round((time.monotonic() - consumer_started_at) * 1000)
+        log(
+            "Amazon varyasyon aşama süreleri: "
+            f"varyasyon={log_cell(variation.label or identity, 64)} | "
+            f"sayfa={page_read_ms} ms | ayrıştırma={page_parse_ms} ms | "
+            f"teklif={offer_stage_ms} ms | sonuç={consumer_ms} ms | "
+            f"toplam={page_read_ms + page_parse_ms + offer_stage_ms + consumer_ms} ms"
+        )
     log(
         "Amazon varyasyon taraması: "
         f"{watch.name or watch.url} | varyant={len(pending)} | teklif={found} | "
