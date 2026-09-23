@@ -380,6 +380,41 @@ class HermesSmokeTests(unittest.TestCase):
         self.assertIn("ayrıştırma=", phase_messages[0])
         self.assertIn("sonuç=", phase_messages[0])
 
+    def test_amazon_product_page_parse_is_shared_between_watches_in_one_cycle(self):
+        url = "https://www.amazon.com.tr/dp/B000000001"
+        watches = [
+            WatchRule("iPhone", "amazon", url, Decimal("100000"), include_variations=True),
+            WatchRule("Telefon fırsatı", "amazon", url, Decimal("95000"), include_variations=True),
+        ]
+        config = SimpleNamespace(request_timeout_seconds=20)
+        session = SimpleNamespace()
+        offer = service.SearchResultItem(
+            "iPhone Gümüş", url, Decimal("90000"), is_warehouse=True
+        )
+
+        with (
+            patch.object(service, "fetch_amazon_page", return_value="html") as fetch,
+            patch.object(service, "cleaned_html", return_value="html"),
+            patch.object(service.amazon_provider, "parse_product_page", return_value=object()) as parse,
+            patch.object(service.amazon_provider, "extract_product_variations", return_value=[]) as variations,
+            patch.object(service.amazon_provider, "selected_variation_label", return_value="Gümüş"),
+            patch.object(service, "_extract_amazon_page_offers", return_value=[offer]) as extract,
+            patch.object(service, "wait_before_request"),
+        ):
+            results = [
+                list(service._iter_amazon_product_watch_offers(session, watch, config))
+                for watch in watches
+            ]
+
+        self.assertEqual(fetch.call_count, 1)
+        self.assertEqual(parse.call_count, 1)
+        self.assertEqual(variations.call_count, 1)
+        self.assertEqual(extract.call_count, 1)
+        self.assertEqual([len(result) for result in results], [1, 1])
+        metrics = session._hermes_amazon_cycle_metrics
+        self.assertEqual(metrics["product_parse_cache_misses"], 1)
+        self.assertEqual(metrics["product_parse_cache_hits"], 1)
+
     def test_amazon_search_skips_excluded_cards_before_detail_requests(self):
         watch = WatchRule(
             name="iPhone", site="amazon", url="https://www.amazon.com.tr/s?k=iphone",
@@ -1712,6 +1747,9 @@ class HermesSmokeTests(unittest.TestCase):
         self.assertEqual(len(messages), 1)
         self.assertIn("taşıma=requests", messages[0])
         self.assertIn("süre=", messages[0])
+        self.assertEqual(session._hermes_amazon_cycle_metrics["page_fetch_calls"], 2)
+        self.assertEqual(session._hermes_amazon_cycle_metrics["network_attempts"], 1)
+        self.assertEqual(session._hermes_amazon_cycle_metrics["response_cache_hits"], 1)
 
     def test_amazon_hard_curl_block_can_recover_with_requests_after_rescue(self):
         curl_calls = {"count": 0}
@@ -2528,6 +2566,83 @@ class HermesSmokeTests(unittest.TestCase):
                 self.assertEqual(prices_by_url["https://example.com/fresh"], "90 TL")
             finally:
                 service.SUMMARY_PATH = original_summary_path
+
+    def test_cycle_keeps_last_prices_for_medium_and_low_watches_until_their_turn(self):
+        now = datetime.now(timezone.utc)
+        medium = WatchRule(
+            "Orta öncelik", "nordbron", "https://nordbron.com/orta", Decimal("150"), priority="medium"
+        )
+        low = WatchRule(
+            "Düşük öncelik", "nordbron", "https://nordbron.com/dusuk", Decimal("250"), priority="low"
+        )
+        high = WatchRule(
+            "Yüksek öncelik", "nordbron", "https://nordbron.com/yuksek", Decimal("350"), priority="high"
+        )
+        watches = [medium, low, high]
+        state = {"_meta": {"warehouse_state_migration_version": service.WAREHOUSE_STATE_MIGRATION_VERSION}}
+        for watch, price in ((medium, "120"), (low, "220")):
+            watch_key = service.normalize_item_key("watch", watch.site, watch.tracking_id or watch.name, watch.url, watch.size)
+            offer_key = f"cached-{watch.priority}"
+            state[watch_key] = {"offer_keys": [offer_key], "last_checked_at": now.isoformat()}
+            state[offer_key] = {
+                "last_price": price,
+                "min_price": price,
+                "max_price": price,
+                "title": f"Önceden okunan {watch.name}",
+                "url": watch.url,
+                "configured_url": watch.url,
+                "site": watch.site,
+                "tracking_id": watch.tracking_id,
+                "priority": watch.priority,
+                "last_checked_at": now.isoformat(),
+            }
+
+        config = SimpleNamespace(
+            watches=watches,
+            interval_seconds=60,
+            request_timeout_seconds=20,
+            request_delay_min_seconds=0,
+            request_delay_max_seconds=0,
+            pushover_user_key="test",
+            pushover_api_token="test",
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_path = Path(tmpdir) / "state.json"
+            summary_path = Path(tmpdir) / "latest_price_summary.json"
+            state_path.write_text(json.dumps(state), encoding="utf-8")
+            with (
+                patch.object(service, "STATE_PATH", state_path),
+                patch.object(service, "SUMMARY_PATH", summary_path),
+                patch.object(service, "local_now", return_value=now),
+                patch.object(service, "wait_before_request"),
+                patch.object(service, "log") as cycle_log,
+                patch.object(
+                    service,
+                    "_fetch_watch_offers",
+                    return_value=[OfferResult("Yeni fırsat", Decimal("300"), url=high.url)],
+                ) as fetch,
+                patch.object(service, "send_pushover"),
+                patch.object(service, "maybe_alert_summary_drop"),
+                patch.object(service, "maybe_alert_search_failures"),
+            ):
+                service.check_once(config)
+
+            fetch.assert_called_once()
+            payload = json.loads(summary_path.read_text(encoding="utf-8"))
+
+        rows_by_priority = {row["priority"]: row for row in payload["rows"]}
+        self.assertEqual(set(rows_by_priority), {"high", "medium", "low"})
+        self.assertEqual(rows_by_priority["medium"]["price"], "120 TL")
+        self.assertEqual(rows_by_priority["low"]["price"], "220 TL")
+        self.assertEqual(rows_by_priority["high"]["price"], "300 TL")
+        coverage_line = next(
+            call.args[0]
+            for call in cycle_log.call_args_list
+            if call.args and "Çevrim öncelik kapsamı:" in call.args[0]
+        )
+        self.assertIn("yüksek=1 başladı, 1 sırası geldi, 0 ertelendi", coverage_line)
+        self.assertIn("orta=0 başladı, 0 sırası geldi, 1 ertelendi", coverage_line)
+        self.assertIn("düşük=0 başladı, 0 sırası geldi, 1 ertelendi", coverage_line)
 
     def test_incremental_summary_removes_stale_rows_for_a_failed_watch(self):
         with tempfile.TemporaryDirectory() as tmpdir:

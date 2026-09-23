@@ -108,7 +108,7 @@ Kontrol sırası aynı siteye art arda istek gelmesini azaltacak biçimde dengel
 
 Amazon aramalarında başlığı `Hariç tut` terimleriyle eşleşen sonuçlar, ürün ayrıntısı isteği açılmadan elenir. Varyasyonlu ürünlerde bulunan her varyasyon her uygun çevrimde yeniden okunur; varyasyon bağlantıları veya fiyatları önbellekten atlanmaz.
 
-Amazon istek günlüklerinde, istek öncesi bekleme süresi ile ağ yanıt süresi ayrı gösterilir. Varyasyon okumalarında sayfa ayrıştırma, teklif çıkarma ve sonuç işleme süreleri de ayrı kaydedilir; sayfa okuma süresi yedek bağlantı denemelerini kapsayabilir. Ürün sayfası ayrıştırıcıları aynı HTML ağacını paylaşarak gereksiz tekrar ayrıştırmayı önler.
+Amazon istek günlüklerinde, istek öncesi bekleme süresi ile ağ yanıt süresi ayrı gösterilir. Varyasyon okumalarında sayfa ayrıştırma, teklif çıkarma ve sonuç işleme süreleri de ayrı kaydedilir; sayfa okuma süresi yedek bağlantı denemelerini kapsayabilir. Ürün sayfası ayrıştırıcıları aynı HTML ağacını paylaşır. Aynı Amazon ürün linki aynı çevrimde birden fazla kartta varsa, ayrıştırılmış sayfa sonucu da kartlar arasında yeniden kullanılır; bu önbellek çevrim sonunda silinir ve sonraki çevrimde fiyat tekrar ağdan okunur. Her çevrim sonunda öncelik başına başlayan, sırası gelen ve ertelenen kart sayıları ile Amazon sayfa isteği, ağ denemesi ve önbellek isabeti sayıları kaydedilir.
 
 ## Geliştirme Notu
 

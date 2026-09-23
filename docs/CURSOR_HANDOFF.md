@@ -1,7 +1,7 @@
 # Hermes Cursor Handoff
 
 This document is the current technical and product handoff for continuing Hermes
-in Cursor. It describes the real repository at version `2.5.22`; source code and
+in Cursor. It describes the real repository at version `2.5.23`; source code and
 tests remain authoritative when this document and code ever differ.
 
 ## 1. Product snapshot
@@ -205,6 +205,13 @@ verified warehouse offers remain separate identities.
   notification/state pipeline; do not wait for remaining variants. Save alert
   suppression immediately after sending. Link Test materializes the same stream
   without notifications or persistent writes.
+- Within one monitoring cycle, an identical Amazon product URL reuses its
+  parsed page snapshot across watch cards. The cache is session-local, bounded,
+  and never carries prices into later cycles.
+- End-of-cycle logs report how many watches of each priority started, were due,
+  or were deferred, plus Amazon page calls, transport attempts, response-cache
+  hits, and parsed-product-cache hits/misses/upgrades. Use those measurements
+  before changing request concurrency or provider pacing.
 - A product may yield normal and genuine used Amazon Warehouse offers as separate
   rows and prices.
 - `DEPO` requires positive second-hand text/offer evidence and Amazon Warehouse

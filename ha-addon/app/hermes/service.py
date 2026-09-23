@@ -1203,6 +1203,41 @@ def _amazon_detail_offers_cache(session: requests.Session) -> Dict[str, List[Sea
     return cache
 
 
+def _amazon_product_page_parse_cache(session: requests.Session) -> Dict[str, Dict[str, Any]]:
+    """Share immutable page-level results across watches in one monitoring cycle."""
+    cache = getattr(session, "_hermes_amazon_product_page_parse_cache", None)
+    if not isinstance(cache, dict):
+        cache = {}
+        try:
+            setattr(session, "_hermes_amazon_product_page_parse_cache", cache)
+        except (AttributeError, TypeError):
+            pass
+    return cache
+
+
+def _increment_amazon_cycle_metric(session: requests.Session, key: str) -> None:
+    metrics = getattr(session, "_hermes_amazon_cycle_metrics", None)
+    if not isinstance(metrics, dict):
+        metrics = {}
+        try:
+            setattr(session, "_hermes_amazon_cycle_metrics", metrics)
+        except (AttributeError, TypeError):
+            pass
+    metrics[key] = int(metrics.get(key, 0)) + 1
+
+
+def _remember_amazon_product_page(
+    cache: Dict[str, Dict[str, Any]],
+    url: str,
+    snapshot: Dict[str, Any],
+) -> None:
+    # A cycle can contain several large variant families. Bound the additional
+    # parsed-result cache while retaining enough entries to dedupe repeated cards.
+    if url not in cache and len(cache) >= 128:
+        cache.pop(next(iter(cache)))
+    cache[url] = snapshot
+
+
 def _extract_amazon_page_offers(
     session: requests.Session,
     source_url: str,
@@ -1445,42 +1480,83 @@ def _iter_amazon_product_watch_offers(
     pending = [amazon_provider.AmazonProductVariation(label="", url=watch.url)]
     queued = {extract_asin_from_url(watch.url) or watch.url}
     limit = 60 if watch.include_variations else 1
+    page_cache = _amazon_product_page_parse_cache(session)
     errors: List[str] = []
     found = 0
     for variation in pending:
         identity = extract_asin_from_url(variation.url) or variation.url
+        cache_key = str(variation.url or "").strip()
+        snapshot = page_cache.get(cache_key)
         page_read_ms = 0
         page_parse_ms = 0
         offer_stage_ms = 0
         consumer_ms = 0
         variation_started_at = 0.0
         try:
-            if variation.url != watch.url:
-                wait_before_request(request_log_label("Amazon varyasyon", variation.label or variation.url), config)
             variation_started_at = time.monotonic()
-            page_started_at = time.monotonic()
-            try:
-                response = fetch_amazon_page(session, variation.url, config.request_timeout_seconds)
-            finally:
-                page_read_ms = round((time.monotonic() - page_started_at) * 1000)
-                log(
-                    "Amazon varyasyon sayfa okuma süresi: "
-                    f"varyasyon={log_cell(variation.label or identity, 64)} | "
-                    f"toplam={page_read_ms} ms"
-                )
-            parse_started_at = time.monotonic()
-            html = cleaned_html(response)
-            raise_if_age_verification(html)
-            if "captcha" in html.lower() and "robot" in html.lower():
-                raise HermesError("Amazon bot korumasi nedeniyle captcha sayfasi dondu.")
-            page_soup = amazon_provider.parse_product_page(html)
+            needs_variation_upgrade = (
+                snapshot is not None
+                and watch.include_variations
+                and snapshot.get("variations") is None
+            )
+            if snapshot is None or needs_variation_upgrade:
+                if variation.url != watch.url:
+                    wait_before_request(request_log_label("Amazon varyasyon", variation.label or variation.url), config)
+                page_started_at = time.monotonic()
+                try:
+                    response = fetch_amazon_page(session, variation.url, config.request_timeout_seconds)
+                finally:
+                    page_read_ms = round((time.monotonic() - page_started_at) * 1000)
+                    log(
+                        "Amazon varyasyon sayfa okuma süresi: "
+                        f"varyasyon={log_cell(variation.label or identity, 64)} | "
+                        f"toplam={page_read_ms} ms"
+                    )
+                html = cleaned_html(response)
+                raise_if_age_verification(html)
+                if "captcha" in html.lower() and "robot" in html.lower():
+                    raise HermesError("Amazon bot korumasi nedeniyle captcha sayfasi dondu.")
+                parse_started_at = time.monotonic()
+                page_soup = amazon_provider.parse_product_page(html)
+                discovered = None
+                if watch.include_variations:
+                    discovered = amazon_provider.extract_product_variations(
+                        html,
+                        variation.url,
+                        limit,
+                        soup=page_soup,
+                    )
+                if snapshot is None:
+                    label = amazon_provider.selected_variation_label(html, soup=page_soup) or variation.label
+                    page_parse_ms = round((time.monotonic() - parse_started_at) * 1000)
+                    offers_started_at = time.monotonic()
+                    try:
+                        page_offers = _extract_amazon_page_offers(
+                            session,
+                            variation.url,
+                            html,
+                            config,
+                            soup=page_soup,
+                        )
+                    finally:
+                        offer_stage_ms = round((time.monotonic() - offers_started_at) * 1000)
+                    snapshot = {
+                        "label": label,
+                        "variations": discovered,
+                        "offers": page_offers,
+                    }
+                    _remember_amazon_product_page(page_cache, cache_key, snapshot)
+                    _increment_amazon_cycle_metric(session, "product_parse_cache_misses")
+                else:
+                    snapshot["variations"] = discovered
+                    page_parse_ms = round((time.monotonic() - parse_started_at) * 1000)
+                    _increment_amazon_cycle_metric(session, "product_parse_cache_upgrades")
+            else:
+                _increment_amazon_cycle_metric(session, "product_parse_cache_hits")
+
+            page_offers = snapshot["offers"]
             if watch.include_variations:
-                discovered = amazon_provider.extract_product_variations(
-                    html,
-                    variation.url,
-                    limit,
-                    soup=page_soup,
-                )
+                discovered = snapshot.get("variations") or []
                 for item in discovered:
                     item_identity = extract_asin_from_url(item.url) or item.url
                     if item_identity == identity and item.label:
@@ -1488,13 +1564,7 @@ def _iter_amazon_product_watch_offers(
                     if item_identity not in queued and len(pending) < limit:
                         queued.add(item_identity)
                         pending.append(item)
-            label = amazon_provider.selected_variation_label(html, soup=page_soup) or variation.label
-            page_parse_ms = round((time.monotonic() - parse_started_at) * 1000)
-            offers_started_at = time.monotonic()
-            try:
-                page_offers = _extract_amazon_page_offers(session, variation.url, html, config, soup=page_soup)
-            finally:
-                offer_stage_ms = round((time.monotonic() - offers_started_at) * 1000)
+            label = snapshot.get("label") or variation.label
         except Exception as exc:  # noqa: BLE001
             errors.append(f"{variation.label or variation.url} | {exc}")
             log(f"Amazon varyasyonu okunamadı: {errors[-1]}")
@@ -1873,6 +1943,10 @@ def check_once(config: HermesConfig) -> None:
     stock_rows: List[StockSummaryRow] = []
     search_failure_events: List[Dict[str, Any]] = []
     request_tasks: List[Dict[str, Any]] = []
+    priority_scope = {
+        priority: {"due": 0, "deferred": 0, "started": 0}
+        for priority in ("high", "medium", "low")
+    }
 
     def check_watch(watch: WatchRule, watch_key: str, state_entry: Dict[str, Any], seller: str) -> None:
         is_search_watch = watch_name_required_for_url(watch.url)
@@ -1888,6 +1962,10 @@ def check_once(config: HermesConfig) -> None:
                 return
         try:
             display_name = watch.name or watch.url
+            priority = str(getattr(watch, "priority", "high") or "high").casefold()
+            if priority not in priority_scope:
+                priority = "high"
+            priority_scope[priority]["started"] += 1
             wait_before_request(request_log_label(seller, display_name), config)
             if watch.site == SITE_AMAZON and not is_amazon_search_url(watch.url):
                 offers = _iter_amazon_product_watch_offers(session, watch, config)
@@ -2145,15 +2223,20 @@ def check_once(config: HermesConfig) -> None:
             save_incremental_price_summary([], removed_price_ids=stale_summary_offer_ids)
 
     for watch in config.watches:
+        priority = str(getattr(watch, "priority", "high") or "high").casefold()
+        if priority not in priority_scope:
+            priority = "high"
         watch_key = normalize_item_key("watch", watch.site, watch.tracking_id or watch.name, watch.url, watch.size)
         state_entry = state.get(watch_key, {})
         if not isinstance(state_entry, dict):
             state_entry = {}
         seller = site_label(watch.site)
         if not watch_check_due(watch, state_entry, config.interval_seconds):
+            priority_scope[priority]["deferred"] += 1
             summary_rows.extend(cached_summary_rows_for_watch(watch, watch_key, state, seller))
             continue
 
+        priority_scope[priority]["due"] += 1
         request_tasks.append(
             {
                 "site": watch.site,
@@ -2168,6 +2251,16 @@ def check_once(config: HermesConfig) -> None:
     for task in priority_request_order(request_tasks):
         task["run"]()
 
+    log(
+        "Çevrim öncelik kapsamı: "
+        + " | ".join(
+            f"{label}={priority_scope[key]['started']} başladı, "
+            f"{priority_scope[key]['due']} sırası geldi, "
+            f"{priority_scope[key]['deferred']} ertelendi"
+            for key, label in (("high", "yüksek"), ("medium", "orta"), ("low", "düşük"))
+        )
+    )
+
     if config.watches:
         scan_duration_seconds = time.monotonic() - cycle_started_at
         cycle_duration_seconds = scan_duration_seconds + config.interval_seconds
@@ -2175,6 +2268,17 @@ def check_once(config: HermesConfig) -> None:
         publish_price_summary(summary_rows, stock_rows, cycle_duration_seconds, scan_duration_seconds)
         maybe_alert_summary_drop(state, summary_rows, config, session)
         maybe_alert_search_failures(state, search_failure_events, config, session)
+    amazon_metrics = getattr(session, "_hermes_amazon_cycle_metrics", {})
+    if isinstance(amazon_metrics, dict) and amazon_metrics.get("page_fetch_calls"):
+        log(
+            "Amazon çevrim ölçümü: "
+            f"sayfa_isteği={amazon_metrics.get('page_fetch_calls', 0)} | "
+            f"ağ_deneme={amazon_metrics.get('network_attempts', 0)} | "
+            f"yanıt_önbelleği_isabeti={amazon_metrics.get('response_cache_hits', 0)} | "
+            f"ayrıştırma_önbelleği_isabeti={amazon_metrics.get('product_parse_cache_hits', 0)} | "
+            f"ayrıştırma_önbelleği_yenilemesi={amazon_metrics.get('product_parse_cache_upgrades', 0)} | "
+            f"ayrıştırma_önbelleği_ıskası={amazon_metrics.get('product_parse_cache_misses', 0)}"
+        )
     save_json(STATE_PATH, state)
 
 

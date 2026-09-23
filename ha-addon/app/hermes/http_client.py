@@ -241,6 +241,22 @@ def _timed_amazon_network_call(transport: str, candidate: str, expect_search: bo
     return response
 
 
+def _amazon_cycle_metrics(session) -> Dict[str, int]:
+    metrics = getattr(session, "_hermes_amazon_cycle_metrics", None)
+    if not isinstance(metrics, dict):
+        metrics = {}
+        try:
+            setattr(session, "_hermes_amazon_cycle_metrics", metrics)
+        except (AttributeError, TypeError):
+            pass
+    return metrics
+
+
+def _increment_amazon_metric(session, key: str) -> None:
+    metrics = _amazon_cycle_metrics(session)
+    metrics[key] = int(metrics.get(key, 0)) + 1
+
+
 def _amazon_timing_url(url: str) -> str:
     parsed = urlsplit(str(url or ""))
     return f"{parsed.netloc}{parsed.path}"[:120]
@@ -251,8 +267,10 @@ def _get_amazon_response(session, candidate: str, timeout: int, expect_search: b
     cache_key = _amazon_cache_key(candidate, expect_search)
     cached_response = cache.get(cache_key)
     if cached_response is not None:
+        _increment_amazon_metric(session, "response_cache_hits")
         return cached_response
 
+    _increment_amazon_metric(session, "network_attempts")
     response = _timed_amazon_network_call(
         "requests",
         candidate,
@@ -278,12 +296,14 @@ def _get_amazon_response_with_curl(session: requests.Session, candidate: str, ti
     cache_key = _amazon_cache_key(candidate, expect_search)
     cached_response = cache.get(cache_key)
     if cached_response is not None:
+        _increment_amazon_metric(session, "response_cache_hits")
         return cached_response
 
     curl_session = getattr(session, "_hermes_amazon_curl_session", None)
     if curl_session is None:
         curl_session = curl_requests.Session()
         setattr(session, "_hermes_amazon_curl_session", curl_session)
+    _increment_amazon_metric(session, "network_attempts")
     response = _timed_amazon_network_call(
         "curl_chrome",
         candidate,
@@ -322,6 +342,7 @@ def _get_amazon_response_with_browser(session: requests.Session, candidate: str,
     cache_key = _amazon_cache_key(f"browser:{candidate}", expect_search)
     cached_response = cache.get(cache_key)
     if cached_response is not None:
+        _increment_amazon_metric(session, "response_cache_hits")
         return cached_response
 
     browser_timeout = max(AMAZON_BROWSER_MIN_TIMEOUT_SECONDS, int(timeout) + 10)
@@ -352,6 +373,7 @@ def _get_amazon_response_with_browser(session: requests.Session, candidate: str,
         ]
         try:
             started_at = time.monotonic()
+            _increment_amazon_metric(session, "network_attempts")
             completed = subprocess.run(
                 command,
                 capture_output=True,
@@ -535,6 +557,7 @@ def _prime_amazon_session(session: requests.Session, timeout: int) -> None:
     if getattr(session, "_hermes_amazon_primed", False):
         return
     _seed_amazon_session(session)
+    _increment_amazon_metric(session, "network_attempts")
     response = _timed_amazon_network_call(
         "requests_prime",
         "https://www.amazon.com.tr/",
@@ -553,6 +576,7 @@ def _prime_amazon_session(session: requests.Session, timeout: int) -> None:
 
 
 def fetch_amazon_page(session: requests.Session, url: str, timeout: int, expect_search: bool = False):
+    _increment_amazon_metric(session, "page_fetch_calls")
     last_error: Optional[Exception] = None
     hard_blocked = False
     attempts: List[Dict[str, Any]] = []
