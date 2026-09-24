@@ -1,8 +1,9 @@
 import os
+import math
 import random
 import re
 import time
-from datetime import timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, Iterable, List
 from itertools import chain
@@ -12,6 +13,7 @@ from .config_loader import load_config
 from .constants import (
     AMAZON_SEARCH_ERROR_NOTIFICATION_HOUR,
     APP_VERSION,
+    CYCLE_HISTORY_PATH,
     NOTIFY_REPEAT_SECONDS,
     SITE_AMAZON,
     SITE_BENGURME,
@@ -281,6 +283,10 @@ def deduplicate_summary_rows(rows: List[PriceSummaryRow]) -> List[PriceSummaryRo
         elif row.price == current.price:
             current.min_price = min(current.min_price, row.min_price)
             current.max_price = max(current.max_price, row.max_price)
+            if row.price_checked_at > current.price_checked_at:
+                row.min_price = current.min_price
+                row.max_price = current.max_price
+                unique_rows[existing_key] = row
         if title_key:
             title_keys[title_key] = existing_key
     return list(unique_rows.values())
@@ -399,6 +405,7 @@ def summary_row_from_state(watch: WatchRule, state_entry: Dict[str, Any], seller
         tracking_id=str(state_entry.get("tracking_id") or watch.tracking_id or ""),
         is_warehouse=bool(state_entry.get("is_warehouse", False)),
         priority=str(state_entry.get("priority") or watch.priority or "high"),
+        price_checked_at=str(state_entry.get("last_price_checked_at") or ""),
     )
 
 
@@ -450,6 +457,29 @@ def format_minutes(seconds: float | int | None) -> str:
     return f"{remaining_seconds} sn"
 
 
+def record_cycle_duration(duration_seconds: float, checked_at=None) -> None:
+    """Persist completed cycles only; incremental opportunity updates are not cycles."""
+    checked_at = checked_at or datetime.now(timezone.utc)
+    cutoff = checked_at - timedelta(days=7)
+    previous = load_json(CYCLE_HISTORY_PATH, [])
+    history = []
+    for item in previous if isinstance(previous, list) else []:
+        if not isinstance(item, dict):
+            continue
+        recorded_at = parse_iso_datetime(str(item.get("checked_at") or ""))
+        try:
+            duration = float(item.get("duration_seconds"))
+        except (TypeError, ValueError):
+            continue
+        if recorded_at and recorded_at >= cutoff and math.isfinite(duration) and duration >= 0:
+            history.append({"checked_at": recorded_at.isoformat(), "duration_seconds": duration})
+    history.append({"checked_at": checked_at.isoformat(), "duration_seconds": max(0, float(duration_seconds))})
+    try:
+        save_json(CYCLE_HISTORY_PATH, history)
+    except OSError as exc:
+        log(f"Çevrim süresi geçmişi kaydedilemedi: {exc}")
+
+
 def save_price_summary(
     rows: List[PriceSummaryRow],
     stock_rows: List[StockSummaryRow] | None = None,
@@ -492,6 +522,7 @@ def save_price_summary(
                 "is_warehouse": row.is_warehouse,
                 "tracking_id": row.tracking_id,
                 "priority": row.priority,
+                "price_checked_at": row.price_checked_at,
             }
             for idx, row in enumerate(sorted_rows, start=1)
         ],
@@ -535,6 +566,7 @@ def _summary_rows_from_payload(payload: Dict[str, Any]) -> List[PriceSummaryRow]
                     is_warehouse=bool(raw_row.get("is_warehouse", False)),
                     tracking_id=str(raw_row.get("tracking_id") or ""),
                     priority=str(raw_row.get("priority") or "high"),
+                    price_checked_at=str(raw_row.get("price_checked_at") or ""),
                 )
             )
         except HermesError:
@@ -2074,6 +2106,7 @@ def check_once(config: HermesConfig) -> None:
                     watch.target_price,
                     f"{seller} | {offer_display_name}",
                 )
+                price_checked_at = datetime.now(timezone.utc).isoformat()
                 summary_rows.append(
                     PriceSummaryRow(
                         seller=seller,
@@ -2088,6 +2121,7 @@ def check_once(config: HermesConfig) -> None:
                         is_warehouse=offer.is_warehouse,
                         tracking_id=watch.tracking_id,
                         priority=watch.priority,
+                        price_checked_at=price_checked_at,
                     )
                 )
                 log(
@@ -2142,6 +2176,7 @@ def check_once(config: HermesConfig) -> None:
                 state[offer_key]["site"] = watch.site
                 state[offer_key]["include_variations"] = watch.include_variations
                 state[offer_key]["priority"] = watch.priority
+                state[offer_key]["last_price_checked_at"] = price_checked_at
                 state[offer_key]["search_group"] = search_group
                 state[offer_key]["search_group_label"] = search_group_label
                 state[offer_key]["is_warehouse"] = offer.is_warehouse
@@ -2297,6 +2332,7 @@ def check_once(config: HermesConfig) -> None:
         cycle_duration_seconds = scan_duration_seconds + config.interval_seconds
         summary_rows = deduplicate_summary_rows(summary_rows)
         publish_price_summary(summary_rows, stock_rows, cycle_duration_seconds, scan_duration_seconds)
+        record_cycle_duration(cycle_duration_seconds)
         maybe_alert_summary_drop(state, summary_rows, config, session)
         maybe_alert_search_failures(state, search_failure_events, config, session)
     amazon_metrics = getattr(session, "_hermes_amazon_cycle_metrics", {})

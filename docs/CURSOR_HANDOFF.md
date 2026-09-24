@@ -1,7 +1,7 @@
 # Hermes Cursor Handoff
 
 This document is the current technical and product handoff for continuing Hermes
-in Cursor. It describes the real repository at version `2.5.26`; source code and
+in Cursor. It describes the real repository at version `2.5.27`; source code and
 tests remain authoritative when this document and code ever differ.
 
 ## 1. Product snapshot
@@ -89,6 +89,7 @@ Current files under `/data`:
 | `options.json` | Supervisor-managed options; contains secrets |
 | `state.json` | notification, price history, and availability state |
 | `latest_price_summary.json` | last complete/merged dashboard table |
+| `cycle_history.json` | completed cycle durations from the rolling last seven days |
 | `status.json` | service health and cycle timing |
 | `error_events.json` | recent operational errors shown by UI |
 | `login_state.json` | provider/browser login-related state when used |
@@ -155,11 +156,17 @@ is fixed at 60 and should not be restored as a user-facing setting.
 8. Update persistent availability and price history.
 9. Notify immediately when eligible. Merge changed rows into the last full
    summary so the dashboard never collapses to a partial cycle.
-10. At cycle end publish a complete summary, update timing, and schedule next run.
+10. At cycle end publish a complete summary, record the cycle duration in the
+    rolling seven-day history, update timing, and schedule next run.
 
 The dashboard separates target-price opportunities, above-target products,
 positively identified unavailable products, operational errors, and recent
 Telegram alerts.
+Each price row retains its own successful read timestamp, including rows from
+medium/low-priority watches carried over into later cycles. The Statistics page
+graphs every completed cycle from the last seven days, lists their durations,
+and shows minimum, maximum, and average values. Historical cycle records begin
+when this release is installed; older cycles cannot be reconstructed.
 
 Rows are provider-colored. Above-target multi-result/variant watches collapse
 under the configured watch name. Rows are grouped by provider and ordered by

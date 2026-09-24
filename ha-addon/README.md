@@ -74,6 +74,7 @@ Telegram dinleme varsayılan olarak kapalıdır. Aktif edildiğinde Hermes confi
 - `/data/options.json`: Home Assistant tarafından yazılan ayarlar
 - `/data/state.json`: son kontrol, hata ve bildirim durumu
 - `/data/latest_price_summary.json`: son döngü fiyat özeti
+- `/data/cycle_history.json`: son yedi günde tamamlanan çevrimlerin süreleri; İstatistik sayfasının veri kaynağı
 - `/data/telegram_keyword_alert`: Telegram session
 - `/data/login_state.json`: Telegram giriş kodu durumu
 - `/data/seen_messages.json`: işlenen Telegram mesajları

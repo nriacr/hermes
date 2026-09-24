@@ -9,6 +9,7 @@ from .dashboard import (
     _public_dashboard_allowed,
     _render_page,
     _render_public_page,
+    _render_statistics_page,
     _reset_notifications_async,
     _reset_price_history,
     _send_test_notification,
@@ -98,6 +99,9 @@ class SettingsDashboardHandler(_StatusHandler):
             content_type = "text/html; charset=utf-8"
         elif path == "/link-test":
             payload = render_link_test_page(DASHBOARD_CSS, "./link-test", "./")
+            content_type = "text/html; charset=utf-8"
+        elif path == "/statistics":
+            payload = _render_statistics_page(self.path, ".")
             content_type = "text/html; charset=utf-8"
         elif path.startswith("/public/") and path.endswith("/settings.js"):
             if _public_dashboard_allowed(self.path):

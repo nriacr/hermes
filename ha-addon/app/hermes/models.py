@@ -49,6 +49,7 @@ class PriceSummaryRow:
     is_warehouse: bool = False
     tracking_id: str = ""
     priority: str = "high"
+    price_checked_at: str = ""
 
     @property
     def difference(self) -> Decimal:

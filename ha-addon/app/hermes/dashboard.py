@@ -1,3 +1,4 @@
+import math
 import re
 import threading
 import urllib.error
@@ -8,7 +9,7 @@ from decimal import ROUND_DOWN, Decimal, InvalidOperation
 from html import escape
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from .constants import OPTIONS_PATH, PUSHOVER_URL, STATE_PATH, SUMMARY_PATH, TELEGRAM_ERROR_EVENTS_PATH, TELEGRAM_STATUS_PATH
+from .constants import CYCLE_HISTORY_PATH, OPTIONS_PATH, PUSHOVER_URL, STATE_PATH, SUMMARY_PATH, TELEGRAM_ERROR_EVENTS_PATH, TELEGRAM_STATUS_PATH
 from .logging_utils import log
 from .link_test_ui import render_link_test_from_request, render_link_test_page
 from .providers import hepsiburada as hepsiburada_provider
@@ -48,7 +49,7 @@ p { margin:0; color:var(--muted); line-height:1.5; font-size:13px; }
 .public-error-card { margin-top:18px; }
 .summary-panel { margin-top:18px; border:1px solid var(--line); border-radius:18px; padding:16px; background:var(--card); } .summary-head { display:flex; align-items:flex-end; justify-content:space-between; gap:12px; margin-bottom:12px; } .summary-head h2 { font-size:18px; margin:0; } .summary-head span { color:var(--muted); font-size:12px; white-space:nowrap; } .table-section + .table-section { margin-top:18px; } .table-section h3 { margin:0 0 9px; font-size:14px; color:#f0f1f0; } .deals-section h3 { color:#b7f0dc; }
 .telegram-recent { margin-top:14px; border:1px solid rgba(210,213,213,.22); border-radius:14px; padding:13px; background:rgba(20,22,24,.46); } .telegram-recent h3 { margin:0 0 10px; font-size:13px; color:#f0f1f0; } .telegram-recent p { color:var(--muted); } .telegram-recent ul { display:grid; gap:8px; margin:0; padding:0; list-style:none; } .telegram-recent li { display:grid; gap:4px; padding:10px 11px; border:1px solid rgba(210,213,213,.20); border-radius:12px; background:rgba(210,213,213,.06); } .telegram-recent li a,.telegram-recent li strong { color:#f1f3f3; font-size:13px; font-weight:850; text-decoration:none; overflow-wrap:anywhere; } .telegram-recent li a:hover { color:#ffd166; text-decoration:underline; } .telegram-recent li span { color:var(--muted); font-size:11px; } .telegram-recent li em { color:#d9dcdd; font-size:12px; font-style:normal; line-height:1.35; overflow-wrap:anywhere; }
-.table-wrap { overflow-x:auto; border:1px solid var(--line); border-radius:14px; } table { width:100%; border-collapse:collapse; min-width:860px; } th,td { padding:8px 8px; border-bottom:1px solid var(--line); text-align:right; white-space:nowrap; } th { color:#e1e3e3; background:var(--head); font-size:11px; text-transform:uppercase; letter-spacing:.035em; } td { color:var(--text); font-size:13px; font-variant-numeric:tabular-nums; } tr:last-child td { border-bottom:none; } th:nth-child(1),td:nth-child(1) { width:104px; } th:nth-child(1),td:nth-child(1),th:nth-child(2),td:nth-child(2) { text-align:left; } th:not(:nth-child(2)),td:not(:nth-child(2)) { width:100px; } th:nth-child(6),td:nth-child(6) { width:148px; } .empty-row td { color:var(--muted); text-align:left; background:rgba(255,255,255,.025); }
+.table-wrap { overflow-x:auto; border:1px solid var(--line); border-radius:14px; } table { width:100%; border-collapse:collapse; min-width:980px; } th,td { padding:8px 8px; border-bottom:1px solid var(--line); text-align:right; white-space:nowrap; } th { color:#e1e3e3; background:var(--head); font-size:11px; text-transform:uppercase; letter-spacing:.035em; } td { color:var(--text); font-size:13px; font-variant-numeric:tabular-nums; } tr:last-child td { border-bottom:none; } th:nth-child(1),td:nth-child(1) { width:104px; } th:nth-child(1),td:nth-child(1),th:nth-child(2),td:nth-child(2) { text-align:left; } th:not(:nth-child(2)),td:not(:nth-child(2)) { width:100px; } th:nth-child(6),td:nth-child(6) { width:148px; } .empty-row td { color:var(--muted); text-align:left; background:rgba(255,255,255,.025); }
 .search-result-group { margin:10px 0; overflow:hidden; border:1px solid rgba(210,213,213,.38); border-radius:14px; background:rgba(210,213,213,.06); } .search-result-group summary { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:12px 14px; color:#f0f1f0; font-size:13px; font-weight:850; cursor:pointer; list-style:none; } .search-result-group summary::-webkit-details-marker { display:none; } .search-result-group summary::before { content:'▸'; display:inline-block; margin-right:8px; color:#d6d8d7; font-size:16px; transition:transform .16s ease; } .search-result-group[open] summary::before { transform:rotate(90deg); } .search-result-group summary strong { margin-right:auto; } .search-result-group summary span { color:var(--muted); font-size:11px; font-weight:750; white-space:nowrap; } .search-result-group[open] summary { border-bottom:1px solid rgba(210,213,213,.25); background:rgba(210,213,213,.09); } .search-result-group .table-wrap { border:0; border-radius:0; }
 tbody tr.site-amazon { --site-bg:rgba(247,197,109,.13); --site-bg-strong:rgba(247,197,109,.24); --site-line:rgba(247,197,109,.84); --site-link:#ffd482; }
 tbody tr.site-hepsiburada { --site-bg:rgba(255,154,111,.13); --site-bg-strong:rgba(255,154,111,.25); --site-line:rgba(255,154,111,.86); --site-link:#ffad82; }
@@ -120,6 +121,32 @@ tbody tr.site-other { --site-bg:rgba(183,177,222,.13); --site-bg-strong:rgba(183
 }
 """
 
+DASHBOARD_CSS += """
+.statistics-intro { color:var(--muted); margin:10px 0 18px; }
+.statistics-chart { width:100%; height:auto; display:block; border:1px solid var(--line); border-radius:14px; background:#202327; }
+.statistics-chart text { fill:var(--muted); font-size:13px; font-family:inherit; }
+.statistics-chart .grid-line { stroke:#41464b; stroke-width:1; }
+.statistics-chart .cycle-line { fill:none; stroke:#ffd07a; stroke-width:3; stroke-linecap:round; stroke-linejoin:round; }
+.statistics-chart .cycle-dot { fill:#ffd07a; }
+.statistics-table-wrap { max-height:430px; overflow:auto; }
+.statistics-table { min-width:480px; }
+.statistics-table th,.statistics-table td { width:auto !important; text-align:left !important; }
+.statistics-table th:last-child,.statistics-table td:last-child { text-align:right !important; }
+.statistics-table thead { position:sticky; top:0; z-index:1; }
+.statistics-metrics { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin-top:14px; }
+.statistics-metrics .public-cycle-pill { min-height:64px; }
+@media (max-width:720px) {
+  .statistics-table { display:table; min-width:480px; }
+  .statistics-table thead { display:table-header-group; }
+  .statistics-table tbody { display:table-row-group; }
+  .statistics-table tr { display:table-row; }
+  .statistics-table th,.statistics-table td { display:table-cell; width:auto; font-size:12px; }
+  .statistics-table-wrap { overflow:auto; }
+  .statistics-metrics { grid-template-columns:1fr; gap:7px; }
+  tbody tr[class*='site-'] .updated-cell { grid-column:1 / -1; min-height:29px; border:1px solid rgba(255,255,255,.06); border-radius:10px; padding:5px 7px; background:rgba(20,22,24,.42); align-items:center; }
+}
+"""
+
 
 def _parse_turkish_money(value):
     text = str(value or "").strip().replace("TL", "").replace(" ", "")
@@ -177,6 +204,14 @@ def _relative_time_text(value) -> str:
         return f"{hours} sa önce"
     days = hours // 24
     return f"{days} gün önce"
+
+
+def _relative_minutes_text(value) -> str:
+    parsed = parse_iso_datetime(str(value or ""))
+    if not parsed:
+        return "-"
+    minutes = max(0, int((datetime.now().astimezone() - parsed.astimezone()).total_seconds() // 60))
+    return f"{minutes} dk önce"
 
 
 def _duration_text(seconds_value, fallback="-") -> str:
@@ -569,6 +604,7 @@ def _render_table_row(row):
             row.get("max_price", "-"),
         )
     )
+    price_age = escape(_relative_minutes_text(row.get("price_checked_at")))
     row_classes = [_site_theme_class(seller_text)]
     if _is_target_hit(row):
         row_classes.append("deal-row")
@@ -579,7 +615,8 @@ def _render_table_row(row):
         f'<td data-label="Güncel" class="price-cell">{price}</td>'
         f'<td data-label="Hedef" class="target-cell">{target}</td>'
         f'<td data-label="Fark" class="diff-cell">{difference}</td>'
-        f'<td data-label="Min / Maks" class="range-cell">{price_range}</td></tr>'
+        f'<td data-label="Min / Maks" class="range-cell">{price_range}</td>'
+        f'<td data-label="Son güncelleme" class="updated-cell">{price_age}</td></tr>'
     )
 
 
@@ -587,11 +624,11 @@ def _render_rows_table(rows, empty_text):
     if rows:
         body = "".join(_render_table_row(row) for row in rows)
     else:
-        body = f"<tr class='empty-row'><td colspan='6'>{escape(empty_text)}</td></tr>"
+        body = f"<tr class='empty-row'><td colspan='7'>{escape(empty_text)}</td></tr>"
     return f"""
         <div class="table-wrap">
           <table>
-            <thead><tr><th>Satıcı</th><th>Ürün Adı</th><th>Güncel</th><th>Hedef</th><th>Fark</th><th>Min / Maks</th></tr></thead>
+            <thead><tr><th>Satıcı</th><th>Ürün Adı</th><th>Güncel</th><th>Hedef</th><th>Fark</th><th>Min / Maks</th><th>Son güncelleme</th></tr></thead>
             <tbody>{body}</tbody>
           </table>
         </div>
@@ -641,7 +678,10 @@ def _deduplicate_dashboard_rows(rows):
         )
         existing_key = title_keys.get(title_key, key) if title_key else key
         current = unique_rows.get(existing_key)
-        if current is None or _summary_difference_sort_value(row) < _summary_difference_sort_value(current):
+        if current is None or _summary_difference_sort_value(row) < _summary_difference_sort_value(current) or (
+            _summary_difference_sort_value(row) == _summary_difference_sort_value(current)
+            and str(row.get("price_checked_at") or "") > str(current.get("price_checked_at") or "")
+        ):
             unique_rows[existing_key] = row
         if title_key:
             title_keys[title_key] = existing_key
@@ -1149,6 +1189,89 @@ def _public_dashboard_allowed(path: str) -> bool:
     return _public_token_from_path(path) == expected_token
 
 
+def _recent_cycle_history(raw_history, now=None):
+    now = now or datetime.now().astimezone()
+    cutoff = now - timedelta(days=7)
+    points = []
+    for item in raw_history if isinstance(raw_history, list) else []:
+        if not isinstance(item, dict):
+            continue
+        checked_at = parse_iso_datetime(str(item.get("checked_at") or ""))
+        try:
+            duration = float(item.get("duration_seconds"))
+        except (TypeError, ValueError):
+            continue
+        if checked_at and cutoff <= checked_at.astimezone() <= now and math.isfinite(duration) and duration >= 0:
+            points.append((checked_at.astimezone(), duration))
+    return sorted(points, key=lambda point: point[0])
+
+
+def _render_cycle_chart(points, now):
+    if not points:
+        return '<p class="statistics-intro">Henüz tamamlanmış çevrim kaydı yok. İlk çevrimden sonra grafik burada görünecek.</p>'
+    cutoff = now - timedelta(days=7)
+    max_duration = max(60.0, *(duration for _, duration in points))
+    span_seconds = (now - cutoff).total_seconds()
+
+    def xy(checked_at, duration):
+        x = 72 + 880 * (checked_at - cutoff).total_seconds() / span_seconds
+        y = 204 - 164 * duration / max_duration
+        return round(x, 1), round(y, 1)
+
+    coordinates = [xy(checked_at, duration) for checked_at, duration in points]
+    polyline = " ".join(f"{x},{y}" for x, y in coordinates)
+    grid = "".join(
+        f'<line class="grid-line" x1="72" x2="952" y1="{y}" y2="{y}"/>'
+        f'<text x="63" y="{y + 4}" text-anchor="end">{escape(_duration_text(max_duration * fraction))}</text>'
+        for fraction, y in ((1, 40), (0.5, 122), (0, 204))
+    )
+    ticks = "".join(
+        f'<text x="{72 + 880 * day / 7:.1f}" y="238" text-anchor="middle">'
+        f'{escape((cutoff + timedelta(days=day)).strftime("%d.%m"))}</text>'
+        for day in range(8)
+    )
+    dots = "".join(
+        f'<circle class="cycle-dot" cx="{x}" cy="{y}" r="4"/>'
+        for x, y in coordinates
+    ) if len(points) <= 50 else ""
+    return (
+        '<svg class="statistics-chart" viewBox="0 0 1000 260" role="img" '
+        'aria-label="Son 7 gündeki tüm çevrim süreleri">'
+        f'{grid}<polyline class="cycle-line" points="{polyline}"/>{dots}{ticks}</svg>'
+    )
+
+
+def _render_statistics_page(path: str, base_path: str) -> bytes:
+    now = datetime.now().astimezone()
+    points = _recent_cycle_history(load_json(CYCLE_HISTORY_PATH, []), now)
+    chart = _render_cycle_chart(points, now)
+    rows = "".join(
+        '<tr>'
+        f'<td>{escape(checked_at.strftime("%d.%m.%Y"))}</td>'
+        f'<td>{escape(checked_at.strftime("%H:%M:%S"))}</td>'
+        f'<td>{escape(_duration_text(duration))}</td>'
+        '</tr>'
+        for checked_at, duration in reversed(points)
+    ) or '<tr class="empty-row"><td colspan="3">Henüz kayıt yok.</td></tr>'
+    durations = [duration for _, duration in points]
+    shortest = _duration_text(min(durations)) if durations else "-"
+    longest = _duration_text(max(durations)) if durations else "-"
+    average = _duration_text(sum(durations) / len(durations)) if durations else "-"
+    web_app_head = render_web_app_head(base_path)
+    base_path = escape(base_path, quote=True)
+    html = f"""<!doctype html>
+<html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="theme-color" content="#111315">{web_app_head}<meta http-equiv="refresh" content="60"><title>Hermes İstatistik</title><style>{DASHBOARD_CSS}</style></head>
+<body class="public"><main><div class="hero"><div class="badge">Hermes</div>
+<nav class="actions public-actions"><a class="button secondary" href="{base_path}/">Özet Tablo</a><a class="button primary" href="{base_path}/statistics" aria-current="page">İstatistik</a><a class="button secondary" href="{base_path}/settings">Ayarlar</a></nav>
+<section class="summary-panel"><div class="summary-head"><h2>Çevrim süreleri</h2><span>Son 7 gün · {len(points)} çevrim</span></div>
+<p class="statistics-intro">Grafikte son yedi günün tamamlanan çevrimleri gösterilir. Süre, tarama ve çevrimler arası beklemeyi kapsar.</p>{chart}</section>
+<section class="summary-panel"><div class="summary-head"><h2>Çevrim süresi tablosu</h2><span>En yeni çevrim üstte</span></div>
+<div class="table-wrap statistics-table-wrap"><table class="statistics-table"><thead><tr><th>Tarih</th><th>Saat</th><th>Çevrim süresi</th></tr></thead><tbody>{rows}</tbody></table></div>
+<div class="statistics-metrics"><section class="public-cycle-pill"><span>En kısa</span><strong>{escape(shortest)}</strong></section><section class="public-cycle-pill"><span>En uzun</span><strong>{escape(longest)}</strong></section><section class="public-cycle-pill"><span>Ortalama</span><strong>{escape(average)}</strong></section></div></section>
+</div></main></body></html>"""
+    return html.encode("utf-8")
+
+
 def _render_dashboard_page(path: str, base_path: str, error_detail_limit: int | None = None) -> bytes:
     payload = load_json(SUMMARY_PATH, {})
     params = urllib.parse.parse_qs(urllib.parse.urlparse(path).query)
@@ -1200,13 +1323,15 @@ def _render_dashboard_page(path: str, base_path: str, error_detail_limit: int | 
   });
 </script>"""
     html = f"""<!doctype html>
-<html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="theme-color" content="#111315"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Hermes">{web_app_head}<meta http-equiv="refresh" content="60"><title>Hermes</title><style>{DASHBOARD_CSS}</style></head><body class="public"><main><div class="hero"><div class="badge">Hermes</div><div class="actions public-actions"><a class="button secondary" href="{base_path}/settings">Ayarlar</a><a class="button secondary" href="{base_path}/link-test">Test</a><form class="inline-form" method="post" action="{base_path}/test-pushover"><button class="button test" type="submit">Pushover</button></form><form class="inline-form" method="post" action="{base_path}/reset-notifications" data-confirm="Bildirim susturma hafızası sıfırlanacak ve hedef altında kalan fırsatlar için tek seferlik kontrol başlatılacak. Devam etmek istiyor musun?"><button class="button secondary" type="submit">Bildirim Sıfırla</button></form><form class="inline-form" method="post" action="{base_path}/reset-price-history" data-confirm="Min/maks fiyat geçmişi temizlenecek ve güncel fiyattan yeniden başlayacak. Devam etmek istiyor musun?"><button class="button secondary" type="submit">Min/Maks Sıfırla</button></form></div>{public_cycle_row}{notice_html}{_render_table()}{telegram_recent_html}{error_card_html}</div></main>{confirm_script}</body></html>"""
+<html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="theme-color" content="#111315"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="Hermes">{web_app_head}<meta http-equiv="refresh" content="60"><title>Hermes</title><style>{DASHBOARD_CSS}</style></head><body class="public"><main><div class="hero"><div class="badge">Hermes</div><div class="actions public-actions"><a class="button secondary" href="{base_path}/settings">Ayarlar</a><a class="button secondary" href="{base_path}/link-test">Test</a><a class="button secondary" href="{base_path}/statistics">İstatistik</a><form class="inline-form" method="post" action="{base_path}/test-pushover"><button class="button test" type="submit">Pushover</button></form><form class="inline-form" method="post" action="{base_path}/reset-notifications" data-confirm="Bildirim susturma hafızası sıfırlanacak ve hedef altında kalan fırsatlar için tek seferlik kontrol başlatılacak. Devam etmek istiyor musun?"><button class="button secondary" type="submit">Bildirim Sıfırla</button></form><form class="inline-form" method="post" action="{base_path}/reset-price-history" data-confirm="Min/maks fiyat geçmişi temizlenecek ve güncel fiyattan yeniden başlayacak. Devam etmek istiyor musun?"><button class="button secondary" type="submit">Min/Maks Sıfırla</button></form></div>{public_cycle_row}{notice_html}{_render_table()}{telegram_recent_html}{error_card_html}</div></main>{confirm_script}</body></html>"""
     return html.encode("utf-8")
 
 
 def _render_public_page(path: str):
     if not _public_dashboard_allowed(path):
         return 404, b"not found\n"
+    if urllib.parse.urlparse(path).path.rstrip("/").endswith("/statistics"):
+        return 200, _render_statistics_page(path, _public_base_path(path))
     return 200, _render_dashboard_page(path, _public_base_path(path), error_detail_limit=None)
 
 
@@ -1235,6 +1360,9 @@ class _StatusHandler(BaseHTTPRequestHandler):
             content_type = "application/manifest+json; charset=utf-8"
         elif path == "/link-test":
             payload = render_link_test_page(DASHBOARD_CSS, "./link-test", "./")
+            content_type = "text/html; charset=utf-8"
+        elif path == "/statistics":
+            payload = _render_statistics_page(self.path, ".")
             content_type = "text/html; charset=utf-8"
         elif path == "/public" or path.startswith("/public/"):
             status, payload = _render_public_page(self.path)

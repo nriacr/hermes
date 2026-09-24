@@ -4690,5 +4690,78 @@ class HermesSmokeTests(unittest.TestCase):
             extract_zara_offers(html, source_url="https://www.zara.com/tr/tr/product", size="L")
 
 
+class StatisticsAndPriceAgeTests(unittest.TestCase):
+    def test_duplicate_equal_price_uses_latest_successful_read(self):
+        older = PriceSummaryRow(
+            "Amazon", "Aynı ürün", "https://www.amazon.com.tr/dp/B000000001",
+            Decimal("90"), Decimal("100"), Decimal("80"), Decimal("90"),
+            price_checked_at="2026-09-24T10:00:00+00:00",
+        )
+        newer = PriceSummaryRow(
+            "Amazon", "Aynı ürün", "https://www.amazon.com.tr/dp/B000000001",
+            Decimal("90"), Decimal("100"), Decimal("90"), Decimal("100"),
+            price_checked_at="2026-09-24T11:00:00+00:00",
+        )
+        rows = service.deduplicate_summary_rows([older, newer])
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].price_checked_at, newer.price_checked_at)
+        self.assertEqual((rows[0].min_price, rows[0].max_price), (Decimal("80"), Decimal("100")))
+
+    def test_completed_cycle_history_keeps_only_last_seven_days(self):
+        now = datetime.now(timezone.utc)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.object(service, "CYCLE_HISTORY_PATH", Path(tmpdir) / "cycles.json"):
+                service.CYCLE_HISTORY_PATH.write_text(json.dumps([
+                    {"checked_at": (now - timedelta(days=8)).isoformat(), "duration_seconds": 400},
+                    {"checked_at": (now - timedelta(days=2)).isoformat(), "duration_seconds": 300},
+                ]), encoding="utf-8")
+                service.record_cycle_duration(180, now)
+                history = json.loads(service.CYCLE_HISTORY_PATH.read_text(encoding="utf-8"))
+                self.assertEqual([item["duration_seconds"] for item in history], [300, 180])
+
+    def test_price_age_survives_incremental_summary_and_skipped_watch(self):
+        checked_at = (datetime.now(timezone.utc) - timedelta(minutes=125)).isoformat()
+        watch = WatchRule("Ürün", "amazon", "https://www.amazon.com.tr/dp/B000000001", Decimal("100"))
+        state_row = service.summary_row_from_state(watch, {
+            "last_price": "90", "last_price_checked_at": checked_at,
+        }, "Amazon")
+        self.assertEqual(state_row.price_checked_at, checked_at)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.object(service, "SUMMARY_PATH", Path(tmpdir) / "summary.json"):
+                service.save_price_summary([state_row])
+                service.save_incremental_price_summary([PriceSummaryRow(
+                    "Amazon", "Yeni fırsat", "https://www.amazon.com.tr/dp/B000000002",
+                    Decimal("80"), Decimal("100"), Decimal("80"), Decimal("80"),
+                    price_checked_at=datetime.now(timezone.utc).isoformat(),
+                )])
+                payload = json.loads(service.SUMMARY_PATH.read_text(encoding="utf-8"))
+                old_row = next(row for row in payload["rows"] if row["product_url"].endswith("B000000001"))
+                self.assertEqual(old_row["price_checked_at"], checked_at)
+                html = dashboard._render_table_row(old_row)
+                self.assertIn("125 dk önce", html)
+                self.assertIn('data-label="Son güncelleme"', html)
+
+    def test_statistics_page_shows_all_cycles_and_summary(self):
+        now = datetime.now(timezone.utc)
+        history = [
+            {"checked_at": (now - timedelta(hours=2)).isoformat(), "duration_seconds": 120},
+            {"checked_at": (now - timedelta(hours=1)).isoformat(), "duration_seconds": 240},
+        ]
+        with patch.object(dashboard, "load_json", return_value=history):
+            html = dashboard._render_statistics_page("/statistics", ".").decode("utf-8")
+        self.assertIn("Son 7 gün · 2 çevrim", html)
+        self.assertIn("2 dk 0 sn", html)
+        self.assertIn("4 dk 0 sn", html)
+        self.assertIn("3 dk 0 sn", html)
+        self.assertIn('class="cycle-line"', html)
+        self.assertIn("Çevrim süresi tablosu", html)
+        with patch.object(dashboard, "_public_dashboard_allowed", return_value=True), patch.object(
+            dashboard, "load_json", return_value=history
+        ):
+            status, public_html = dashboard._render_public_page("/public/test-token/statistics")
+        self.assertEqual(status, 200)
+        self.assertIn(b"/public/test-token/settings", public_html)
+
+
 if __name__ == "__main__":
     unittest.main()
