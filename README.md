@@ -23,6 +23,7 @@ Takip edilen alanlar:
 - Her takip kartında öncelik seçilebilir: yüksek her çevrimde, orta en az 2 saatte, düşük en az 6 saatte kontrol edilir. Yüksek öncelikli işler önce yürütülür; yeni eklenen veya tek kart olarak düzenlenen takip hemen kontrol edilir.
 - Sonuç tablosunda normal ürünlerin adının başındaki renkli daire kontrol önceliğini gösterir: yüksek kırmızı, orta sarı, düşük yeşil. Amazon Depo satırları bu göstergeden etkilenmez.
 - Ana tablodaki `Son güncelleme` sütunu her fiyatın kaç dakika önce okunduğunu gösterir; sonraki çevrime ertelenen ürünlerin ve eski fiyat kayıtlarının başarılı okuma zamanı korunur. `İstatistik` sayfası son yedi gündeki tamamlanmış çevrimleri grafik ve tabloyla, en kısa/en uzun/ortalama süreleriyle gösterir. Geçmiş kayıtları bu sürümün kurulumundan itibaren birikir.
+- Mobil görünümde ürün kartının fiyat geçmişi ve son güncelleme alanları kart genişliğini kullanır; İstatistik tablosu dar ekranlara sığar.
 - `Yalnızca platformun kendi satıcısı` filtresi Amazon sıfır ürünlerinde yalnızca `Amazon.com.tr` satıcısını tutar. Satıcı bilgisi okunamayan teklifler elenir; doğrulanmış Amazon Depo teklifleri her zaman korunur. Diğer mağazalar için filtre desteği ileride eklenecektir.
 - Amazon'un bağlantı yerine düz metin olarak sunduğu `Amazon.com.tr` satıcı bilgisi de resmi satıcı filtresinde tanınır.
 - Ana ekrandaki `Test` sayfası bağlantıyı anlık ve geçici olarak okur; arama anahtar kelimesi, beden, hariç tut ve varyasyon seçenekleri bu test için ayrıca uygulanabilir.
