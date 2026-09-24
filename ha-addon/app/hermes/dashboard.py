@@ -545,22 +545,22 @@ def _collect_telegram_summary(options):
     }
 
 
-TABLE_TITLE_MAX_LENGTH = 70
+TABLE_TITLE_MAX_LENGTH = 60
 GROUP_TITLE_MAX_LENGTH = 70
 
 
-def _shortened_title(value, max_length):
+def _shortened_title(value, max_length, ellipsis=True):
     """Keep a dashboard label compact while retaining its full tooltip text."""
     full_title = repair_mojibake(value or "-").strip() or "-"
     if len(full_title) <= max_length:
         return full_title, full_title
-    visible_title = f"{full_title[:max_length - 3].rstrip()}..."
+    visible_title = f"{full_title[:max_length - 3].rstrip()}..." if ellipsis else full_title[:max_length].rstrip()
     return visible_title, full_title
 
 
 def _table_title(value):
     """Keep dashboard row titles compact while retaining the full tooltip."""
-    return _shortened_title(value, TABLE_TITLE_MAX_LENGTH)
+    return _shortened_title(value, TABLE_TITLE_MAX_LENGTH, ellipsis=False)
 
 
 def _group_title(value):

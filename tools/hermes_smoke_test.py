@@ -3958,7 +3958,7 @@ class HermesSmokeTests(unittest.TestCase):
                 self.assertIn(f"priority-{priority}", row_html)
                 self.assertIn(f'title="{label} öncelik"', row_html)
 
-    def test_dashboard_shortens_long_product_titles_to_70_characters(self):
+    def test_dashboard_shortens_long_product_titles_to_60_characters_without_ellipsis(self):
         full_title = "Çok uzun ürün adı " * 12
         row_html = dashboard._render_table_row(
             {
@@ -3973,8 +3973,9 @@ class HermesSmokeTests(unittest.TestCase):
             }
         )
         visible_title, tooltip = dashboard._table_title(full_title)
-        self.assertEqual(len(visible_title), 70)
-        self.assertTrue(visible_title.endswith("..."))
+        self.assertLessEqual(len(visible_title), 60)
+        self.assertEqual(visible_title, full_title.strip()[:60].rstrip())
+        self.assertFalse(visible_title.endswith("..."))
         self.assertEqual(tooltip, full_title.strip())
         self.assertIn(visible_title, row_html)
         self.assertIn(tooltip, row_html)

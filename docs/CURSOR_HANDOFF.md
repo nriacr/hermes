@@ -1,7 +1,7 @@
 # Hermes Cursor Handoff
 
 This document is the current technical and product handoff for continuing Hermes
-in Cursor. It describes the real repository at version `2.5.29`; source code and
+in Cursor. It describes the real repository at version `2.5.30`; source code and
 tests remain authoritative when this document and code ever differ.
 
 ## 1. Product snapshot
@@ -309,8 +309,9 @@ Visual contract:
 - muted but clearly distinct provider accents;
 - compact mobile cards without dropping seller, product, current, target,
   difference, min/max, stock, or links;
-- table, stock-list, and collapsible product-group labels show at most 70
-  characters; retain the complete label in the tooltip;
+- table and stock-list product names show at most 60 characters without an
+  ellipsis; collapsible product-group labels show at most 70 characters; retain
+  the complete label in the tooltip;
 - whole-lira display (`1.500 TL`), correct Turkish grammar and characters;
 - confirmation for destructive actions and clear save/restart progress;
 - settings edits stay on the page until `Değişiklikleri uygula`; one save writes
