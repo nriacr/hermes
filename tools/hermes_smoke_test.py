@@ -4739,7 +4739,7 @@ class StatisticsAndPriceAgeTests(unittest.TestCase):
                 self.assertEqual(old_row["price_checked_at"], checked_at)
                 html = dashboard._render_table_row(old_row)
                 self.assertIn("125 dk önce", html)
-                self.assertIn('data-label="Güncelleme"', html)
+                self.assertIn('data-label="Son güncelleme"', html)
 
     def test_statistics_page_shows_all_cycles_and_summary(self):
         now = datetime.now(timezone.utc)
