@@ -960,13 +960,49 @@ def _attach_state_search_groups(rows, state, options=None):
     return enriched
 
 
+def _attach_state_price_times(rows, state):
+    """Fill legacy summary rows from their matching successful offer reads."""
+    if not isinstance(state, dict):
+        return rows
+    known_reads = {}
+    for entry in state.values():
+        if not isinstance(entry, dict) or not entry.get("url") or entry.get("last_price") is None:
+            continue
+        checked_at = parse_iso_datetime(entry.get("last_price_checked_at") or entry.get("last_checked_at"))
+        identity = tracking_offer_identity(entry.get("url"), parse_bool(entry.get("is_warehouse"), False))
+        if not checked_at or not identity:
+            continue
+        try:
+            price = Decimal(str(entry["last_price"])).quantize(Decimal("1"), rounding=ROUND_DOWN)
+        except (InvalidOperation, ValueError):
+            continue
+        key = (str(entry.get("tracking_id") or ""), identity, price)
+        if key not in known_reads or checked_at > known_reads[key]:
+            known_reads[key] = checked_at
+
+    enriched = []
+    for row in rows:
+        if not isinstance(row, dict) or parse_iso_datetime(row.get("price_checked_at")):
+            enriched.append(row)
+            continue
+        identity = tracking_offer_identity(row.get("product_url"), parse_bool(row.get("is_warehouse"), False))
+        price = _parse_turkish_money(row.get("price"))
+        checked_at = known_reads.get((str(row.get("tracking_id") or ""), identity, price))
+        if checked_at:
+            row = {**row, "price_checked_at": checked_at.isoformat()}
+        enriched.append(row)
+    return enriched
+
+
 def _render_table():
     payload = load_json(SUMMARY_PATH, {})
     rows = payload.get("rows") if isinstance(payload.get("rows"), list) else []
     stock_rows = payload.get("stock_rows") if isinstance(payload.get("stock_rows"), list) else []
+    state = load_json(STATE_PATH, {})
+    rows = _attach_state_price_times(rows, state)
     rows = _attach_state_search_groups(
         rows,
-        load_json(STATE_PATH, {}),
+        state,
         load_json(OPTIONS_PATH, {}),
     )
     if not rows and not stock_rows:

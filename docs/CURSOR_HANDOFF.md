@@ -1,7 +1,7 @@
 # Hermes Cursor Handoff
 
 This document is the current technical and product handoff for continuing Hermes
-in Cursor. It describes the real repository at version `2.5.30`; source code and
+in Cursor. It describes the real repository at version `2.5.31`; source code and
 tests remain authoritative when this document and code ever differ.
 
 ## 1. Product snapshot
@@ -167,6 +167,9 @@ medium/low-priority watches carried over into later cycles. The Statistics page
 graphs every completed cycle from the last seven days, lists their durations,
 and shows minimum, maximum, and average values. Historical cycle records begin
 when this release is installed; older cycles cannot be reconstructed.
+For pre-timestamp price rows, the successful offer state's `last_checked_at`
+recovers the read time. The dashboard also backfills a matching legacy summary
+row immediately, requiring the same offer identity and displayed price.
 
 Rows are provider-colored. Above-target multi-result/variant watches collapse
 under the configured watch name. Rows are grouped by provider and ordered by

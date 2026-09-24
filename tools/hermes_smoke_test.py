@@ -2742,6 +2742,8 @@ class HermesSmokeTests(unittest.TestCase):
         self.assertEqual(rows_by_priority["medium"]["price"], "120 TL")
         self.assertEqual(rows_by_priority["low"]["price"], "220 TL")
         self.assertEqual(rows_by_priority["high"]["price"], "300 TL")
+        self.assertEqual(rows_by_priority["medium"]["price_checked_at"], now.isoformat())
+        self.assertEqual(rows_by_priority["low"]["price_checked_at"], now.isoformat())
         coverage_line = next(
             call.args[0]
             for call in cycle_log.call_args_list
@@ -4692,6 +4694,41 @@ class HermesSmokeTests(unittest.TestCase):
 
 
 class StatisticsAndPriceAgeTests(unittest.TestCase):
+    def test_legacy_summary_recovers_price_time_from_matching_offer_state(self):
+        checked_at = (datetime.now(timezone.utc) - timedelta(minutes=125)).isoformat()
+        url = "https://www.amazon.com.tr/dp/B000000001"
+        row = {
+            "product_url": url, "price": "90 TL", "tracking_id": "phone",
+            "is_warehouse": False, "price_checked_at": "",
+        }
+        state = {
+            "offer": {"url": url, "last_price": "90.50", "last_checked_at": checked_at,
+                      "tracking_id": "phone", "is_warehouse": False},
+            "other_price": {"url": url, "last_price": "91", "last_checked_at": datetime.now(timezone.utc).isoformat(),
+                            "tracking_id": "phone", "is_warehouse": False},
+            "warehouse": {"url": url, "last_price": "90", "last_checked_at": datetime.now(timezone.utc).isoformat(),
+                          "tracking_id": "phone", "is_warehouse": True},
+        }
+        hydrated = dashboard._attach_state_price_times([row], state)
+        self.assertEqual(hydrated[0]["price_checked_at"], checked_at)
+        self.assertIn("125 dk önce", dashboard._render_table_row(hydrated[0]))
+        self.assertEqual(row["price_checked_at"], "")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            summary_path = Path(tmpdir) / "summary.json"
+            state_path = Path(tmpdir) / "state.json"
+            options_path = Path(tmpdir) / "options.json"
+            summary_path.write_text(json.dumps({"rows": [{
+                **row, "seller": "Amazon", "product_title": "Telefon",
+                "target": "100 TL", "difference": "-10 TL", "min_price": "90 TL", "max_price": "90 TL",
+            }]}), encoding="utf-8")
+            state_path.write_text(json.dumps(state), encoding="utf-8")
+            options_path.write_text("{}", encoding="utf-8")
+            with patch.object(dashboard, "SUMMARY_PATH", summary_path), patch.object(
+                dashboard, "STATE_PATH", state_path
+            ), patch.object(dashboard, "OPTIONS_PATH", options_path):
+                self.assertIn("125 dk önce", dashboard._render_table())
+
     def test_duplicate_equal_price_uses_latest_successful_read(self):
         older = PriceSummaryRow(
             "Amazon", "Aynı ürün", "https://www.amazon.com.tr/dp/B000000001",

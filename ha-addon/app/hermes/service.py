@@ -405,7 +405,9 @@ def summary_row_from_state(watch: WatchRule, state_entry: Dict[str, Any], seller
         tracking_id=str(state_entry.get("tracking_id") or watch.tracking_id or ""),
         is_warehouse=bool(state_entry.get("is_warehouse", False)),
         priority=str(state_entry.get("priority") or watch.priority or "high"),
-        price_checked_at=str(state_entry.get("last_price_checked_at") or ""),
+        # Offer entries already stored the successful read time before the
+        # dedicated price timestamp was introduced. Preserve it on skipped watches.
+        price_checked_at=str(state_entry.get("last_price_checked_at") or state_entry.get("last_checked_at") or ""),
     )
 
 
