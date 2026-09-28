@@ -130,24 +130,26 @@ DASHBOARD_CSS += """
 .statistics-chart .grid-line { stroke:#41464b; stroke-width:1; }
 .statistics-chart .cycle-line { fill:none; stroke:#ffd07a; stroke-width:3; stroke-linecap:round; stroke-linejoin:round; }
 .statistics-chart .cycle-dot { fill:#ffd07a; }
-.statistics-day-list { display:grid; gap:9px; }
-.statistics-day { border:1px solid var(--line); border-radius:14px; background:#202327; overflow:hidden; }
-.statistics-day summary { cursor:pointer; list-style:none; padding:13px 14px; }
+.statistics-day-list { border:1px solid var(--line); border-radius:14px; overflow:hidden; }
+.statistics-day-head,.statistics-day-grid { display:grid; grid-template-columns:1.1fr 1fr 1.5fr .7fr; gap:10px; align-items:center; }
+.statistics-day-head { padding:9px 14px; background:var(--head); color:#e1e3e3; font-size:11px; font-weight:800; text-transform:uppercase; letter-spacing:.035em; }
+.statistics-day { background:#202327; }
+.statistics-day + .statistics-day { border-top:1px solid var(--line); }
+.statistics-day summary { cursor:pointer; list-style:none; padding:11px 14px; }
 .statistics-day summary::-webkit-details-marker { display:none; }
-.statistics-day summary::after { content:'Çevrim kayıtlarını göster ▾'; display:block; margin-top:9px; color:var(--muted); font-size:11px; font-weight:700; }
-.statistics-day[open] summary::after { content:'Çevrim kayıtlarını gizle ▴'; }
-.statistics-day-grid { display:grid; grid-template-columns:minmax(95px,1.15fr) repeat(3,minmax(80px,1fr)); gap:10px; align-items:center; }
+.statistics-day summary:hover { background:#2a2e32; }
+.statistics-day[open] summary { background:#2a2e32; }
 .statistics-day-grid > span { min-width:0; }
-.statistics-day-grid small { display:block; color:var(--muted); font-size:10px; font-weight:750; text-transform:uppercase; }
-.statistics-day-grid strong { display:block; margin-top:3px; font-size:15px; font-variant-numeric:tabular-nums; }
+.statistics-day-grid strong { display:block; font-size:15px; font-variant-numeric:tabular-nums; white-space:nowrap; }
 .statistics-day-grid .statistics-day-date strong { color:#ffd07a; }
-.statistics-day-distribution { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:8px; align-items:center; margin-top:10px; }
-.statistics-day-bar { display:flex; height:10px; border-radius:99px; background:#44494e; overflow:hidden; }
-.statistics-day-bar span { display:block; height:100%; }
-.statistics-day-bar .fast { background:#86dfb7; }.statistics-day-bar .regular { background:#ffd07a; }.statistics-day-bar .slow { background:#ff9caf; }
-.statistics-day-slow { color:var(--muted); font-size:11px; white-space:nowrap; font-variant-numeric:tabular-nums; }
-.statistics-legend { display:flex; flex-wrap:wrap; gap:12px; margin:0 0 12px; color:var(--muted); font-size:11px; }
-.statistics-legend span::before { content:''; display:inline-block; width:8px; height:8px; margin-right:5px; border-radius:2px; background:var(--legend-color); }
+.statistics-day-date .short-date { display:none; }
+.statistics-day-grid small { display:block; margin-top:2px; color:var(--muted); font-size:10px; }
+.statistics-day-grid .statistics-day-typical strong { color:#b7f0dc; }
+.statistics-day-grid .statistics-day-slow strong:not(.zero) { color:#ff9caf; }
+.statistics-day-grid .statistics-day-slow .zero { color:var(--muted); }
+.statistics-day-detail { display:flex; flex-wrap:wrap; gap:7px 16px; padding:10px 14px; border-top:1px solid var(--line); color:var(--muted); font-size:12px; }
+.statistics-day-detail strong { color:var(--text); font-variant-numeric:tabular-nums; }
+.statistics-day-detail span:last-child { margin-left:auto; }
 .statistics-table-wrap { max-height:340px; overflow:auto; border:0; border-top:1px solid var(--line); border-radius:0; }
 .statistics-table { min-width:0; }
 .statistics-table th,.statistics-table td { width:auto !important; text-align:left !important; }
@@ -157,10 +159,12 @@ DASHBOARD_CSS += """
 .statistics-metrics { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin-top:14px; }
 .statistics-metrics .public-cycle-pill { min-height:64px; }
 @media (max-width:720px) {
-  .statistics-day summary { padding:11px; }
-  .statistics-day-grid { grid-template-columns:repeat(2,minmax(0,1fr)); gap:9px; }
-  .statistics-day-grid strong { font-size:14px; }
-  .statistics-day-distribution { grid-template-columns:1fr; gap:5px; }
+  .statistics-day-head,.statistics-day-grid { grid-template-columns:1.15fr .7fr 1.45fr .6fr; gap:4px; }
+  .statistics-day-head { padding:8px 6px; font-size:10px; letter-spacing:0; }
+  .statistics-day summary { padding:9px 6px; }
+  .statistics-day-grid strong { font-size:13px; }
+  .statistics-day-grid small { font-size:9px; }
+  .statistics-day-detail span:last-child { margin-left:0; }
   .statistics-table { display:table; min-width:0; table-layout:fixed; }
   .statistics-table thead { display:table-header-group; }
   .statistics-table tbody { display:table-row-group; }
@@ -169,6 +173,10 @@ DASHBOARD_CSS += """
   .statistics-table-wrap { overflow:auto; }
   .statistics-metrics { grid-template-columns:1fr; gap:7px; }
   tbody tr[class*='site-'] .updated-cell { grid-column:1 / -1; min-height:29px; border:1px solid rgba(255,255,255,.06); border-radius:10px; padding:5px 7px; background:rgba(20,22,24,.42); align-items:center; }
+}
+@media (max-width:360px) {
+  .statistics-day-date .full-date { display:none; }
+  .statistics-day-date .short-date { display:inline; }
 }
 """
 
@@ -1308,22 +1316,25 @@ def _render_cycle_days(points):
         days.setdefault(checked_at.date(), []).append((checked_at, duration))
     if not days:
         return '<p class="statistics-empty">Henüz kayıt yok.</p>'
-    result = []
+    result = [
+        '<div class="statistics-day-head" aria-hidden="true">'
+        '<span>Gün / Çevrim</span><span>Tipik</span>'
+        '<span>Orta %50</span><span>10 dk+</span></div>'
+    ]
     for day, entries in reversed(list(days.items())):
         durations = [duration for _, duration in entries]
         count = len(durations)
-        fast = sum(duration < 300 for duration in durations)
-        regular = sum(300 <= duration < 600 for duration in durations)
-        slow = count - fast - regular
-        segments = "".join(
-            f'<span class="{kind}" style="width:{amount / count * 100:.2f}%" '
-            f'aria-label="{label}: {amount}"></span>'
-            for kind, amount, label in (
-                ("fast", fast, "5 dakikadan kısa"),
-                ("regular", regular, "5–10 dakika"),
-                ("slow", slow, "10 dakika ve üzeri"),
-            ) if amount
+        slow = sum(duration >= 600 for duration in durations)
+        slow_class = ' class="zero"' if not slow else ''
+        lower, upper = (
+            statistics.quantiles(durations, n=4, method="inclusive")[::2]
+            if count > 1 else (durations[0], durations[0])
         )
+
+        def compact(duration):
+            minutes, seconds = divmod(round(duration), 60)
+            return f"{minutes}:{seconds:02d}"
+
         rows = "".join(
             '<tr>'
             f'<td>{escape(checked_at.strftime("%H:%M:%S"))}</td>'
@@ -1332,18 +1343,22 @@ def _render_cycle_days(points):
             for checked_at, duration in reversed(entries)
         )
         result.append(
-            '<details class="statistics-day"><summary>'
+            '<details class="statistics-day"><summary '
+            f'aria-label="{day.strftime("%d.%m.%Y")}: {count} çevrim; tipik {compact(statistics.median(durations))}; '
+            f'orta yüzde elli {compact(lower)} ile {compact(upper)}; on dakika ve üzeri {slow}">'
             '<span class="statistics-day-grid">'
-            f'<span class="statistics-day-date"><small>Gün</small><strong>{day.strftime("%d.%m.%Y")}</strong></span>'
-            f'<span><small>Çevrim</small><strong>{count}</strong></span>'
-            f'<span><small>Tipik süre</small><strong>{escape(_duration_text(statistics.median(durations)))}</strong></span>'
-            f'<span><small>Ortalama</small><strong>{escape(_duration_text(statistics.mean(durations)))}</strong></span>'
-            '</span>'
-            '<span class="statistics-day-distribution">'
-            f'<span class="statistics-day-bar" role="img" aria-label="Süre dağılımı: {fast} kısa, {regular} orta, {slow} uzun">{segments}</span>'
-            f'<span class="statistics-day-slow">10 dk+: {slow} · En kısa–uzun: '
-            f'{escape(_duration_text(min(durations)))}–{escape(_duration_text(max(durations)))}</span>'
+            f'<span class="statistics-day-date"><strong><span class="full-date">{day.strftime("%d.%m.%Y")}</span>'
+            f'<span class="short-date">{day.strftime("%d.%m")}</span></strong><small>{count} çevrim</small></span>'
+            f'<span class="statistics-day-typical"><strong>{compact(statistics.median(durations))}</strong></span>'
+            f'<span><strong>{compact(lower)}–{compact(upper)}</strong></span>'
+            f'<span class="statistics-day-slow"><strong{slow_class}>{slow}</strong></span>'
             '</span></summary>'
+            '<div class="statistics-day-detail">'
+            f'<span>Ortalama <strong>{escape(_duration_text(statistics.mean(durations)))}</strong></span>'
+            f'<span>En kısa <strong>{escape(_duration_text(min(durations)))}</strong></span>'
+            f'<span>En uzun <strong>{escape(_duration_text(max(durations)))}</strong></span>'
+            '<span>Aşağıda tüm çevrimler yeni tarihten eskiye sıralı.</span>'
+            '</div>'
             '<div class="table-wrap statistics-table-wrap"><table class="statistics-table">'
             '<thead><tr><th>Saat</th><th>Çevrim süresi</th></tr></thead>'
             f'<tbody>{rows}</tbody></table></div></details>'
@@ -1366,13 +1381,12 @@ def _render_statistics_page(path: str, base_path: str) -> bytes:
 <html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="theme-color" content="#111315">{web_app_head}<meta http-equiv="refresh" content="60"><title>Hermes İstatistik</title><style>{DASHBOARD_CSS}</style></head>
 <body class="public"><main><div class="hero"><div class="badge">Hermes</div>
 <nav class="actions public-actions"><a class="button secondary" href="{base_path}/">Özet Tablo</a><a class="button primary" href="{base_path}/statistics" aria-current="page">İstatistik</a><a class="button secondary" href="{base_path}/settings">Ayarlar</a></nav>
-<section class="summary-panel"><div class="summary-head"><h2>Çevrim süreleri</h2><span>Son 7 gün · {len(points)} çevrim</span></div>
-<p class="statistics-intro">Grafikte son yedi günün tamamlanan çevrimleri gösterilir. Süre, tarama ve çevrimler arası beklemeyi kapsar.</p>{chart}</section>
-<section class="summary-panel"><div class="summary-head"><h2>Günlük çevrim özeti</h2><span>En yeni gün üstte · Güne dokunarak çevrim kayıtlarını aç</span></div>
-<p class="statistics-intro">Tipik süre, günün ortasındaki çevrimdir; birkaç uzun çevrimden etkilenmez. Renkli şerit, sürelerin dağılımını gösterir.</p>
-<div class="statistics-legend"><span style="--legend-color:#86dfb7">5 dk altı</span><span style="--legend-color:#ffd07a">5–10 dk</span><span style="--legend-color:#ff9caf">10 dk ve üzeri</span></div>
+<section class="summary-panel"><div class="summary-head"><h2>Günlük çevrim özeti</h2><span>Son 7 gün · {len(points)} çevrim</span></div>
+<p class="statistics-intro">Süreler dakika:saniye biçiminde. Tipik, ortadaki çevrim; Orta %50, uç değerler yerine çevrimlerin ortadaki yarısını gösterir. Güne dokunarak tüm kayıtları açabilirsin.</p>
 <div class="statistics-day-list">{day_rows}</div>
 <div class="statistics-metrics"><section class="public-cycle-pill"><span>En kısa</span><strong>{escape(shortest)}</strong></section><section class="public-cycle-pill"><span>En uzun</span><strong>{escape(longest)}</strong></section><section class="public-cycle-pill"><span>Ortalama</span><strong>{escape(average)}</strong></section></div></section>
+<section class="summary-panel"><div class="summary-head"><h2>Çevrim süreleri grafiği</h2></div>
+<p class="statistics-intro">Grafikte son yedi günün tamamlanan çevrimleri gösterilir. Süre, tarama ve çevrimler arası beklemeyi kapsar.</p>{chart}</section>
 </div></main></body></html>"""
     return html.encode("utf-8")
 

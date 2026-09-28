@@ -1,7 +1,7 @@
 # Hermes Cursor Handoff
 
 This document is the current technical and product handoff for continuing Hermes
-in Cursor. It describes the real repository at version `2.5.33`; source code and
+in Cursor. It describes the real repository at version `2.5.34`; source code and
 tests remain authoritative when this document and code ever differ.
 
 ## 1. Product snapshot
@@ -164,10 +164,10 @@ positively identified unavailable products, operational errors, and recent
 Telegram alerts.
 Each price row retains its own successful read timestamp, including rows from
 medium/low-priority watches carried over into later cycles. The Statistics page
-graphs every completed cycle from the last seven days, then groups cycles by
-local day. Each day shows count, median, mean, duration buckets (<5, 5-10, 10+
-minutes), slow-cycle count and min/max range. Expanding a day reveals every
-individual cycle time. Overall minimum, maximum and average remain below.
+starts with a compact daily table: count, median, interquartile range (middle
+50%), and the number of cycles lasting at least ten minutes. Expanding a day
+shows its mean, min/max, and every individual cycle time. Overall minimum,
+maximum and average remain below the table; the full-cycle chart follows it.
 Historical cycle records begin
 when this release is installed; older cycles cannot be reconstructed.
 For pre-timestamp price rows, the successful offer state's `last_checked_at`

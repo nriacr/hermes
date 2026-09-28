@@ -4779,27 +4779,30 @@ class StatisticsAndPriceAgeTests(unittest.TestCase):
                 self.assertIn("125 dk önce", html)
                 self.assertIn('data-label="Son güncelleme"', html)
 
-    def test_statistics_page_groups_cycles_by_day_and_shows_distribution(self):
+    def test_statistics_page_shows_compact_daily_range_without_outliers(self):
         now = datetime.now(timezone.utc)
         same_day = now.replace(hour=12, minute=0, second=0, microsecond=0)
         history = [
             {"checked_at": (same_day - timedelta(days=1)).isoformat(), "duration_seconds": 120},
-            {"checked_at": (same_day - timedelta(days=1, minutes=1)).isoformat(), "duration_seconds": 240},
-            {"checked_at": (same_day - timedelta(days=1, minutes=2)).isoformat(), "duration_seconds": 900},
+            {"checked_at": (same_day - timedelta(days=1, minutes=1)).isoformat(), "duration_seconds": 230},
+            {"checked_at": (same_day - timedelta(days=1, minutes=2)).isoformat(), "duration_seconds": 240},
+            {"checked_at": (same_day - timedelta(days=1, minutes=3)).isoformat(), "duration_seconds": 250},
+            {"checked_at": (same_day - timedelta(days=1, minutes=4)).isoformat(), "duration_seconds": 900},
         ]
         with patch.object(dashboard, "load_json", return_value=history):
             html = dashboard._render_statistics_page("/statistics", ".").decode("utf-8")
-        self.assertIn("Son 7 gün · 3 çevrim", html)
+        self.assertIn("Son 7 gün · 5 çevrim", html)
         self.assertIn("2 dk 0 sn", html)
         self.assertIn("4 dk 0 sn", html)
         self.assertIn("15 dk 0 sn", html)
         self.assertIn('class="cycle-line"', html)
         self.assertIn("Günlük çevrim özeti", html)
         self.assertEqual(html.count('<details class="statistics-day">'), 1)
-        self.assertIn('<small>Tipik süre</small><strong>4 dk 0 sn</strong>', html)
-        self.assertIn('aria-label="Süre dağılımı: 2 kısa, 0 orta, 1 uzun"', html)
-        self.assertIn("10 dk+: 1", html)
-        self.assertIn("Çevrim kayıtlarını göster", html)
+        self.assertIn('<span class="statistics-day-typical"><strong>4:00</strong></span>', html)
+        self.assertIn('<span><strong>3:50–4:10</strong></span>', html)
+        self.assertIn('<span class="statistics-day-slow"><strong>1</strong></span>', html)
+        self.assertIn("En uzun <strong>15 dk 0 sn</strong>", html)
+        self.assertNotIn("statistics-day-bar", html)
         with patch.object(dashboard, "_public_dashboard_allowed", return_value=True), patch.object(
             dashboard, "load_json", return_value=history
         ):
