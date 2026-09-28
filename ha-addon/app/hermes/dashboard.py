@@ -1,5 +1,6 @@
 import math
 import re
+import statistics
 import threading
 import urllib.error
 import urllib.parse
@@ -129,14 +130,37 @@ DASHBOARD_CSS += """
 .statistics-chart .grid-line { stroke:#41464b; stroke-width:1; }
 .statistics-chart .cycle-line { fill:none; stroke:#ffd07a; stroke-width:3; stroke-linecap:round; stroke-linejoin:round; }
 .statistics-chart .cycle-dot { fill:#ffd07a; }
-.statistics-table-wrap { max-height:430px; overflow:auto; }
-.statistics-table { min-width:480px; }
+.statistics-day-list { display:grid; gap:9px; }
+.statistics-day { border:1px solid var(--line); border-radius:14px; background:#202327; overflow:hidden; }
+.statistics-day summary { cursor:pointer; list-style:none; padding:13px 14px; }
+.statistics-day summary::-webkit-details-marker { display:none; }
+.statistics-day summary::after { content:'Çevrim kayıtlarını göster ▾'; display:block; margin-top:9px; color:var(--muted); font-size:11px; font-weight:700; }
+.statistics-day[open] summary::after { content:'Çevrim kayıtlarını gizle ▴'; }
+.statistics-day-grid { display:grid; grid-template-columns:minmax(95px,1.15fr) repeat(3,minmax(80px,1fr)); gap:10px; align-items:center; }
+.statistics-day-grid > span { min-width:0; }
+.statistics-day-grid small { display:block; color:var(--muted); font-size:10px; font-weight:750; text-transform:uppercase; }
+.statistics-day-grid strong { display:block; margin-top:3px; font-size:15px; font-variant-numeric:tabular-nums; }
+.statistics-day-grid .statistics-day-date strong { color:#ffd07a; }
+.statistics-day-distribution { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:8px; align-items:center; margin-top:10px; }
+.statistics-day-bar { display:flex; height:10px; border-radius:99px; background:#44494e; overflow:hidden; }
+.statistics-day-bar span { display:block; height:100%; }
+.statistics-day-bar .fast { background:#86dfb7; }.statistics-day-bar .regular { background:#ffd07a; }.statistics-day-bar .slow { background:#ff9caf; }
+.statistics-day-slow { color:var(--muted); font-size:11px; white-space:nowrap; font-variant-numeric:tabular-nums; }
+.statistics-legend { display:flex; flex-wrap:wrap; gap:12px; margin:0 0 12px; color:var(--muted); font-size:11px; }
+.statistics-legend span::before { content:''; display:inline-block; width:8px; height:8px; margin-right:5px; border-radius:2px; background:var(--legend-color); }
+.statistics-table-wrap { max-height:340px; overflow:auto; border:0; border-top:1px solid var(--line); border-radius:0; }
+.statistics-table { min-width:0; }
 .statistics-table th,.statistics-table td { width:auto !important; text-align:left !important; }
 .statistics-table th:last-child,.statistics-table td:last-child { text-align:right !important; }
 .statistics-table thead { position:sticky; top:0; z-index:1; }
+.statistics-empty { padding:14px; color:var(--muted); }
 .statistics-metrics { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin-top:14px; }
 .statistics-metrics .public-cycle-pill { min-height:64px; }
 @media (max-width:720px) {
+  .statistics-day summary { padding:11px; }
+  .statistics-day-grid { grid-template-columns:repeat(2,minmax(0,1fr)); gap:9px; }
+  .statistics-day-grid strong { font-size:14px; }
+  .statistics-day-distribution { grid-template-columns:1fr; gap:5px; }
   .statistics-table { display:table; min-width:0; table-layout:fixed; }
   .statistics-table thead { display:table-header-group; }
   .statistics-table tbody { display:table-row-group; }
@@ -1251,19 +1275,19 @@ def _render_cycle_chart(points, now):
     span_seconds = (now - cutoff).total_seconds()
 
     def xy(checked_at, duration):
-        x = 72 + 880 * (checked_at - cutoff).total_seconds() / span_seconds
+        x = 110 + 842 * (checked_at - cutoff).total_seconds() / span_seconds
         y = 204 - 164 * duration / max_duration
         return round(x, 1), round(y, 1)
 
     coordinates = [xy(checked_at, duration) for checked_at, duration in points]
     polyline = " ".join(f"{x},{y}" for x, y in coordinates)
     grid = "".join(
-        f'<line class="grid-line" x1="72" x2="952" y1="{y}" y2="{y}"/>'
-        f'<text x="63" y="{y + 4}" text-anchor="end">{escape(_duration_text(max_duration * fraction))}</text>'
+        f'<line class="grid-line" x1="110" x2="952" y1="{y}" y2="{y}"/>'
+        f'<text x="101" y="{y + 4}" text-anchor="end">{escape(_duration_text(max_duration * fraction))}</text>'
         for fraction, y in ((1, 40), (0.5, 122), (0, 204))
     )
     ticks = "".join(
-        f'<text x="{72 + 880 * day / 7:.1f}" y="238" text-anchor="middle">'
+        f'<text x="{110 + 842 * day / 7:.1f}" y="238" text-anchor="middle">'
         f'{escape((cutoff + timedelta(days=day)).strftime("%d.%m"))}</text>'
         for day in range(8)
     )
@@ -1278,18 +1302,60 @@ def _render_cycle_chart(points, now):
     )
 
 
+def _render_cycle_days(points):
+    days = {}
+    for checked_at, duration in points:
+        days.setdefault(checked_at.date(), []).append((checked_at, duration))
+    if not days:
+        return '<p class="statistics-empty">Henüz kayıt yok.</p>'
+    result = []
+    for day, entries in reversed(list(days.items())):
+        durations = [duration for _, duration in entries]
+        count = len(durations)
+        fast = sum(duration < 300 for duration in durations)
+        regular = sum(300 <= duration < 600 for duration in durations)
+        slow = count - fast - regular
+        segments = "".join(
+            f'<span class="{kind}" style="width:{amount / count * 100:.2f}%" '
+            f'aria-label="{label}: {amount}"></span>'
+            for kind, amount, label in (
+                ("fast", fast, "5 dakikadan kısa"),
+                ("regular", regular, "5–10 dakika"),
+                ("slow", slow, "10 dakika ve üzeri"),
+            ) if amount
+        )
+        rows = "".join(
+            '<tr>'
+            f'<td>{escape(checked_at.strftime("%H:%M:%S"))}</td>'
+            f'<td>{escape(_duration_text(duration))}</td>'
+            '</tr>'
+            for checked_at, duration in reversed(entries)
+        )
+        result.append(
+            '<details class="statistics-day"><summary>'
+            '<span class="statistics-day-grid">'
+            f'<span class="statistics-day-date"><small>Gün</small><strong>{day.strftime("%d.%m.%Y")}</strong></span>'
+            f'<span><small>Çevrim</small><strong>{count}</strong></span>'
+            f'<span><small>Tipik süre</small><strong>{escape(_duration_text(statistics.median(durations)))}</strong></span>'
+            f'<span><small>Ortalama</small><strong>{escape(_duration_text(statistics.mean(durations)))}</strong></span>'
+            '</span>'
+            '<span class="statistics-day-distribution">'
+            f'<span class="statistics-day-bar" role="img" aria-label="Süre dağılımı: {fast} kısa, {regular} orta, {slow} uzun">{segments}</span>'
+            f'<span class="statistics-day-slow">10 dk+: {slow} · En kısa–uzun: '
+            f'{escape(_duration_text(min(durations)))}–{escape(_duration_text(max(durations)))}</span>'
+            '</span></summary>'
+            '<div class="table-wrap statistics-table-wrap"><table class="statistics-table">'
+            '<thead><tr><th>Saat</th><th>Çevrim süresi</th></tr></thead>'
+            f'<tbody>{rows}</tbody></table></div></details>'
+        )
+    return "".join(result)
+
+
 def _render_statistics_page(path: str, base_path: str) -> bytes:
     now = datetime.now().astimezone()
     points = _recent_cycle_history(load_json(CYCLE_HISTORY_PATH, []), now)
     chart = _render_cycle_chart(points, now)
-    rows = "".join(
-        '<tr>'
-        f'<td>{escape(checked_at.strftime("%d.%m.%Y"))}</td>'
-        f'<td>{escape(checked_at.strftime("%H:%M:%S"))}</td>'
-        f'<td>{escape(_duration_text(duration))}</td>'
-        '</tr>'
-        for checked_at, duration in reversed(points)
-    ) or '<tr class="empty-row"><td colspan="3">Henüz kayıt yok.</td></tr>'
+    day_rows = _render_cycle_days(points)
     durations = [duration for _, duration in points]
     shortest = _duration_text(min(durations)) if durations else "-"
     longest = _duration_text(max(durations)) if durations else "-"
@@ -1302,8 +1368,10 @@ def _render_statistics_page(path: str, base_path: str) -> bytes:
 <nav class="actions public-actions"><a class="button secondary" href="{base_path}/">Özet Tablo</a><a class="button primary" href="{base_path}/statistics" aria-current="page">İstatistik</a><a class="button secondary" href="{base_path}/settings">Ayarlar</a></nav>
 <section class="summary-panel"><div class="summary-head"><h2>Çevrim süreleri</h2><span>Son 7 gün · {len(points)} çevrim</span></div>
 <p class="statistics-intro">Grafikte son yedi günün tamamlanan çevrimleri gösterilir. Süre, tarama ve çevrimler arası beklemeyi kapsar.</p>{chart}</section>
-<section class="summary-panel"><div class="summary-head"><h2>Çevrim süresi tablosu</h2><span>En yeni çevrim üstte</span></div>
-<div class="table-wrap statistics-table-wrap"><table class="statistics-table"><thead><tr><th>Tarih</th><th>Saat</th><th>Çevrim süresi</th></tr></thead><tbody>{rows}</tbody></table></div>
+<section class="summary-panel"><div class="summary-head"><h2>Günlük çevrim özeti</h2><span>En yeni gün üstte · Güne dokunarak çevrim kayıtlarını aç</span></div>
+<p class="statistics-intro">Tipik süre, günün ortasındaki çevrimdir; birkaç uzun çevrimden etkilenmez. Renkli şerit, sürelerin dağılımını gösterir.</p>
+<div class="statistics-legend"><span style="--legend-color:#86dfb7">5 dk altı</span><span style="--legend-color:#ffd07a">5–10 dk</span><span style="--legend-color:#ff9caf">10 dk ve üzeri</span></div>
+<div class="statistics-day-list">{day_rows}</div>
 <div class="statistics-metrics"><section class="public-cycle-pill"><span>En kısa</span><strong>{escape(shortest)}</strong></section><section class="public-cycle-pill"><span>En uzun</span><strong>{escape(longest)}</strong></section><section class="public-cycle-pill"><span>Ortalama</span><strong>{escape(average)}</strong></section></div></section>
 </div></main></body></html>"""
     return html.encode("utf-8")
