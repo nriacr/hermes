@@ -227,7 +227,7 @@ def _timed_amazon_network_call(transport: str, candidate: str, expect_search: bo
         log(
             "Amazon ağ yanıt süresi: "
             f"taşıma={transport} | tip={_amazon_request_type(candidate, expect_search)} | "
-            f"durum={_amazon_error_status(exc) or 'hata'} | süre={elapsed_ms} ms | "
+            f"durum={amazon_error_status(exc) or 'hata'} | süre={elapsed_ms} ms | "
             f"adres={_amazon_timing_url(candidate)}"
         )
         raise
@@ -433,7 +433,7 @@ def _get_amazon_response_with_browser(session: requests.Session, candidate: str,
     return response
 
 
-def _amazon_error_status(exc: Exception) -> Optional[int]:
+def amazon_error_status(exc: Exception) -> Optional[int]:
     status_code = getattr(exc, "status_code", None)
     if isinstance(status_code, int):
         return status_code
@@ -443,7 +443,7 @@ def _amazon_error_status(exc: Exception) -> Optional[int]:
 
 
 def _is_hard_amazon_block_error(exc: Exception) -> bool:
-    status_code = _amazon_error_status(exc)
+    status_code = amazon_error_status(exc)
     if status_code in {429, 503}:
         return True
     message = normalize_offer_text(str(exc))
@@ -462,7 +462,7 @@ def _short_amazon_url(url: str) -> str:
 
 
 def _amazon_error_reason(exc: Exception) -> str:
-    status_code = _amazon_error_status(exc)
+    status_code = amazon_error_status(exc)
     message = normalize_offer_text(str(exc))
     if status_code:
         return f"http_{status_code}"
@@ -491,7 +491,7 @@ def _record_amazon_attempt(
         {
             "method": method,
             "type": _amazon_request_type(candidate, expect_search),
-            "status": _amazon_error_status(exc),
+            "status": amazon_error_status(exc),
             "reason": _amazon_error_reason(exc),
             "url": candidate,
         }

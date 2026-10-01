@@ -2132,6 +2132,43 @@ class HermesSmokeTests(unittest.TestCase):
         service.clear_amazon_protection(state, "amazon-a")
         self.assertNotIn("amazon-a", state["_meta"]["amazon_protection"])
 
+    def test_amazon_search_http_503_uses_response_status_for_cooldown(self):
+        response = requests.Response()
+        response.status_code = 503
+        response.url = "https://www.amazon.com.tr/s?k=hue"
+        error = requests.HTTPError("503 Server Error: Service Unavailable", response=response)
+        self.assertEqual(http_client.amazon_error_status(error), 503)
+        self.assertTrue(service.is_amazon_protection_error(error))
+
+        watch = WatchRule("Hue", "amazon", response.url, Decimal("1000"))
+        watch_key = service.normalize_item_key("watch", watch.site, watch.tracking_id or watch.name, watch.url, watch.size)
+        state = {}
+        config = SimpleNamespace(watches=[watch], interval_seconds=1, request_timeout_seconds=20,
+                                 pushover_user_key="", pushover_api_token="")
+        with (patch.object(service, "load_json", return_value=state),
+              patch.object(service, "save_json"),
+              patch.object(service, "wait_before_request"),
+              patch.object(service, "_fetch_watch_offers", side_effect=error) as fetch,
+              patch.object(service, "save_incremental_price_summary"),
+              patch.object(service, "publish_price_summary"),
+              patch.object(service, "record_cycle_duration"),
+              patch.object(service, "maybe_alert_summary_drop"),
+              patch.object(service, "maybe_alert_search_failures")):
+            service.check_once(config)
+        fetch.assert_called_once()
+        self.assertGreater(service.amazon_protection_remaining_seconds(state, watch_key), 0)
+
+        state[watch_key]["last_checked_at"] = (datetime.now(timezone.utc) - timedelta(minutes=2)).isoformat()
+        with (patch.object(service, "load_json", return_value=state),
+              patch.object(service, "save_json"),
+              patch.object(service, "_fetch_watch_offers") as fetch,
+              patch.object(service, "publish_price_summary"),
+              patch.object(service, "record_cycle_duration"),
+              patch.object(service, "maybe_alert_summary_drop"),
+              patch.object(service, "maybe_alert_search_failures")):
+            service.check_once(config)
+        fetch.assert_not_called()
+
     def test_amazon_protection_skip_does_not_republish_stale_price(self):
         watch = WatchRule("iPhone", "amazon", "https://www.amazon.com.tr/dp/B000000001", Decimal("100000"))
         watch_key = service.normalize_item_key("watch", watch.site, watch.tracking_id or watch.name, watch.url, watch.size)

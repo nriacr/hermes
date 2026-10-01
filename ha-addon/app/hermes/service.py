@@ -28,6 +28,7 @@ from .constants import (
 )
 from .errors import EmptySearchResultsHermesError, HermesError, OutOfStockHermesError
 from .http_client import (
+    amazon_error_status,
     cleaned_html,
     fetch_amazon_page,
     fetch_bengurme_page,
@@ -801,7 +802,7 @@ def amazon_protection_state(state: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def is_amazon_protection_error(exc: Exception) -> bool:
-    status_code = getattr(exc, "status_code", None)
+    status_code = amazon_error_status(exc)
     if status_code in {429, 503}:
         return True
     message = normalize_key(str(exc))

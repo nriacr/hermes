@@ -1,7 +1,7 @@
 # Hermes Cursor Handoff
 
 This document is the current technical and product handoff for continuing Hermes
-in Cursor. It describes the real repository at version `2.5.35`; source code and
+in Cursor. It describes the real repository at version `2.5.36`; source code and
 tests remain authoritative when this document and code ever differ.
 
 ## 1. Product snapshot
@@ -220,6 +220,9 @@ verified warehouse offers remain separate identities.
   search detail stops further immediate requests from the same watch; verified
   partial offers remain available with their original read time. A wholly
   failed watch never republishes its old current price.
+- HTTP 429/503 may arrive as `requests.HTTPError` with the status on its
+  response object; the service reads that status through the shared HTTP
+  helper so Amazon search URLs receive the same pause as product URLs.
 - Search names use phrase matching; recommendation sections are cut.
 - Parsing stops before `All Departments içindeki sonuçlar gösteriliyor`.
 - Product variation expansion is opt-in with `include_variations`: follow actual
