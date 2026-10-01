@@ -1,7 +1,7 @@
 # Hermes Cursor Handoff
 
 This document is the current technical and product handoff for continuing Hermes
-in Cursor. It describes the real repository at version `2.5.36`; source code and
+in Cursor. It describes the real repository at version `2.5.37`; source code and
 tests remain authoritative when this document and code ever differ.
 
 ## 1. Product snapshot
@@ -211,8 +211,8 @@ verified warehouse offers remain separate identities.
 
 ### Amazon
 
-- Supports product and search URLs with isolated rescue diagnostics.
-- A verified CAPTCHA/429/503 pauses only the affected watch for 15 minutes,
+- Supports product and search URLs with isolated transport diagnostics.
+- A challenge or HTTP 429/503 pauses only the affected watch for 15 minutes,
   then automatically probes once. Repeated protection extends that watch's
   pause to 30 and at most 60 minutes. The pause survives restarts, resets on
   a successful read, and can trigger a recovery probe before the watch's normal
@@ -223,6 +223,19 @@ verified warehouse offers remain separate identities.
 - HTTP 429/503 may arrive as `requests.HTTPError` with the status on its
   response object; the service reads that status through the shared HTTP
   helper so Amazon search URLs receive the same pause as product URLs.
+- The monitor owns one process-lived `AmazonClient`: anonymous Requests and
+  curl sessions retain cookies/connections across cycles. Other providers still
+  receive a new Requests session per cycle. Chromium, when needed, reuses one
+  anonymous temporary profile until process shutdown. Restarting resets these
+  transport sessions. All response, parsed-page and offer caches remain on the
+  per-cycle session, so a subsequent cycle fetches fresh prices.
+- One canonical URL gets one primary HTTP attempt. Challenges and HTTP 429/503
+  are terminal; do not reset cookies or try fresh sessions, locale paths,
+  Chromium or Requests after those responses. For a non-protection failure,
+  allow at most one Chromium fallback on that same address, then stop.
+- CAPTCHA detection checks actual validation forms/inputs, a Robot Check title,
+  or explicit challenge instructions. Ignore scripts, styles, templates,
+  comments and captcha asset names; a raw keyword alone is insufficient.
 - Search names use phrase matching; recommendation sections are cut.
 - Parsing stops before `All Departments içindeki sonuçlar gösteriliyor`.
 - Product variation expansion is opt-in with `include_variations`: follow actual
@@ -355,6 +368,18 @@ provider so adjacent providers remain distinguishable.
 - Request lines identify provider and watch.
 - Errors identify context, failed URL, and actionable reason.
 - Amazon diagnostics retain method/status/reason without secrets.
+- Amazon request measurements span cycles: session age/count, inter-attempt
+  gap and a rolling 60-second attempt count. Response diagnostics distinguish
+  HTTP status, challenge evidence and product/search markers. Chromium's process
+  exit code is not an HTTP status; its HTTP status is reported as unknown.
+- The measurement unit is a primary HTTP call/browser navigation, not every
+  resource request from Chromium. HTTP redirect counts are separate. Never
+  claim this is a complete packet-level or browser-resource request count.
+- `_meta.amazon_request_diagnostics` in `state.json` retains block snapshots
+  for seven days (at most 1,000), including first block in the process-lived
+  session, transport, status/challenge evidence and request density. It contains
+  no HTML, cookie values or account information. These observations do not
+  expose Amazon's internal blocking rule. The existing cooldown still applies.
 - Avoid successful internal parser noise; keep concise success and rich failure.
 
 ## 14. Testing and release

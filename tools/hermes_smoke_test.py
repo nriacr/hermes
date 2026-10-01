@@ -1868,209 +1868,227 @@ class HermesSmokeTests(unittest.TestCase):
         self.assertIs(first, second)
         self.assertEqual(session.calls, 1)
         messages = [call.args[0] for call in timing_log.call_args_list]
-        self.assertEqual(len(messages), 1)
-        self.assertIn("taşıma=requests", messages[0])
-        self.assertIn("süre=", messages[0])
+        timing_messages = [message for message in messages if "Amazon ağ yanıt süresi:" in message]
+        self.assertEqual(len(timing_messages), 1)
+        self.assertIn("taşıma=requests", timing_messages[0])
+        self.assertIn("süre=", timing_messages[0])
         self.assertEqual(session._hermes_amazon_cycle_metrics["page_fetch_calls"], 2)
         self.assertEqual(session._hermes_amazon_cycle_metrics["network_attempts"], 1)
         self.assertEqual(session._hermes_amazon_cycle_metrics["response_cache_hits"], 1)
 
-    def test_amazon_hard_curl_block_can_recover_with_requests_after_rescue(self):
-        curl_calls = {"count": 0}
-        browser_calls = {"count": 0}
+    def test_amazon_protection_detection_ignores_scripts_and_product_words(self):
+        html = '''<html><title>Amazon</title><body>
+          <span id="productTitle">Robot süpürge</span>
+          <script>var url="/errors/validateCaptcha"; var message="not a robot";</script>
+          <style>.captcha { color:red; }</style><!-- Robot Check -->
+          <img src="captcha-example.jpg"><p>CAPTCHA teknolojisi hakkında bilgi</p>
+        </body></html>'''
+        self.assertFalse(http_client.is_amazon_protection_page(html))
+        self.assertFalse(service.is_bot_protection_page("amazon", html))
 
-        class FakeCookies:
-            def set(self, *_args, **_kwargs):
-                return None
+    def test_amazon_protection_detection_accepts_real_challenges(self):
+        pages = [
+            '<form action="/errors_page/validateCaptcha"><button>Alışverişe Devam Et</button></form>',
+            '<form action="/errors/validateCaptcha"><input id="captchacharacters"></form>',
+            '<title>Robot Check</title><body>Amazon</body>',
+            '<body>Enter the characters you see below</body>',
+            '<body>Robot olmadığınızı doğrulayın</body>',
+            '<body>For automated access to Amazon data please contact us</body>',
+        ]
+        for html in pages:
+            with self.subTest(html=html):
+                self.assertTrue(http_client.is_amazon_protection_page(html))
 
-            def clear(self, *_args, **_kwargs):
-                return None
+    def test_amazon_block_is_terminal_without_rescue_or_cookie_reset(self):
+        response = requests.Response()
+        response.status_code = 200
+        response._content = b'<form action="/errors_page/validateCaptcha">Amazon</form>'
+        response.encoding = "utf-8"
+        session = requests.Session()
+        session.cookies.set("session-id", "keep-me", domain=".amazon.com.tr")
+        with (patch.object(http_client, "curl_requests", None),
+              patch.object(session, "get", return_value=response) as get,
+              patch.object(http_client, "_get_amazon_response_with_browser") as browser):
+            with self.assertRaisesRegex(HermesError, "koruma"):
+                fetch_amazon_page(session, "https://www.amazon.com.tr/s?k=test", 10, True)
+        get.assert_called_once()
+        browser.assert_not_called()
+        self.assertEqual(session.cookies.get("session-id"), "keep-me")
+        self.assertEqual(session._hermes_amazon_cycle_metrics["network_attempts"], 1)
 
-        class FakeRequestsSession:
+    def test_amazon_sessions_survive_cycles_but_prices_are_fetched_again(self):
+        class FakeCurlSession:
             def __init__(self):
                 self.calls = 0
-                self.cookies = FakeCookies()
+                self.cookies = requests.cookies.RequestsCookieJar()
+                self.closed = False
 
             def get(self, *_args, **_kwargs):
                 self.calls += 1
-                return FakeRequestsResponse()
+                self.cookies.set("session-id", "keep-me")
+                return http_client._HtmlResponse("https://www.amazon.com.tr/dp/B000000001", f"Amazon price {self.calls}")
 
-        class FakeRequestsResponse:
-            status_code = 200
-            headers = {"content-type": "text/html; charset=utf-8"}
-            content = b'<html><body><div data-component-type="s-search-result"><a href="/dp/B000">Amazon</a></div></body></html>'
-            text = content.decode("utf-8")
+            def close(self):
+                self.closed = True
 
-            def raise_for_status(self):
-                return None
+        curl = FakeCurlSession()
+        with patch.object(http_client, "curl_requests", SimpleNamespace(Session=lambda: curl)):
+            with http_client.AmazonClient() as client:
+                first_cycle = requests.Session()
+                first_cycle._hermes_amazon_client = client
+                first = fetch_amazon_page(first_cycle, "https://www.amazon.com.tr/dp/B000000001", 10)
+                self.assertIs(first, fetch_amazon_page(first_cycle, first.url, 10))
+                second_cycle = requests.Session()
+                second_cycle._hermes_amazon_client = client
+                second = fetch_amazon_page(second_cycle, first.url, 10)
+                self.assertIsNot(first, second)
+                self.assertNotEqual(first.text, second.text)
+                self.assertEqual(curl.calls, 2)
+                self.assertEqual(curl.cookies.get("session-id"), "keep-me")
+                self.assertEqual(first_cycle._hermes_amazon_cycle_metrics["network_attempts"], 1)
+                self.assertEqual(second_cycle._hermes_amazon_cycle_metrics["network_attempts"], 1)
+                self.assertEqual(client.total_attempts, 2)
+        self.assertTrue(curl.closed)
 
-        class FakeCurlResponse:
-            status_code = 503
-            headers = {}
-            content = b""
-            text = ""
+    def test_amazon_monitor_reuses_only_amazon_client_between_cycles(self):
+        seen = []
+        with http_client.AmazonClient() as client:
+            with patch.object(service, "_check_once", side_effect=lambda _config, session: seen.append(session)):
+                service.check_once(SimpleNamespace(), amazon_client=client)
+                service.check_once(SimpleNamespace(), amazon_client=client)
+            self.assertIsNot(seen[0], seen[1])
+            self.assertIs(seen[0]._hermes_amazon_client, client)
+            self.assertIs(seen[1]._hermes_amazon_client, client)
 
-            def raise_for_status(self):
-                error = requests.HTTPError("503 Server Error")
-                error.response = self
-                raise error
+    def test_amazon_http_block_stops_after_one_curl_request(self):
+        for status in (429, 503):
+            with self.subTest(status=status):
+                response = requests.Response()
+                response.status_code = status
+                response._content = b"Amazon temporary error"
+                response.encoding = "utf-8"
+                curl = SimpleNamespace(cookies=requests.cookies.RequestsCookieJar(),
+                                       get=lambda *_args, **_kwargs: response, close=lambda: None)
+                with (http_client.AmazonClient() as client,
+                      patch.object(http_client, "curl_requests", SimpleNamespace(Session=lambda: curl)),
+                      patch.object(http_client, "_get_amazon_response_with_browser") as browser,
+                      patch.object(client.requests_session, "get") as normal_get):
+                    session = requests.Session()
+                    session._hermes_amazon_client = client
+                    with self.assertRaises(requests.HTTPError):
+                        fetch_amazon_page(session, "https://www.amazon.com.tr/s?k=test", 10, True)
+                    browser.assert_not_called()
+                    normal_get.assert_not_called()
+                    self.assertIs(client.curl_session, curl)
+                    self.assertEqual(client.total_attempts, 1)
+                    self.assertEqual(client.block_count, 1)
+                    self.assertEqual(session._hermes_amazon_cycle_metrics["network_attempts"], 1)
 
-        class FakeCurlSession:
-            def get(self, *_args, **_kwargs):
-                curl_calls["count"] += 1
-                return FakeCurlResponse()
+    def test_amazon_non_protection_failure_has_one_browser_fallback_and_cache(self):
+        session = requests.Session()
+        response = http_client._HtmlResponse("https://www.amazon.com.tr/dp/B000000001", "Amazon product")
+        with (patch.object(http_client, "curl_requests", None),
+              patch.object(session, "get", side_effect=requests.Timeout("timeout")) as primary,
+              patch.object(http_client, "_get_amazon_response_with_browser", return_value=response) as browser):
+            first = fetch_amazon_page(session, response.url, 10)
+            second = fetch_amazon_page(session, response.url, 10)
+        self.assertIs(first, second)
+        primary.assert_called_once()
+        browser.assert_called_once()
 
-        class FakeCurlRequests:
-            @staticmethod
-            def Session():
-                return FakeCurlSession()
+    def test_amazon_browser_failure_does_not_start_more_transports(self):
+        session = requests.Session()
+        with (patch.object(http_client, "curl_requests", None),
+              patch.object(session, "get", side_effect=requests.Timeout("timeout")) as primary,
+              patch.object(http_client, "_get_amazon_response_with_browser", side_effect=HermesError("browser timeout")) as browser):
+            with self.assertRaisesRegex(HermesError, "browser timeout"):
+                fetch_amazon_page(session, "https://www.amazon.com.tr/s?k=test", 10, True)
+        primary.assert_called_once()
+        browser.assert_called_once()
 
-        original_curl_requests = http_client.curl_requests
-        original_browser_rescue = http_client._get_amazon_response_with_browser
-        http_client.curl_requests = FakeCurlRequests
-        session = FakeRequestsSession()
+    def test_amazon_request_measurement_spans_cycles_and_expires_old_attempts(self):
+        with patch.object(http_client.time, "monotonic", return_value=100):
+            with http_client.AmazonClient() as client:
+                first, second = requests.Session(), requests.Session()
+                first._hermes_amazon_client = client
+                second._hermes_amazon_client = client
+                with patch.object(http_client, "log") as logs:
+                    http_client._note_amazon_request(first, "requests", "https://www.amazon.com.tr/dp/B000000001")
+                    with patch.object(http_client.time, "monotonic", return_value=110):
+                        http_client._note_amazon_request(second, "requests", "https://www.amazon.com.tr/dp/B000000001")
+                        http_client._log_amazon_block(second, HermesError("Amazon captcha"))
+                    with patch.object(http_client.time, "monotonic", return_value=171):
+                        http_client._note_amazon_request(second, "requests", "https://www.amazon.com.tr/dp/B000000001")
+                        http_client._log_amazon_block(second, HermesError("Amazon captcha"))
+                messages = [call.args[0] for call in logs.call_args_list]
+                self.assertIn("son_60sn_deneme=2", messages[1])
+                self.assertIn("ara_ms=10000", messages[1])
+                self.assertIn("ilk_engel=1", messages[2])
+                self.assertIn("önceki_engelden_sonra_deneme=2", messages[2])
+                self.assertIn("son_60sn_deneme=1", messages[3])
+                self.assertIn("oturum_deneme=3", messages[3])
+                self.assertIn("ilk_engel=0", messages[4])
+                self.assertIn("önceki_engelden_sonra_deneme=1", messages[4])
 
-        def fake_browser_rescue(*_args, **_kwargs):
-            browser_calls["count"] += 1
-            raise http_client.HermesError("browser rescue failed")
+    def test_amazon_browser_profile_is_reused_between_cycles_and_cleaned_up(self):
+        commands = []
+        with http_client.AmazonClient() as client:
+            def fake_run(command, **_kwargs):
+                commands.append(command)
+                return http_client.subprocess.CompletedProcess(command, 0, stdout="<html>Amazon product</html>", stderr="")
 
-        http_client._get_amazon_response_with_browser = fake_browser_rescue
-        try:
-            response = fetch_amazon_page(session, "https://www.amazon.com.tr/s?k=juo+q3", 10, expect_search=True)
-        finally:
-            http_client.curl_requests = original_curl_requests
-            http_client._get_amazon_response_with_browser = original_browser_rescue
+            with (patch.object(http_client.subprocess, "run", side_effect=fake_run),
+                  patch.object(http_client, "_chromium_binary", return_value="/usr/bin/chromium")):
+                for _ in range(2):
+                    session = requests.Session()
+                    session._hermes_amazon_client = client
+                    http_client._get_amazon_response_with_browser(session, "https://www.amazon.com.tr/dp/B000000001", 10, False)
+            profile_path = Path(client.browser_profile.name)
+            self.assertTrue(profile_path.exists())
+            self.assertEqual([arg for arg in commands[0] if arg.startswith("--user-data-dir=")],
+                             [arg for arg in commands[1] if arg.startswith("--user-data-dir=")])
+        self.assertFalse(profile_path.exists())
 
-        self.assertEqual(response.status_code, 200)
-        self.assertGreater(session.calls, 0)
-        self.assertEqual(curl_calls["count"], 3)
-        self.assertEqual(browser_calls["count"], 2)
-        self.assertFalse(hasattr(session, "_hermes_amazon_curl_session"))
+    def test_amazon_diagnostics_keep_seven_days_and_preserve_price_state(self):
+        state = {"price_history": "preserved", "_meta": {"amazon_request_diagnostics": [
+            {"at": (datetime.now(timezone.utc) - timedelta(days=8)).isoformat(), "reason": "old"},
+            {"at": "invalid"}, None,
+        ]}}
+        event = {"at": utc_now(), "reason": "bot_korumasi", "attempts_last_60_seconds": 5}
+        service.append_amazon_diagnostics(state, [event])
+        self.assertEqual(state["_meta"]["amazon_request_diagnostics"], [event])
+        self.assertEqual(state["price_history"], "preserved")
+        service.append_amazon_diagnostics(state, [event] * 1005)
+        self.assertEqual(len(state["_meta"]["amazon_request_diagnostics"]), 1000)
 
-    def test_amazon_hard_curl_block_can_recover_with_fresh_variant(self):
-        curl_calls = {"count": 0}
+    def test_amazon_cycle_persists_block_measurement_once_across_restart(self):
+        state = {}
+        watch = WatchRule("iPhone", "amazon", "https://www.amazon.com.tr/dp/B000000001", Decimal("1000"))
+        config = SimpleNamespace(watches=[watch], interval_seconds=1, request_timeout_seconds=10,
+                                 pushover_user_key="", pushover_api_token="")
 
-        class FakeCookies:
-            def set(self, *_args, **_kwargs):
-                return None
+        def blocked_fetch(session, *_args):
+            http_client._note_amazon_request(session, "requests", watch.url)
+            error = HermesError("Amazon captcha")
+            http_client._log_amazon_block(session, error)
+            raise error
 
-            def clear(self, *_args, **_kwargs):
-                return None
-
-        class FakeRequestsSession:
-            cookies = FakeCookies()
-
-            def get(self, *_args, **_kwargs):
-                raise AssertionError("requests fallback should not run while curl rescue can recover")
-
-        class FakeCurlResponse:
-            headers = {"content-type": "text/html; charset=utf-8"}
-            content = b"<html><body>amazon <div data-component-type='s-search-result'>ok</div></body></html>"
-            text = "<html><body>amazon <div data-component-type='s-search-result'>ok</div></body></html>"
-
-            def __init__(self, status_code):
-                self.status_code = status_code
-
-            def raise_for_status(self):
-                if self.status_code == 200:
-                    return None
-                error = requests.HTTPError("503 Server Error")
-                error.response = self
-                raise error
-
-        class FakeCurlSession:
-            def get(self, *_args, **_kwargs):
-                curl_calls["count"] += 1
-                return FakeCurlResponse(200 if curl_calls["count"] == 3 else 503)
-
-        class FakeCurlRequests:
-            @staticmethod
-            def Session():
-                return FakeCurlSession()
-
-        original_curl_requests = http_client.curl_requests
-        original_browser_rescue = http_client._get_amazon_response_with_browser
-        http_client.curl_requests = FakeCurlRequests
-
-        def fake_browser_rescue(*_args, **_kwargs):
-            raise AssertionError("browser rescue should not run when fresh curl variant recovers")
-
-        http_client._get_amazon_response_with_browser = fake_browser_rescue
-        try:
-            response = fetch_amazon_page(
-                FakeRequestsSession(),
-                "https://www.amazon.com.tr/s?k=juo+q3",
-                10,
-                expect_search=True,
-            )
-        finally:
-            http_client.curl_requests = original_curl_requests
-            http_client._get_amazon_response_with_browser = original_browser_rescue
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(curl_calls["count"], 3)
-
-    def test_amazon_browser_rescue_recovers_after_curl_blocks(self):
-        curl_calls = {"count": 0}
-        browser_calls = {"count": 0}
-
-        class FakeCookies:
-            def set(self, *_args, **_kwargs):
-                return None
-
-            def clear(self, *_args, **_kwargs):
-                return None
-
-        class FakeRequestsSession:
-            def __init__(self):
-                self.cookies = FakeCookies()
-                self.normal_requests = 0
-
-            def get(self, *_args, **_kwargs):
-                self.normal_requests += 1
-                raise AssertionError("normal requests should not run while browser rescue can recover")
-
-        class FakeCurlResponse:
-            status_code = 503
-            headers = {}
-            content = b""
-            text = ""
-
-            def raise_for_status(self):
-                error = requests.HTTPError("503 Server Error")
-                error.response = self
-                raise error
-
-        class FakeCurlSession:
-            def get(self, *_args, **_kwargs):
-                curl_calls["count"] += 1
-                return FakeCurlResponse()
-
-        class FakeCurlRequests:
-            @staticmethod
-            def Session():
-                return FakeCurlSession()
-
-        def fake_browser_rescue(_session, candidate, _timeout, expect_search):
-            browser_calls["count"] += 1
-            html = "<html><body>amazon <div data-component-type='s-search-result'>ok</div></body></html>"
-            return http_client._HtmlResponse(candidate, html)
-
-        original_curl_requests = http_client.curl_requests
-        original_browser_rescue = http_client._get_amazon_response_with_browser
-        http_client.curl_requests = FakeCurlRequests
-        http_client._get_amazon_response_with_browser = fake_browser_rescue
-        session = FakeRequestsSession()
-        try:
-            response = fetch_amazon_page(session, "https://www.amazon.com.tr/s?k=juo+q3", 10, expect_search=True)
-        finally:
-            http_client.curl_requests = original_curl_requests
-            http_client._get_amazon_response_with_browser = original_browser_rescue
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(curl_calls["count"], 3)
-        self.assertEqual(browser_calls["count"], 1)
-        self.assertEqual(session.normal_requests, 0)
+        with (http_client.AmazonClient() as client,
+              patch.object(service, "load_json", return_value=state),
+              patch.object(service, "save_json") as save,
+              patch.object(service, "wait_before_request"),
+              patch.object(service, "_iter_amazon_product_watch_offers", side_effect=blocked_fetch) as fetch,
+              patch.object(service, "publish_price_summary"),
+              patch.object(service, "record_cycle_duration"),
+              patch.object(service, "maybe_alert_summary_drop"),
+              patch.object(service, "maybe_alert_search_failures")):
+            service.check_once(config, amazon_client=client)
+            self.assertEqual(len(state["_meta"]["amazon_request_diagnostics"]), 1)
+            self.assertEqual(len(client.block_events), 0)
+            service.check_once(config, amazon_client=client)
+            self.assertEqual(len(state["_meta"]["amazon_request_diagnostics"]), 1)
+            fetch.assert_called_once()
+            self.assertEqual(save.call_args.args[1]["_meta"]["amazon_request_diagnostics"][0]["session_attempts"], 1)
 
     def test_amazon_browser_rescue_accepts_usable_stdout_with_nonzero_exit(self):
         class FakeCookies:

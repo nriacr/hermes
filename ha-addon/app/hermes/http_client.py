@@ -5,6 +5,8 @@ import shutil
 import subprocess
 import tempfile
 import time
+from collections import deque
+from html.parser import HTMLParser
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
@@ -13,7 +15,7 @@ import requests
 from .constants import RETRY_DELAYS_SECONDS, RETRY_STATUS_CODES
 from .errors import HermesError, HttpStatusHermesError
 from .logging_utils import log
-from .utils import build_headers, canonical_amazon_product_url, normalize_offer_text, repair_mojibake, referer_for_url
+from .utils import build_headers, canonical_amazon_product_url, normalize_offer_text, repair_mojibake, referer_for_url, utc_now
 
 try:
     from curl_cffi import requests as curl_requests
@@ -44,11 +46,55 @@ AMAZON_CHROME_USER_AGENT = (
     "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 )
 
-AMAZON_HARD_BLOCK_RESCUE_VARIANT_LIMIT = 3
-AMAZON_BROWSER_RESCUE_VARIANT_LIMIT = 2
 AMAZON_BROWSER_MIN_TIMEOUT_SECONDS = 25
 AMAZON_DIAGNOSTIC_SNIPPET_LENGTH = 220
 HM_API_BASE_URL = "https://api.hm.com/search-services/v1/tr_tr/search/byids"
+
+
+class AmazonClient:
+    """Process-lived anonymous transports; page/offer caches stay cycle-local."""
+
+    def __init__(self, requests_session=None):
+        self.requests_session = requests_session if requests_session is not None else requests.Session()
+        self.owns_requests_session = requests_session is None
+        self.curl_session = None
+        self.browser_profile = None
+        self.started_at = time.monotonic()
+        self.attempt_times = deque()
+        self.total_attempts = 0
+        self.attempts_since_block = 0
+        self.block_count = 0
+        self.last_attempt_at = None
+        self.last_transport = ""
+        self.last_address = ""
+        self.block_events = deque(maxlen=200)
+        _seed_amazon_session(self.requests_session)
+
+    def close(self):
+        try:
+            if self.curl_session is not None:
+                self.curl_session.close()
+        finally:
+            try:
+                if self.owns_requests_session:
+                    self.requests_session.close()
+            finally:
+                if self.browser_profile is not None:
+                    self.browser_profile.cleanup()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        self.close()
+
+
+def _amazon_client(session) -> AmazonClient:
+    client = getattr(session, "_hermes_amazon_client", None)
+    if client is None:
+        client = AmazonClient(requests_session=session)
+        setattr(session, "_hermes_amazon_client", client)
+    return client
 
 
 class _HtmlResponse:
@@ -179,25 +225,78 @@ def amazon_url_variants(url: str):
     return variants
 
 
-def _is_amazon_protection_page(html: str) -> bool:
-    normalized = normalize_offer_text(html)
-    return any(
-        marker in normalized
-        for marker in (
-            "captcha",
-            "automated access",
-            "robot check",
-            "not a robot",
-            "robot olmadiginizi",
-            "enter the characters you see below",
-        )
-    )
+class _AmazonChallengeParser(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.ignored_depth = 0
+        self.in_title = False
+        self.title = []
+        self.text = []
+        self.reason = ""
+
+    def handle_starttag(self, tag, attrs):
+        if tag in {"script", "style", "template", "noscript"}:
+            self.ignored_depth += 1
+        if self.ignored_depth:
+            return
+        attrs = dict(attrs)
+        if tag == "form" and "validatecaptcha" in str(attrs.get("action", "")).lower():
+            self.reason = "captcha_formu"
+        if tag == "input" and str(attrs.get("id", "")).lower() == "captchacharacters":
+            self.reason = "captcha_alani"
+        if tag == "title":
+            self.in_title = True
+
+    def handle_endtag(self, tag):
+        if tag in {"script", "style", "template", "noscript"}:
+            self.ignored_depth = max(0, self.ignored_depth - 1)
+        if tag == "title":
+            self.in_title = False
+
+    def handle_data(self, data):
+        if not self.ignored_depth:
+            self.text.append(data)
+            if self.in_title:
+                self.title.append(data)
+
+
+def _amazon_protection_reason(html: str) -> str:
+    if not any(marker in html.lower() for marker in ("captcha", "robot", "automated access", "characters")):
+        return ""
+    parser = _AmazonChallengeParser()
+    parser.feed(html)
+    if parser.reason:
+        return parser.reason
+    if "robot check" in normalize_offer_text(" ".join(parser.title)):
+        return "robot_check_basligi"
+    visible = normalize_offer_text(" ".join(parser.text))
+    for marker in ("enter the characters you see below", "type the characters you see",
+                   "robot olmadiginizi", "for automated access to amazon"):
+        if marker in visible:
+            return "gorunen_dogrulama_metni"
+    return ""
+
+
+def is_amazon_protection_page(html: str) -> bool:
+    return bool(_amazon_protection_reason(html))
+
+
+def _amazon_response_protection_reason(response) -> str:
+    reason = getattr(response, "_hermes_amazon_protection_reason", None)
+    if reason is None:
+        reason = _amazon_protection_reason(decode_response_text(response))
+        response._hermes_amazon_protection_reason = reason
+    return reason
 
 
 def _is_usable_amazon_response(response, expect_search: bool) -> bool:
     html = decode_response_text(response)
-    if _is_amazon_protection_page(html):
-        raise HermesError("Amazon bot korumasi nedeniyle captcha/koruma sayfasi dondu.")
+    reason = _amazon_response_protection_reason(response)
+    if reason:
+        error = HermesError("Amazon bot korumasi nedeniyle captcha/koruma sayfasi dondu.")
+        error.amazon_challenge_reason = reason
+        error.amazon_http_status = response.status_code
+        raise error
     lowered = html.lower()
     if "amazon" not in lowered:
         return False
@@ -218,8 +317,41 @@ def _is_usable_amazon_response(response, expect_search: bool) -> bool:
     )
 
 
-def _timed_amazon_network_call(transport: str, candidate: str, expect_search: bool, request):
+def _note_amazon_request(session, transport: str, candidate: str) -> None:
+    client = _amazon_client(session)
+    now = time.monotonic()
+    while client.attempt_times and client.attempt_times[0] <= now - 60:
+        client.attempt_times.popleft()
+    gap_ms = round((now - client.last_attempt_at) * 1000) if client.last_attempt_at is not None else "-"
+    client.attempt_times.append(now)
+    client.total_attempts += 1
+    client.attempts_since_block += 1
+    client.last_attempt_at = now
+    client.last_transport = transport
+    client.last_address = _amazon_timing_url(candidate)
+    _increment_amazon_metric(session, "network_attempts")
+    log(
+        "Amazon istek ölçümü: "
+        f"taşıma={transport} | oturum_s={round(now - client.started_at)} | "
+        f"oturum_deneme={client.total_attempts} | son_60sn_deneme={len(client.attempt_times)} | "
+        f"ara_ms={gap_ms} | adres={_amazon_timing_url(candidate)}"
+    )
+
+
+def _log_amazon_response(response, transport: str) -> None:
+    html = decode_response_text(response)
+    log(
+        "Amazon yanıt teşhisi: "
+        f"taşıma={transport} | http={response.status_code if transport != 'browser' else 'bilinmiyor'} | "
+        f"bayt={len(response.content)} | yönlendirme={len(getattr(response, 'history', []))} | "
+        f"koruma={_amazon_response_protection_reason(response) or 'yok'} | "
+        f"ürün_işareti={int('productTitle' in html)} | arama_işareti={int('s-search-result' in html)}"
+    )
+
+
+def _timed_amazon_network_call(session, transport: str, candidate: str, expect_search: bool, request):
     started_at = time.monotonic()
+    _note_amazon_request(session, transport, candidate)
     try:
         response = request()
     except Exception as exc:  # noqa: BLE001
@@ -238,6 +370,7 @@ def _timed_amazon_network_call(transport: str, candidate: str, expect_search: bo
         f"durum={getattr(response, 'status_code', '-')} | süre={elapsed_ms} ms | "
         f"adres={_amazon_timing_url(candidate)}"
     )
+    _log_amazon_response(response, transport)
     return response
 
 
@@ -270,12 +403,12 @@ def _get_amazon_response(session, candidate: str, timeout: int, expect_search: b
         _increment_amazon_metric(session, "response_cache_hits")
         return cached_response
 
-    _increment_amazon_metric(session, "network_attempts")
     response = _timed_amazon_network_call(
+        session,
         "requests",
         candidate,
         expect_search,
-        lambda: session.get(
+        lambda: _amazon_client(session).requests_session.get(
             candidate,
             headers=amazon_headers(candidate),
             timeout=timeout,
@@ -299,16 +432,16 @@ def _get_amazon_response_with_curl(session: requests.Session, candidate: str, ti
         _increment_amazon_metric(session, "response_cache_hits")
         return cached_response
 
-    curl_session = getattr(session, "_hermes_amazon_curl_session", None)
-    if curl_session is None:
-        curl_session = curl_requests.Session()
-        setattr(session, "_hermes_amazon_curl_session", curl_session)
-    _increment_amazon_metric(session, "network_attempts")
+    client = _amazon_client(session)
+    if client.curl_session is None:
+        client.curl_session = curl_requests.Session()
+        _seed_amazon_session(client.curl_session)
     response = _timed_amazon_network_call(
+        session,
         "curl_chrome",
         candidate,
         expect_search,
-        lambda: curl_session.get(
+        lambda: client.curl_session.get(
             candidate,
             headers=amazon_headers(candidate),
             timeout=timeout,
@@ -346,61 +479,64 @@ def _get_amazon_response_with_browser(session: requests.Session, candidate: str,
         return cached_response
 
     browser_timeout = max(AMAZON_BROWSER_MIN_TIMEOUT_SECONDS, int(timeout) + 10)
-    with tempfile.TemporaryDirectory(prefix="hermes-amazon-browser-") as profile_dir:
-        command = [
-            _chromium_binary(),
-            "--headless=new",
-            "--disable-gpu",
-            "--disable-dev-shm-usage",
-            "--disable-background-networking",
-            "--disable-default-apps",
-            "--disable-extensions",
-            "--disable-sync",
-            "--disable-setuid-sandbox",
-            "--disable-software-rasterizer",
-            "--disable-crash-reporter",
-            "--disable-features=Translate,MediaRouter,OptimizationHints",
-            "--hide-scrollbars",
-            "--no-first-run",
-            "--no-zygote",
-            "--no-sandbox",
-            "--window-size=1365,900",
-            "--lang=tr-TR",
-            f"--user-agent={AMAZON_CHROME_USER_AGENT}",
-            f"--user-data-dir={profile_dir}",
-            "--dump-dom",
-            candidate,
-        ]
-        try:
-            started_at = time.monotonic()
-            _increment_amazon_metric(session, "network_attempts")
-            completed = subprocess.run(
-                command,
-                capture_output=True,
-                text=True,
-                timeout=browser_timeout,
-                check=False,
-            )
-        except subprocess.TimeoutExpired as exc:
-            log(
-                "Amazon ağ yanıt süresi: "
-                f"taşıma=browser | tip={_amazon_request_type(candidate, expect_search)} | "
-                f"durum=zaman_aşımı | süre={round((time.monotonic() - started_at) * 1000)} ms | "
-                f"adres={_amazon_timing_url(candidate)}"
-            )
-            raise HermesError("Amazon gercek tarayici modu zaman asimina ugradi.") from exc
-        except OSError as exc:
-            raise HermesError(f"Amazon gercek tarayici modu baslatilamadi: {exc}") from exc
+    client = _amazon_client(session)
+    if client.browser_profile is None:
+        client.browser_profile = tempfile.TemporaryDirectory(prefix="hermes-amazon-browser-")
+    command = [
+        _chromium_binary(),
+        "--headless=new",
+        "--disable-gpu",
+        "--disable-dev-shm-usage",
+        "--disable-background-networking",
+        "--disable-default-apps",
+        "--disable-extensions",
+        "--disable-sync",
+        "--disable-setuid-sandbox",
+        "--disable-software-rasterizer",
+        "--disable-crash-reporter",
+        "--disable-features=Translate,MediaRouter,OptimizationHints",
+        "--hide-scrollbars",
+        "--no-first-run",
+        "--no-zygote",
+        "--no-sandbox",
+        "--window-size=1365,900",
+        "--lang=tr-TR",
+        f"--user-agent={AMAZON_CHROME_USER_AGENT}",
+        f"--user-data-dir={client.browser_profile.name}",
+        "--dump-dom",
+        candidate,
+    ]
+    try:
+        started_at = time.monotonic()
+        _note_amazon_request(session, "browser", candidate)
+        completed = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=browser_timeout,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        log(
+            "Amazon ağ yanıt süresi: "
+            f"taşıma=browser | tip={_amazon_request_type(candidate, expect_search)} | "
+            f"durum=zaman_aşımı | süre={round((time.monotonic() - started_at) * 1000)} ms | "
+            f"adres={_amazon_timing_url(candidate)}"
+        )
+        raise HermesError("Amazon gercek tarayici modu zaman asimina ugradi.") from exc
+    except OSError as exc:
+        raise HermesError(f"Amazon gercek tarayici modu baslatilamadi: {exc}") from exc
     log(
         "Amazon ağ yanıt süresi: "
         f"taşıma=browser | tip={_amazon_request_type(candidate, expect_search)} | "
-        f"durum={completed.returncode} | süre={round((time.monotonic() - started_at) * 1000)} ms | "
+        f"çıkış_kodu={completed.returncode} | süre={round((time.monotonic() - started_at) * 1000)} ms | "
         f"adres={_amazon_timing_url(candidate)}"
     )
 
     stdout = completed.stdout or ""
     stderr = completed.stderr or ""
     response = _HtmlResponse(candidate, stdout)
+    _log_amazon_response(response, "browser")
     try:
         if stdout and _is_usable_amazon_response(response, expect_search):
             if completed.returncode != 0:
@@ -416,7 +552,7 @@ def _get_amazon_response_with_browser(session: requests.Session, candidate: str,
             log(
                 "Amazon tarayici modu HTML kullanilamadi: "
                 f"returncode={completed.returncode} | sebep={_amazon_error_reason(exc)} | "
-                f"stdout={_diagnostic_snippet(stdout)} | stderr={_diagnostic_snippet(stderr)} | "
+                f"html_bayt={len(response.content)} | stderr={_diagnostic_snippet(stderr)} | "
                 f"url={_short_amazon_url(candidate)}"
             )
         raise
@@ -529,22 +665,6 @@ def _amazon_response_cache(session: requests.Session) -> Dict[Tuple[bool, str], 
     return cache
 
 
-def _reset_amazon_client_state(session: requests.Session) -> None:
-    for attr_name in (
-        "_hermes_amazon_curl_session",
-        "_hermes_amazon_response_cache",
-        "_hermes_amazon_primed",
-        "_hermes_amazon_seeded",
-    ):
-        if hasattr(session, attr_name):
-            delattr(session, attr_name)
-    for domain in (".amazon.com.tr", "www.amazon.com.tr"):
-        try:
-            session.cookies.clear(domain=domain)
-        except Exception:  # noqa: BLE001
-            pass
-
-
 def _seed_amazon_session(session: requests.Session) -> None:
     if getattr(session, "_hermes_amazon_seeded", False):
         return
@@ -553,142 +673,64 @@ def _seed_amazon_session(session: requests.Session) -> None:
     setattr(session, "_hermes_amazon_seeded", True)
 
 
-def _prime_amazon_session(session: requests.Session, timeout: int) -> None:
-    if getattr(session, "_hermes_amazon_primed", False):
-        return
-    _seed_amazon_session(session)
-    _increment_amazon_metric(session, "network_attempts")
-    response = _timed_amazon_network_call(
-        "requests_prime",
-        "https://www.amazon.com.tr/",
-        False,
-        lambda: session.get(
-            "https://www.amazon.com.tr/",
-            headers=amazon_headers("https://www.amazon.com.tr/"),
-            timeout=timeout,
-            allow_redirects=True,
-        ),
+def _log_amazon_block(session, exc: Exception) -> None:
+    client = _amazon_client(session)
+    client.block_count += 1
+    now = time.monotonic()
+    recent = sum(at > now - 60 for at in client.attempt_times)
+    client.block_events.append({
+        "at": utc_now(),
+        "first_block": client.block_count == 1,
+        "block_count": client.block_count,
+        "reason": _amazon_error_reason(exc),
+        "challenge": getattr(exc, "amazon_challenge_reason", ""),
+        "http_status": getattr(exc, "amazon_http_status", None) or amazon_error_status(exc),
+        "transport": client.last_transport,
+        "address": client.last_address,
+        "session_age_seconds": round(now - client.started_at),
+        "session_attempts": client.total_attempts,
+        "attempts_last_60_seconds": recent,
+        "attempts_since_previous_block": client.attempts_since_block,
+    })
+    log(
+        "Amazon engel ölçümü: "
+        f"ilk_engel={int(client.block_count == 1)} | engel_sayısı={client.block_count} | "
+        f"sebep={_amazon_error_reason(exc)} | oturum_s={round(now - client.started_at)} | "
+        f"oturum_deneme={client.total_attempts} | son_60sn_deneme={recent} | "
+        f"önceki_engelden_sonra_deneme={client.attempts_since_block}"
     )
-    response.raise_for_status()
-    if _is_amazon_protection_page(decode_response_text(response)):
-        raise HermesError("Amazon bot korumasi nedeniyle captcha/koruma sayfasi dondu.")
-    setattr(session, "_hermes_amazon_primed", True)
+    client.attempts_since_block = 0
 
 
 def fetch_amazon_page(session: requests.Session, url: str, timeout: int, expect_search: bool = False):
+    """One canonical request; at most one browser fallback for non-protection failures.
+
+    A challenge or HTTP 429/503 is terminal. Never reset cookies or multiply
+    requests through URL/transport variants after the server rejects a read.
+    """
     _increment_amazon_metric(session, "page_fetch_calls")
-    last_error: Optional[Exception] = None
-    hard_blocked = False
+    candidate = amazon_url_variants(url)[0]
+    primary = _get_amazon_response_with_curl if curl_requests is not None else _get_amazon_response
+    method = "curl" if curl_requests is not None else "requests"
     attempts: List[Dict[str, Any]] = []
-    variants = amazon_url_variants(url)
-    _seed_amazon_session(session)
-
-    if curl_requests is not None:
-        for candidate_index, candidate in enumerate(variants):
-            try:
-                return _get_amazon_response_with_curl(session, candidate, timeout, expect_search)
-            except Exception as exc:  # noqa: BLE001
-                last_error = exc
-                _record_amazon_attempt(attempts, "curl", candidate, expect_search, exc)
-                if _is_hard_amazon_block_error(exc):
-                    hard_blocked = True
-                    rescue_candidates = variants[
-                        candidate_index : candidate_index + AMAZON_HARD_BLOCK_RESCUE_VARIANT_LIMIT
-                    ]
-                    for rescue_index, rescue_candidate in enumerate(rescue_candidates):
-                        _reset_amazon_client_state(session)
-                        _seed_amazon_session(session)
-                        method = "curl_fresh" if rescue_index == 0 else "curl_variant_fresh"
-                        try:
-                            return _get_amazon_response_with_curl(
-                                session,
-                                rescue_candidate,
-                                timeout,
-                                expect_search,
-                            )
-                        except Exception as retry_exc:  # noqa: BLE001
-                            last_error = retry_exc
-                            _record_amazon_attempt(attempts, method, rescue_candidate, expect_search, retry_exc)
-                    browser_candidates = variants[
-                        candidate_index : candidate_index + AMAZON_BROWSER_RESCUE_VARIANT_LIMIT
-                    ]
-                    for browser_candidate in browser_candidates:
-                        try:
-                            response = _get_amazon_response_with_browser(
-                                session,
-                                browser_candidate,
-                                timeout,
-                                expect_search,
-                            )
-                            _reset_amazon_client_state(session)
-                            _seed_amazon_session(session)
-                            return response
-                        except Exception as browser_exc:  # noqa: BLE001
-                            last_error = browser_exc
-                            _record_amazon_attempt(
-                                attempts,
-                                "browser_rescue",
-                                browser_candidate,
-                                expect_search,
-                                browser_exc,
-                            )
-                    _reset_amazon_client_state(session)
-                    _seed_amazon_session(session)
-                    for requests_candidate in variants:
-                        try:
-                            return _get_amazon_response(
-                                session,
-                                requests_candidate,
-                                timeout,
-                                expect_search,
-                            )
-                        except Exception as requests_exc:  # noqa: BLE001
-                            last_error = requests_exc
-                            _record_amazon_attempt(
-                                attempts,
-                                "requests_after_rescue",
-                                requests_candidate,
-                                expect_search,
-                                requests_exc,
-                            )
-                    break
-
-    if not hard_blocked:
-        for candidate in variants:
-            try:
-                return _get_amazon_response(session, candidate, timeout, expect_search)
-            except Exception as exc:  # noqa: BLE001
-                last_error = exc
-                _record_amazon_attempt(attempts, "requests", candidate, expect_search, exc)
-                if _is_hard_amazon_block_error(exc):
-                    hard_blocked = True
-                    break
-
-    if expect_search and not hard_blocked:
-        try:
-            _prime_amazon_session(session, timeout)
-            for candidate in variants:
-                try:
-                    return _get_amazon_response(session, candidate, timeout, expect_search)
-                except Exception as exc:  # noqa: BLE001
-                    last_error = exc
-                    _record_amazon_attempt(attempts, "requests_prime", candidate, expect_search, exc)
-                    if _is_hard_amazon_block_error(exc):
-                        hard_blocked = True
-                        break
-        except Exception as exc:  # noqa: BLE001
-            last_error = exc
-            _record_amazon_attempt(attempts, "prime", "https://www.amazon.com.tr/", expect_search, exc)
-            if _is_hard_amazon_block_error(exc):
-                hard_blocked = True
-
-    if last_error:
-        if hard_blocked:
-            _reset_amazon_client_state(session)
+    try:
+        return primary(session, candidate, timeout, expect_search)
+    except Exception as exc:  # noqa: BLE001
+        _record_amazon_attempt(attempts, method, candidate, expect_search, exc)
+        if _is_hard_amazon_block_error(exc):
+            _log_amazon_block(session, exc)
+            _log_amazon_diagnostics(url, expect_search, attempts)
+            raise
+    try:
+        response = _get_amazon_response_with_browser(session, candidate, timeout, expect_search)
+        _amazon_response_cache(session)[_amazon_cache_key(candidate, expect_search)] = response
+        return response
+    except Exception as exc:  # noqa: BLE001
+        _record_amazon_attempt(attempts, "browser", candidate, expect_search, exc)
+        if _is_hard_amazon_block_error(exc):
+            _log_amazon_block(session, exc)
         _log_amazon_diagnostics(url, expect_search, attempts)
-        raise last_error
-    _log_amazon_diagnostics(url, expect_search, attempts)
-    raise HttpStatusHermesError(0, url)
+        raise
 
 
 def hepsiburada_headers(url: str):

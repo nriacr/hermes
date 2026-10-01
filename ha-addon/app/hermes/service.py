@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, Iterable, List
 from itertools import chain
+from contextlib import nullcontext
 import requests
 
 from .config_loader import load_config
@@ -28,7 +29,9 @@ from .constants import (
 )
 from .errors import EmptySearchResultsHermesError, HermesError, OutOfStockHermesError
 from .http_client import (
+    AmazonClient,
     amazon_error_status,
+    is_amazon_protection_page,
     cleaned_html,
     fetch_amazon_page,
     fetch_bengurme_page,
@@ -57,7 +60,7 @@ from .search_amazon import (
     title_matches_any_keyword,
     title_matches_keyword,
 )
-from .storage import load_json, save_json
+from .storage import append_amazon_diagnostics, load_json, save_json
 from .telegram_listener import start_telegram_listener
 from .utils import (
     canonical_tracking_url,
@@ -125,6 +128,8 @@ def raise_if_age_verification(html: str) -> None:
 
 
 def is_bot_protection_page(site: str, html: str) -> bool:
+    if site == SITE_AMAZON:
+        return is_amazon_protection_page(html)
     lowered = html.lower()
     normalized = normalize_offer_text(html)
     if site == SITE_ZARA:
@@ -1359,8 +1364,6 @@ def _fetch_amazon_detail_offers(
     response = fetch_amazon_page(session, candidate.url, config.request_timeout_seconds)
     html = cleaned_html(response)
     raise_if_age_verification(html)
-    if "captcha" in html.lower() and "robot" in html.lower():
-        raise HermesError("Amazon bot korumasi nedeniyle captcha sayfasi dondu.")
 
     parsed_offers = _extract_amazon_page_offers(
         session,
@@ -1399,8 +1402,6 @@ def _fetch_amazon_search_watch_offers(
     )
     html = cleaned_html(response)
     raise_if_age_verification(html)
-    if "captcha" in html.lower() and "robot" in html.lower():
-        raise HermesError("Amazon bot korumasi nedeniyle captcha sayfasi dondu.")
 
     warehouse_search = amazon_provider.is_warehouse_search_url(watch.url)
     candidates = extract_result_candidates(
@@ -1595,8 +1596,6 @@ def _iter_amazon_product_watch_offers(
                     )
                 html = cleaned_html(response)
                 raise_if_age_verification(html)
-                if "captcha" in html.lower() and "robot" in html.lower():
-                    raise HermesError("Amazon bot korumasi nedeniyle captcha sayfasi dondu.")
                 parse_started_at = time.monotonic()
                 page_soup = amazon_provider.parse_product_page(html)
                 discovered = None
@@ -2031,8 +2030,9 @@ def inspect_link_now(
         excluded_terms=[str(term).strip() for term in (excluded_terms or []) if str(term).strip()],
         max_items_to_scan=60,
     )
-    session = requests.Session()
-    offers = _fetch_watch_offers(session, temporary_watch, config)
+    with AmazonClient() as client, requests.Session() as session:
+        session._hermes_amazon_client = client
+        offers = _fetch_watch_offers(session, temporary_watch, config)
     offers = [
         offer
         for offer in offers
@@ -2043,7 +2043,14 @@ def inspect_link_now(
     return site, offers
 
 
-def check_once(config: HermesConfig) -> None:
+def check_once(config: HermesConfig, amazon_client: AmazonClient | None = None) -> None:
+    with (AmazonClient() if amazon_client is None else nullcontext(amazon_client)) as client:
+        with requests.Session() as session:
+            session._hermes_amazon_client = client
+            _check_once(config, session)
+
+
+def _check_once(config: HermesConfig, session: requests.Session) -> None:
     cycle_started_at = time.monotonic()
     state = load_json(STATE_PATH, {})
     if not isinstance(state, dict):
@@ -2051,7 +2058,6 @@ def check_once(config: HermesConfig) -> None:
     cleared_warehouse_rows = clear_legacy_amazon_warehouse_rows(state)
     if cleared_warehouse_rows:
         log(f"Eski yanlis DEPO kayitlari temizlendi: adet={cleared_warehouse_rows}")
-    session = requests.Session()
     summary_rows: List[PriceSummaryRow] = []
     stock_rows: List[StockSummaryRow] = []
     search_failure_events: List[Dict[str, Any]] = []
@@ -2420,7 +2426,10 @@ def check_once(config: HermesConfig) -> None:
             f"ayrıştırma_önbelleği_yenilemesi={amazon_metrics.get('product_parse_cache_upgrades', 0)} | "
             f"ayrıştırma_önbelleği_ıskası={amazon_metrics.get('product_parse_cache_misses', 0)}"
         )
+    client = session._hermes_amazon_client
+    append_amazon_diagnostics(state, list(client.block_events))
     save_json(STATE_PATH, state)
+    client.block_events.clear()
 
 
 def log_cycle_banner(config: HermesConfig) -> None:
@@ -2448,9 +2457,10 @@ def run_service() -> int:
 
     start_telegram_listener(config)
     log(f"Servis basladi. Hermes v{APP_VERSION} | Kontrol araligi: {config.interval_seconds} saniye")
-    while True:
-        log_cycle_banner(config)
-        check_once(config)
-        next_check = local_now() + timedelta(seconds=config.interval_seconds)
-        log(f"Sonraki kontrol: {format_local_datetime(next_check)}")
-        time.sleep(config.interval_seconds)
+    with AmazonClient() as amazon_client:
+        while True:
+            log_cycle_banner(config)
+            check_once(config, amazon_client=amazon_client)
+            next_check = local_now() + timedelta(seconds=config.interval_seconds)
+            log(f"Sonraki kontrol: {format_local_datetime(next_check)}")
+            time.sleep(config.interval_seconds)
