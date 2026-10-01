@@ -784,8 +784,8 @@ def reset_notification_suppression() -> int:
     return reset_count
 
 
-def amazon_protection_cooldown_seconds() -> int:
-    return 0
+def amazon_protection_cooldown_seconds(consecutive_blocks: int = 1) -> int:
+    return min(60 * 60, 15 * 60 * (2 ** min(max(consecutive_blocks - 1, 0), 2)))
 
 
 def amazon_protection_state(state: Dict[str, Any]) -> Dict[str, Any]:
@@ -812,20 +812,47 @@ def amazon_protection_remaining_seconds(state: Dict[str, Any], key: str) -> int:
     guard = amazon_protection_state(state).get(key)
     if not isinstance(guard, dict):
         return 0
-    blocked_at = parse_iso_datetime(guard.get("blocked_at"))
-    if not blocked_at:
+    retry_after = parse_iso_datetime(guard.get("retry_after"))
+    if not retry_after:
         return 0
-    elapsed = (local_now().astimezone(timezone.utc) - blocked_at).total_seconds()
-    return max(0, amazon_protection_cooldown_seconds() - int(elapsed))
+    return max(0, math.ceil((retry_after - local_now().astimezone(timezone.utc)).total_seconds()))
 
 
 def note_amazon_protection(state: Dict[str, Any], key: str, source: str, exc: Exception) -> None:
     protection = amazon_protection_state(state)
+    now = local_now().astimezone(timezone.utc)
+    previous = protection.get(key)
+    previous_at = parse_iso_datetime(previous.get("blocked_at")) if isinstance(previous, dict) else None
+    try:
+        previous_count = int(previous.get("consecutive_blocks") or 1) if isinstance(previous, dict) else 1
+    except (TypeError, ValueError):
+        previous_count = 1
+    consecutive_blocks = (
+        min(3, previous_count + 1)
+        if previous_at and 0 <= (now - previous_at).total_seconds() < 6 * 60 * 60
+        else 1
+    )
+    cooldown = amazon_protection_cooldown_seconds(consecutive_blocks)
     protection[key] = {
-        "blocked_at": utc_now(),
+        "blocked_at": now.isoformat(),
+        "retry_after": (now + timedelta(seconds=cooldown)).isoformat(),
+        "consecutive_blocks": consecutive_blocks,
         "source": source,
         "message": str(exc)[:300],
     }
+    log(f"Amazon korumasi: {source} | {cooldown // 60} dk sonra yeniden denenecek.")
+
+
+def clear_amazon_protection(state: Dict[str, Any], key: str) -> None:
+    if amazon_protection_state(state).pop(key, None):
+        log("Amazon korumasi sona erdi; normal tarama yeniden basladi.")
+
+
+def remember_amazon_protection(session: requests.Session, exc: Exception) -> bool:
+    if not is_amazon_protection_error(exc):
+        return False
+    setattr(session, "_hermes_amazon_protection_error", exc)
+    return True
 
 
 def should_send_search_error_notification(state_entry: Dict[str, Any]) -> bool:
@@ -1303,6 +1330,7 @@ def _extract_amazon_page_offers(
         )
     except Exception as exc:  # noqa: BLE001
         log(f"Amazon Depo teklif listesi okunamadı: {log_cell(source_url, 70)} | {exc}")
+        remember_amazon_protection(session, exc)
         return offers
 
     verified_warehouse_offers = warehouse_offers
@@ -1447,11 +1475,15 @@ def _fetch_amazon_search_watch_offers(
                     ]
                     warehouse_detail_hits += len(used_results)
                     results.extend(used_results)
+                    if getattr(session, "_hermes_amazon_protection_error", None):
+                        break
                 except Exception as exc:  # noqa: BLE001
                     log(
                         "Amazon Depo detay fiyatı okunamadı: "
                         f"{log_cell(candidate.title, 60)} | {exc}"
                     )
+                    if remember_amazon_protection(session, exc):
+                        break
             continue
         if not candidate_matches_watch:
             skipped_detail_count += 1
@@ -1463,8 +1495,12 @@ def _fetch_amazon_search_watch_offers(
                 config,
             )
             results.extend(detailed_results)
+            if getattr(session, "_hermes_amazon_protection_error", None):
+                break
         except Exception as exc:  # noqa: BLE001
             log(f"Amazon product arama detay fiyatı okunamadı: {log_cell(candidate.title, 60)} | {exc}")
+            if remember_amazon_protection(session, exc):
+                break
 
     if skipped_detail_count:
         log(f"Amazon product arama detay fiyatı atlandı: eslesmeyen_urun={skipped_detail_count}")
@@ -1476,6 +1512,9 @@ def _fetch_amazon_search_watch_offers(
             f"urun={warehouse_detail_scans} | bulunan_depo={warehouse_detail_hits}"
         )
     if not results:
+        protection_error = getattr(session, "_hermes_amazon_protection_error", None)
+        if protection_error:
+            raise protection_error
         raise EmptySearchResultsHermesError("Amazon arama sayfasında fiyatı okunabilir ürün bulunamadı.")
     configured_amazon_names = [
         configured_watch.name
@@ -1639,6 +1678,9 @@ def _iter_amazon_product_watch_offers(
                 f"teklif={offer_stage_ms} ms | sonuç=0 ms | "
                 f"toplam={round((time.monotonic() - variation_started_at) * 1000) if variation_started_at else 0} ms"
             )
+            if remember_amazon_protection(session, exc):
+                # Preserve any offers already yielded, then pause this watch.
+                break
             continue
         # Yield outside the fetch exception handler: notification failures belong
         # to the caller, not to the provider's parsing/error handling.
@@ -1661,6 +1703,8 @@ def _iter_amazon_product_watch_offers(
             f"teklif={offer_stage_ms} ms | sonuç={consumer_ms} ms | "
             f"toplam={page_read_ms + page_parse_ms + offer_stage_ms + consumer_ms} ms"
         )
+        if getattr(session, "_hermes_amazon_protection_error", None):
+            break
     log(
         "Amazon varyasyon taraması: "
         f"{watch.name or watch.url} | varyant={len(pending)} | teklif={found} | "
@@ -1668,6 +1712,9 @@ def _iter_amazon_product_watch_offers(
         f"hariç_nedeniyle_fiyat_okuması_atlandı={excluded_price_reads}"
     )
     if not found:
+        protection_error = getattr(session, "_hermes_amazon_protection_error", None)
+        if protection_error:
+            raise protection_error
         raise HermesError(errors[-1] if errors else "Amazon sayfasından fiyat bulunamadı.")
 
 
@@ -2016,14 +2063,20 @@ def check_once(config: HermesConfig) -> None:
     def check_watch(watch: WatchRule, watch_key: str, state_entry: Dict[str, Any], seller: str) -> None:
         is_search_watch = watch_name_required_for_url(watch.url)
         if watch.site == SITE_AMAZON:
+            setattr(session, "_hermes_amazon_protection_error", None)
             remaining = amazon_protection_remaining_seconds(state, watch_key)
             if remaining > 0:
-                summary_rows.extend(cached_summary_rows_for_watch(watch, watch_key, state, seller))
+                if state_entry.get("amazon_partial_result"):
+                    summary_rows.extend(cached_summary_rows_for_watch(watch, watch_key, state, seller))
                 minutes = max(1, round(remaining / 60))
-                log(
-                    f"Amazon linki gecici koruma nedeniyle atlandi: "
-                    f"{watch.name or watch.url} | kalan={minutes} dk"
-                )
+                guard = amazon_protection_state(state).get(watch_key, {})
+                last_logged = parse_iso_datetime(guard.get("last_skip_logged_at"))
+                if not last_logged or (local_now().astimezone(timezone.utc) - last_logged).total_seconds() >= 60:
+                    guard["last_skip_logged_at"] = utc_now()
+                    log(
+                        f"Amazon linki gecici koruma nedeniyle atlandi: "
+                        f"{watch.name or watch.url} | kalan={minutes} dk"
+                    )
                 return
         try:
             display_name = watch.name or watch.url
@@ -2209,7 +2262,16 @@ def check_once(config: HermesConfig) -> None:
                 "last_error_status": None,
                 "last_checked_at": utc_now(),
                 "check_now_token": getattr(watch, "check_now_token", ""),
+                "amazon_partial_result": False,
             }
+            if watch.site == SITE_AMAZON:
+                protection_error = getattr(session, "_hermes_amazon_protection_error", None)
+                if protection_error:
+                    note_amazon_protection(state, watch_key, watch.name or watch.url, protection_error)
+                    state[watch_key]["last_error"] = str(protection_error)
+                    state[watch_key]["amazon_partial_result"] = True
+                else:
+                    clear_amazon_protection(state, watch_key)
         except OutOfStockHermesError as exc:
             stale_summary_offer_ids = cached_summary_offer_ids_for_watch(watch, watch_key, state, seller)
             stock_title = getattr(exc, "product_title", "") or watch.name or watch.url
@@ -2237,6 +2299,8 @@ def check_once(config: HermesConfig) -> None:
             failed["check_now_token"] = getattr(watch, "check_now_token", "")
             failed["last_out_of_stock_at"] = utc_now()
             state[watch_key] = failed
+            if watch.site == SITE_AMAZON:
+                clear_amazon_protection(state, watch_key)
             # A missing item must not keep its previous price visible until the cycle ends.
             save_incremental_price_summary([], stock_rows[-1:], removed_price_ids=stale_summary_offer_ids)
         except Exception as exc:  # noqa: BLE001
@@ -2246,8 +2310,10 @@ def check_once(config: HermesConfig) -> None:
                 log(f"Arama sonucu boş: {seller} | {watch.name or watch.url}")
             else:
                 log(f"Hata: {seller} | {watch.url} | {exc}")
-            if watch.site == SITE_AMAZON and is_amazon_protection_error(exc):
-                note_amazon_protection(state, watch_key, watch.name or watch.url, exc)
+            if watch.site == SITE_AMAZON:
+                protection_error = getattr(session, "_hermes_amazon_protection_error", None)
+                if protection_error or is_amazon_protection_error(exc):
+                    note_amazon_protection(state, watch_key, watch.name or watch.url, protection_error or exc)
             if is_search_watch and not normal_empty_search:
                 search_failure_events.append({"page": watch.name, "failed_links": 1})
             failed = dict(state_entry)
@@ -2285,6 +2351,8 @@ def check_once(config: HermesConfig) -> None:
             failed["last_error_status"] = None if normal_empty_search else getattr(exc, "status_code", None)
             failed["last_checked_at"] = utc_now()
             failed["check_now_token"] = getattr(watch, "check_now_token", "")
+            if watch.site == SITE_AMAZON:
+                failed["amazon_partial_result"] = False
             state[watch_key] = failed
             # State records the current error while the dashboard may still show the last
             # successful cycle. Remove only this watch's stale rows immediately.
@@ -2299,9 +2367,12 @@ def check_once(config: HermesConfig) -> None:
         if not isinstance(state_entry, dict):
             state_entry = {}
         seller = site_label(watch.site)
-        if not watch_check_due(watch, state_entry, config.interval_seconds):
+        protection = amazon_protection_state(state).get(watch_key) if watch.site == SITE_AMAZON else None
+        recovery_due = bool(protection) and amazon_protection_remaining_seconds(state, watch_key) == 0
+        if not recovery_due and not watch_check_due(watch, state_entry, config.interval_seconds):
             priority_scope[priority]["deferred"] += 1
-            summary_rows.extend(cached_summary_rows_for_watch(watch, watch_key, state, seller))
+            if not protection or state_entry.get("amazon_partial_result"):
+                summary_rows.extend(cached_summary_rows_for_watch(watch, watch_key, state, seller))
             continue
 
         priority_scope[priority]["due"] += 1

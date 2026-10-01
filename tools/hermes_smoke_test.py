@@ -542,6 +542,23 @@ class HermesSmokeTests(unittest.TestCase):
         self.assertEqual(detail_fetch.call_count, 1)
         self.assertEqual(detail_fetch.call_args.args[1].title, "iPhone 256 GB")
 
+    def test_amazon_search_keeps_read_card_but_stops_details_on_captcha(self):
+        watch = WatchRule("iPhone", "amazon", "https://www.amazon.com.tr/s?k=iphone", Decimal("100000"))
+        candidates = [
+            AmazonSearchCandidate("iPhone 256 GB", "https://www.amazon.com.tr/dp/B000000001", Decimal("90000")),
+            AmazonSearchCandidate("iPhone 512 GB", "https://www.amazon.com.tr/dp/B000000002", Decimal("120000")),
+        ]
+        session = SimpleNamespace()
+        config = SimpleNamespace(request_timeout_seconds=20, watches=[watch])
+        with (patch.object(service, "fetch_amazon_page", return_value="html"),
+              patch.object(service, "cleaned_html", return_value="amazon search result"),
+              patch.object(service, "extract_result_candidates", return_value=candidates),
+              patch.object(service, "_fetch_amazon_detail_offers", side_effect=HermesError("Amazon captcha")) as detail):
+            offers = service._fetch_amazon_search_watch_offers(session, watch, config)
+        self.assertEqual([offer.title for offer in offers], ["iPhone 256 GB"])
+        detail.assert_called_once()
+        self.assertTrue(service.is_amazon_protection_error(session._hermes_amazon_protection_error))
+
     def test_amazon_modern_family_asins_are_deduplicated_and_recommendations_ignored(self):
         html = '''<script type="a-state" data-a-state='{"key":"twister-plus-desktop-inline-twister-collapse-view-asins-data"}'>
         {"asinsInCollapsedView":["B000000001","B000000002","B000000002"]}</script>
@@ -2098,16 +2115,141 @@ class HermesSmokeTests(unittest.TestCase):
         self.assertEqual(variants[0], "https://www.amazon.com.tr/dp/B0B2PSDNV1?th=1")
         self.assertIn(url, variants)
 
-    def test_amazon_protection_error_is_scoped_per_key(self):
+    def test_amazon_protection_pauses_one_watch_then_retries_with_backoff(self):
         state = {}
         error = service.HermesError("Amazon bot korumasi nedeniyle captcha/koruma sayfasi dondu.")
+        now = datetime(2026, 10, 1, 12, tzinfo=timezone.utc)
 
         self.assertTrue(service.is_amazon_protection_error(error))
-        service.note_amazon_protection(state, "amazon-a", "test", error)
+        with patch.object(service, "local_now", return_value=now):
+            service.note_amazon_protection(state, "amazon-a", "test", error)
+            self.assertEqual(service.amazon_protection_remaining_seconds(state, "amazon-a"), 15 * 60)
+            self.assertEqual(service.amazon_protection_remaining_seconds(state, "amazon-b"), 0)
+        with patch.object(service, "local_now", return_value=now + timedelta(minutes=15, seconds=1)):
+            self.assertEqual(service.amazon_protection_remaining_seconds(state, "amazon-a"), 0)
+            service.note_amazon_protection(state, "amazon-a", "test", error)
+            self.assertEqual(service.amazon_protection_remaining_seconds(state, "amazon-a"), 30 * 60)
+        service.clear_amazon_protection(state, "amazon-a")
+        self.assertNotIn("amazon-a", state["_meta"]["amazon_protection"])
 
-        self.assertEqual(service.amazon_protection_remaining_seconds(state, "amazon-a"), 0)
-        self.assertEqual(service.amazon_protection_remaining_seconds(state, "amazon-b"), 0)
-        self.assertIn("amazon_protection", state["_meta"])
+    def test_amazon_protection_skip_does_not_republish_stale_price(self):
+        watch = WatchRule("iPhone", "amazon", "https://www.amazon.com.tr/dp/B000000001", Decimal("100000"))
+        watch_key = service.normalize_item_key("watch", watch.site, watch.tracking_id or watch.name, watch.url, watch.size)
+        state = {watch_key: {"last_price": "90000", "last_checked_at":
+                             (datetime.now(timezone.utc) - timedelta(minutes=2)).isoformat(), "url": watch.url}}
+        service.note_amazon_protection(state, watch_key, "iPhone", HermesError("Amazon captcha"))
+        config = SimpleNamespace(watches=[watch], interval_seconds=1, request_timeout_seconds=20,
+                                 pushover_user_key="", pushover_api_token="")
+        with (patch.object(service, "load_json", return_value=state),
+              patch.object(service, "save_json"),
+              patch.object(service, "_iter_amazon_product_watch_offers") as fetch,
+              patch.object(service, "publish_price_summary") as publish,
+              patch.object(service, "record_cycle_duration"),
+              patch.object(service, "maybe_alert_summary_drop"),
+              patch.object(service, "maybe_alert_search_failures")):
+            service.check_once(config)
+        fetch.assert_not_called()
+        self.assertEqual(publish.call_args.args[0], [])
+
+        state["_meta"]["amazon_protection"][watch_key]["retry_after"] = (
+            datetime.now(timezone.utc) - timedelta(seconds=1)
+        ).isoformat()
+        with (patch.object(service, "load_json", return_value=state),
+              patch.object(service, "save_json"),
+              patch.object(service, "wait_before_request"),
+              patch.object(service, "_iter_amazon_product_watch_offers", return_value=iter([
+                  OfferResult("iPhone", Decimal("120000"), "Amazon.com.tr", watch.url)
+              ])) as fetch,
+              patch.object(service, "publish_price_summary") as publish,
+              patch.object(service, "record_cycle_duration"),
+              patch.object(service, "maybe_alert_summary_drop"),
+              patch.object(service, "maybe_alert_search_failures")):
+            service.check_once(config)
+        fetch.assert_called_once()
+        self.assertEqual(len(publish.call_args.args[0]), 1)
+        self.assertNotIn(watch_key, state["_meta"]["amazon_protection"])
+
+    def test_deferred_amazon_watch_does_not_restore_price_after_captcha(self):
+        watch = WatchRule("iPhone", "amazon", "https://www.amazon.com.tr/dp/B000000001", Decimal("100000"),
+                          priority="medium")
+        watch_key = service.normalize_item_key("watch", watch.site, watch.tracking_id or watch.name, watch.url, watch.size)
+        state = {watch_key: {"last_price": "90000", "last_checked_at": utc_now(), "url": watch.url}}
+        service.note_amazon_protection(state, watch_key, "iPhone", HermesError("Amazon captcha"))
+        config = SimpleNamespace(watches=[watch], interval_seconds=1, request_timeout_seconds=20,
+                                 pushover_user_key="", pushover_api_token="")
+        with (patch.object(service, "load_json", return_value=state),
+              patch.object(service, "save_json"),
+              patch.object(service, "_iter_amazon_product_watch_offers") as fetch,
+              patch.object(service, "publish_price_summary") as publish,
+              patch.object(service, "record_cycle_duration"),
+              patch.object(service, "maybe_alert_summary_drop"),
+              patch.object(service, "maybe_alert_search_failures")):
+            service.check_once(config)
+        fetch.assert_not_called()
+        self.assertEqual(publish.call_args.args[0], [])
+
+        state["_meta"]["amazon_protection"][watch_key]["retry_after"] = (
+            datetime.now(timezone.utc) - timedelta(seconds=1)
+        ).isoformat()
+        with (patch.object(service, "load_json", return_value=state),
+              patch.object(service, "save_json"),
+              patch.object(service, "wait_before_request"),
+              patch.object(service, "_iter_amazon_product_watch_offers", return_value=iter([
+                  OfferResult("iPhone", Decimal("120000"), "Amazon.com.tr", watch.url)
+              ])) as fetch,
+              patch.object(service, "publish_price_summary"),
+              patch.object(service, "record_cycle_duration"),
+              patch.object(service, "maybe_alert_summary_drop"),
+              patch.object(service, "maybe_alert_search_failures")):
+            service.check_once(config)
+        fetch.assert_called_once()
+        self.assertNotIn(watch_key, state["_meta"]["amazon_protection"])
+
+    def test_amazon_partial_variant_result_keeps_offer_and_pauses_next_scan(self):
+        watch = WatchRule("iPhone", "amazon", "https://www.amazon.com.tr/dp/B000000001", Decimal("100000"),
+                          include_variations=True)
+        watch_key = service.normalize_item_key("watch", watch.site, watch.tracking_id or watch.name, watch.url, watch.size)
+        state = {}
+        config = SimpleNamespace(watches=[watch], interval_seconds=1, request_timeout_seconds=20,
+                                 pushover_user_key="", pushover_api_token="")
+
+        def partial_stream(session, *_args):
+            yield OfferResult("iPhone Gümüş", Decimal("120000"), "Amazon.com.tr", watch.url)
+            service.remember_amazon_protection(session, HermesError("Amazon captcha"))
+
+        with (patch.object(service, "load_json", return_value=state),
+              patch.object(service, "save_json"),
+              patch.object(service, "wait_before_request"),
+              patch.object(service, "_iter_amazon_product_watch_offers", side_effect=partial_stream),
+              patch.object(service, "publish_price_summary") as publish,
+              patch.object(service, "record_cycle_duration"),
+              patch.object(service, "maybe_alert_summary_drop"),
+              patch.object(service, "maybe_alert_search_failures")):
+            service.check_once(config)
+        self.assertEqual(len(publish.call_args.args[0]), 1)
+        self.assertGreater(service.amazon_protection_remaining_seconds(state, watch_key), 0)
+        self.assertIn("captcha", state[watch_key]["last_error"])
+
+        state[watch_key]["last_checked_at"] = utc_now()
+        with (patch.object(service, "load_json", return_value=state),
+              patch.object(service, "save_json"),
+              patch.object(service, "_iter_amazon_product_watch_offers") as fetch,
+              patch.object(service, "publish_price_summary") as publish,
+              patch.object(service, "record_cycle_duration"),
+              patch.object(service, "maybe_alert_summary_drop"),
+              patch.object(service, "maybe_alert_search_failures")):
+            service.check_once(config)
+        fetch.assert_not_called()
+        self.assertEqual(len(publish.call_args.args[0]), 1)
+
+    def test_amazon_variant_scan_stops_after_protection_page(self):
+        watch = WatchRule("iPhone", "amazon", "https://www.amazon.com.tr/dp/B000000001", Decimal("100000"),
+                          include_variations=True)
+        config = SimpleNamespace(request_timeout_seconds=20)
+        with patch.object(service, "fetch_amazon_page", side_effect=HermesError("Amazon captcha")) as fetch:
+            with self.assertRaisesRegex(HermesError, "captcha"):
+                list(service._iter_amazon_product_watch_offers(requests.Session(), watch, config))
+        fetch.assert_called_once()
 
     def test_amazon_search_card_uses_structured_price(self):
         html = """

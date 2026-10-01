@@ -26,6 +26,7 @@ Takip edilen alanlar:
 - Mobil görünümde ürün kartının fiyat geçmişi ve son güncelleme alanları kart genişliğini kullanır; günlük istatistik özetleri dar ekranlarda iki sütun halinde okunur.
 - `Yalnızca platformun kendi satıcısı` filtresi Amazon sıfır ürünlerinde yalnızca `Amazon.com.tr` satıcısını tutar. Satıcı bilgisi okunamayan teklifler elenir; doğrulanmış Amazon Depo teklifleri her zaman korunur. Diğer mağazalar için filtre desteği ileride eklenecektir.
 - Amazon'un bağlantı yerine düz metin olarak sunduğu `Amazon.com.tr` satıcı bilgisi de resmi satıcı filtresinde tanınır.
+- Amazon CAPTCHA/koruma sayfası gösterdiğinde yalnızca etkilenen takip 15 dakika bekletilir; tekrarında 30, ardından en fazla 60 dakika sonra otomatik yeniden denenir. Diğer takipler çalışır, başarısız okumanın eski fiyatı güncel diye gösterilmez.
 - Ana ekrandaki `Test` sayfası bağlantıyı anlık ve geçici olarak okur; arama anahtar kelimesi, beden, hariç tut ve varyasyon seçenekleri bu test için ayrıca uygulanabilir.
 - Telegram kanalları: keyword ve exclude keyword tabanlı fırsat bildirimi
 - Telegram Kayıtlı Mesajlar: bağlantıyı gönder, Hermes hedef fiyatı sorup takibi ekler

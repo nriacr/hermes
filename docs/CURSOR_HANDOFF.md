@@ -1,7 +1,7 @@
 # Hermes Cursor Handoff
 
 This document is the current technical and product handoff for continuing Hermes
-in Cursor. It describes the real repository at version `2.5.34`; source code and
+in Cursor. It describes the real repository at version `2.5.35`; source code and
 tests remain authoritative when this document and code ever differ.
 
 ## 1. Product snapshot
@@ -212,6 +212,14 @@ verified warehouse offers remain separate identities.
 ### Amazon
 
 - Supports product and search URLs with isolated rescue diagnostics.
+- A verified CAPTCHA/429/503 pauses only the affected watch for 15 minutes,
+  then automatically probes once. Repeated protection extends that watch's
+  pause to 30 and at most 60 minutes. The pause survives restarts, resets on
+  a successful read, and can trigger a recovery probe before the watch's normal
+  medium/low-priority interval. Other watches continue. A blocked variant or
+  search detail stops further immediate requests from the same watch; verified
+  partial offers remain available with their original read time. A wholly
+  failed watch never republishes its old current price.
 - Search names use phrase matching; recommendation sections are cut.
 - Parsing stops before `All Departments içindeki sonuçlar gösteriliyor`.
 - Product variation expansion is opt-in with `include_variations`: follow actual
