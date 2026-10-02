@@ -441,6 +441,15 @@ def cached_summary_rows_for_watch(
     return rows
 
 
+def cached_stock_rows_for_watch(watch: WatchRule, entry: Dict[str, Any], seller: str) -> List[StockSummaryRow]:
+    return [
+        StockSummaryRow(seller, str(item["product_title"]), str(item["product_url"]), watch.target_price,
+                        str(item.get("reason") or "Stokta yok"))
+        for item in entry.get("unavailable_variants", [])
+        if isinstance(item, dict) and item.get("product_title") and item.get("product_url")
+    ]
+
+
 def cached_summary_offer_ids_for_watch(
     watch: WatchRule,
     watch_key: str,
@@ -845,8 +854,12 @@ def note_amazon_protection(state: Dict[str, Any], key: str, source: str, exc: Ex
         "consecutive_blocks": consecutive_blocks,
         "source": source,
         "message": str(exc)[:300],
+        "kind": "http_503" if amazon_error_status(exc) == 503 else "http_429" if amazon_error_status(exc) == 429 else "captcha",
     }
-    log(f"Amazon korumasi: {source} | {cooldown // 60} dk sonra yeniden denenecek.")
+    kind = protection[key]["kind"]
+    label = {"http_503": "Amazon servis hatası (HTTP 503)", "http_429": "Amazon istek sınırı (HTTP 429)",
+             "captcha": "Amazon doğrulama/koruma sayfası"}[kind]
+    log(f"{label}: {source} | {cooldown // 60} dk sonra yeniden denenecek.")
 
 
 def clear_amazon_protection(state: Dict[str, Any], key: str) -> None:
@@ -1318,12 +1331,20 @@ def _extract_amazon_page_offers(
     listing only when needed; both paths verify condition and seller together.
     """
     soup = soup or amazon_provider.parse_product_page(html)
-    offers = amazon_provider.extract_offers(html, source_url=source_url, soup=soup)
+    # Capture the link before extract_offers removes the used accordion from the shared tree.
+    used_listing_url = amazon_provider.extract_used_offer_listing_url(html, source_url=source_url, soup=soup)
+    primary_error = None
+    try:
+        offers = amazon_provider.extract_offers(html, source_url=source_url, soup=soup)
+    except HermesError as exc:
+        primary_error = exc
+        offers = []
     if any(offer.is_warehouse for offer in offers):
         return offers
 
-    used_listing_url = amazon_provider.extract_used_offer_listing_url(html, source_url=source_url, soup=soup)
     if not used_listing_url:
+        if primary_error:
+            raise primary_error
         return offers
 
     try:
@@ -1337,6 +1358,8 @@ def _extract_amazon_page_offers(
     except Exception as exc:  # noqa: BLE001
         log(f"Amazon Depo teklif listesi okunamadı: {log_cell(source_url, 70)} | {exc}")
         remember_amazon_protection(session, exc)
+        if not offers:
+            raise
         return offers
 
     verified_warehouse_offers = warehouse_offers
@@ -1345,6 +1368,8 @@ def _extract_amazon_page_offers(
             "Amazon Depo teklifi doğrulandı: "
             f"adet={len(verified_warehouse_offers)} | url={log_cell(source_url, 70)}"
         )
+    if not offers and not verified_warehouse_offers and primary_error:
+        raise primary_error
     return offers + verified_warehouse_offers
 
 
@@ -1557,6 +1582,8 @@ def _iter_amazon_product_watch_offers(
     limit = 60 if watch.include_variations else 1
     page_cache = _amazon_product_page_parse_cache(session)
     errors: List[str] = []
+    unavailable = []
+    setattr(session, "_hermes_amazon_unavailable_variants", unavailable)
     found = 0
     variation_discovery_pages = 0
     excluded_price_reads = 0
@@ -1607,6 +1634,11 @@ def _iter_amazon_product_watch_offers(
                         limit,
                         soup=page_soup,
                     )
+                for item in discovered or []:
+                    item_identity = extract_asin_from_url(item.url) or item.url
+                    if item_identity not in queued and len(pending) < limit:
+                        queued.add(item_identity)
+                        pending.append(item)
                 selected_label = amazon_provider.selected_variation_label(html, soup=page_soup)
                 page_title = amazon_provider.extract_title(page_soup) or ""
                 exclusion_term = excluded_term_in_title(
@@ -1614,6 +1646,7 @@ def _iter_amazon_product_watch_offers(
                     " ".join((page_title, selected_label, variation.label)),
                 )
                 page_parse_ms = round((time.monotonic() - parse_started_at) * 1000)
+                offer_error = None
                 skipped_offer_terms = bool(exclusion_term)
                 if skipped_offer_terms:
                     excluded_price_reads += 1
@@ -1633,6 +1666,9 @@ def _iter_amazon_product_watch_offers(
                             config,
                             soup=page_soup,
                         )
+                    except HermesError as exc:
+                        offer_error = exc
+                        page_offers = []
                     finally:
                         offer_stage_ms = round((time.monotonic() - offers_started_at) * 1000)
                 if snapshot is None:
@@ -1640,6 +1676,7 @@ def _iter_amazon_product_watch_offers(
                         "label": selected_label or variation.label,
                         "variations": discovered,
                         "offers": page_offers,
+                        "offer_error": offer_error,
                         "offers_skipped_by_exclusion": skipped_offer_terms,
                         "offer_skip_excluded_terms": tuple(watch.excluded_terms) if skipped_offer_terms else (),
                     }
@@ -1649,6 +1686,7 @@ def _iter_amazon_product_watch_offers(
                     snapshot["variations"] = discovered
                     if snapshot.get("offers") is None or needs_offer_upgrade:
                         snapshot["offers"] = page_offers
+                        snapshot["offer_error"] = offer_error
                         snapshot["offers_skipped_by_exclusion"] = skipped_offer_terms
                         snapshot["offer_skip_excluded_terms"] = (
                             tuple(watch.excluded_terms) if skipped_offer_terms else ()
@@ -1668,6 +1706,16 @@ def _iter_amazon_product_watch_offers(
                         queued.add(item_identity)
                         pending.append(item)
             label = snapshot.get("label") or variation.label
+            if snapshot.get("offer_error"):
+                raise snapshot["offer_error"]
+        except OutOfStockHermesError as exc:
+            title = amazon_provider.title_with_variation(exc.product_title or watch.name or variation.url,
+                                                         snapshot.get("label", variation.label) if snapshot else variation.label)
+            if excluded_term_in_title(watch, title):
+                continue
+            unavailable.append({"product_title": title, "product_url": variation.url, "reason": str(exc)})
+            log(f"Amazon varyantı stokta yok: {title} | {variation.url}")
+            continue
         except Exception as exc:  # noqa: BLE001
             errors.append(f"{variation.label or variation.url} | {exc}")
             log(f"Amazon varyasyonu okunamadı: {errors[-1]}")
@@ -1715,7 +1763,12 @@ def _iter_amazon_product_watch_offers(
         protection_error = getattr(session, "_hermes_amazon_protection_error", None)
         if protection_error:
             raise protection_error
-        raise HermesError(errors[-1] if errors else "Amazon sayfasından fiyat bulunamadı.")
+        if errors:
+            raise HermesError(errors[-1])
+        if unavailable:
+            first = unavailable[0]
+            raise OutOfStockHermesError(first["reason"], first["product_title"], first["product_url"])
+        raise EmptySearchResultsHermesError("Amazon bağlantısında seçilen filtrelere uygun teklif yok.")
 
 
 def _fetch_amazon_product_watch_offers(
@@ -2012,6 +2065,7 @@ def inspect_link_now(
     size: str = "",
     include_variations: bool = False,
     excluded_terms: List[str] | None = None,
+    amazon_browser: bool = False,
 ) -> tuple[str, List[OfferResult]]:
     """Read one supported link without changing tracking state or sending notifications."""
     source_url = str(url or "").strip()
@@ -2030,7 +2084,7 @@ def inspect_link_now(
         excluded_terms=[str(term).strip() for term in (excluded_terms or []) if str(term).strip()],
         max_items_to_scan=60,
     )
-    with AmazonClient() as client, requests.Session() as session:
+    with AmazonClient(transport="browser" if amazon_browser else "http") as client, requests.Session() as session:
         session._hermes_amazon_client = client
         offers = _fetch_watch_offers(session, temporary_watch, config)
     offers = [
@@ -2071,17 +2125,19 @@ def _check_once(config: HermesConfig, session: requests.Session) -> None:
         is_search_watch = watch_name_required_for_url(watch.url)
         if watch.site == SITE_AMAZON:
             setattr(session, "_hermes_amazon_protection_error", None)
+            setattr(session, "_hermes_amazon_unavailable_variants", [])
             remaining = amazon_protection_remaining_seconds(state, watch_key)
             if remaining > 0:
                 if state_entry.get("amazon_partial_result"):
                     summary_rows.extend(cached_summary_rows_for_watch(watch, watch_key, state, seller))
+                    stock_rows.extend(cached_stock_rows_for_watch(watch, state_entry, seller))
                 minutes = max(1, round(remaining / 60))
                 guard = amazon_protection_state(state).get(watch_key, {})
                 last_logged = parse_iso_datetime(guard.get("last_skip_logged_at"))
                 if not last_logged or (local_now().astimezone(timezone.utc) - last_logged).total_seconds() >= 60:
                     guard["last_skip_logged_at"] = utc_now()
                     log(
-                        f"Amazon linki gecici koruma nedeniyle atlandi: "
+                        f"Amazon linki son erişim hatası nedeniyle atlandı ({guard.get('kind', 'captcha')}): "
                         f"{watch.name or watch.url} | kalan={minutes} dk"
                     )
                 return
@@ -2270,7 +2326,9 @@ def _check_once(config: HermesConfig, session: requests.Session) -> None:
                 "last_checked_at": utc_now(),
                 "check_now_token": getattr(watch, "check_now_token", ""),
                 "amazon_partial_result": False,
+                "unavailable_variants": list(getattr(session, "_hermes_amazon_unavailable_variants", [])) if watch.site == SITE_AMAZON else [],
             }
+            stock_rows.extend(cached_stock_rows_for_watch(watch, state[watch_key], seller))
             if watch.site == SITE_AMAZON:
                 protection_error = getattr(session, "_hermes_amazon_protection_error", None)
                 if protection_error:
@@ -2284,15 +2342,10 @@ def _check_once(config: HermesConfig, session: requests.Session) -> None:
             stock_title = getattr(exc, "product_title", "") or watch.name or watch.url
             stock_url = getattr(exc, "product_url", "") or watch.url
             log(f"Stokta yok: {seller} | {stock_title} | {exc}")
-            stock_rows.append(
-                StockSummaryRow(
-                    seller=seller,
-                    product_title=stock_title,
-                    product_url=stock_url,
-                    target_price=watch.target_price,
-                    reason=str(exc),
-                )
-            )
+            unavailable = list(getattr(session, "_hermes_amazon_unavailable_variants", [])) if watch.site == SITE_AMAZON else []
+            if not unavailable:
+                unavailable = [{"product_title": stock_title, "product_url": stock_url, "reason": str(exc)}]
+            stock_rows.extend(cached_stock_rows_for_watch(watch, {"unavailable_variants": unavailable}, seller))
             failed = reset_product_alert_after_missing(dict(state_entry), seller, stock_title)
             failed["site"] = watch.site
             failed["watch_name"] = watch.name
@@ -2305,14 +2358,15 @@ def _check_once(config: HermesConfig, session: requests.Session) -> None:
             failed["last_checked_at"] = utc_now()
             failed["check_now_token"] = getattr(watch, "check_now_token", "")
             failed["last_out_of_stock_at"] = utc_now()
+            failed["unavailable_variants"] = unavailable
             state[watch_key] = failed
             if watch.site == SITE_AMAZON:
                 clear_amazon_protection(state, watch_key)
             # A missing item must not keep its previous price visible until the cycle ends.
-            save_incremental_price_summary([], stock_rows[-1:], removed_price_ids=stale_summary_offer_ids)
+            save_incremental_price_summary([], cached_stock_rows_for_watch(watch, failed, seller), removed_price_ids=stale_summary_offer_ids)
         except Exception as exc:  # noqa: BLE001
             stale_summary_offer_ids = cached_summary_offer_ids_for_watch(watch, watch_key, state, seller)
-            normal_empty_search = is_search_watch and is_normal_search_result_absence(exc)
+            normal_empty_search = isinstance(exc, EmptySearchResultsHermesError) or (is_search_watch and is_normal_search_result_absence(exc))
             if normal_empty_search:
                 log(f"Arama sonucu boş: {seller} | {watch.name or watch.url}")
             else:
@@ -2321,6 +2375,10 @@ def _check_once(config: HermesConfig, session: requests.Session) -> None:
                 protection_error = getattr(session, "_hermes_amazon_protection_error", None)
                 if protection_error or is_amazon_protection_error(exc):
                     note_amazon_protection(state, watch_key, watch.name or watch.url, protection_error or exc)
+                else:
+                    # A recovery probe is consumed once even if valid access found no offer
+                    # or a different operational failure. Old guards cannot bypass priority.
+                    clear_amazon_protection(state, watch_key)
             if is_search_watch and not normal_empty_search:
                 search_failure_events.append({"page": watch.name, "failed_links": 1})
             failed = dict(state_entry)
@@ -2354,8 +2412,9 @@ def _check_once(config: HermesConfig, session: requests.Session) -> None:
             failed["configured_url"] = watch.url
             failed["size"] = watch.size
             failed["offer_keys"] = []
+            failed["unavailable_variants"] = []
             failed["last_error"] = None if normal_empty_search else str(exc)
-            failed["last_error_status"] = None if normal_empty_search else getattr(exc, "status_code", None)
+            failed["last_error_status"] = None if normal_empty_search else (amazon_error_status(exc) if watch.site == SITE_AMAZON else getattr(exc, "status_code", None))
             failed["last_checked_at"] = utc_now()
             failed["check_now_token"] = getattr(watch, "check_now_token", "")
             if watch.site == SITE_AMAZON:
@@ -2380,6 +2439,7 @@ def _check_once(config: HermesConfig, session: requests.Session) -> None:
             priority_scope[priority]["deferred"] += 1
             if not protection or state_entry.get("amazon_partial_result"):
                 summary_rows.extend(cached_summary_rows_for_watch(watch, watch_key, state, seller))
+                stock_rows.extend(cached_stock_rows_for_watch(watch, state_entry, seller))
             continue
 
         priority_scope[priority]["due"] += 1

@@ -1,6 +1,7 @@
 import urllib.parse
 from html import escape
 
+from .errors import OutOfStockHermesError
 from .service import inspect_link_now
 from .utils import format_tl, site_label
 
@@ -59,11 +60,15 @@ def render_link_test_page(
     site="",
     offers=None,
     error="",
+    amazon_browser=False,
+    unavailable="",
 ) -> bytes:
     """Render an on-demand provider test without persisting any result."""
     source_url = str(url or "").strip()
     result_html = ""
-    if error:
+    if unavailable:
+        result_html = f"<p class='notice'>{escape(str(unavailable))}</p>"
+    elif error:
         result_html = f"<p class='notice notice-fail'>{escape(str(error))}</p>"
     elif offers is not None:
         rows = _render_offer_rows(site, offers, source_url)
@@ -100,6 +105,7 @@ def render_link_test_page(
             </label>
             <label class='link-test-checkbox'><input type='checkbox' name='include_variations' value='1'{_checked(bool(include_variations))}> Varyasyonları ekle</label>
           </div>
+          <label class='link-test-checkbox'><input type='checkbox' name='amazon_browser' value='1'{_checked(bool(amazon_browser))}> Amazon bağlantısını Pi’de gerçek tarayıcıyla test et</label>
           <button class='button primary' type='submit'>Şimdi Test Et</button>
         </form>
       </section>
@@ -115,6 +121,7 @@ def render_link_test_from_request(css, action_path, back_path, body) -> bytes:
     size = str(form.get("size", [""])[0]).strip()
     exclude_terms = str(form.get("exclude_terms", [""])[0]).strip()
     include_variations = str(form.get("include_variations", [""])[0]).strip() in {"1", "true", "on", "yes"}
+    amazon_browser = str(form.get("amazon_browser", [""])[0]).strip() in {"1", "true", "on", "yes"}
     excluded_terms = [item.strip() for item in exclude_terms.split(",") if item.strip()]
     try:
         site, offers = inspect_link_now(
@@ -123,6 +130,7 @@ def render_link_test_from_request(css, action_path, back_path, body) -> bytes:
             size=size,
             include_variations=include_variations,
             excluded_terms=excluded_terms,
+            **({"amazon_browser": True} if amazon_browser else {}),
         )
         return render_link_test_page(
             css,
@@ -135,7 +143,12 @@ def render_link_test_from_request(css, action_path, back_path, body) -> bytes:
             include_variations=include_variations,
             site=site,
             offers=offers,
+            amazon_browser=amazon_browser,
         )
+    except OutOfStockHermesError as exc:
+        return render_link_test_page(css, action_path, back_path, url=url, name=name, size=size,
+                                     exclude_terms=exclude_terms, include_variations=include_variations,
+                                     amazon_browser=amazon_browser, unavailable=f"Stokta yok: {exc.product_title or url} — {exc}")
     except Exception as exc:  # noqa: BLE001
         return render_link_test_page(
             css,
@@ -147,4 +160,5 @@ def render_link_test_from_request(css, action_path, back_path, body) -> bytes:
             exclude_terms=exclude_terms,
             include_variations=include_variations,
             error=f"Bağlantı okunamadı: {exc}",
+            amazon_browser=amazon_browser,
         )

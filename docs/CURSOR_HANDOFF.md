@@ -1,7 +1,7 @@
 # Hermes Cursor Handoff
 
 This document is the current technical and product handoff for continuing Hermes
-in Cursor. It describes the real repository at version `2.5.37`; source code and
+in Cursor. It describes the real repository at version `2.5.38`; source code and
 tests remain authoritative when this document and code ever differ.
 
 ## 1. Product snapshot
@@ -62,7 +62,7 @@ and can test links without adding them to the real table.
 ## 3. Runtime and Home Assistant contract
 
 - Base runtime: Python 3.12 slim.
-- Browser fallback: Chromium installed in the add-on image.
+- Browser fallback: matched Chromium/chromium-driver installed in the image, Selenium 4.50.0.
 - Libraries: Requests, BeautifulSoup, `curl_cffi`, Telethon.
 - Ingress: enabled on internal port `8099`.
 - Public dashboard: host port `8100`, protected by a configured token path.
@@ -226,13 +226,17 @@ verified warehouse offers remain separate identities.
 - The monitor owns one process-lived `AmazonClient`: anonymous Requests and
   curl sessions retain cookies/connections across cycles. Other providers still
   receive a new Requests session per cycle. Chromium, when needed, reuses one
-  anonymous temporary profile until process shutdown. Restarting resets these
+  anonymous temporary profile and live Selenium Chromium driver until process shutdown. Browser cache is disabled; its main-document HTTP status comes from performance events, never a subresource. Restarting resets these
   transport sessions. All response, parsed-page and offer caches remain on the
   per-cycle session, so a subsequent cycle fetches fresh prices.
 - One canonical URL gets one primary HTTP attempt. Challenges and HTTP 429/503
   are terminal; do not reset cookies or try fresh sessions, locale paths,
   Chromium or Requests after those responses. For a non-protection failure,
   allow at most one Chromium fallback on that same address, then stop.
+- Recovery is consumed after any non-protection outcome, including valid empty searches. Never leave an expired guard repeatedly bypassing medium/low scheduling. HTTP 503, HTTP 429 and verified CAPTCHA receive distinct log/guard classifications; 503 alone is not CAPTCHA proof.
+- Discover/enqueue variant edges before offer extraction. Cache offer errors separately from discovered metadata so a no-price root does not hide its siblings. Explicit selected-product unavailability raises `OutOfStockHermesError` with the variant title/URL; do not reuse metadata prices for an explicitly unavailable new offer. Still inspect a used listing when the new price is missing. Unknown missing prices remain parser errors, not invented stock facts.
+- Watch state retains `unavailable_variants` (title, URL, reason) for deferred stock rows, without altering offer keys or price history. Clear those entries on a subsequent valid offer read/error as appropriate; never carry a failed read's current price.
+- Link Test's optional `amazon_browser` flag selects browser-only reads for that temporary inspection. The real monitor remains HTTP-primary pending Pi comparison; both paths use the same provider/variation pipeline. No desktop browser, login, purchase or CAPTCHA solver is involved.
 - CAPTCHA detection checks actual validation forms/inputs, a Robot Check title,
   or explicit challenge instructions. Ignore scripts, styles, templates,
   comments and captcha asset names; a raw keyword alone is insufficient.

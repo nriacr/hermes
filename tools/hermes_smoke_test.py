@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 
 APP_PATH = Path(__file__).resolve().parents[1] / "ha-addon" / "app"
@@ -75,6 +75,93 @@ from hermes.utils import detect_site_from_url, parse_decimal, utc_now  # noqa: E
 
 
 class HermesSmokeTests(unittest.TestCase):
+    def test_amazon_expired_recovery_is_consumed_by_empty_result(self):
+        watch = WatchRule("Juo", "amazon", "https://www.amazon.com.tr/s?k=Juo", Decimal("1000"), priority="medium")
+        key = service.normalize_item_key("watch", watch.site, watch.name, watch.url, watch.size)
+        state = {key: {"last_checked_at": utc_now()}}
+        service.note_amazon_protection(state, key, "Juo", HermesError("Amazon captcha"))
+        state["_meta"]["amazon_protection"][key]["retry_after"] = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
+        config = SimpleNamespace(watches=[watch], interval_seconds=1, request_timeout_seconds=10,
+                                 pushover_user_key="", pushover_api_token="")
+        with (patch.object(service, "load_json", return_value=state), patch.object(service, "save_json"),
+              patch.object(service, "wait_before_request"),
+              patch.object(service, "_fetch_watch_offers", side_effect=service.EmptySearchResultsHermesError("Boş sonuç")) as fetch,
+              patch.object(service, "save_incremental_price_summary"), patch.object(service, "publish_price_summary"),
+              patch.object(service, "record_cycle_duration"), patch.object(service, "maybe_alert_summary_drop"),
+              patch.object(service, "maybe_alert_search_failures")):
+            service.check_once(config)
+            service.check_once(config)
+        fetch.assert_called_once()
+        self.assertNotIn(key, state["_meta"]["amazon_protection"])
+        self.assertIsNone(state[key]["last_error"])
+
+    def test_amazon_stock_absence_is_not_a_price_parser_failure(self):
+        html = '<span id="productTitle">iPhone Gümüş</span><div id="availability">Şu anda mevcut değil.</div>'
+        with self.assertRaises(OutOfStockHermesError) as caught:
+            extract_amazon_offers(html, "https://www.amazon.com.tr/dp/B000000001")
+        self.assertEqual(caught.exception.product_title, "iPhone Gümüş")
+        self.assertEqual(caught.exception.product_url, "https://www.amazon.com.tr/dp/B000000001")
+        # Unknown/broken markup and an active purchase with a missing price are errors.
+        for broken in ('<html>garbled</html>', '<span id="productTitle">iPhone</span><div id="availability">Stokta var</div>'):
+            with self.subTest(broken=broken), self.assertRaises(HermesError) as caught:
+                extract_amazon_offers(broken)
+            self.assertNotIsInstance(caught.exception, OutOfStockHermesError)
+        # Recommendation stock and disabled siblings are not the selected product.
+        priced = '<span id="productTitle">iPhone</span><div id="corePrice_feature_div"><span class="a-price"><span class="a-offscreen">100,00 TL</span></span></div>'
+        priced += '<div id="recommendations">Şu anda mevcut değil</div>'
+        self.assertEqual(extract_amazon_offers(priced)[0].price, Decimal("100.00"))
+
+    def test_amazon_unavailable_product_does_not_reuse_stale_metadata_price(self):
+        html = '<span id="productTitle">iPhone</span><div id="availability">Şu anda mevcut değil.</div><meta property="product:price:amount" content="1000">'
+        with self.assertRaises(OutOfStockHermesError):
+            extract_amazon_offers(html)
+
+    def test_amazon_missing_root_price_still_visits_all_discovered_variants(self):
+        urls = ["https://www.amazon.com.tr/dp/B000000001", "https://www.amazon.com.tr/dp/B000000002"]
+        watch = WatchRule("iPhone", "amazon", urls[0], Decimal("1000"), include_variations=True)
+        config = SimpleNamespace(request_timeout_seconds=10)
+        variations = [service.amazon_provider.AmazonProductVariation("Gümüş", urls[0]),
+                      service.amazon_provider.AmazonProductVariation("Turuncu", urls[1])]
+        pages = ['<span id="productTitle">iPhone Gümüş</span><div id="availability">Şu anda mevcut değil.</div>',
+                 '<span id="productTitle">iPhone Turuncu</span><div id="corePrice_feature_div"><span class="a-price"><span class="a-offscreen">100,00 TL</span></span></div>']
+        session = requests.Session()
+        with (patch.object(service, "fetch_amazon_page", side_effect=pages) as fetch,
+              patch.object(service, "cleaned_html", side_effect=lambda value: value),
+              patch.object(service, "wait_before_request"),
+              patch.object(service.amazon_provider, "extract_product_variations", return_value=variations)):
+            offers = list(service._iter_amazon_product_watch_offers(session, watch, config))
+        self.assertEqual(fetch.call_count, 2)
+        self.assertEqual([offer.url for offer in offers], [urls[1]])
+        self.assertEqual(session._hermes_amazon_unavailable_variants[0]["product_url"], urls[0])
+
+    def test_amazon_depot_listing_is_read_without_a_new_product_price(self):
+        url = "https://www.amazon.com.tr/dp/B000000001"
+        html = '<span id="productTitle">iPhone</span><div id="availability">Şu anda mevcut değil.</div><a href="/gp/offer-listing/B000000001?condition=used">Kullanılmış teklifler</a>'
+        depot = OfferResult("iPhone", Decimal("90"), "Amazon Depo", url, True)
+        with (patch.object(service, "fetch_amazon_page", return_value="depot-listing") as fetch,
+              patch.object(service, "cleaned_html", side_effect=lambda value: value),
+              patch.object(service.amazon_provider, "extract_verified_warehouse_offers_from_listing", side_effect=[[], [depot]])):
+            offers = service._extract_amazon_page_offers(requests.Session(), url, html, SimpleNamespace(request_timeout_seconds=10))
+        fetch.assert_called_once()
+        self.assertEqual(offers, [depot])
+
+    def test_deferred_stock_row_retains_last_successful_stock_classification(self):
+        watch = WatchRule("iPhone", "amazon", "https://www.amazon.com.tr/dp/B000000001", Decimal("1000"), priority="medium")
+        state = {}
+        config = SimpleNamespace(watches=[watch], interval_seconds=1, request_timeout_seconds=10,
+                                 pushover_user_key="", pushover_api_token="")
+        with (patch.object(service, "load_json", return_value=state), patch.object(service, "save_json"),
+              patch.object(service, "wait_before_request"),
+              patch.object(service, "_iter_amazon_product_watch_offers", side_effect=OutOfStockHermesError("Stokta yok", "iPhone", watch.url)) as fetch,
+              patch.object(service, "save_incremental_price_summary"), patch.object(service, "publish_price_summary") as publish,
+              patch.object(service, "record_cycle_duration"), patch.object(service, "maybe_alert_summary_drop"),
+              patch.object(service, "maybe_alert_search_failures")):
+            service.check_once(config)
+            service.check_once(config)
+        fetch.assert_called_once()
+        self.assertEqual(len(publish.call_args.args[1]), 1)
+        self.assertEqual(publish.call_args.args[1][0].product_url, watch.url)
+
     def test_cycle_interval_accepts_values_below_ten_seconds(self):
         for interval in (1, 5, 8, 35):
             with self.subTest(interval=interval), patch.object(
@@ -329,7 +416,7 @@ class HermesSmokeTests(unittest.TestCase):
               patch.object(service, "wait_before_request"),
               patch.object(service.amazon_provider, "extract_product_variations",
                            wraps=service.amazon_provider.extract_product_variations) as discover):
-            stream = service._iter_amazon_product_watch_offers(object(), watch, config)
+            stream = service._iter_amazon_product_watch_offers(SimpleNamespace(), watch, config)
             first = next(stream)
             self.assertTrue(first.is_warehouse)
             self.assertEqual(fetched, ["B000000001"])
@@ -475,7 +562,7 @@ class HermesSmokeTests(unittest.TestCase):
               patch.object(service.amazon_provider, "soup_from_html",
                            wraps=service.amazon_provider.soup_from_html) as html_parser):
             for _ in range(2):
-                offers = list(service._iter_amazon_product_watch_offers(object(), watch, config))
+                offers = list(service._iter_amazon_product_watch_offers(SimpleNamespace(), watch, config))
                 self.assertEqual(len(offers), 2)
 
         self.assertEqual(fetched, list(variants) * 2)
@@ -1100,7 +1187,7 @@ class HermesSmokeTests(unittest.TestCase):
             patch.object(service.amazon_provider, "extract_product_variations", return_value=variations),
             patch.object(service.amazon_provider, "extract_offers", side_effect=offers_for_url),
         ):
-            offers = service._fetch_amazon_product_watch_offers(object(), watch, config)
+            offers = service._fetch_amazon_product_watch_offers(SimpleNamespace(), watch, config)
 
         self.assertEqual([offer.url for offer in offers], variation_urls)
         self.assertEqual([offer.title for offer in offers], [
@@ -2030,24 +2117,66 @@ class HermesSmokeTests(unittest.TestCase):
                 self.assertIn("ilk_engel=0", messages[4])
                 self.assertIn("önceki_engelden_sonra_deneme=1", messages[4])
 
-    def test_amazon_browser_profile_is_reused_between_cycles_and_cleaned_up(self):
-        commands = []
-        with http_client.AmazonClient() as client:
-            def fake_run(command, **_kwargs):
-                commands.append(command)
-                return http_client.subprocess.CompletedProcess(command, 0, stdout="<html>Amazon product</html>", stderr="")
+    def test_amazon_browser_uses_installed_identity_and_disables_stale_cache(self):
+        driver = Mock()
+        with (http_client.AmazonClient() as client, patch.object(http_client.webdriver, "Chrome", return_value=driver) as launch,
+              patch.object(http_client, "ChromeService"),
+              patch.object(http_client, "_chromium_binary", return_value="/usr/bin/chromium"),
+              patch.object(http_client.shutil, "which", return_value="/usr/bin/chromedriver")):
+            self.assertIs(http_client._start_amazon_browser(client), driver)
+            options = launch.call_args.kwargs["options"]
+            self.assertEqual(options.binary_location, "/usr/bin/chromium")
+            self.assertFalse(any(arg.startswith("--user-agent") for arg in options.arguments))
+            self.assertIn("--remote-debugging-pipe", options.arguments)
+            driver.execute_cdp_cmd.assert_any_call("Network.setCacheDisabled", {"cacheDisabled": True})
+            client.browser_driver = driver
 
-            with (patch.object(http_client.subprocess, "run", side_effect=fake_run),
-                  patch.object(http_client, "_chromium_binary", return_value="/usr/bin/chromium")):
-                for _ in range(2):
-                    session = requests.Session()
+    def test_amazon_browser_driver_is_reused_between_cycles_and_cleaned_up(self):
+        driver = Mock()
+        driver.page_source = '<html>Amazon product</html>'
+        driver.current_url = 'https://www.amazon.com.tr/dp/B000000001'
+        driver.get_log.return_value = []
+        driver.execute_cdp_cmd.return_value = {"frameTree": {"frame": {"id": "main"}}}
+        def start(client):
+            client.browser_profile = tempfile.TemporaryDirectory(prefix="hermes-test-browser-")
+            return driver
+        with http_client.AmazonClient() as client, patch.object(http_client, "_start_amazon_browser", side_effect=start) as launch:
+            for _ in range(2):
+                with requests.Session() as session:
                     session._hermes_amazon_client = client
-                    http_client._get_amazon_response_with_browser(session, "https://www.amazon.com.tr/dp/B000000001", 10, False)
+                    response = http_client._get_amazon_response_with_browser(session, driver.current_url, 10, False)
+                    cached = http_client._get_amazon_response_with_browser(session, driver.current_url, 10, False)
+                    self.assertIs(response, cached)
             profile_path = Path(client.browser_profile.name)
             self.assertTrue(profile_path.exists())
-            self.assertEqual([arg for arg in commands[0] if arg.startswith("--user-data-dir=")],
-                             [arg for arg in commands[1] if arg.startswith("--user-data-dir=")])
+            launch.assert_called_once()
+            self.assertEqual(driver.get.call_count, 2)
+        driver.quit.assert_called_once()
         self.assertFalse(profile_path.exists())
+
+    def test_amazon_browser_http_status_uses_main_document_only(self):
+        driver = Mock()
+        driver.execute_cdp_cmd.return_value = {"frameTree": {"frame": {"id": "main"}}}
+        def entry(frame, status, resource_type="Document"):
+            return {"message": json.dumps({"message": {"method": "Network.responseReceived", "params": {
+                "frameId": frame, "type": resource_type, "response": {"status": status}}}})}
+        driver.get_log.return_value = [entry("iframe", 503), entry("main", 200), entry("main", 503, "Image")]
+        self.assertEqual(http_client._browser_document_status(driver), 200)
+        driver.get_log.return_value = []
+        self.assertIsNone(http_client._browser_document_status(driver))
+
+    def test_amazon_browser_comparison_never_falls_back_to_http(self):
+        session = requests.Session()
+        with http_client.AmazonClient(transport="browser") as client:
+            session._hermes_amazon_client = client
+            with (patch.object(http_client, "_get_amazon_response_with_browser", side_effect=HermesError("Amazon captcha")) as browser,
+                  patch.object(http_client, "_get_amazon_response_with_curl") as curl,
+                  patch.object(http_client, "_get_amazon_response") as plain):
+                with self.assertRaisesRegex(HermesError, "captcha"):
+                    fetch_amazon_page(session, "https://www.amazon.com.tr/dp/B000000001", 10)
+        browser.assert_called_once()
+        curl.assert_not_called()
+        plain.assert_not_called()
 
     def test_amazon_diagnostics_keep_seven_days_and_preserve_price_state(self):
         state = {"price_history": "preserved", "_meta": {"amazon_request_diagnostics": [
@@ -2090,42 +2219,22 @@ class HermesSmokeTests(unittest.TestCase):
             fetch.assert_called_once()
             self.assertEqual(save.call_args.args[1]["_meta"]["amazon_request_diagnostics"][0]["session_attempts"], 1)
 
-    def test_amazon_browser_rescue_accepts_usable_stdout_with_nonzero_exit(self):
-        class FakeCookies:
-            def set(self, *_args, **_kwargs):
-                return None
-
-            def clear(self, *_args, **_kwargs):
-                return None
-
-        class FakeSession:
-            cookies = FakeCookies()
-
-        def fake_run(*_args, **_kwargs):
-            return http_client.subprocess.CompletedProcess(
-                args=["chromium"],
-                returncode=1,
-                stdout='<html><body><div data-component-type="s-search-result"><a href="/dp/B000">Amazon</a></div></body></html>',
-                stderr="dbus connection warning",
-            )
-
-        original_run = http_client.subprocess.run
-        original_chromium_binary = http_client._chromium_binary
-        http_client.subprocess.run = fake_run
-        http_client._chromium_binary = lambda: "/usr/bin/chromium"
-        try:
-            response = http_client._get_amazon_response_with_browser(
-                FakeSession(),
-                "https://www.amazon.com.tr/s?k=juo+q3",
-                10,
-                True,
-            )
-        finally:
-            http_client.subprocess.run = original_run
-            http_client._chromium_binary = original_chromium_binary
-
-        self.assertEqual(response.status_code, 200)
-        self.assertIn("s-search-result", response.text)
+    def test_amazon_browser_captcha_and_service_failure_are_not_stock_states(self):
+        for status, html in ((503, '<html>Amazon Service Unavailable</html>'),
+                             (200, '<html>Amazon<form action="/errors/validateCaptcha"><input name="captchacharacters"></form></html>')):
+            driver = Mock()
+            driver.page_source = html
+            driver.current_url = "https://www.amazon.com.tr/dp/B000000001"
+            driver.get_log.return_value = []
+            with (http_client.AmazonClient(transport="browser") as client,
+                  patch.object(http_client, "_browser_document_status", return_value=status)):
+                client.browser_driver = driver
+                session = requests.Session()
+                session._hermes_amazon_client = client
+                with self.assertRaises(HermesError) as caught:
+                    fetch_amazon_page(session, driver.current_url, 10)
+                self.assertNotIsInstance(caught.exception, OutOfStockHermesError)
+                self.assertEqual(http_client.amazon_error_status(caught.exception), 503 if status == 503 else None)
 
     def test_amazon_product_url_variants_start_with_clean_product_url(self):
         url = "https://www.amazon.com.tr/gp/product/B0B2PSDNV1?ref=ppx_yo2ov_dt_b_fed_asin_title&th=1"

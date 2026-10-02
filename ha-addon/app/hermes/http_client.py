@@ -2,7 +2,6 @@ import json
 import os
 import re
 import shutil
-import subprocess
 import tempfile
 import time
 from collections import deque
@@ -21,6 +20,13 @@ try:
     from curl_cffi import requests as curl_requests
 except Exception:
     curl_requests = None
+
+try:
+    from selenium import webdriver
+    from selenium.webdriver.chrome.service import Service as ChromeService
+except ImportError:
+    webdriver = None
+    ChromeService = None
 
 AMAZON_STABLE_SEARCH_PARAMS = {
     "__mk_tr_TR",
@@ -54,11 +60,13 @@ HM_API_BASE_URL = "https://api.hm.com/search-services/v1/tr_tr/search/byids"
 class AmazonClient:
     """Process-lived anonymous transports; page/offer caches stay cycle-local."""
 
-    def __init__(self, requests_session=None):
+    def __init__(self, requests_session=None, transport="http"):
         self.requests_session = requests_session if requests_session is not None else requests.Session()
         self.owns_requests_session = requests_session is None
         self.curl_session = None
         self.browser_profile = None
+        self.browser_driver = None
+        self.transport = transport
         self.started_at = time.monotonic()
         self.attempt_times = deque()
         self.total_attempts = 0
@@ -79,8 +87,12 @@ class AmazonClient:
                 if self.owns_requests_session:
                     self.requests_session.close()
             finally:
-                if self.browser_profile is not None:
-                    self.browser_profile.cleanup()
+                try:
+                    if self.browser_driver is not None:
+                        self.browser_driver.quit()
+                finally:
+                    if self.browser_profile is not None:
+                        self.browser_profile.cleanup()
 
     def __enter__(self):
         return self
@@ -98,15 +110,16 @@ def _amazon_client(session) -> AmazonClient:
 
 
 class _HtmlResponse:
-    def __init__(self, url: str, html: str):
+    def __init__(self, url: str, html: str, status_code=None):
         self.url = url
-        self.status_code = 200
+        self.status_code = status_code
         self.headers = {"content-type": "text/html; charset=utf-8"}
         self.text = html
         self.content = html.encode("utf-8", errors="replace")
 
     def raise_for_status(self) -> None:
-        return None
+        if isinstance(self.status_code, int) and self.status_code >= 400:
+            raise HttpStatusHermesError(self.status_code, self.url)
 
 
 def decode_response_text(response: requests.Response) -> str:
@@ -342,7 +355,7 @@ def _log_amazon_response(response, transport: str) -> None:
     html = decode_response_text(response)
     log(
         "Amazon yanıt teşhisi: "
-        f"taşıma={transport} | http={response.status_code if transport != 'browser' else 'bilinmiyor'} | "
+        f"taşıma={transport} | http={response.status_code if response.status_code is not None else 'bilinmiyor'} | "
         f"bayt={len(response.content)} | yönlendirme={len(getattr(response, 'history', []))} | "
         f"koruma={_amazon_response_protection_reason(response) or 'yok'} | "
         f"ürün_işareti={int('productTitle' in html)} | arama_işareti={int('s-search-result' in html)}"
@@ -470,101 +483,87 @@ def _chromium_binary(site_name: str = "Hermes") -> str:
     raise HermesError(f"{site_name} icin gercek tarayici modu kullanilamiyor; Chromium bulunamadi.")
 
 
+def _start_amazon_browser(client: AmazonClient):
+    """Use the installed matching Chromium/driver, with its natural browser identity."""
+    if webdriver is None or ChromeService is None:
+        raise HermesError("Amazon gerçek tarayıcı desteği kurulmamış.")
+    driver_binary = shutil.which("chromedriver")
+    if not driver_binary:
+        raise HermesError("Amazon gerçek tarayıcı sürücüsü bulunamadı.")
+    if client.browser_profile is None:
+        client.browser_profile = tempfile.TemporaryDirectory(prefix="hermes-amazon-browser-")
+    options = webdriver.ChromeOptions()
+    options.binary_location = _chromium_binary()
+    for argument in (
+        "--headless=new", "--no-sandbox", "--disable-dev-shm-usage",
+        "--disable-background-networking", "--no-first-run", "--lang=tr-TR",
+        "--window-size=1365,900", "--remote-debugging-pipe",
+        f"--user-data-dir={client.browser_profile.name}",
+    ):
+        options.add_argument(argument)
+    options.set_capability("goog:loggingPrefs", {"performance": "ALL"})
+    driver = webdriver.Chrome(service=ChromeService(executable_path=driver_binary), options=options)
+    try:
+        driver.execute_cdp_cmd("Network.enable", {})
+        driver.execute_cdp_cmd("Network.setCacheDisabled", {"cacheDisabled": True})
+    except Exception:
+        driver.quit()
+        raise
+    return driver
+
+
+def _browser_document_status(driver):
+    """Read only the current main document status, never subresources or frames."""
+    frame_id = driver.execute_cdp_cmd("Page.getFrameTree", {})["frameTree"]["frame"]["id"]
+    status = None
+    for entry in driver.get_log("performance"):
+        try:
+            message = json.loads(entry["message"])["message"]
+            params = message.get("params", {})
+            if (message.get("method") == "Network.responseReceived"
+                    and params.get("type") == "Document" and params.get("frameId") == frame_id):
+                status = int(params["response"]["status"])
+        except (KeyError, TypeError, ValueError):
+            continue
+    return status
+
+
 def _get_amazon_response_with_browser(session: requests.Session, candidate: str, timeout: int, expect_search: bool):
     cache = _amazon_response_cache(session)
     cache_key = _amazon_cache_key(f"browser:{candidate}", expect_search)
-    cached_response = cache.get(cache_key)
-    if cached_response is not None:
+    if cache_key in cache:
         _increment_amazon_metric(session, "response_cache_hits")
-        return cached_response
-
-    browser_timeout = max(AMAZON_BROWSER_MIN_TIMEOUT_SECONDS, int(timeout) + 10)
+        return cache[cache_key]
     client = _amazon_client(session)
-    if client.browser_profile is None:
-        client.browser_profile = tempfile.TemporaryDirectory(prefix="hermes-amazon-browser-")
-    command = [
-        _chromium_binary(),
-        "--headless=new",
-        "--disable-gpu",
-        "--disable-dev-shm-usage",
-        "--disable-background-networking",
-        "--disable-default-apps",
-        "--disable-extensions",
-        "--disable-sync",
-        "--disable-setuid-sandbox",
-        "--disable-software-rasterizer",
-        "--disable-crash-reporter",
-        "--disable-features=Translate,MediaRouter,OptimizationHints",
-        "--hide-scrollbars",
-        "--no-first-run",
-        "--no-zygote",
-        "--no-sandbox",
-        "--window-size=1365,900",
-        "--lang=tr-TR",
-        f"--user-agent={AMAZON_CHROME_USER_AGENT}",
-        f"--user-data-dir={client.browser_profile.name}",
-        "--dump-dom",
-        candidate,
-    ]
+    if client.browser_driver is None:
+        try:
+            client.browser_driver = _start_amazon_browser(client)
+        except Exception as exc:
+            raise HermesError(f"Amazon gerçek tarayıcı oturumu başlatılamadı: {exc}") from exc
+    driver = client.browser_driver
+    driver.set_page_load_timeout(max(AMAZON_BROWSER_MIN_TIMEOUT_SECONDS, int(timeout)))
+    driver.get_log("performance")  # Drain the previous page's document events.
+    started_at = time.monotonic()
+    _note_amazon_request(session, "browser", candidate)
     try:
-        started_at = time.monotonic()
-        _note_amazon_request(session, "browser", candidate)
-        completed = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            timeout=browser_timeout,
-            check=False,
-        )
-    except subprocess.TimeoutExpired as exc:
+        driver.get(candidate)
+        html = driver.page_source
+        status = _browser_document_status(driver)
+        response = _HtmlResponse(driver.current_url, html, status)
+    except Exception as exc:
+        raise HermesError(f"Amazon gerçek tarayıcı sayfası okunamadı ({type(exc).__name__}).") from exc
+    finally:
         log(
             "Amazon ağ yanıt süresi: "
             f"taşıma=browser | tip={_amazon_request_type(candidate, expect_search)} | "
-            f"durum=zaman_aşımı | süre={round((time.monotonic() - started_at) * 1000)} ms | "
+            f"süre={round((time.monotonic() - started_at) * 1000)} ms | "
             f"adres={_amazon_timing_url(candidate)}"
         )
-        raise HermesError("Amazon gercek tarayici modu zaman asimina ugradi.") from exc
-    except OSError as exc:
-        raise HermesError(f"Amazon gercek tarayici modu baslatilamadi: {exc}") from exc
-    log(
-        "Amazon ağ yanıt süresi: "
-        f"taşıma=browser | tip={_amazon_request_type(candidate, expect_search)} | "
-        f"çıkış_kodu={completed.returncode} | süre={round((time.monotonic() - started_at) * 1000)} ms | "
-        f"adres={_amazon_timing_url(candidate)}"
-    )
-
-    stdout = completed.stdout or ""
-    stderr = completed.stderr or ""
-    response = _HtmlResponse(candidate, stdout)
     _log_amazon_response(response, "browser")
-    try:
-        if stdout and _is_usable_amazon_response(response, expect_search):
-            if completed.returncode != 0:
-                log(
-                    "Amazon tarayici modu HTML dondurdu: "
-                    f"returncode={completed.returncode} | stderr={_diagnostic_snippet(stderr)} | "
-                    f"url={_short_amazon_url(candidate)}"
-                )
-            cache[cache_key] = response
-            return response
-    except Exception as exc:  # noqa: BLE001
-        if completed.returncode != 0:
-            log(
-                "Amazon tarayici modu HTML kullanilamadi: "
-                f"returncode={completed.returncode} | sebep={_amazon_error_reason(exc)} | "
-                f"html_bayt={len(response.content)} | stderr={_diagnostic_snippet(stderr)} | "
-                f"url={_short_amazon_url(candidate)}"
-            )
-        raise
-
-    if completed.returncode != 0:
-        error_text = _diagnostic_snippet(stderr or stdout)
-        raise HermesError(f"Amazon gercek tarayici modu basarisiz oldu: {error_text[:160] or completed.returncode}")
-
-    if not stdout:
-        raise HermesError("Amazon gercek tarayici modunda bos HTML dondu.")
-    if not _is_usable_amazon_response(response, expect_search):
-        raise HermesError("Amazon gercek tarayici modunda da bos veya farkli bir sayfa dondurdu.")
+    usable = _is_usable_amazon_response(response, expect_search)
+    response.raise_for_status()
+    if not usable:
+        raise HermesError("Amazon gerçek tarayıcıda beklenen ürün/arama sayfası yerine boş veya farklı sayfa döndürdü.")
     cache[cache_key] = response
     return response
 
@@ -710,6 +709,14 @@ def fetch_amazon_page(session: requests.Session, url: str, timeout: int, expect_
     """
     _increment_amazon_metric(session, "page_fetch_calls")
     candidate = amazon_url_variants(url)[0]
+    if _amazon_client(session).transport == "browser":
+        # Explicit Pi comparison mode: one browser navigation, no HTTP rescue chain.
+        try:
+            return _get_amazon_response_with_browser(session, candidate, timeout, expect_search)
+        except Exception as exc:
+            if _is_hard_amazon_block_error(exc):
+                _log_amazon_block(session, exc)
+            raise
     primary = _get_amazon_response_with_curl if curl_requests is not None else _get_amazon_response
     method = "curl" if curl_requests is not None else "requests"
     attempts: List[Dict[str, Any]] = []

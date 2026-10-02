@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Optional
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from ..errors import HermesError
+from ..errors import HermesError, OutOfStockHermesError
 from ..models import OfferResult
 from ..utils import (
     canonical_amazon_product_url,
@@ -571,6 +571,20 @@ def extract_verified_warehouse_offers_from_listing(html: str, source_url: str, s
     return offers
 
 
+def selected_product_unavailable_reason(soup) -> str:
+    """Require a selected-product availability signal, never whole-page text."""
+    for node in soup.select("#availability, #availabilityInsideBuyBox_feature_div, #availability_feature_div, #outOfStock"):
+        if _is_in_used_offer(node):
+            continue
+        text = normalize_offer_text(node.get_text(" ", strip=True))
+        if any(marker in text for marker in (
+            "su anda mevcut degil", "gecici olarak stokta yok", "stokta yok",
+            "currently unavailable", "temporarily out of stock", "out of stock",
+        )):
+            return "Stokta yok; Amazon bu varyant için satın alınabilir yeni teklif göstermiyor."
+    return ""
+
+
 def extract_offers(html: str, source_url: str = "", soup=None) -> list[OfferResult]:
     """Extract normal and used offers separately when Amazon shows both on one page."""
     soup = soup or parse_product_page(html)
@@ -585,7 +599,8 @@ def extract_offers(html: str, source_url: str = "", soup=None) -> list[OfferResu
     stock_quantity = extract_low_stock_quantity(soup=soup)
     offers: list[OfferResult] = []
 
-    primary_price = _extract_visible_primary_price(soup)
+    unavailable_reason = selected_product_unavailable_reason(soup)
+    primary_price = None if unavailable_reason else _extract_visible_primary_price(soup)
     if primary_price is not None:
         offers.append(
             OfferResult(
@@ -603,6 +618,9 @@ def extract_offers(html: str, source_url: str = "", soup=None) -> list[OfferResu
     offers.extend(warehouse_offers)
     if offers:
         return offers
+
+    if unavailable_reason:
+        raise OutOfStockHermesError(unavailable_reason, product_title=title, product_url=source_url)
 
     for price in (jsonld_price, extract_price_from_meta(soup)):
         if price is not None:

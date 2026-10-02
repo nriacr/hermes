@@ -4,7 +4,7 @@ WORKDIR /app
 ENV PATH="/opt/venv/bin:$PATH"
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends chromium ca-certificates fonts-liberation \
+    && apt-get install -y --no-install-recommends chromium chromium-driver ca-certificates fonts-liberation \
     && rm -rf /var/lib/apt/lists/*
 
 COPY app/requirements.txt /app/requirements.txt
