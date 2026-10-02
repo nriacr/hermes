@@ -2467,6 +2467,16 @@ def _check_once(config: HermesConfig, session: requests.Session) -> None:
             failed["offer_keys"] = []
             failed["unavailable_variants"] = []
             failed["amazon_no_offer_retry_after"] = getattr(session, "_hermes_amazon_next_no_offer_check", None) if watch.site == SITE_AMAZON else None
+            if watch.site == SITE_AMAZON and is_search_watch and getattr(exc, "no_results_notice", False):
+                # Explicit marketplace absence is a normal result. Keep the query
+                # visible and do not send the same empty search every high-priority cycle.
+                failed["unavailable_variants"] = [{
+                    "product_title": watch.name or watch.url, "product_url": watch.url, "reason": str(exc),
+                }]
+                failed["amazon_no_offer_retry_after"] = (
+                    datetime.now(timezone.utc) + timedelta(seconds=AMAZON_NO_OFFER_RECHECK_SECONDS)
+                ).isoformat()
+                stock_rows.extend(cached_stock_rows_for_watch(watch, failed, seller))
             failed["last_error"] = None if normal_empty_search else str(exc)
             failed["last_error_status"] = None if normal_empty_search else (amazon_error_status(exc) if watch.site == SITE_AMAZON else getattr(exc, "status_code", None))
             failed["last_checked_at"] = utc_now()
@@ -2476,7 +2486,8 @@ def _check_once(config: HermesConfig, session: requests.Session) -> None:
             state[watch_key] = failed
             # State records the current error while the dashboard may still show the last
             # successful cycle. Remove only this watch's stale rows immediately.
-            save_incremental_price_summary([], removed_price_ids=stale_summary_offer_ids)
+            save_incremental_price_summary([], cached_stock_rows_for_watch(watch, failed, seller),
+                                           removed_price_ids=stale_summary_offer_ids)
 
     for watch in config.watches:
         priority = str(getattr(watch, "priority", "high") or "high").casefold()

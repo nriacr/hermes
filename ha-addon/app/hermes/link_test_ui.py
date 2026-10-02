@@ -1,7 +1,7 @@
 import urllib.parse
 from html import escape
 
-from .errors import OutOfStockHermesError
+from .errors import EmptySearchResultsHermesError, OutOfStockHermesError
 from .service import inspect_link_now
 from .utils import format_tl, site_label
 
@@ -145,10 +145,12 @@ def render_link_test_from_request(css, action_path, back_path, body) -> bytes:
             offers=offers,
             amazon_browser=amazon_browser,
         )
-    except OutOfStockHermesError as exc:
+    except (OutOfStockHermesError, EmptySearchResultsHermesError) as exc:
+        notice = (f"Stokta yok: {exc.product_title or url} — {exc}"
+                  if isinstance(exc, OutOfStockHermesError) else f"Ürün bulunamadı: {exc}")
         return render_link_test_page(css, action_path, back_path, url=url, name=name, size=size,
                                      exclude_terms=exclude_terms, include_variations=include_variations,
-                                     amazon_browser=amazon_browser, unavailable=f"Stokta yok: {exc.product_title or url} — {exc}")
+                                     amazon_browser=amazon_browser, unavailable=notice)
     except Exception as exc:  # noqa: BLE001
         return render_link_test_page(
             css,

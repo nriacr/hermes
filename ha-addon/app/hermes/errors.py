@@ -21,6 +21,10 @@ class EmptySearchResultsHermesError(HermesError):
     searches from polluting the dashboard error list or triggering alerts.
     """
 
+    def __init__(self, message: str, no_results_notice: bool = False):
+        self.no_results_notice = no_results_notice
+        super().__init__(message)
+
 
 class HttpStatusHermesError(HermesError):
     def __init__(self, status_code: int, url: str) -> None:

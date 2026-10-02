@@ -263,6 +263,73 @@ class HermesSmokeTests(unittest.TestCase):
             "watch": {"offer_keys": [], "last_price": "100", "last_checked_at": utc_now()}
         }, "Amazon"), [])
 
+    def test_amazon_depot_no_results_notice_ignores_all_category_fallback(self):
+        html = '<div id="search"><h2>Tüm Kategoriler içindeki sonuçlar gösteriliyor</h2><h3>Amazon Depo içinde <b>juo 240w</b> için sonuç bulunamadı</h3><div class="s-main-slot"><div data-component-type="s-search-result" data-asin="B000000001"><h2><a href="/dp/B000000001"><span>Juo 240W</span></a></h2><span class="a-price"><span class="a-offscreen">100,00 TL</span></span><span>Kullanılmış Amazon Depo</span></div></div></div>'
+        with self.assertRaises(service.EmptySearchResultsHermesError) as caught:
+            extract_result_candidates(html, 60, primary_is_warehouse=True)
+        self.assertTrue(caught.exception.no_results_notice)
+        self.assertIn("sonuç bulunamadı", str(caught.exception))
+        watch = WatchRule("Juo 240W", "amazon", "https://www.amazon.com.tr/s?k=juo+240w&i=warehouse-deals", Decimal("1000"))
+        with (patch.object(service, "fetch_amazon_page", return_value=html),
+              patch.object(service, "cleaned_html", side_effect=lambda value: value),
+              patch.object(service, "_fetch_amazon_detail_offers") as detail):
+            with self.assertRaises(service.EmptySearchResultsHermesError):
+                service._fetch_amazon_search_watch_offers(requests.Session(), watch, SimpleNamespace(request_timeout_seconds=10))
+        detail.assert_not_called()
+
+    def test_amazon_turkish_all_categories_heading_cuts_fallback_cards(self):
+        def card(asin):
+            return f'<div data-component-type="s-search-result" data-asin="{asin}"><h2><a href="/dp/{asin}"><span>Juo 240W</span></a></h2><span class="a-price"><span class="a-offscreen">100,00 TL</span></span></div>'
+        html = '<div class="s-main-slot">' + card('B000000001') + '<h2>Tüm Kategoriler içindeki sonuçlar gösteriliyor</h2>' + card('B000000002') + '</div>'
+        self.assertEqual([item.url for item in extract_result_candidates(html, 60)], ['https://www.amazon.com.tr/dp/B000000001'])
+
+    def test_amazon_no_results_notice_in_hidden_or_script_text_is_ignored(self):
+        card = '<div data-component-type="s-search-result" data-asin="B000000001"><h2><a href="/dp/B000000001"><span>Juo 240W</span></a></h2><span class="a-price"><span class="a-offscreen">100,00 TL</span></span></div>'
+        for extra in ('<script>"Amazon Depo içinde juo 240w için sonuç bulunamadı"</script>',
+                      '<div aria-hidden="true">Amazon Depo içinde juo 240w için sonuç bulunamadı</div>',
+                      '<!-- Amazon Depo içinde juo 240w için sonuç bulunamadı -->'):
+            with self.subTest(extra=extra):
+                self.assertEqual(len(extract_result_candidates(extra + card, 60)), 1)
+
+    def test_amazon_genuine_empty_search_is_usable_without_fallback_products(self):
+        html = '<html>Amazon<div id="search"><h3>Amazon Depo içinde juo 240w için sonuç bulunamadı</h3></div></html>'
+        self.assertTrue(http_client._is_usable_amazon_response(http_client._HtmlResponse('https://www.amazon.com.tr/s?k=juo', html, 200), True))
+
+    def test_amazon_no_results_notice_is_normal_stock_state_not_error_notification(self):
+        watch = WatchRule("Juo 240W", "amazon", "https://www.amazon.com.tr/s?k=juo+240w&i=warehouse-deals", Decimal("1000"))
+        config = SimpleNamespace(watches=[watch], interval_seconds=1, request_timeout_seconds=10,
+                                 pushover_user_key="", pushover_api_token="")
+        state = {}
+        html = '<html>Amazon<div id="search"><h3>Amazon Depo içinde juo 240w için sonuç bulunamadı</h3></div></html>'
+        with (patch.object(service, "load_json", return_value=state), patch.object(service, "save_json"),
+              patch.object(service, "wait_before_request"), patch.object(service, "fetch_amazon_page", return_value=html) as fetch,
+              patch.object(service, "cleaned_html", side_effect=lambda value: value),
+              patch.object(service, "save_incremental_price_summary"), patch.object(service, "publish_price_summary") as publish,
+              patch.object(service, "record_cycle_duration"), patch.object(service, "maybe_alert_summary_drop"),
+              patch.object(service, "maybe_alert_search_failures") as failures, patch.object(service, "send_pushover") as notify):
+            service.check_once(config)
+            service.check_once(config)
+        fetch.assert_called_once()
+        notify.assert_not_called()
+        self.assertEqual(failures.call_args.args[1], [])
+        key = service.normalize_item_key("watch", watch.site, watch.name, watch.url, watch.size)
+        self.assertIsNone(state[key]["last_error"])
+        self.assertEqual(len(publish.call_args.args[1]), 1)
+        self.assertIn("sonuç bulunamadı", publish.call_args.args[1][0].reason)
+
+    def test_link_test_empty_search_is_a_normal_notice(self):
+        error = service.EmptySearchResultsHermesError("Amazon Depo içinde juo 240w için sonuç bulunamadı", no_results_notice=True)
+        with patch.object(link_test_ui, "inspect_link_now", side_effect=error):
+            page = link_test_ui.render_link_test_from_request('', './link-test', './',
+                b'url=https%3A%2F%2Fwww.amazon.com.tr%2Fs%3Fk%3Djuo%2B240w&name=Juo+240W').decode()
+        self.assertIn("Ürün bulunamadı", page)
+        self.assertNotIn("Bağlantı okunamadı", page)
+        self.assertNotIn("class='notice notice-fail'", page)
+
+    def test_amazon_product_title_cannot_declare_the_search_empty(self):
+        html = '<div id="search"><h2>Sonuçlar</h2><div data-component-type="s-search-result" data-asin="B000000001"><h2><a href="/dp/B000000001"><span>Hata rehberi: sorgu için sonuç bulunamadı</span></a></h2><span class="a-price"><span class="a-offscreen">100,00 TL</span></span></div></div>'
+        self.assertEqual(len(extract_result_candidates(html, 60)), 1)
+
     def test_cycle_interval_accepts_values_below_ten_seconds(self):
         for interval in (1, 5, 8, 35):
             with self.subTest(interval=interval), patch.object(

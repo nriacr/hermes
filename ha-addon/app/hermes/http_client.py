@@ -323,6 +323,8 @@ def _is_usable_amazon_response(response, expect_search: bool) -> bool:
             "data-component-type=\"s-search-result\"",
             "data-component-type='s-search-result'",
             "s-search-result",
+            'id="search"',
+            "id='search'",
             "data-cy=\"title-recipe\"",
             "data-cy='title-recipe'",
             "puis-card-container",

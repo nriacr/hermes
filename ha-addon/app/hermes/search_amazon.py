@@ -4,7 +4,7 @@ from decimal import Decimal
 from typing import Any, List, Optional
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Comment
 
 from .errors import EmptySearchResultsHermesError, HermesError
 from .models import SearchResultItem
@@ -31,6 +31,8 @@ AMAZON_CARD_TITLE_SELECTORS = [
 AMAZON_SEARCH_STOP_SECTION_MARKERS = (
     "all departments icindeki sonuclar",
     "all departments icindeki sonuclar gosteriliyor",
+    "tum kategoriler icindeki sonuclar",
+    "tum kategorilerdeki sonuclar",
     "yardima mi ihtiyaciniz var",
     "baktiginiz urunlere gore belirlenen urunler",
     "tarama gecmisinizdeki urunleri goruntuleyen musteriler ayrica sunlari da goruntuledi",
@@ -176,21 +178,42 @@ def _is_stop_section_text(value: str) -> bool:
     return any(marker in normalized for marker in AMAZON_SEARCH_STOP_SECTION_MARKERS)
 
 
+def _visible_search_text_nodes(soup: BeautifulSoup):
+    for node in soup.find_all(string=True):
+        if isinstance(node, Comment) or _is_hidden_element(node.parent):
+            continue
+        if any(parent.name in {"script", "style", "template", "noscript"} for parent in node.parents):
+            continue
+        yield node
+
+
+def _find_no_results_notice(soup: BeautifulSoup) -> str:
+    for node in _visible_search_text_nodes(soup):
+        if "sonuc" not in normalize_offer_text(str(node)):
+            continue
+        # A product title or recommendation cannot declare the search empty.
+        if any(parent.get("data-asin") for parent in node.parents if getattr(parent, "get", None)):
+            continue
+        for container in (node.parent, node.parent.parent):
+            if container is None:
+                continue
+            if container.find(attrs={"data-asin": re.compile(r".+")}):
+                continue
+            if container.name in {"html", "body", "[document]"}:
+                text = str(node).strip()
+            else:
+                text = " ".join(str(part).strip() for part in _visible_search_text_nodes(container))
+            normalized = normalize_offer_text(text)
+            if any(marker in normalized for marker in ("icin sonuc bulunamadi", "icin sonuc bulamadik")):
+                return text[:250]
+    return ""
+
+
 def _find_stop_marker(soup: BeautifulSoup):
-    for text_node in soup.find_all(string=True):
+    for text_node in _visible_search_text_nodes(soup):
         if _is_stop_section_text(str(text_node)):
             return text_node
     return None
-
-
-def _filter_cards_before_stop(cards: List[Any], soup: BeautifulSoup):
-    marker = _find_stop_marker(soup)
-    if marker is None:
-        return cards
-    # Compare document order rather than DOM nesting: Amazon can place the
-    # fallback heading inside a wrapper separate from the result cards.
-    before_marker_ids = {id(el) for el in marker.previous_elements if getattr(el, "name", None)}
-    return [card for card in cards if id(card) in before_marker_ids]
 
 
 def _match_phrase(value: str) -> str:
@@ -217,9 +240,19 @@ def extract_result_candidates(
     primary_is_warehouse: bool = False,
 ) -> List[AmazonSearchCandidate]:
     soup = BeautifulSoup(html, "html.parser")
+    raw_lower = html.casefold()
+    notice = _find_no_results_notice(soup) if "bulunamad" in raw_lower or "bulamad" in raw_lower else ""
+    if notice:
+        raise EmptySearchResultsHermesError(f"Aranan ürün bulunamadı: {notice}", no_results_notice=True)
     cards: List[Any] = []
+    marker = _find_stop_marker(soup)
+    # One document-order boundary for every selector, instead of rescanning the tree.
+    before_marker_ids = ({id(el) for el in marker.previous_elements if getattr(el, "name", None)}
+                         if marker is not None else None)
     for selector in AMAZON_SEARCH_CARD_SELECTORS:
-        found = _filter_cards_before_stop(soup.select(selector), soup)
+        found = soup.select(selector)
+        if before_marker_ids is not None:
+            found = [card for card in found if id(card) in before_marker_ids]
         if found:
             cards = found
             break

@@ -1,7 +1,7 @@
 # Hermes Cursor Handoff
 
 This document is the current technical and product handoff for continuing Hermes
-in Cursor. It describes the real repository at version `2.5.39`; source code and
+in Cursor. It describes the real repository at version `2.5.40`; source code and
 tests remain authoritative when this document and code ever differ.
 
 ## 1. Product snapshot
@@ -238,6 +238,7 @@ verified warehouse offers remain separate identities.
 - Watch state retains `unavailable_variants` (title, URL, reason) for deferred stock rows, without altering offer keys or price history. Clear those entries on a subsequent valid offer read/error as appropriate; never carry a failed read's current price.
 - `AmazonClient.unavailable_product_pages` holds at most 512 negative product snapshots for a fixed 300 seconds. Cache only explicit stock absence or typed `PriceUnavailableHermesError` for a recognized product, never successful prices, broken markup, timeouts, HTTP failures or CAPTCHA. Retain the discovered edges in those negative snapshots so a temporarily skipped root cannot hide priced siblings. Cache hits cannot refresh expiry. When every queued variant has a negative snapshot, `amazon_no_offer_retry_after` defers the whole watch until the earliest probe; manual check tokens bypass that defer. Settings restart the client. Normal priority and protection scheduling remain independent. Empty current `offer_keys` must not fall back to a legacy price.
 - Pi comparison on 2026-10-02: B0FQFTYPTQ returned no readable featured price through both HTTP and Chromium. Chromium returned real HTTP 200, 1,221,124 bytes without a challenge; navigation took 12,688 ms. The anonymous selected buybox had `Satın Alma Seçeneklerini Gör` and no explicit out-of-stock marker. Do not classify that page as stock absence. Its offer-listing link returned the product document without offer rows in a separate anonymous read. Keep HTTP primary: this comparison did not establish a browser reliability gain.
+- Visible `Amazon Depo içinde … için sonuç bulunamadı` / `… için sonuç bulamadık` notices raise normal `EmptySearchResultsHermesError(no_results_notice=True)` before card/detail reads. Ignore scripts/comments/hidden notices. Explicit absence retains a query-level unavailable row and sets a 300-second minimum next probe; normal medium/low intervals still apply. `Tüm Kategoriler içindeki sonuçlar` and `Tüm Kategorilerdeki sonuçlar` cut fallback cards alongside the existing All Departments marker. A valid `#search` document with zero cards is usable, so do not start a browser rescue for normal empty results. Shared Link Test displays typed empty search as a normal notice.
 - Link Test's optional `amazon_browser` flag selects browser-only reads for that temporary inspection. The real monitor remains HTTP-primary pending Pi comparison; both paths use the same provider/variation pipeline. No desktop browser, login, purchase or CAPTCHA solver is involved.
 - CAPTCHA detection checks actual validation forms/inputs, a Robot Check title,
   or explicit challenge instructions. Ignore scripts, styles, templates,
