@@ -1,7 +1,7 @@
 # Hermes Cursor Handoff
 
 This document is the current technical and product handoff for continuing Hermes
-in Cursor. It describes the real repository at version `2.5.44`; source code and
+in Cursor. It describes the real repository at version `2.5.45`; source code and
 tests remain authoritative when this document and code ever differ.
 
 ## 1. Product snapshot
@@ -273,7 +273,7 @@ verified warehouse offers remain separate identities.
   No raw HTML, cookies or credentials are recorded. Failed browser startup stops
   the trial and restores HTTP without a CAPTCHA rescue. Few samples or time-of-day
   differences do not establish causation; no automatic production promotion.
-- Optimized Pi browser (2.5.44) uses eager navigation plus an Amazon-provider
+- Optimized Pi browser (2.5.45) uses eager navigation plus an Amazon-provider
   DOM readiness/change observation over selected price/seller/stock, all Twister
   state and used/listing regions. Critical regions must settle for 600 ms.
   Unknown/no-price markup conservatively waits for document completion.
@@ -283,7 +283,7 @@ verified warehouse offers remain separate identities.
   Require a main-frame network response; reject disk/service-worker/prefetch
   documents, interception failures and a redirect to another product ASIN.
   A 503 is raised immediately, before readiness polling; no protection rescue.
-- First and each tenth fast read per URL (256 bounded URL records) compare
+- First successful fast read (even after earlier missing-price full reads) and each tenth read per URL (256 bounded URL records) compare
   existing provider snapshots against a complete same-navigation DOM, with a
   one-second reference grace for cached-resource load finishing before late
   purchase updates. Compare title/selected values, price/seller/stock, discovered

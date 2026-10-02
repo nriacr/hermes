@@ -2721,6 +2721,20 @@ class HermesSmokeTests(unittest.TestCase):
             self.assertEqual(len(client.browser_audits), 2)
             driver.get.assert_not_called()
 
+    def test_amazon_browser_first_fast_read_is_audited_after_an_initial_missing_price(self):
+        clock = [0.0]
+        driver = Mock(page_source='page')
+        available = [False]
+        driver.execute_script.side_effect = lambda code, *args: ('complete' if code == "return document.readyState" else
+            {"ready": available[0], "state": "interactive" if available[0] else "complete", "signature": "stable"})
+        with (http_client.AmazonClient() as client, patch.object(http_client.time, "monotonic", side_effect=lambda: clock[0]),
+              patch.object(http_client.time, "sleep", side_effect=lambda seconds: clock.__setitem__(0, clock[0] + seconds)),
+              patch.object(http_client.amazon_provider, "browser_coverage_snapshot", return_value={"offers": ["current"]})):
+            self.assertEqual(http_client._read_amazon_browser_html(driver, client, 'url', False, 10)[1], 'tam')
+            clock[0], available[0] = 0, True
+            self.assertEqual(http_client._read_amazon_browser_html(driver, client, 'url', False, 10)[1], 'kapsam_doğrulandı')
+            self.assertEqual(len(client.browser_audits), 1)
+
     def test_amazon_browser_readiness_or_audit_timeout_never_publishes_incomplete_data(self):
         for ready in (True, False):
             clock = [0.0]

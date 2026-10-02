@@ -82,8 +82,8 @@ def _render_transport_trial(action_path):
         f"<td data-label='Tipik varyant'>{card['modes'][mode]['median_variants']}</td>"
         f"<td data-label='Depo bulunan kontrol'>{card['modes'][mode]['warehouse_reads']}</td></tr>"
         for card in report["cards"] for mode, label in (("http", "Mevcut okuyucu"), ("browser", "Pi Chromium")))
-    validation_rows = "".join(f"<tr><td>{escape(card['name'])}</td><td>{card['reads']}</td><td>{card['priced']}</td>"
-        f"<td>{card['audits']}</td><td>{card['late_data']}</td><td>{card['median_seconds']} sn</td></tr>"
+    validation_rows = "".join(f"<tr><td data-label='Kart'>{escape(card['name'])}</td><td data-label='Kontrol'>{card['reads']}</td><td data-label='Fiyat okunan'>{card['priced']}</td>"
+        f"<td data-label='Kapsam kontrolü'>{card['audits']}</td><td data-label='Geç veri'>{card['late_data']}</td><td data-label='Tipik süre'>{card['median_seconds']} sn</td></tr>"
         for card in report["browser_validation"])
     validation_html = ("<p>Bir saat boyunca sırası gelen normal taramalar Pi tarayıcısıyla okunur. "
         "İlk okumada ve her onuncu okumada aynı sayfanın erken ve tam yüklenmiş verileri karşılaştırılır; "
@@ -95,11 +95,14 @@ def _render_transport_trial(action_path):
         "<input type='hidden' name='amazon_trial_action' value='validate'>"
         "<button class='button secondary' type='submit'>Pi tarayıcısını 1 saat doğrula</button></form>") if not active else ""
     if validation:
+        comparison_button = (f"<form method='post' action='{escape(action_path, quote=True)}'>"
+            "<input type='hidden' name='amazon_trial_action' value='start'>"
+            "<button class='button secondary' type='submit'>24 saatlik karşılaştırmayı başlat</button></form>") if not active else ""
         return (f"<section class='summary-panel link-test-result'><div class='summary-head'>"
                 f"<h2>Amazon tarayıcısı kapsam doğrulaması</h2><span>{escape(status)}</span></div>"
                 f"{validation_html}<form method='post' action='{escape(action_path, quote=True)}'>"
                 f"<input type='hidden' name='amazon_trial_action' value='{action}'>"
-                f"<button class='button secondary' type='submit'>{button}</button></form>"
+                f"<button class='button secondary' type='submit'>{button}</button></form>{comparison_button}"
                 f"<p>Koruma beklemesi örneği: {report['protection_waits']}. Bekleyen ve yalnızca önbellekten "
                 "gelen okumalar kontrol sayısına dahil edilmez. Kapsam kontrolü aynı sayfanın iki zamanını karşılaştırır; "
                 "tüm ürün ailesinin eksiksizliğini veya CAPTCHA'nın önleneceğini garanti etmez.</p>"

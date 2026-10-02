@@ -572,7 +572,7 @@ def _browser_document_response(driver):
 def _read_amazon_browser_html(driver, client, candidate, expect_search, deadline):
     """Use a stable selected-product DOM, audit against complete DOM on the same navigation."""
     key = (expect_search, candidate)
-    record = client.browser_coverage.setdefault(key, {"reads": 0, "full_only": False, "minimum_seconds": 0})
+    record = client.browser_coverage.setdefault(key, {"reads": 0, "full_only": False, "minimum_seconds": 0, "validated": False})
     if len(client.browser_coverage) > 256:
         client.browser_coverage.pop(next(iter(client.browser_coverage)))
     record["reads"] += 1
@@ -604,7 +604,7 @@ def _read_amazon_browser_html(driver, client, candidate, expect_search, deadline
         time.sleep(0.2)
     else:
         raise HermesError("Amazon tarayıcıda ürün/arama verisinin hazır olması zaman aşımına uğradı.")
-    audit = early_html is not None and (record["reads"] == 1 or record["reads"] % AMAZON_BROWSER_AUDIT_INTERVAL == 0)
+    audit = early_html is not None and (not record["validated"] or record["reads"] % AMAZON_BROWSER_AUDIT_INTERVAL == 0)
     if not audit:
         return early_html if early_html is not None else driver.page_source, "erken" if early_html is not None else "tam"
     early_snapshot = amazon_provider.browser_coverage_snapshot(early_html, candidate, expect_search)
@@ -622,6 +622,7 @@ def _read_amazon_browser_html(driver, client, candidate, expect_search, deadline
     changed = sorted(name for name in set(early_snapshot) | set(full_snapshot)
                      if early_snapshot.get(name) != full_snapshot.get(name))
     record["full_only"] = bool(changed)
+    record["validated"] = not changed
     if changed:
         record["minimum_seconds"] = time.monotonic() - read_started
     client.browser_audit_total += 1
