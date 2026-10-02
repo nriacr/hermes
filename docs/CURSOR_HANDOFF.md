@@ -1,7 +1,7 @@
 # Hermes Cursor Handoff
 
 This document is the current technical and product handoff for continuing Hermes
-in Cursor. It describes the real repository at version `2.5.42`; source code and
+in Cursor. It describes the real repository at version `2.5.43`; source code and
 tests remain authoritative when this document and code ever differ.
 
 ## 1. Product snapshot
@@ -273,6 +273,37 @@ verified warehouse offers remain separate identities.
   No raw HTML, cookies or credentials are recorded. Failed browser startup stops
   the trial and restores HTTP without a CAPTCHA rescue. Few samples or time-of-day
   differences do not establish causation; no automatic production promotion.
+- Optimized Pi browser (2.5.43) uses eager navigation plus an Amazon-provider
+  DOM readiness/change observation over selected price/seller/stock, all Twister
+  state and used/listing regions. Critical regions must settle for 600 ms.
+  Unknown/no-price markup conservatively waits for document completion.
+- Chromium static cache remains enabled. A Selenium CDP Fetch listener adds
+  no-cache headers to Document requests only; natural identity and cookies are
+  preserved, no URL/cache-busting query is added. Service workers are bypassed.
+  Require a main-frame network response; reject disk/service-worker/prefetch
+  documents, interception failures and a redirect to another product ASIN.
+  A 503 is raised immediately, before readiness polling; no protection rescue.
+- First and each tenth fast read per URL (256 bounded URL records) compare
+  existing provider snapshots against a complete same-navigation DOM, with a
+  one-second reference grace for cached-resource load finishing before late
+  purchase updates. Compare title/selected values, price/seller/stock, discovered
+  ASIN edges and verified used offers/listing link. Return the full DOM on audit;
+  discrepancies lock that URL to complete reads and retain the observed minimum
+  readiness duration until service restart. There is no second pricing parser.
+  Sampled checks cannot guarantee arbitrary later JS changes or family completeness.
+- `amazon_trial_action=validate` is a one-hour browser-only run on ordinary
+  scheduled work. Use `browser_validation` per-card real-request counters and
+  `coverage_details`, not the two-arm matched totals, to evaluate it. Expiry
+  restores HTTP. Keep all priority, seller, exclusion and protection rules.
+  Completed comparisons are archived as `amazon_trial_archive_<id>.json` before
+  a new run. No automatic permanent production promotion.
+- `amazon_browser_check=1` on shared /link-test runs the real Pi reader against
+  a temporary loopback-only fixture server (full/cold, eager/cold, eager/cached).
+  It verifies changing main-document prices, seller/stock, delayed variant/depot
+  updates and static cache hits without querying Amazon or modifying monitoring
+  state. JSON is in amazon-browser-check-data. Synthetic image delays are only
+  functional checks, never evidence of Amazon cycle speed. CDP debugging binds
+  to loopback on a random unexposed port; profile and driver close after checking.
 - CAPTCHA detection checks actual validation forms/inputs, a Robot Check title,
   or explicit challenge instructions. Ignore scripts, styles, templates,
   comments and captcha asset names; a raw keyword alone is insufficient.

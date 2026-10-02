@@ -2570,6 +2570,7 @@ def _check_once(config: HermesConfig, session: requests.Session) -> None:
             started_at = time.monotonic()
             client = session._hermes_amazon_client
             blocks_before = len(client.block_events)
+            audits_before = client.browser_audit_total
             session._hermes_amazon_trial_requests = []
             task["run"]()
             key = normalize_item_key("watch", watch.site, watch.tracking_id or watch.name, watch.url, watch.size)
@@ -2607,6 +2608,10 @@ def _check_once(config: HermesConfig, session: requests.Session) -> None:
                 "outcome": outcome,
                 "variant_count": len({canonical_tracking_url(item.get("url", "")) for item in offer_entries}),
                 "warehouse_count": sum(bool(item.get("is_warehouse")) for item in offer_entries),
+                "browser_policy": client.browser_policy,
+                "browser_audits": [{"url": item["url"], "changed": item["changed"],
+                    "early": item["early"], "full": item["full"]}
+                    for item in client.browser_audits if item["sequence"] > audits_before],
             })
             session._hermes_amazon_trial_requests = None
             if trial["transport"] == "browser" and "gercek tarayici oturumu baslatilamadi" in normalize_offer_text(str(entry.get("last_error", ""))):

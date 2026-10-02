@@ -76,6 +76,57 @@ from hermes.utils import detect_site_from_url, parse_decimal, utc_now  # noqa: E
 
 
 class HermesSmokeTests(unittest.TestCase):
+    def test_amazon_browser_coverage_detects_late_variant_and_depot_without_copying_prices(self):
+        from hermes.providers import amazon
+        url = "https://www.amazon.com.tr/dp/B000000001"
+        early = '''<span id="productTitle">Telefon Gümüş 256 GB</span>
+          <div id="corePrice_feature_div"><span class="a-price"><span class="a-offscreen">100.000,00 TL</span></span></div>
+          <div id="merchant-info">Satıcı Amazon.com.tr</div><div id="availability">Stokta var</div>'''
+        late = early + '''<div id="variation_color_name"><ul><li data-asin="B000000002" title="Turuncu"></li></ul></div>
+          <div id="usedBuySection">Kullanılmış - Yeni Gibi
+          <span class="a-price"><span class="a-offscreen">80.000,00 TL</span></span>Satıcı: Amazon Depo</div>'''
+        before = amazon.browser_coverage_snapshot(early, url, False)
+        after = amazon.browser_coverage_snapshot(late, url, False)
+        self.assertNotEqual(before, after)
+        self.assertEqual({item[0] for item in after["variants"]},
+                         {url, "https://www.amazon.com.tr/dp/B000000002"})
+        self.assertEqual([row["price"] for row in after["offers"]], ["100000.00", "80000.00"])
+        self.assertTrue(after["offers"][1]["warehouse"])
+        self.assertEqual(before["offers"][0], after["offers"][0])
+
+    def test_amazon_browser_coverage_checks_seller_stock_and_used_listing_even_without_price(self):
+        from hermes.providers import amazon
+        url = "https://www.amazon.com.tr/dp/B000000001"
+        html = '<span id="productTitle">Telefon</span><div id="availability">Stokta yok</div>'
+        other = html.replace('Stokta yok', 'Stokta var') + '<div id="merchant-info">Satıcı Diğer Satıcı</div><a href="/gp/offer-listing/B000000001?condition=used">Kullanılmış</a>'
+        self.assertNotEqual(amazon.browser_coverage_snapshot(html, url, False),
+                            amazon.browser_coverage_snapshot(other, url, False))
+
+    def test_amazon_browser_coverage_search_respects_empty_notice_and_category_boundary(self):
+        from hermes.providers import amazon
+        url = 'https://www.amazon.com.tr/s?k=telefon'
+        empty = '<div id="search">Amazon Depo içinde telefon için sonuç bulunamadı</div>'
+        self.assertEqual(amazon.browser_coverage_snapshot(empty, url, True)["error"], 'EmptySearchResultsHermesError')
+        html = '''<div id="search"><div class="s-main-slot"><div data-component-type="s-search-result" data-asin="B000000001">
+          <h2><a href="/dp/B000000001"><span>Telefon</span></a></h2><span class="a-price"><span class="a-offscreen">100,00 TL</span></span></div>
+          <h2>Tüm Kategoriler içindeki sonuçlar gösteriliyor</h2><div data-component-type="s-search-result" data-asin="B000000002">
+          <h2><a href="/dp/B000000002"><span>İlgisiz</span></a></h2></div></div></div>'''
+        snapshot = amazon.browser_coverage_snapshot(html, url, True)
+        self.assertEqual(len(snapshot["cards"]), 1)
+        self.assertIn('B000000001', snapshot['cards'][0][0])
+
+    def test_amazon_browser_self_check_shared_route_does_not_inspect_amazon_or_touch_trial(self):
+        with (patch.object(link_test_ui, 'run_browser_check', return_value={"passed": True, "amazon_requests": 0}) as check,
+              patch.object(link_test_ui, 'inspect_link_now') as inspect,
+              patch.object(transport_trial, 'start_trial') as start):
+            for path in ('./link-test', '/token/link-test'):
+                page = link_test_ui.render_link_test_from_request('', path, './', b'amazon_browser_check=1').decode()
+                self.assertIn('amazon-browser-check-data', page)
+                self.assertIn('Kontroller geçti.', page)
+            self.assertEqual(check.call_count, 2)
+            inspect.assert_not_called()
+            start.assert_not_called()
+
     def test_transport_trial_balances_modes_expires_and_does_not_restart_on_second_click(self):
         with tempfile.TemporaryDirectory() as directory, \
                 patch.object(transport_trial, "CONTROL_PATH", Path(directory) / "control.json"):
@@ -88,6 +139,31 @@ class HermesSmokeTests(unittest.TestCase):
             self.assertIsNone(transport_trial.active_trial(now - timedelta(seconds=1)))
             transport_trial.stop_trial(now + timedelta(minutes=10))
             self.assertIsNone(transport_trial.active_trial(now + timedelta(minutes=11)))
+
+    def test_browser_validation_expires_after_hour_and_keeps_completed_comparison(self):
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(transport_trial, "CONTROL_PATH", Path(directory) / "control.json"), \
+                patch.object(transport_trial, "RESULTS_PATH", Path(directory) / "results.json"):
+            previous = {"id": "a" * 32, "samples": ["old comparison"]}
+            transport_trial.save_json(transport_trial.RESULTS_PATH, previous)
+            now = datetime(2026, 10, 2, 12, tzinfo=timezone.utc)
+            transport_trial.start_trial(now, purpose='browser_validation')
+            self.assertEqual(transport_trial.active_trial(now + timedelta(minutes=59))['transport'], 'browser')
+            self.assertIsNone(transport_trial.active_trial(now + timedelta(hours=1)))
+            self.assertEqual(transport_trial.load_json(Path(directory) / f"amazon_trial_archive_{'a' * 32}.json", {}), previous)
+
+    def test_browser_validation_report_counts_same_page_audits_without_claiming_http_match(self):
+        sample = {"watch": "a", "config": "same", "name": "phone", "network_attempts": 1,
+                  "captcha": 0, "http_503": 0, "outcome": "priced", "variant_count": 2,
+                  "warehouse_count": 1, "seconds": 3, "transport": "browser",
+                  "browser_audits": [{"url": "phone", "changed": ["variants"], "early": {}, "full": {}}]}
+        report = transport_trial.summarize({"samples": [sample, {**sample, "network_attempts": 0, "outcome": "protection_wait"}]})
+        self.assertEqual(report['matched_cards'], 0)
+        self.assertEqual(report['modes']['browser']['reads'], 0)
+        self.assertEqual(report['browser_validation'][0]['reads'], 1)
+        self.assertEqual(report['browser_validation'][0]['audits'], 1)
+        self.assertEqual(report['browser_validation'][0]['late_data'], 1)
+        self.assertEqual(report['browser_validation'][0]['warehouse_reads'], 1)
 
     def test_transport_trial_uses_existing_read_and_preserves_protection_wait(self):
         priced = WatchRule("Fiyat", "amazon", "https://www.amazon.com.tr/dp/B000000001", Decimal("1000"))
@@ -2508,18 +2584,22 @@ class HermesSmokeTests(unittest.TestCase):
                 self.assertIn("ilk_engel=0", messages[4])
                 self.assertIn("önceki_engelden_sonra_deneme=1", messages[4])
 
-    def test_amazon_browser_uses_installed_identity_and_disables_stale_cache(self):
+    def test_amazon_browser_uses_installed_identity_and_revalidates_documents_with_static_cache(self):
         driver = Mock()
         with (http_client.AmazonClient() as client, patch.object(http_client.webdriver, "Chrome", return_value=driver) as launch,
               patch.object(http_client, "ChromeService"),
               patch.object(http_client, "_chromium_binary", return_value="/usr/bin/chromium"),
-              patch.object(http_client.shutil, "which", return_value="/usr/bin/chromedriver")):
+              patch.object(http_client.shutil, "which", return_value="/usr/bin/chromedriver"),
+              patch.object(http_client, "_configure_amazon_document_revalidation") as configure):
             self.assertIs(http_client._start_amazon_browser(client), driver)
             options = launch.call_args.kwargs["options"]
             self.assertEqual(options.binary_location, "/usr/bin/chromium")
             self.assertFalse(any(arg.startswith("--user-agent") for arg in options.arguments))
-            self.assertIn("--remote-debugging-pipe", options.arguments)
-            driver.execute_cdp_cmd.assert_any_call("Network.setCacheDisabled", {"cacheDisabled": True})
+            self.assertEqual(options.page_load_strategy, "eager")
+            self.assertIn("--remote-debugging-address=127.0.0.1", options.arguments)
+            driver.execute_cdp_cmd.assert_any_call("Network.setCacheDisabled", {"cacheDisabled": False})
+            driver.execute_cdp_cmd.assert_any_call("Network.setBypassServiceWorker", {"bypass": True})
+            configure.assert_called_once_with(driver, client)
             client.browser_driver = driver
 
     def test_amazon_browser_driver_is_reused_between_cycles_and_cleaned_up(self):
@@ -2531,7 +2611,9 @@ class HermesSmokeTests(unittest.TestCase):
         def start(client):
             client.browser_profile = tempfile.TemporaryDirectory(prefix="hermes-test-browser-")
             return driver
-        with http_client.AmazonClient() as client, patch.object(http_client, "_start_amazon_browser", side_effect=start) as launch:
+        with (http_client.AmazonClient() as client, patch.object(http_client, "_start_amazon_browser", side_effect=start) as launch,
+              patch.object(http_client, "_browser_document_response", return_value={"status": 200}),
+              patch.object(http_client, "_read_amazon_browser_html", return_value=(driver.page_source, "tam"))):
             for _ in range(2):
                 with requests.Session() as session:
                     session._hermes_amazon_client = client
@@ -2552,9 +2634,103 @@ class HermesSmokeTests(unittest.TestCase):
             return {"message": json.dumps({"message": {"method": "Network.responseReceived", "params": {
                 "frameId": frame, "type": resource_type, "response": {"status": status}}}})}
         driver.get_log.return_value = [entry("iframe", 503), entry("main", 200), entry("main", 503, "Image")]
-        self.assertEqual(http_client._browser_document_status(driver), 200)
+        self.assertEqual(http_client._browser_document_response(driver)["status"], 200)
         driver.get_log.return_value = []
-        self.assertIsNone(http_client._browser_document_status(driver))
+        self.assertIsNone(http_client._browser_document_response(driver))
+
+    def test_amazon_browser_document_headers_do_not_change_identity_or_static_requests(self):
+        from selenium.webdriver.common.devtools import v154 as devtools
+        driver, connection = Mock(), Mock()
+        driver.start_devtools.return_value = devtools, connection
+        with http_client.AmazonClient() as client:
+            http_client._configure_amazon_document_revalidation(driver, client)
+            enabled = next(connection.execute.call_args.args[0])
+            self.assertEqual(enabled['params']['patterns'], [{"resourceType": "Document", "requestStage": "Request"}])
+            callback = connection.add_callback.call_args.args[1]
+            callback(SimpleNamespace(request_id=devtools.fetch.RequestId("doc"), request=SimpleNamespace(headers={
+                "User-Agent": "natural", "Cookie": "synthetic", "Cache-Control": "max-age=600"})))
+            continued = next(connection.execute.call_args.args[0])
+            headers = {row['name']: row['value'] for row in continued['params']['headers']}
+            self.assertEqual(headers, {"User-Agent": "natural", "Cookie": "synthetic",
+                                       "Cache-Control": "no-cache", "Pragma": "no-cache"})
+            connection.execute.side_effect = RuntimeError("interception failed")
+            callback(SimpleNamespace(request_id=devtools.fetch.RequestId("doc"), request=SimpleNamespace(headers={})))
+            self.assertEqual(client.browser_header_error, "RuntimeError")
+
+    def test_amazon_browser_rejects_cached_unverified_or_wrong_product_documents(self):
+        driver = Mock()
+        driver.page_source = '<span id="productTitle">Amazon phone</span>'
+        driver.current_url = 'https://www.amazon.com.tr/dp/B000000001'
+        for document in (None, {"status": 200, "fromDiskCache": True},
+                         {"status": 200, "fromServiceWorker": True}, {"status": 200, "fromPrefetchCache": True}):
+            with (self.subTest(document=document), http_client.AmazonClient(transport="browser") as client,
+                  patch.object(http_client, "_browser_document_response", return_value=document),
+                  patch.object(http_client, "_read_amazon_browser_html", return_value=(driver.page_source, "erken"))):
+                client.browser_driver = driver
+                session = requests.Session()
+                session._hermes_amazon_client = client
+                with self.assertRaises(HermesError):
+                    fetch_amazon_page(session, driver.current_url, 10)
+                self.assertEqual(http_client._amazon_response_cache(session), {})
+        with (http_client.AmazonClient() as client,
+              patch.object(http_client, "_browser_document_response", return_value={"status": 200}),
+              patch.object(http_client, "_read_amazon_browser_html", return_value=(driver.page_source, "erken"))):
+            client.browser_driver = driver
+            session = requests.Session()
+            session._hermes_amazon_client = client
+            with self.assertRaisesRegex(HermesError, "farklı ürün"):
+                http_client._get_amazon_response_with_browser(session, 'https://www.amazon.com.tr/dp/B000000002', 10, False)
+
+    def test_amazon_browser_readiness_audit_uses_full_dom_and_locks_late_data_to_full_reads(self):
+        clock = [0.0]
+        driver = Mock()
+        driver.page_source = 'early'
+        def script(code, *args):
+            if code == "return document.readyState":
+                driver.page_source = 'full'
+                return 'complete'
+            return {"ready": True, "state": "interactive" if clock[0] < 2 else "complete", "signature": "stable"}
+        driver.execute_script.side_effect = script
+        with (http_client.AmazonClient() as client, patch.object(http_client.time, "monotonic", side_effect=lambda: clock[0]),
+              patch.object(http_client.time, "sleep", side_effect=lambda seconds: clock.__setitem__(0, clock[0] + seconds)),
+              patch.object(http_client.amazon_provider, "browser_coverage_snapshot", side_effect=lambda html, *args: {"variants": html})):
+            html, result = http_client._read_amazon_browser_html(driver, client, 'url', False, 10)
+            self.assertEqual((html, result), ('full', 'kapsam_farkı'))
+            self.assertTrue(client.browser_coverage[(False, 'url')]['full_only'])
+            self.assertEqual(client.browser_audits[0]['changed'], ['variants'])
+            clock[0], driver.page_source = 0.0, 'full'
+            html, result = http_client._read_amazon_browser_html(driver, client, 'url', False, 10)
+            self.assertEqual((html, result), ('full', 'tam'))
+            self.assertGreaterEqual(clock[0], 2)
+
+    def test_amazon_browser_verified_fast_read_and_tenth_read_are_audited_without_more_navigation(self):
+        clock = [0.0]
+        driver = Mock(page_source='unchanged')
+        driver.execute_script.side_effect = lambda code, *args: ('complete' if code == "return document.readyState" else
+                                                               {"ready": True, "state": "interactive", "signature": "stable"})
+        with (http_client.AmazonClient() as client, patch.object(http_client.time, "monotonic", side_effect=lambda: clock[0]),
+              patch.object(http_client.time, "sleep", side_effect=lambda seconds: clock.__setitem__(0, clock[0] + seconds)),
+              patch.object(http_client.amazon_provider, "browser_coverage_snapshot", return_value={"offers": ["current"]})):
+            for count in range(1, 11):
+                clock[0] = 0
+                html, result = http_client._read_amazon_browser_html(driver, client, 'url', False, 10)
+                self.assertEqual(html, 'unchanged')
+                self.assertEqual(result, 'kapsam_doğrulandı' if count in (1, 10) else 'erken')
+            self.assertEqual(len(client.browser_audits), 2)
+            driver.get.assert_not_called()
+
+    def test_amazon_browser_readiness_or_audit_timeout_never_publishes_incomplete_data(self):
+        for ready in (True, False):
+            clock = [0.0]
+            driver = Mock(page_source='early')
+            driver.execute_script.side_effect = lambda code, *args: ('interactive' if code == "return document.readyState" else
+                                                                   {"ready": ready, "state": "interactive", "signature": "stable"})
+            with (self.subTest(ready=ready), http_client.AmazonClient() as client,
+                  patch.object(http_client.time, "monotonic", side_effect=lambda: clock[0]),
+                  patch.object(http_client.time, "sleep", side_effect=lambda seconds: clock.__setitem__(0, clock[0] + seconds)),
+                  patch.object(http_client.amazon_provider, "browser_coverage_snapshot", return_value={})):
+                with self.assertRaisesRegex(HermesError, "zaman aşımı"):
+                    http_client._read_amazon_browser_html(driver, client, 'url', False, 2)
 
     def test_amazon_browser_comparison_never_falls_back_to_http(self):
         session = requests.Session()
@@ -2618,7 +2794,8 @@ class HermesSmokeTests(unittest.TestCase):
             driver.current_url = "https://www.amazon.com.tr/dp/B000000001"
             driver.get_log.return_value = []
             with (http_client.AmazonClient(transport="browser") as client,
-                  patch.object(http_client, "_browser_document_status", return_value=status)):
+                  patch.object(http_client, "_browser_document_response", return_value={"status": status}),
+                  patch.object(http_client, "_read_amazon_browser_html", return_value=(html, "tam"))):
                 client.browser_driver = driver
                 session = requests.Session()
                 session._hermes_amazon_client = client

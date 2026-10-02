@@ -111,6 +111,8 @@ Amazon aramalarında başlığı `Hariç tut` terimleriyle eşleşen sonuçlar, 
 
 Amazon istek günlüklerinde, istek öncesi bekleme süresi ile ağ yanıt süresi ayrı gösterilir. Varyasyon okumalarında sayfa ayrıştırma, teklif çıkarma ve sonuç işleme süreleri de ayrı kaydedilir; sayfa okuma süresi yedek bağlantı denemelerini kapsayabilir. Ürün sayfası ayrıştırıcıları aynı HTML ağacını paylaşır. Aynı Amazon ürün linki aynı çevrimde birden fazla kartta varsa, ayrıştırılmış sayfa sonucu da kartlar arasında yeniden kullanılır; bu önbellek çevrim sonunda silinir ve sonraki çevrimde fiyat tekrar ağdan okunur. Her çevrim sonunda öncelik başına başlayan, sırası gelen ve ertelenen kart sayıları ile Amazon sayfa isteği, ağ denemesi ve önbellek isabeti sayıları kaydedilir.
 
+Pi Chromium okuyucusu gerekli ürün/arama verileri kararlı olduğunda erken okuyabilir. Statik kaynak önbelleği açık kalır; belge isteklerine yalnızca belge kapsamındaki `Cache-Control: no-cache` uygulanır. Ana belgenin ağ yanıtı ve ürün kimliği doğrulanmadan fiyat yayımlanmaz. İlk ve her onuncu hızlı okuma aynı sayfanın tam yüklenmiş haliyle karşılaştırılır; geç veri farkı tam okuma gerektirir. `Test` sayfasından bir saatlik normal tarama doğrulaması başlatılabilir; mevcut koruma ve öncelik aralıkları korunur, sonunda HTTP okuyucuya dönülür.
+
 ## Geliştirme Notu
 
 Hermes mimarisi provider tabanlıdır. Her site için parser/fiyat yakalama kodu ayrı dosyadadır:

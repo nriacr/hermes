@@ -25,16 +25,22 @@ def active_trial(now=None):
     if not start or not end or not start <= now < end:
         return None
     phase = int((now - start).total_seconds() // 3600)
-    return {**control, "phase": phase, "transport": MODES[phase % len(MODES)]}
+    return {**control, "phase": phase, "transport": "browser" if control.get("purpose") == "browser_validation" else MODES[phase % len(MODES)]}
 
 
-def start_trial(now=None):
+def start_trial(now=None, purpose="reader_comparison"):
     now = now or datetime.now(timezone.utc)
     existing = active_trial(now)
     if existing:
         return existing
-    control = {"id": uuid.uuid4().hex, "started_at": now.isoformat(),
-               "ends_at": (now + timedelta(hours=24)).isoformat()}
+    # Retain the completed comparison when beginning a new validation run.
+    completed = load_json(RESULTS_PATH, {})
+    if isinstance(completed, dict) and len(str(completed.get("id", ""))) == 32:
+        saved_id = str(completed["id"])
+        if all(char in "0123456789abcdef" for char in saved_id):
+            save_json(RESULTS_PATH.with_name(f"amazon_trial_archive_{saved_id}.json"), completed)
+    control = {"id": uuid.uuid4().hex, "started_at": now.isoformat(), "purpose": purpose,
+               "ends_at": (now + timedelta(hours=1 if purpose == "browser_validation" else 24)).isoformat()}
     save_json(CONTROL_PATH, control)
     return control
 
@@ -109,7 +115,22 @@ def summarize(results):
                 "warehouse_reads": sum(item["warehouse_count"] > 0 for item in rows if item["transport"] == mode),
                 "median_seconds": round(statistics.median([item["seconds"] for item in rows if item["transport"] == mode]), 2),
             } for mode in ("http", "browser")}})
-    return {"matched_cards": len(matched), "modes": modes, "cards": cards,
+    validation = []
+    for watch, signature in sorted(groups):
+        rows = [item for item in samples if item["watch"] == watch and item["config"] == signature
+                and item["transport"] == "browser" and item.get("network_attempts", 0) > 0]
+        if not rows:
+            continue
+        audits = [audit for row in rows for audit in row.get("browser_audits", [])]
+        validation.append({"watch": watch, "config": signature, "name": rows[-1]["name"],
+            "reads": len(rows), "network_attempts": sum(item["network_attempts"] for item in rows),
+            "captcha": sum(item["captcha"] for item in rows), "http_503": sum(item["http_503"] for item in rows),
+            "priced": sum(item["outcome"] in {"priced", "partial"} for item in rows),
+            "warehouse_reads": sum(item["warehouse_count"] > 0 for item in rows),
+            "median_seconds": round(statistics.median([item["seconds"] for item in rows]), 2),
+            "audits": len(audits), "late_data": sum(bool(item["changed"]) for item in audits),
+            "coverage_details": audits[-60:]})
+    return {"matched_cards": len(matched), "modes": modes, "cards": cards, "browser_validation": validation,
             "protection_waits": sum(item["outcome"] == "protection_wait" for item in samples),
             "unmatched_reads": sum(item.get("network_attempts", 0) > 0 and (item["watch"], item["config"]) not in matched
                                    for item in samples),

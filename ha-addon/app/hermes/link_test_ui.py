@@ -3,6 +3,7 @@ import json
 from html import escape
 
 from . import amazon_transport_trial
+from .amazon_browser_check import run_browser_check
 from .storage import load_json
 from .errors import EmptySearchResultsHermesError, OutOfStockHermesError
 from .service import inspect_link_now
@@ -60,8 +61,10 @@ def _render_transport_trial(action_path):
     if not isinstance(results, dict) or results.get("id") != control.get("id"):
         results = {}
     report = amazon_transport_trial.summarize(results)
-    status = (f"Çalışıyor · dönem {active['phase'] + 1}/24 · "
-              + ("Pi Chromium" if active["transport"] == "browser" else "mevcut okuyucu")) if active else "Çalışmıyor"
+    validation = control.get("purpose") == "browser_validation"
+    status = (("Çalışıyor · Pi tarayıcısı kapsam kontrolü" if validation else
+               f"Çalışıyor · dönem {active['phase'] + 1}/24 · "
+               + ("Pi Chromium" if active["transport"] == "browser" else "mevcut okuyucu")) if active else "Çalışmıyor")
     rows = []
     for key, label in (("http", "Mevcut okuyucu"), ("browser", "Pi Chromium")):
         mode = report["modes"][key]
@@ -69,8 +72,8 @@ def _render_transport_trial(action_path):
                     f"<td data-label='Kontrol'>{mode['reads']}</td><td data-label='Ağ isteği'>{mode['network_attempts']}</td>"
                     f"<td data-label='CAPTCHA'>{mode['captcha']}</td><td data-label='503'>{mode['http_503']}</td>"
                     f"<td data-label='Fiyat okunan'>{mode['priced']}</td><td data-label='Tipik süre'>{mode['median_seconds']} sn</td></tr>")
-    action = "stop" if active else "start"
-    button = "Testi durdur" if active else "24 saatlik karşılaştırmayı başlat"
+    action = "stop" if active else "validate" if validation else "start"
+    button = "Testi durdur" if active else "1 saatlik doğrulamayı başlat" if validation else "24 saatlik karşılaştırmayı başlat"
     data = {"control": control, "active": active, "summary": report,
             "updated_at": results.get("updated_at"), "cycles": results.get("cycles", [])[-8:]}
     card_rows = "".join(
@@ -79,6 +82,29 @@ def _render_transport_trial(action_path):
         f"<td data-label='Tipik varyant'>{card['modes'][mode]['median_variants']}</td>"
         f"<td data-label='Depo bulunan kontrol'>{card['modes'][mode]['warehouse_reads']}</td></tr>"
         for card in report["cards"] for mode, label in (("http", "Mevcut okuyucu"), ("browser", "Pi Chromium")))
+    validation_rows = "".join(f"<tr><td>{escape(card['name'])}</td><td>{card['reads']}</td><td>{card['priced']}</td>"
+        f"<td>{card['audits']}</td><td>{card['late_data']}</td><td>{card['median_seconds']} sn</td></tr>"
+        for card in report["browser_validation"])
+    validation_html = ("<p>Bir saat boyunca sırası gelen normal taramalar Pi tarayıcısıyla okunur. "
+        "İlk okumada ve her onuncu okumada aynı sayfanın erken ve tam yüklenmiş verileri karşılaştırılır; "
+        "fark varsa tam veri kullanılır. Ek Amazon sorgusu yapılmaz. Süre bitince mevcut okuyucuya dönülür.</p>"
+        "<div class='table-wrap'><table><thead><tr><th>Kart</th><th>Kontrol</th><th>Fiyat okunan</th>"
+        "<th>Kapsam kontrolü</th><th>Geç veri</th><th>Tipik süre</th></tr></thead>"
+        f"<tbody>{validation_rows}</tbody></table></div>") if validation else ""
+    validation_button = (f"<form method='post' action='{escape(action_path, quote=True)}'>"
+        "<input type='hidden' name='amazon_trial_action' value='validate'>"
+        "<button class='button secondary' type='submit'>Pi tarayıcısını 1 saat doğrula</button></form>") if not active else ""
+    if validation:
+        return (f"<section class='summary-panel link-test-result'><div class='summary-head'>"
+                f"<h2>Amazon tarayıcısı kapsam doğrulaması</h2><span>{escape(status)}</span></div>"
+                f"{validation_html}<form method='post' action='{escape(action_path, quote=True)}'>"
+                f"<input type='hidden' name='amazon_trial_action' value='{action}'>"
+                f"<button class='button secondary' type='submit'>{button}</button></form>"
+                f"<p>Koruma beklemesi örneği: {report['protection_waits']}. Bekleyen ve yalnızca önbellekten "
+                "gelen okumalar kontrol sayısına dahil edilmez. Kapsam kontrolü aynı sayfanın iki zamanını karşılaştırır; "
+                "tüm ürün ailesinin eksiksizliğini veya CAPTCHA'nın önleneceğini garanti etmez.</p>"
+                "<script type='application/json' id='amazon-trial-data'>"
+                f"{json.dumps(data, ensure_ascii=False).replace('<', chr(92) + 'u003c')}</script></section>")
     return f"""<section class='summary-panel link-test-result'>
       <div class='summary-head'><h2>Amazon okuyucu karşılaştırması</h2><span>{escape(status)}</span></div>
       <p>Normal taramalar ölçülür; ek ürün sorgusu yapılmaz. Öncelikler, filtreler ve koruma beklemeleri korunur.
@@ -87,6 +113,8 @@ def _render_transport_trial(action_path):
         <input type='hidden' name='amazon_trial_action' value='{action}'>
         <button class='button secondary' type='submit'>{button}</button>
       </form>
+      {validation_button}
+      {validation_html}
       <p>{report['matched_cards']} kart her iki yöntemle okundu. Koruma beklemesi kaydı: {report['protection_waits']}.
       İki yöntemle henüz okunmayan kontroller: {report['unmatched_reads']}.</p>
       <div class='table-wrap'><table><thead><tr><th>Yöntem</th><th>Kontrol</th><th>Ağ isteği</th>
@@ -113,10 +141,18 @@ def render_link_test_page(
     error="",
     amazon_browser=False,
     unavailable="",
+    browser_check=None,
 ) -> bytes:
     """Render an on-demand provider test without persisting any result."""
     source_url = str(url or "").strip()
     result_html = ""
+    check_html = ""
+    if browser_check is not None:
+        check_html = (f"<section class='summary-panel'><h2>Pi tarayıcısı kontrolü</h2>"
+                      f"<p>{'Kontroller geçti.' if browser_check.get('passed') else 'Kontrol başarısız; ayrıntılar kaydedildi.'} "
+                      "Amazon’a sorgu gönderilmedi. Bu kontrol gerçek Amazon çevrim süresini ölçmez.</p>"
+                      "<script type='application/json' id='amazon-browser-check-data'>"
+                      f"{json.dumps(browser_check, ensure_ascii=False).replace('<', chr(92) + 'u003c')}</script></section>")
     if unavailable:
         result_html = f"<p class='notice'>{escape(str(unavailable))}</p>"
     elif error:
@@ -161,6 +197,7 @@ def render_link_test_page(
         </form>
       </section>
       {result_html}
+      {check_html}
       {_render_transport_trial(action_path)}
     </div></main></body></html>"""
     return html.encode("utf-8")
@@ -168,10 +205,12 @@ def render_link_test_page(
 
 def render_link_test_from_request(css, action_path, back_path, body) -> bytes:
     form = urllib.parse.parse_qs(body.decode("utf-8", errors="replace"), keep_blank_values=True)
+    if str(form.get("amazon_browser_check", [""])[0]) == "1":
+        return render_link_test_page(css, action_path, back_path, browser_check=run_browser_check())
     trial_action = str(form.get("amazon_trial_action", [""])[0])
-    if trial_action in {"start", "stop", "report"}:
-        if trial_action == "start":
-            amazon_transport_trial.start_trial()
+    if trial_action in {"start", "stop", "report", "validate"}:
+        if trial_action in {"start", "validate"}:
+            amazon_transport_trial.start_trial(purpose="browser_validation" if trial_action == "validate" else "reader_comparison")
         elif trial_action == "stop":
             amazon_transport_trial.stop_trial()
         return render_link_test_page(css, action_path, back_path)

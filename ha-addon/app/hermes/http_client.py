@@ -14,7 +14,8 @@ import requests
 from .constants import RETRY_DELAYS_SECONDS, RETRY_STATUS_CODES
 from .errors import HermesError, HttpStatusHermesError
 from .logging_utils import log
-from .utils import build_headers, canonical_amazon_product_url, normalize_offer_text, repair_mojibake, referer_for_url, utc_now
+from .providers import amazon as amazon_provider
+from .utils import build_headers, canonical_amazon_product_url, extract_asin_from_url, normalize_offer_text, repair_mojibake, referer_for_url, utc_now
 
 try:
     from curl_cffi import requests as curl_requests
@@ -53,6 +54,8 @@ AMAZON_CHROME_USER_AGENT = (
 )
 
 AMAZON_BROWSER_MIN_TIMEOUT_SECONDS = 25
+AMAZON_BROWSER_SETTLE_SECONDS = 0.6
+AMAZON_BROWSER_AUDIT_INTERVAL = 10
 AMAZON_DIAGNOSTIC_SNIPPET_LENGTH = 220
 HM_API_BASE_URL = "https://api.hm.com/search-services/v1/tr_tr/search/byids"
 
@@ -60,12 +63,17 @@ HM_API_BASE_URL = "https://api.hm.com/search-services/v1/tr_tr/search/byids"
 class AmazonClient:
     """Process-lived anonymous transports; page/offer caches stay cycle-local."""
 
-    def __init__(self, requests_session=None, transport="http"):
+    def __init__(self, requests_session=None, transport="http", browser_policy="ready_cached"):
         self.requests_session = requests_session if requests_session is not None else requests.Session()
         self.owns_requests_session = requests_session is None
         self.curl_session = None
         self.browser_profile = None
         self.browser_driver = None
+        self.browser_policy = browser_policy
+        self.browser_coverage = {}
+        self.browser_audits = deque(maxlen=128)
+        self.browser_audit_total = 0
+        self.browser_header_error = None
         self.transport = transport
         # Only absent/unreadable offers, with discovery metadata, never successful prices.
         self.unavailable_product_pages = {}
@@ -501,10 +509,11 @@ def _start_amazon_browser(client: AmazonClient):
         client.browser_profile = tempfile.TemporaryDirectory(prefix="hermes-amazon-browser-")
     options = webdriver.ChromeOptions()
     options.binary_location = _chromium_binary()
+    options.page_load_strategy = "normal" if client.browser_policy == "full_cold" else "eager"
     for argument in (
         "--headless=new", "--no-sandbox", "--disable-dev-shm-usage",
         "--disable-background-networking", "--no-first-run", "--lang=tr-TR",
-        "--window-size=1365,900", "--remote-debugging-pipe",
+        "--window-size=1365,900", "--remote-debugging-port=0", "--remote-debugging-address=127.0.0.1",
         f"--user-data-dir={client.browser_profile.name}",
     ):
         options.add_argument(argument)
@@ -512,27 +521,116 @@ def _start_amazon_browser(client: AmazonClient):
     driver = webdriver.Chrome(service=ChromeService(executable_path=driver_binary), options=options)
     try:
         driver.execute_cdp_cmd("Network.enable", {})
-        driver.execute_cdp_cmd("Network.setCacheDisabled", {"cacheDisabled": True})
+        driver.execute_cdp_cmd("Network.setBypassServiceWorker", {"bypass": True})
+        driver.execute_cdp_cmd("Network.setCacheDisabled", {"cacheDisabled": client.browser_policy != "ready_cached"})
+        if client.browser_policy == "ready_cached":
+            _configure_amazon_document_revalidation(driver, client)
     except Exception:
         driver.quit()
         raise
     return driver
 
 
-def _browser_document_status(driver):
-    """Read only the current main document status, never subresources or frames."""
+def _configure_amazon_document_revalidation(driver, client):
+    """Revalidate documents only; static assets keep Chromium's ordinary cache."""
+    devtools, connection = driver.start_devtools()
+
+    def continue_document(event):
+        headers = [devtools.fetch.HeaderEntry(str(name), str(value)) for name, value in event.request.headers.items()
+                   if name.casefold() not in {"cache-control", "pragma"}]
+        headers.extend([devtools.fetch.HeaderEntry("Cache-Control", "no-cache"),
+                        devtools.fetch.HeaderEntry("Pragma", "no-cache")])
+        try:
+            connection.execute(devtools.fetch.continue_request(event.request_id, headers=headers))
+        except Exception as exc:
+            # Do not publish an unvalidated document or retry its Amazon URL.
+            client.browser_header_error = type(exc).__name__
+            log(f"Amazon tarayıcı belge doğrulaması başarısız: {type(exc).__name__}")
+
+    connection.add_callback(devtools.fetch.RequestPaused, continue_document)
+    connection.execute(devtools.fetch.enable(patterns=[devtools.fetch.RequestPattern(
+        resource_type=devtools.network.ResourceType.DOCUMENT, request_stage=devtools.fetch.RequestStage.REQUEST,
+    )]))
+
+
+def _browser_document_response(driver):
+    """Observe the final main document, including cache provenance; ignore frames/assets."""
     frame_id = driver.execute_cdp_cmd("Page.getFrameTree", {})["frameTree"]["frame"]["id"]
-    status = None
+    document = None
     for entry in driver.get_log("performance"):
         try:
             message = json.loads(entry["message"])["message"]
             params = message.get("params", {})
             if (message.get("method") == "Network.responseReceived"
                     and params.get("type") == "Document" and params.get("frameId") == frame_id):
-                status = int(params["response"]["status"])
+                document = {**params["response"], "status": int(params["response"]["status"])}
         except (KeyError, TypeError, ValueError):
             continue
-    return status
+    return document
+
+
+def _read_amazon_browser_html(driver, client, candidate, expect_search, deadline):
+    """Use a stable selected-product DOM, audit against complete DOM on the same navigation."""
+    key = (expect_search, candidate)
+    record = client.browser_coverage.setdefault(key, {"reads": 0, "full_only": False, "minimum_seconds": 0})
+    if len(client.browser_coverage) > 256:
+        client.browser_coverage.pop(next(iter(client.browser_coverage)))
+    record["reads"] += 1
+    if client.browser_policy == "full_cold":
+        return driver.page_source, "tam"
+    read_started = time.monotonic()
+    previous = None
+    stable_since = time.monotonic()
+    early_html = None
+    complete = False
+    while time.monotonic() < deadline:
+        observation = driver.execute_script(amazon_provider.BROWSER_READY_SCRIPT, expect_search,
+                                            amazon_provider.AMAZON_PRODUCT_SELECTORS)
+        complete = observation["state"] == "complete"
+        signature = observation["signature"]
+        if signature != previous:
+            previous, stable_since = signature, time.monotonic()
+        elif (time.monotonic() - stable_since >= AMAZON_BROWSER_SETTLE_SECONDS
+              and (observation["ready"] or complete)):
+            if record["full_only"]:
+                if complete and time.monotonic() - read_started >= record["minimum_seconds"]:
+                    break
+            elif not observation["ready"]:
+                if complete:
+                    break
+            else:
+                early_html = driver.page_source
+                break
+        time.sleep(0.2)
+    else:
+        raise HermesError("Amazon tarayıcıda ürün/arama verisinin hazır olması zaman aşımına uğradı.")
+    audit = early_html is not None and (record["reads"] == 1 or record["reads"] % AMAZON_BROWSER_AUDIT_INTERVAL == 0)
+    if not audit:
+        return early_html if early_html is not None else driver.page_source, "erken" if early_html is not None else "tam"
+    early_snapshot = amazon_provider.browser_coverage_snapshot(early_html, candidate, expect_search)
+    # An initial observation must not approve a page merely because cached
+    # images made load finish before its late purchase/Twister updates.
+    reference_after = time.monotonic() + 1.0
+    while time.monotonic() < deadline:
+        if driver.execute_script("return document.readyState") == "complete" and time.monotonic() >= reference_after:
+            break
+        time.sleep(0.2)
+    else:
+        raise HermesError("Amazon tarayıcı kapsam kontrolünde tam yükleme zaman aşımına uğradı.")
+    full_html = driver.page_source
+    full_snapshot = amazon_provider.browser_coverage_snapshot(full_html, candidate, expect_search)
+    changed = sorted(name for name in set(early_snapshot) | set(full_snapshot)
+                     if early_snapshot.get(name) != full_snapshot.get(name))
+    record["full_only"] = bool(changed)
+    if changed:
+        record["minimum_seconds"] = time.monotonic() - read_started
+    client.browser_audit_total += 1
+    client.browser_audits.append({"sequence": client.browser_audit_total, "url": candidate, "at": utc_now(), "changed": changed,
+                                 "early": early_snapshot, "full": full_snapshot})
+    log(f"Amazon tarayıcı kapsam kontrolü: sonuç={'tam_yükleme_gerekli' if changed else 'eşleşti'} | "
+        f"fark={','.join(changed) or 'yok'} | adres={_amazon_timing_url(candidate)}")
+    # Audit reads always return the complete DOM. A discrepancy locks this URL to full reads.
+    return full_html, "kapsam_farkı" if changed else "kapsam_doğrulandı"
 
 
 def _get_amazon_response_with_browser(session: requests.Session, candidate: str, timeout: int, expect_search: bool):
@@ -554,9 +652,23 @@ def _get_amazon_response_with_browser(session: requests.Session, candidate: str,
     _note_amazon_request(session, "browser", candidate)
     try:
         driver.get(candidate)
-        html = driver.page_source
-        status = _browser_document_status(driver)
-        response = _HtmlResponse(driver.current_url, html, status)
+        document = _browser_document_response(driver)
+        if not document:
+            raise HermesError("Amazon tarayıcıda ana belge ağ yanıtı doğrulanamadı.")
+        _HtmlResponse(driver.current_url, "", document["status"]).raise_for_status()
+        deadline = started_at + max(AMAZON_BROWSER_MIN_TIMEOUT_SECONDS, int(timeout))
+        html, readiness = _read_amazon_browser_html(driver, client, candidate, expect_search, deadline)
+        document = _browser_document_response(driver) or document
+        if (client.browser_header_error or not document or any(document.get(field) for field in
+                ("fromDiskCache", "fromServiceWorker", "fromPrefetchCache"))):
+            raise HermesError("Amazon tarayıcıda güncel ana belge ağ üzerinden doğrulanamadı.")
+        requested_asin, response_asin = extract_asin_from_url(candidate), extract_asin_from_url(driver.current_url)
+        if requested_asin and requested_asin != response_asin:
+            raise HermesError("Amazon tarayıcı farklı ürün kimliğine yönlendirildi; fiyat kullanılmadı.")
+        response = _HtmlResponse(driver.current_url, html, document["status"])
+        log(f"Amazon tarayıcı okuması: politika={client.browser_policy} | veri={readiness} | belge_önbelleği=0")
+    except HermesError:
+        raise
     except Exception as exc:
         raise HermesError(f"Amazon gerçek tarayıcı sayfası okunamadı ({type(exc).__name__}).") from exc
     finally:

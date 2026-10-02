@@ -197,6 +197,74 @@ def parse_product_page(html: str):
     return soup_from_html(html)
 
 
+# A readiness observation only: prices and sellers still use the provider below.
+# Watch selected-product regions, all Twister data, and secondary offers together.
+BROWSER_READY_SCRIPT = r"""
+const search = arguments[0], priceSelectors = arguments[1];
+const state = document.readyState;
+const scope = (search ? document.querySelector('#search') : document.querySelector('#dp-container')) || document;
+const selectors = search ? ['.s-main-slot', '.s-no-outline'] : [
+  '#productTitle', '#corePriceDisplay_desktop_feature_div', '#corePrice_feature_div', '#apex_desktop',
+  '#buybox', '#desktop_buybox', '#merchant-info', '#sellerProfileTriggerId', '#tabular-buybox',
+  '#availability', '#availabilityInsideBuyBox_feature_div', '#outOfStock',
+  '#usedBuySection', '#usedAccordionRow', '[data-csa-c-slot-id="usedAccordionRow"]',
+  '#aod-offer-list', '#aod-pinned-offer', '.aod-offer', '#olpOfferList',
+  '[id^="variation_"]', '[id^="inline-twister-row-"]', 'a[href*="offer-listing"]'];
+const parts = selectors.flatMap(s => Array.from(scope.querySelectorAll(s), n => n.outerHTML));
+for (const n of document.querySelectorAll('script[type="a-state"][data-a-state]')) {
+  if ((n.getAttribute('data-a-state') || '').includes('twister')) parts.push(n.outerHTML);
+}
+const title = scope.querySelector('#productTitle');
+const hasPrice = priceSelectors.some(s => Array.from(scope.querySelectorAll(s)).some(n => /[0-9]/.test(n.textContent)));
+const hasSeller = ['#merchant-info', '#sellerProfileTriggerId', '#tabular-buybox'].some(s => {
+  const n = scope.querySelector(s); return n && n.textContent.trim();
+});
+const usedReady = ['#usedBuySection', '#usedAccordionRow', '.aod-offer', '#aod-pinned-offer', '#olpOfferList'].some(s => {
+  const n = scope.querySelector(s); return n && n.querySelector('.a-price .a-offscreen') && n.textContent.trim();
+});
+const ready = state !== 'loading' && (search ? !!document.querySelector('#search') :
+  (!!title && !!title.textContent.trim() && hasPrice && hasSeller) || usedReady);
+// Compact exact-change signal, never a price cache or the parser's input.
+const text = parts.join('\u001e');
+let hash = 2166136261;
+for (let i = 0; i < text.length; i++) hash = Math.imul(hash ^ text.charCodeAt(i), 16777619);
+return {ready, state, signature: text.length + ':' + (hash >>> 0)};
+"""
+
+
+def browser_coverage_snapshot(html: str, source_url: str, expect_search: bool) -> dict:
+    """Compare early/full DOM through the existing provider, never a second parser."""
+    if expect_search:
+        from ..search_amazon import extract_result_candidates
+        try:
+            candidates = extract_result_candidates(html, max_items_to_scan=60,
+                                                   primary_is_warehouse=is_warehouse_search_url(source_url))
+        except HermesError as exc:
+            return {"error": type(exc).__name__}
+        return {"cards": sorted((item.url, item.title, str(item.price), item.seller or "", item.is_warehouse)
+                                for item in candidates)}
+    soup = parse_product_page(html)
+    # extract_offers removes used nodes; inspect the other fields first.
+    snapshot = {
+        "title": extract_title(soup), "selected": selected_variation_label(html, soup=soup),
+        "variants": sorted((item.url, item.label) for item in extract_product_variations(html, source_url, 60, soup=soup)),
+        "used_listing": extract_used_offer_listing_url(html, source_url, soup=soup),
+        "stock": [normalize_offer_text(node.get_text(" ", strip=True))
+                  for selector in AMAZON_LOW_STOCK_SELECTORS for node in soup.select(selector)],
+        "seller": extract_primary_seller(soup),
+    }
+    try:
+        offers = extract_offers(html, source_url, soup=soup)
+        snapshot["offers"] = sorted(({
+            "url": offer.url or source_url, "price": str(offer.price), "seller": offer.seller or "",
+            "warehouse": offer.is_warehouse, "stock_quantity": offer.stock_quantity, "title": offer.title,
+        } for offer in offers), key=lambda item: (item["warehouse"], item["url"], item["price"], item["seller"]))
+    except HermesError as exc:
+        snapshot["offers"] = []
+        snapshot["error"] = type(exc).__name__
+    return snapshot
+
+
 def extract_product_variations(
     html: str,
     source_url: str,
