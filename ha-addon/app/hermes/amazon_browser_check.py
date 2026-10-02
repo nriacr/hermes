@@ -48,7 +48,7 @@ def run_browser_check():
                 body = f'''<!doctype html><html><head><title>Amazon Hermes test</title></head><body>
                   <div id="dp-container"><span id="productTitle">Hermes test telefonu Gümüş 256 GB</span>
                   <div id="corePrice_feature_div"><span class="a-price"><span class="a-offscreen">{100 + reading},00 TL</span></span></div>
-                  <div id="merchant-info">Satıcı Amazon.com.tr</div><div id="availability">Stokta sadece {2 + reading} adet kaldı</div>
+                  <div id="merchantInfoFeature_feature_div">Satıcı Amazon.com.tr</div><div id="availability">Stokta sadece {2 + reading} adet kaldı</div>
                   <div id="variation_color_name"><ul><li data-asin="B000000002" title="Siyah"></li></ul></div>
                   {used if case == "stable" else ''}</div>
                   <img src="/asset/{policy}.svg"><script>{script}</script></body></html>'''.encode()

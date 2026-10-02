@@ -81,7 +81,7 @@ class HermesSmokeTests(unittest.TestCase):
         url = "https://www.amazon.com.tr/dp/B000000001"
         early = '''<span id="productTitle">Telefon Gümüş 256 GB</span>
           <div id="corePrice_feature_div"><span class="a-price"><span class="a-offscreen">100.000,00 TL</span></span></div>
-          <div id="merchant-info">Satıcı Amazon.com.tr</div><div id="availability">Stokta var</div>'''
+          <div id="merchantInfoFeature_feature_div">Satıcı Amazon.com.tr</div><div id="availability">Stokta var</div>'''
         late = early + '''<div id="variation_color_name"><ul><li data-asin="B000000002" title="Turuncu"></li></ul></div>
           <div id="usedBuySection">Kullanılmış - Yeni Gibi
           <span class="a-price"><span class="a-offscreen">80.000,00 TL</span></span>Satıcı: Amazon Depo</div>'''
@@ -93,12 +93,14 @@ class HermesSmokeTests(unittest.TestCase):
         self.assertEqual([row["price"] for row in after["offers"]], ["100000.00", "80000.00"])
         self.assertTrue(after["offers"][1]["warehouse"])
         self.assertEqual(before["offers"][0], after["offers"][0])
+        self.assertEqual(after['seller'], 'Amazon.com.tr')
+        self.assertEqual(after['offers'][0]['seller'], 'Amazon.com.tr')
 
     def test_amazon_browser_coverage_checks_seller_stock_and_used_listing_even_without_price(self):
         from hermes.providers import amazon
         url = "https://www.amazon.com.tr/dp/B000000001"
         html = '<span id="productTitle">Telefon</span><div id="availability">Stokta yok</div>'
-        other = html.replace('Stokta yok', 'Stokta var') + '<div id="merchant-info">Satıcı Diğer Satıcı</div><a href="/gp/offer-listing/B000000001?condition=used">Kullanılmış</a>'
+        other = html.replace('Stokta yok', 'Stokta var') + '<div id="merchantInfoFeature_feature_div">Satıcı Diğer Satıcı</div><a href="/gp/offer-listing/B000000001?condition=used">Kullanılmış</a>'
         self.assertNotEqual(amazon.browser_coverage_snapshot(html, url, False),
                             amazon.browser_coverage_snapshot(other, url, False))
 

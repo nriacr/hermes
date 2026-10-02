@@ -205,7 +205,7 @@ const state = document.readyState;
 const scope = (search ? document.querySelector('#search') : document.querySelector('#dp-container')) || document;
 const selectors = search ? ['.s-main-slot', '.s-no-outline'] : [
   '#productTitle', '#corePriceDisplay_desktop_feature_div', '#corePrice_feature_div', '#apex_desktop',
-  '#buybox', '#desktop_buybox', '#merchant-info', '#sellerProfileTriggerId', '#tabular-buybox',
+  '#buybox', '#desktop_buybox', '#merchant-info', '#merchantInfoFeature_feature_div', '#sellerProfileTriggerId', '#tabular-buybox',
   '#availability', '#availabilityInsideBuyBox_feature_div', '#outOfStock',
   '#usedBuySection', '#usedAccordionRow', '[data-csa-c-slot-id="usedAccordionRow"]',
   '#aod-offer-list', '#aod-pinned-offer', '.aod-offer', '#olpOfferList',
@@ -216,7 +216,7 @@ for (const n of document.querySelectorAll('script[type="a-state"][data-a-state]'
 }
 const title = scope.querySelector('#productTitle');
 const hasPrice = priceSelectors.some(s => Array.from(scope.querySelectorAll(s)).some(n => /[0-9]/.test(n.textContent)));
-const hasSeller = ['#merchant-info', '#sellerProfileTriggerId', '#tabular-buybox'].some(s => {
+const hasSeller = ['#merchant-info', '#merchantInfoFeature_feature_div', '#sellerProfileTriggerId', '#tabular-buybox'].some(s => {
   const n = scope.querySelector(s); return n && n.textContent.trim();
 });
 const usedReady = ['#usedBuySection', '#usedAccordionRow', '.aod-offer', '#aod-pinned-offer', '#olpOfferList'].some(s => {
