@@ -889,6 +889,30 @@ def should_send_search_error_notification(state_entry: Dict[str, Any]) -> bool:
     return last_notified.astimezone().date() < now.date()
 
 
+def is_silent_access_error(exc: Exception) -> bool:
+    """Keep CAPTCHA and HTTP 503 visible as errors without notifying the user."""
+    message = normalize_offer_text(str(exc))
+    return amazon_error_status(exc) == 503 or "captcha" in message or "robot check" in message
+
+
+def has_silent_access_failure(state: Dict[str, Any], config: HermesConfig) -> bool:
+    """Also cover deferred watches and partial Amazon results with blocked siblings."""
+    meta = state.get("_meta", {})
+    guards = meta.get("amazon_protection", {}) if isinstance(meta, dict) else {}
+    for watch in config.watches:
+        if not watch.active:
+            continue
+        key = normalize_item_key("watch", watch.site, watch.tracking_id or watch.name, watch.url, watch.size)
+        entry = state.get(key, {})
+        if isinstance(entry, dict) and entry.get("last_error"):
+            if entry.get("last_error_status") == 503 or is_silent_access_error(HermesError(str(entry["last_error"]))):
+                return True
+        guard = guards.get(key, {}) if isinstance(guards, dict) and watch.site == SITE_AMAZON else {}
+        if isinstance(guard, dict) and guard.get("kind") in {"captcha", "http_503"}:
+            return True
+    return False
+
+
 def wait_before_request(label: str, config: HermesConfig) -> None:
     delay = random.randint(config.request_delay_min_seconds, config.request_delay_max_seconds)
     log(f"{label} istegi oncesi {delay} saniye ({delay * 1000} ms) bekleniyor.")
@@ -1084,6 +1108,14 @@ def maybe_alert_summary_drop(
     threshold = summary_drop_threshold(expected_count)
     drop_count = expected_count - current_count
     is_unexpected_drop = expected_count > 0 and drop_count >= threshold
+    if is_unexpected_drop and has_silent_access_failure(state, config):
+        # A count warning would indirectly notify about a deliberately silent
+        # access failure. Preserve the reference and restart the streak on recovery.
+        meta["summary_drop_consecutive_cycles"] = 0
+        meta["summary_last_row_count"] = current_count
+        state["_meta"] = meta
+        log("Özet ürün sayısı uyarısı atlandı: CAPTCHA/HTTP 503 nedeniyle eksik sonuç var.")
+        return
     now = local_now()
     drop_streak = next_summary_drop_streak(meta, is_unexpected_drop)
     meta["summary_drop_consecutive_cycles"] = drop_streak
@@ -1111,7 +1143,7 @@ def maybe_alert_summary_drop(
                 f"Beklenen ürün sayısı: {expected_count}\n"
                 f"Bu tur bulunan ürün sayısı: {current_count}\n"
                 f"Fark: -{drop_count}\n"
-                "Config'i, özellikle Amazon arama linklerini kontrol etmeni öneririm. "
+                "Ayarları, özellikle Amazon arama linklerini kontrol etmeni öneririm. "
                 "Amazon arama linkleri geçici olarak boş veya eksik dönmüş olabilir."
             )
             try:
@@ -1195,7 +1227,7 @@ def maybe_alert_search_failures(
         "Arama sayfalarinda anlamli sayida erisim hatasi yakalandi.\n"
         f"Etkilenen arama sayfasi: {len(affected_pages)}\n"
         f"Hata veren link sayisi: {failed_link_count}\n"
-        "Bos arama sonuclari bu uyarinin disindadir. Erisim, koruma veya sayfa hatasi olan linkleri kontrol etmeni oneririm.\n"
+        "Boş sonuçlar, CAPTCHA ve HTTP 503 bu uyarının dışındadır. Diğer erişim veya sayfa hatası olan bağlantıları kontrol etmeni öneririm.\n"
         + "\n".join(event_lines)
     )
     try:
@@ -2424,20 +2456,23 @@ def _check_once(config: HermesConfig, session: requests.Session) -> None:
                 log(f"Arama sonucu boş: {seller} | {watch.name or watch.url}")
             else:
                 log(f"Hata: {seller} | {watch.url} | {exc}")
+            access_error = exc
             if watch.site == SITE_AMAZON:
                 protection_error = getattr(session, "_hermes_amazon_protection_error", None)
+                access_error = protection_error or exc
                 if protection_error or is_amazon_protection_error(exc):
                     note_amazon_protection(state, watch_key, watch.name or watch.url, protection_error or exc)
                 else:
                     # A recovery probe is consumed once even if valid access found no offer
                     # or a different operational failure. Old guards cannot bypass priority.
                     clear_amazon_protection(state, watch_key)
-            if is_search_watch and not normal_empty_search:
+            silent_access_error = is_silent_access_error(access_error)
+            if is_search_watch and not normal_empty_search and not silent_access_error:
                 search_failure_events.append({"page": watch.name, "failed_links": 1})
             failed = dict(state_entry)
             if should_reset_product_alert_on_error(exc):
                 failed = reset_product_alert_after_missing(failed, seller, watch.name or watch.url)
-            if is_search_watch and not normal_empty_search and should_send_search_error_notification(failed):
+            if is_search_watch and not normal_empty_search and not silent_access_error and should_send_search_error_notification(failed):
                 try:
                     message = (
                         f"{seller} arama: {watch.name}\n"
@@ -2478,7 +2513,7 @@ def _check_once(config: HermesConfig, session: requests.Session) -> None:
                 ).isoformat()
                 stock_rows.extend(cached_stock_rows_for_watch(watch, failed, seller))
             failed["last_error"] = None if normal_empty_search else str(exc)
-            failed["last_error_status"] = None if normal_empty_search else (amazon_error_status(exc) if watch.site == SITE_AMAZON else getattr(exc, "status_code", None))
+            failed["last_error_status"] = None if normal_empty_search else amazon_error_status(access_error)
             failed["last_checked_at"] = utc_now()
             failed["check_now_token"] = getattr(watch, "check_now_token", "")
             if watch.site == SITE_AMAZON:

@@ -75,6 +75,111 @@ from hermes.utils import detect_site_from_url, parse_decimal, utc_now  # noqa: E
 
 
 class HermesSmokeTests(unittest.TestCase):
+    def test_captcha_and_503_errors_do_not_notify_but_verified_depot_offer_does(self):
+        errors = [HermesError("Amazon bot korumasi nedeniyle captcha/koruma sayfasi dondu."),
+                  http_client.HttpStatusHermesError(503, "https://www.amazon.com.tr/s?k=test"),
+                  requests.HTTPError("Service Unavailable", response=SimpleNamespace(status_code=503)),
+                  HermesError("Hepsiburada bot korumasi nedeniyle captcha sayfasi dondu."),
+                  HermesError("Amazon varyantları okunamadı.")]
+        watches = [WatchRule(f"Arama {i}", "hepsiburada" if i == 3 else "amazon",
+                             f"https://www.hepsiburada.com/ara?q=test{i}" if i == 3 else f"https://www.amazon.com.tr/s?k=test{i}",
+                             Decimal("1000")) for i in range(5)]
+        depot = WatchRule("Depo", "amazon", "https://www.amazon.com.tr/dp/B000000001", Decimal("1000"))
+        config = SimpleNamespace(watches=watches + [depot], interval_seconds=1, request_timeout_seconds=10,
+                                 pushover_user_key="test-user", pushover_api_token="test-token")
+        state = {"_meta": {"summary_config_signature": service.summary_config_signature(config),
+                           "summary_expected_row_count": 20, "summary_drop_consecutive_cycles": 4}}
+        warehouse = OfferResult("Depo ürünü", Decimal("500"), seller="Amazon Depo", url=depot.url, is_warehouse=True)
+        now = datetime(2026, 10, 2, service.AMAZON_SEARCH_ERROR_NOTIFICATION_HOUR, tzinfo=timezone.utc)
+
+        def fail_search(session, watch, config):
+            if watch == watches[4]:
+                service.remember_amazon_protection(session, http_client.HttpStatusHermesError(503, watch.url))
+            raise errors[watches.index(watch)]
+
+        with (patch.object(service, "load_json", return_value=state), patch.object(service, "save_json"),
+              patch.object(service, "wait_before_request"), patch.object(service, "local_now", return_value=now),
+              patch.object(service, "_fetch_watch_offers", side_effect=fail_search),
+              patch.object(service, "_iter_amazon_product_watch_offers", return_value=iter([warehouse])),
+              patch.object(service, "save_incremental_price_summary"), patch.object(service, "publish_price_summary") as publish,
+              patch.object(service, "record_cycle_duration"), patch.object(service, "send_pushover") as notify):
+            service.check_once(config)
+        notify.assert_called_once()
+        self.assertIn("Depo ürünü", notify.call_args.args[4])
+        self.assertEqual(len(publish.call_args.args[0]), 1)
+        self.assertTrue(publish.call_args.args[0][0].is_warehouse)
+        for watch in watches:
+            entry = state[service.normalize_item_key("watch", watch.site, watch.name, watch.url, watch.size)]
+            self.assertTrue(entry["last_error"])
+            self.assertNotIn("last_error_notified_at", entry)
+        self.assertNotIn("last_search_failure_alert_at", state["_meta"])
+        self.assertNotIn("last_summary_drop_alert_at", state["_meta"])
+        wrapped_key = service.normalize_item_key("watch", watches[4].site, watches[4].name, watches[4].url, watches[4].size)
+        self.assertEqual(state[wrapped_key]["last_error_status"], 503)
+
+    def test_partial_depot_opportunity_notifies_even_when_a_sibling_hits_captcha(self):
+        watch = WatchRule("Depo", "amazon", "https://www.amazon.com.tr/dp/B000000001", Decimal("1000"))
+        config = SimpleNamespace(watches=[watch], interval_seconds=1, request_timeout_seconds=10,
+                                 pushover_user_key="test-user", pushover_api_token="test-token")
+        state = {"_meta": {"summary_config_signature": service.summary_config_signature(config),
+                           "summary_expected_row_count": 20, "summary_drop_consecutive_cycles": 4}}
+        warehouse = OfferResult("Depo ürünü", Decimal("500"), seller="Amazon Depo", url=watch.url, is_warehouse=True)
+
+        def partial_family(session, watch, config):
+            yield warehouse
+            service.remember_amazon_protection(session, HermesError("Amazon captcha"))
+
+        with (patch.object(service, "load_json", return_value=state), patch.object(service, "save_json"),
+              patch.object(service, "wait_before_request"),
+              patch.object(service, "local_now", return_value=datetime(2026, 10, 2, 12, tzinfo=timezone.utc)),
+              patch.object(service, "_iter_amazon_product_watch_offers", side_effect=partial_family),
+              patch.object(service, "save_incremental_price_summary"), patch.object(service, "publish_price_summary"),
+              patch.object(service, "record_cycle_duration"), patch.object(service, "send_pushover") as notify):
+            service.check_once(config)
+        notify.assert_called_once()
+        self.assertIn("Depo ürünü", notify.call_args.args[4])
+        key = service.normalize_item_key("watch", watch.site, watch.name, watch.url, watch.size)
+        self.assertTrue(state[key]["amazon_partial_result"])
+        self.assertIn("captcha", state[key]["last_error"])
+        self.assertNotIn("last_summary_drop_alert_at", state["_meta"])
+
+    def test_summary_drop_remains_silent_while_captcha_or_503_watch_is_deferred(self):
+        watch = WatchRule("Arama", "amazon", "https://www.amazon.com.tr/s?k=test", Decimal("1000"))
+        key = service.normalize_item_key("watch", watch.site, watch.name, watch.url, watch.size)
+        config = SimpleNamespace(watches=[watch], pushover_user_key="user", pushover_api_token="token", request_timeout_seconds=10)
+        now = datetime(2026, 10, 2, 12, tzinfo=timezone.utc)
+        for message, status in (("Amazon captcha", None), ("Service Unavailable", 503)):
+            with self.subTest(status=status):
+                state = {key: {"last_error": message, "last_error_status": status},
+                         "_meta": {"summary_config_signature": service.summary_config_signature(config),
+                                   "summary_expected_row_count": 20, "summary_drop_consecutive_cycles": 4}}
+                with patch.object(service, "local_now", return_value=now), patch.object(service, "send_pushover") as notify:
+                    for _ in range(6):
+                        service.maybe_alert_summary_drop(state, [], config, Mock())
+                    notify.assert_not_called()
+                    # Recovery restores the ordinary summary warning after five new cycles.
+                    state[key]["last_error"] = None
+                    state[key]["last_error_status"] = None
+                    for _ in range(5):
+                        service.maybe_alert_summary_drop(state, [], config, Mock())
+                    notify.assert_called_once()
+
+    def test_other_search_errors_still_send_individual_and_aggregate_notifications(self):
+        watches = [WatchRule(f"Arama {i}", "amazon", f"https://www.amazon.com.tr/s?k=test{i}", Decimal("1000"))
+                   for i in range(4)]
+        config = SimpleNamespace(watches=watches, interval_seconds=1, request_timeout_seconds=10,
+                                 pushover_user_key="test-user", pushover_api_token="test-token")
+        state = {}
+        now = datetime(2026, 10, 2, service.AMAZON_SEARCH_ERROR_NOTIFICATION_HOUR, tzinfo=timezone.utc)
+        with (patch.object(service, "load_json", return_value=state), patch.object(service, "save_json"),
+              patch.object(service, "wait_before_request"), patch.object(service, "local_now", return_value=now),
+              patch.object(service, "_fetch_watch_offers", side_effect=http_client.HttpStatusHermesError(500, watches[0].url)),
+              patch.object(service, "save_incremental_price_summary"), patch.object(service, "publish_price_summary"),
+              patch.object(service, "record_cycle_duration"), patch.object(service, "send_pushover") as notify):
+            service.check_once(config)
+        self.assertEqual(notify.call_count, 5)
+        self.assertIn("Hermes arama erişim uyarısı", [call.args[3] for call in notify.call_args_list])
+
     def test_amazon_expired_recovery_is_consumed_by_empty_result(self):
         watch = WatchRule("Juo", "amazon", "https://www.amazon.com.tr/s?k=Juo", Decimal("1000"), priority="medium")
         key = service.normalize_item_key("watch", watch.site, watch.name, watch.url, watch.size)

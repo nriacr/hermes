@@ -1,7 +1,7 @@
 # Hermes Cursor Handoff
 
 This document is the current technical and product handoff for continuing Hermes
-in Cursor. It describes the real repository at version `2.5.40`; source code and
+in Cursor. It describes the real repository at version `2.5.41`; source code and
 tests remain authoritative when this document and code ever differ.
 
 ## 1. Product snapshot
@@ -204,6 +204,15 @@ verified warehouse offers remain separate identities.
 - Manual notification reset makes qualifying suppressed opportunities eligible
   once, then normal suppression resumes.
 - Search-page empty inventory should not generate repetitive operational errors.
+- CAPTCHA and HTTP 503 stay operational errors in logs/state/UI but never send
+  individual search-error notifications or contribute to aggregate access alerts.
+  Use the remembered original Amazon error if a family failure wraps its status.
+  Other errors retain their notification policy; successful opportunities are
+  still eligible even when another variant in the same card hits protection.
+- Summary-count alerts stay silent while an active watch has a CAPTCHA/503
+  failure or matching Amazon protection guard, including deferred/partial watches.
+  Keep the expected count and reset the drop streak; recovery requires five new
+  deficient cycles before an ordinary count warning becomes eligible again.
 - A significant summary-count drop warns only after repeated cycles and respects
   cooldown and quiet-hour rules.
 
