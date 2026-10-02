@@ -67,6 +67,8 @@ class AmazonClient:
         self.browser_profile = None
         self.browser_driver = None
         self.transport = transport
+        # Only absent/unreadable offers, with discovery metadata, never successful prices.
+        self.unavailable_product_pages = {}
         self.started_at = time.monotonic()
         self.attempt_times = deque()
         self.total_attempts = 0

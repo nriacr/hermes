@@ -2,6 +2,10 @@ class HermesError(Exception):
     pass
 
 
+class PriceUnavailableHermesError(HermesError):
+    """A recognized product has no readable price; stock is not inferred."""
+
+
 class OutOfStockHermesError(HermesError):
     def __init__(self, message: str, product_title: str = "", product_url: str = "") -> None:
         self.product_title = product_title

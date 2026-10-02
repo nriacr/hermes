@@ -162,6 +162,107 @@ class HermesSmokeTests(unittest.TestCase):
         self.assertEqual(len(publish.call_args.args[1]), 1)
         self.assertEqual(publish.call_args.args[1][0].product_url, watch.url)
 
+    def test_amazon_no_offer_probe_is_bounded_without_hiding_priced_siblings(self):
+        root = "https://www.amazon.com.tr/dp/B000000001"
+        child = "https://www.amazon.com.tr/dp/B000000002"
+        watch = WatchRule("iPhone", "amazon", root, Decimal("1000"), include_variations=True)
+        config = SimpleNamespace(request_timeout_seconds=10)
+        pages = {root: '<span id="productTitle">iPhone</span><div id="availability">Şu anda mevcut değil.</div>',
+                 child: '<span id="productTitle">iPhone</span><div id="corePrice_feature_div"><span class="a-price"><span class="a-offscreen">100,00 TL</span></span></div>'}
+        variations = [service.amazon_provider.AmazonProductVariation("Gümüş", root),
+                      service.amazon_provider.AmazonProductVariation("Turuncu", child)]
+        fetched = []
+        def read(_session, url, _timeout):
+            fetched.append(url)
+            return pages[url]
+        with (http_client.AmazonClient() as client, patch.object(service, "fetch_amazon_page", side_effect=read),
+              patch.object(service, "cleaned_html", side_effect=lambda value: value),
+              patch.object(service, "wait_before_request"), patch.object(service.time, "monotonic", return_value=100),
+              patch.object(service.amazon_provider, "extract_product_variations", return_value=variations)):
+            for price in ("100,00", "101,00"):
+                pages[child] = pages[child].replace("100,00", price)
+                session = requests.Session()
+                session._hermes_amazon_client = client
+                offers = list(service._iter_amazon_product_watch_offers(session, watch, config))
+            self.assertEqual(fetched, [root, child, child])
+            self.assertEqual(offers[0].price, Decimal("101"))
+            # Time passes: a new offer appears at the root. The expiry is fixed;
+            # looking at the cached absence must never postpone its next probe.
+            pages[root] = pages[child]
+            with patch.object(service.time, "monotonic", return_value=401):
+                session = requests.Session()
+                session._hermes_amazon_client = client
+                offers = list(service._iter_amazon_product_watch_offers(session, watch, config))
+            self.assertEqual(fetched, [root, child, child, root, child])
+            self.assertEqual({offer.url for offer in offers}, {root, child})
+            self.assertFalse(client.unavailable_product_pages)
+
+    def test_amazon_missing_price_probe_is_bounded_but_never_becomes_fake_stock(self):
+        url = "https://www.amazon.com.tr/dp/B000000001"
+        watch = WatchRule("iPhone", "amazon", url, Decimal("1000"))
+        config = SimpleNamespace(request_timeout_seconds=10)
+        with (http_client.AmazonClient() as client,
+              patch.object(service, "fetch_amazon_page", return_value='<span id="productTitle">iPhone</span>') as fetch,
+              patch.object(service, "cleaned_html", side_effect=lambda value: value), patch.object(service, "wait_before_request")):
+            for _ in range(2):
+                session = requests.Session()
+                session._hermes_amazon_client = client
+                with self.assertRaises(HermesError) as caught:
+                    list(service._iter_amazon_product_watch_offers(session, watch, config))
+                self.assertNotIsInstance(caught.exception, OutOfStockHermesError)
+            fetch.assert_called_once()
+            self.assertEqual(len(client.unavailable_product_pages), 1)
+
+    def test_amazon_access_failure_never_enters_no_offer_cache(self):
+        url = "https://www.amazon.com.tr/dp/B000000001"
+        watch = WatchRule("iPhone", "amazon", url, Decimal("1000"))
+        with (http_client.AmazonClient() as client, patch.object(service, "fetch_amazon_page", side_effect=HermesError("Amazon captcha"))):
+            session = requests.Session()
+            session._hermes_amazon_client = client
+            with self.assertRaisesRegex(HermesError, "captcha"):
+                list(service._iter_amazon_product_watch_offers(session, watch, SimpleNamespace(request_timeout_seconds=10)))
+            self.assertFalse(client.unavailable_product_pages)
+
+    def test_all_unavailable_high_priority_watch_waits_until_its_next_probe(self):
+        watch = WatchRule("iPhone", "amazon", "https://www.amazon.com.tr/dp/B000000001", Decimal("1000"))
+        state = {}
+        config = SimpleNamespace(watches=[watch], interval_seconds=1, request_timeout_seconds=10,
+                                 pushover_user_key="", pushover_api_token="")
+        html = '<span id="productTitle">iPhone</span><div id="availability">Şu anda mevcut değil.</div>'
+        with (http_client.AmazonClient() as client, patch.object(service, "load_json", return_value=state),
+              patch.object(service, "save_json"), patch.object(service, "wait_before_request"),
+              patch.object(service, "fetch_amazon_page", return_value=html) as fetch,
+              patch.object(service, "cleaned_html", side_effect=lambda value: value),
+              patch.object(service, "save_incremental_price_summary"), patch.object(service, "publish_price_summary") as publish,
+              patch.object(service, "record_cycle_duration"), patch.object(service, "maybe_alert_summary_drop"),
+              patch.object(service, "maybe_alert_search_failures")):
+            service.check_once(config, amazon_client=client)
+            service.check_once(config, amazon_client=client)
+            fetch.assert_called_once()
+            self.assertEqual(len(publish.call_args.args[1]), 1)
+            key = service.normalize_item_key("watch", watch.site, watch.name, watch.url, watch.size)
+            retry_at = service.parse_iso_datetime(state[key]["amazon_no_offer_retry_after"])
+            self.assertGreater((retry_at - datetime.now(timezone.utc)).total_seconds(), 295)
+            # A user-requested new read is allowed immediately.
+            watch.check_now_token = "edited"
+            # Real settings writes restart the client; don't reuse its old negative cache.
+            with http_client.AmazonClient() as fresh_client:
+                service.check_once(config, amazon_client=fresh_client)
+            self.assertEqual(fetch.call_count, 2)
+
+    def test_no_featured_amazon_offer_does_not_mean_stock_is_absent(self):
+        html = '<span id="productTitle">Apple iPhone 17 Pro</span><div id="availability"></div><span id="buybox-see-all-buying-choices"><a href="/gp/offer-listing/B000000001/ref=dp_olp_unknown_mbc">Satın Alma Seçeneklerini Gör</a></span>'
+        with self.assertRaises(HermesError) as caught:
+            extract_amazon_offers(html)
+        self.assertNotIsInstance(caught.exception, OutOfStockHermesError)
+        self.assertIn("stok durumu doğrulanamadı", str(caught.exception))
+
+    def test_explicit_empty_current_offer_keys_never_restore_a_legacy_price(self):
+        watch = WatchRule("iPhone", "amazon", "https://www.amazon.com.tr/dp/B000000001", Decimal("1000"))
+        self.assertEqual(service.cached_summary_rows_for_watch(watch, "watch", {
+            "watch": {"offer_keys": [], "last_price": "100", "last_checked_at": utc_now()}
+        }, "Amazon"), [])
+
     def test_cycle_interval_accepts_values_below_ten_seconds(self):
         for interval in (1, 5, 8, 35):
             with self.subTest(interval=interval), patch.object(

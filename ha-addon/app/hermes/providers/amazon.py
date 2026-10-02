@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Optional
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from ..errors import HermesError, OutOfStockHermesError
+from ..errors import HermesError, OutOfStockHermesError, PriceUnavailableHermesError
 from ..models import OfferResult
 from ..utils import (
     canonical_amazon_product_url,
@@ -634,7 +634,9 @@ def extract_offers(html: str, source_url: str = "", soup=None) -> list[OfferResu
                 )
             ]
 
-    raise HermesError("Amazon sayfasından fiyat bulunamadı.")
+    if jsonld_title or extract_title(soup):
+        raise PriceUnavailableHermesError("Amazon sayfasından fiyat bulunamadı; stok durumu doğrulanamadı.")
+    raise HermesError("Amazon ürün sayfası tanınamadı; fiyat ayrıştırılamadı.")
 
 
 def extract_offer(html: str, source_url: str = "") -> OfferResult:
