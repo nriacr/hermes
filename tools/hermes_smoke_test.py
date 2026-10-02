@@ -1,4 +1,5 @@
 import json
+import re
 import requests
 import sys
 import tempfile
@@ -2704,6 +2705,77 @@ class HermesSmokeTests(unittest.TestCase):
             html, result = http_client._read_amazon_browser_html(driver, client, 'url', False, 10)
             self.assertEqual((html, result), ('full', 'tam'))
             self.assertGreaterEqual(clock[0], 2)
+
+    def test_amazon_browser_phase_measurement_separates_work_without_extra_reads(self):
+        clock = [0.0]
+        def advance(seconds, value=None):
+            clock[0] += seconds
+            return value
+        class Driver:
+            current_url = 'https://www.amazon.com.tr/dp/B000000001'
+            navigation_count = 0
+            source_count = 0
+            def get(self, url):
+                self.navigation_count += 1
+                advance(2)
+            def get_log(self, kind):
+                return []
+            def set_page_load_timeout(self, seconds):
+                pass
+            def execute_script(self, code, *args):
+                return advance(0.1, 'complete' if code == 'return document.readyState' else
+                    {"ready": True, "state": "interactive", "signature": "stable"})
+            @property
+            def page_source(self):
+                self.source_count += 1
+                return advance(1, '<span id="productTitle">Synthetic phone</span>')
+        driver = Driver()
+        with (http_client.AmazonClient(transport='browser') as client,
+              patch.object(http_client.time, 'monotonic', side_effect=lambda: clock[0]),
+              patch.object(http_client.time, 'sleep', side_effect=advance),
+              patch.object(http_client, '_browser_document_response', side_effect=lambda *_: advance(0.25, {"status": 200})),
+              patch.object(http_client.amazon_provider, 'browser_coverage_snapshot', side_effect=lambda *_: advance(2, {"offers": ['current']})),
+              patch.object(http_client, '_is_usable_amazon_response', return_value=True),
+              patch.object(http_client, '_log_amazon_response'), patch.object(http_client, 'log') as logger):
+            client.browser_driver = driver
+            session = requests.Session()
+            session._hermes_amazon_client = client
+            response = http_client._get_amazon_response_with_browser(session, driver.current_url, 25, False)
+            self.assertIs(http_client._get_amazon_response_with_browser(session, driver.current_url, 25, False), response)
+            client.browser_driver = None
+        self.assertEqual((driver.navigation_count, driver.source_count), (1, 2))
+        phase_logs = [call.args[0] for call in logger.call_args_list if 'tarayıcı aşama süreleri:' in call.args[0]]
+        self.assertEqual(len(phase_logs), 1)  # Cache hits are not fresh document measurements.
+        fields = dict(re.findall(r'(\w+)=(\d+) ms', phase_logs[0]))
+        self.assertEqual({key: int(fields[key]) for key in ['navigation', 'html', 'document', 'coverage_parse']},
+                         {'navigation': 2000, 'html': 2000, 'document': 500, 'coverage_parse': 4000})
+        self.assertGreater(int(fields['ready_script']), 0)
+        self.assertGreater(int(fields['ready_wait']), 0)
+        self.assertGreater(int(fields['audit_wait']), 0)
+        self.assertLessEqual(abs(int(fields['total']) - sum(int(v) for k, v in fields.items() if k != 'total')), 5)
+        self.assertIn('html_reads=2', phase_logs[0])
+
+    def test_amazon_browser_phase_measurement_retains_failed_navigation_without_retry(self):
+        clock = [0.0]
+        def fail(_url):
+            clock[0] += 3
+            raise TimeoutError('synthetic timeout')
+        driver = Mock()
+        driver.get.side_effect = fail
+        with (http_client.AmazonClient(transport='browser') as client,
+              patch.object(http_client.time, 'monotonic', side_effect=lambda: clock[0]),
+              patch.object(http_client, 'log') as logger):
+            client.browser_driver = driver
+            session = requests.Session()
+            session._hermes_amazon_client = client
+            with self.assertRaisesRegex(HermesError, 'TimeoutError'):
+                http_client._get_amazon_response_with_browser(session, 'https://www.amazon.com.tr/dp/B000000001', 25, False)
+            self.assertEqual(http_client._amazon_response_cache(session), {})
+        driver.get.assert_called_once()
+        phase_log = next(call.args[0] for call in logger.call_args_list if 'tarayıcı aşama süreleri:' in call.args[0])
+        self.assertIn('navigation=3000 ms', phase_log)
+        self.assertIn('veri=başarısız', phase_log)
+        self.assertIn('html_reads=0', phase_log)
 
     def test_amazon_browser_verified_fast_read_and_tenth_read_are_audited_without_more_navigation(self):
         clock = [0.0]

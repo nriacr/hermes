@@ -1,7 +1,7 @@
 # Hermes Cursor Handoff
 
 This document is the current technical and product handoff for continuing Hermes
-in Cursor. It describes the real repository at version `2.5.45`; source code and
+in Cursor. It describes the real repository at version `2.5.46`; source code and
 tests remain authoritative when this document and code ever differ.
 
 ## 1. Product snapshot
@@ -277,6 +277,12 @@ verified warehouse offers remain separate identities.
   DOM readiness/change observation over selected price/seller/stock, all Twister
   state and used/listing regions. Critical regions must settle for 600 ms.
   Unknown/no-price markup conservatively waits for document completion.
+- Browser phase timings (2.5.46) instrument existing operations only: navigation,
+  readiness scripts and stability sleeps, page_source transfer, document checks,
+  coverage parsing and reference waits. Log exclusive durations, residual/total
+  time, observations, signature changes and HTML reads, including failed reads.
+  Cache-only responses emit no fresh timing. Normal offer parsing remains in
+  the existing variant phase logs; browser total is not pure network latency.
 - Chromium static cache remains enabled. A Selenium CDP Fetch listener adds
   no-cache headers to Document requests only; natural identity and cookies are
   preserved, no URL/cache-busting query is added. Service workers are bypassed.

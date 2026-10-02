@@ -569,26 +569,43 @@ def _browser_document_response(driver):
     return document
 
 
-def _read_amazon_browser_html(driver, client, candidate, expect_search, deadline):
+def _timed_browser_operation(timings, phase, operation):
+    """Measure existing work, including failures; never perform an additional read."""
+    started = time.monotonic()
+    try:
+        return operation()
+    finally:
+        timings[phase] = timings.get(phase, 0.0) + time.monotonic() - started
+
+
+def _browser_page_source(driver, timings):
+    timings["html_reads"] = timings.get("html_reads", 0) + 1
+    return _timed_browser_operation(timings, "html", lambda: driver.page_source)
+
+
+def _read_amazon_browser_html(driver, client, candidate, expect_search, deadline, timings=None):
     """Use a stable selected-product DOM, audit against complete DOM on the same navigation."""
+    timings = {} if timings is None else timings
     key = (expect_search, candidate)
     record = client.browser_coverage.setdefault(key, {"reads": 0, "full_only": False, "minimum_seconds": 0, "validated": False})
     if len(client.browser_coverage) > 256:
         client.browser_coverage.pop(next(iter(client.browser_coverage)))
     record["reads"] += 1
     if client.browser_policy == "full_cold":
-        return driver.page_source, "tam"
+        return _browser_page_source(driver, timings), "tam"
     read_started = time.monotonic()
     previous = None
     stable_since = time.monotonic()
     early_html = None
     complete = False
     while time.monotonic() < deadline:
-        observation = driver.execute_script(amazon_provider.BROWSER_READY_SCRIPT, expect_search,
-                                            amazon_provider.AMAZON_PRODUCT_SELECTORS)
+        observation = _timed_browser_operation(timings, "ready_script", lambda: driver.execute_script(
+            amazon_provider.BROWSER_READY_SCRIPT, expect_search, amazon_provider.AMAZON_PRODUCT_SELECTORS))
+        timings["observations"] = timings.get("observations", 0) + 1
         complete = observation["state"] == "complete"
         signature = observation["signature"]
         if signature != previous:
+            timings["signature_changes"] = timings.get("signature_changes", 0) + 1
             previous, stable_since = signature, time.monotonic()
         elif (time.monotonic() - stable_since >= AMAZON_BROWSER_SETTLE_SECONDS
               and (observation["ready"] or complete)):
@@ -599,26 +616,29 @@ def _read_amazon_browser_html(driver, client, candidate, expect_search, deadline
                 if complete:
                     break
             else:
-                early_html = driver.page_source
+                early_html = _browser_page_source(driver, timings)
                 break
-        time.sleep(0.2)
+        _timed_browser_operation(timings, "ready_wait", lambda: time.sleep(0.2))
     else:
         raise HermesError("Amazon tarayıcıda ürün/arama verisinin hazır olması zaman aşımına uğradı.")
     audit = early_html is not None and (not record["validated"] or record["reads"] % AMAZON_BROWSER_AUDIT_INTERVAL == 0)
     if not audit:
-        return early_html if early_html is not None else driver.page_source, "erken" if early_html is not None else "tam"
-    early_snapshot = amazon_provider.browser_coverage_snapshot(early_html, candidate, expect_search)
+        return early_html if early_html is not None else _browser_page_source(driver, timings), "erken" if early_html is not None else "tam"
+    early_snapshot = _timed_browser_operation(timings, "coverage_parse", lambda:
+        amazon_provider.browser_coverage_snapshot(early_html, candidate, expect_search))
     # An initial observation must not approve a page merely because cached
     # images made load finish before its late purchase/Twister updates.
     reference_after = time.monotonic() + 1.0
     while time.monotonic() < deadline:
-        if driver.execute_script("return document.readyState") == "complete" and time.monotonic() >= reference_after:
+        complete_state = _timed_browser_operation(timings, "audit_wait", lambda: driver.execute_script("return document.readyState"))
+        if complete_state == "complete" and time.monotonic() >= reference_after:
             break
-        time.sleep(0.2)
+        _timed_browser_operation(timings, "audit_wait", lambda: time.sleep(0.2))
     else:
         raise HermesError("Amazon tarayıcı kapsam kontrolünde tam yükleme zaman aşımına uğradı.")
-    full_html = driver.page_source
-    full_snapshot = amazon_provider.browser_coverage_snapshot(full_html, candidate, expect_search)
+    full_html = _browser_page_source(driver, timings)
+    full_snapshot = _timed_browser_operation(timings, "coverage_parse", lambda:
+        amazon_provider.browser_coverage_snapshot(full_html, candidate, expect_search))
     changed = sorted(name for name in set(early_snapshot) | set(full_snapshot)
                      if early_snapshot.get(name) != full_snapshot.get(name))
     record["full_only"] = bool(changed)
@@ -650,16 +670,18 @@ def _get_amazon_response_with_browser(session: requests.Session, candidate: str,
     driver.set_page_load_timeout(max(AMAZON_BROWSER_MIN_TIMEOUT_SECONDS, int(timeout)))
     driver.get_log("performance")  # Drain the previous page's document events.
     started_at = time.monotonic()
+    timings = {}
+    readiness = "başarısız"
     _note_amazon_request(session, "browser", candidate)
     try:
-        driver.get(candidate)
-        document = _browser_document_response(driver)
+        _timed_browser_operation(timings, "navigation", lambda: driver.get(candidate))
+        document = _timed_browser_operation(timings, "document", lambda: _browser_document_response(driver))
         if not document:
             raise HermesError("Amazon tarayıcıda ana belge ağ yanıtı doğrulanamadı.")
         _HtmlResponse(driver.current_url, "", document["status"]).raise_for_status()
         deadline = started_at + max(AMAZON_BROWSER_MIN_TIMEOUT_SECONDS, int(timeout))
-        html, readiness = _read_amazon_browser_html(driver, client, candidate, expect_search, deadline)
-        document = _browser_document_response(driver) or document
+        html, readiness = _read_amazon_browser_html(driver, client, candidate, expect_search, deadline, timings)
+        document = _timed_browser_operation(timings, "document", lambda: _browser_document_response(driver)) or document
         if (client.browser_header_error or not document or any(document.get(field) for field in
                 ("fromDiskCache", "fromServiceWorker", "fromPrefetchCache"))):
             raise HermesError("Amazon tarayıcıda güncel ana belge ağ üzerinden doğrulanamadı.")
@@ -673,10 +695,19 @@ def _get_amazon_response_with_browser(session: requests.Session, candidate: str,
     except Exception as exc:
         raise HermesError(f"Amazon gerçek tarayıcı sayfası okunamadı ({type(exc).__name__}).") from exc
     finally:
+        total = time.monotonic() - started_at
+        phases = {key: timings.get(key, 0.0) for key in (
+            "navigation", "ready_script", "ready_wait", "html", "document", "coverage_parse", "audit_wait")}
+        other = max(0.0, total - sum(phases.values()))
+        log("Amazon tarayıcı aşama süreleri: "
+            f"veri={readiness} | " + " | ".join(f"{key}={round(value * 1000)} ms" for key, value in phases.items()) +
+            f" | other={round(other * 1000)} ms | total={round(total * 1000)} ms"
+            f" | observations={timings.get('observations', 0)} | signature_changes={timings.get('signature_changes', 0)}"
+            f" | html_reads={timings.get('html_reads', 0)} | adres={_amazon_timing_url(candidate)}")
         log(
             "Amazon ağ yanıt süresi: "
             f"taşıma=browser | tip={_amazon_request_type(candidate, expect_search)} | "
-            f"süre={round((time.monotonic() - started_at) * 1000)} ms | "
+            f"süre={round(total * 1000)} ms | "
             f"adres={_amazon_timing_url(candidate)}"
         )
     _log_amazon_response(response, "browser")
