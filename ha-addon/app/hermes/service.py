@@ -1,4 +1,5 @@
 import os
+import hashlib
 import math
 import random
 import re
@@ -11,6 +12,7 @@ from contextlib import nullcontext
 import requests
 
 from .config_loader import load_config
+from . import amazon_transport_trial
 from .constants import (
     AMAZON_SEARCH_ERROR_NOTIFICATION_HOUR,
     APP_VERSION,
@@ -2188,6 +2190,10 @@ def check_once(config: HermesConfig, amazon_client: AmazonClient | None = None) 
 
 def _check_once(config: HermesConfig, session: requests.Session) -> None:
     cycle_started_at = time.monotonic()
+    trial = amazon_transport_trial.active_trial()
+    session._hermes_amazon_client.transport = trial["transport"] if trial else "http"
+    trial_samples = []
+    trial_aborted = False
     state = load_json(STATE_PATH, {})
     if not isinstance(state, dict):
         state = {}
@@ -2559,6 +2565,57 @@ def _check_once(config: HermesConfig, session: requests.Session) -> None:
         )
 
     for task in priority_request_order(request_tasks):
+        if trial and not trial_aborted and task["site"] == SITE_AMAZON:
+            watch = task["watch"]
+            started_at = time.monotonic()
+            client = session._hermes_amazon_client
+            blocks_before = len(client.block_events)
+            session._hermes_amazon_trial_requests = []
+            task["run"]()
+            key = normalize_item_key("watch", watch.site, watch.tracking_id or watch.name, watch.url, watch.size)
+            entry = state.get(key, {})
+            requests_made = session._hermes_amazon_trial_requests
+            offer_entries = [state.get(offer_key, {}) for offer_key in entry.get("offer_keys", [])]
+            blocks = list(client.block_events)[blocks_before:]
+            outcome = ("protection_wait" if not requests_made and amazon_protection_remaining_seconds(state, key) > 0
+                       else "partial" if entry.get("amazon_partial_result")
+                       else "error" if entry.get("last_error")
+                       else "priced" if offer_entries else "unavailable")
+            if getattr(client, "transport_trial_id", None) != trial["id"]:
+                client.transport_trial_id = trial["id"]
+                client.transport_trial_skip_times = {}
+            if outcome == "protection_wait":
+                previous_skip = client.transport_trial_skip_times.get(key)
+                if previous_skip is not None and started_at - previous_skip < 60:
+                    session._hermes_amazon_trial_requests = None
+                    continue
+                client.transport_trial_skip_times[key] = started_at
+            trial_samples.append({
+                "at": utc_now(), "transport": trial["transport"], "phase": trial["phase"],
+                "watch": hashlib.sha256(key.encode()).hexdigest()[:24],
+                "config": amazon_transport_trial.watch_signature(watch, config), "name": (watch.name or watch.url)[:70],
+                "seconds": round(time.monotonic() - started_at, 3), "network_attempts": len(requests_made),
+                "transports": {method: sum(item["transport"] == method for item in requests_made)
+                               for method in ("curl_chrome", "requests", "browser")},
+                "requested_asins": sorted({match.group(1) for item in requests_made
+                    if (match := re.search(r"/(?:dp|gp/product|gp/offer-listing)/([A-Z0-9]{10})", item["address"]))}),
+                "captcha": sum(item["reason"] == "bot_korumasi" for item in blocks),
+                "http_503": sum(item.get("http_status") == 503 for item in blocks),
+                "http_429": sum(item.get("http_status") == 429 for item in blocks),
+                "session_age_seconds": round(started_at - client.started_at),
+                "attempts_last_60_seconds": sum(at > time.monotonic() - 60 for at in client.attempt_times),
+                "outcome": outcome,
+                "variant_count": len({canonical_tracking_url(item.get("url", "")) for item in offer_entries}),
+                "warehouse_count": sum(bool(item.get("is_warehouse")) for item in offer_entries),
+            })
+            session._hermes_amazon_trial_requests = None
+            if trial["transport"] == "browser" and "gercek tarayici oturumu baslatilamadi" in normalize_offer_text(str(entry.get("last_error", ""))):
+                # A missing/broken browser must not disable scheduled reads for a day.
+                amazon_transport_trial.stop_trial()
+                client.transport = "http"
+                trial_aborted = True
+                log("Amazon karşılaştırması durduruldu: Pi tarayıcısı başlatılamadı. Mevcut okuyucuya dönüldü.")
+            continue
         task["run"]()
 
     log(
@@ -2595,6 +2652,12 @@ def _check_once(config: HermesConfig, session: requests.Session) -> None:
     append_amazon_diagnostics(state, list(client.block_events))
     save_json(STATE_PATH, state)
     client.block_events.clear()
+    if trial and trial_samples:
+        try:
+            amazon_transport_trial.append_cycle(trial, trial_samples, time.monotonic() - cycle_started_at)
+            log(f"Amazon karşılaştırma ölçümü: yöntem={trial['transport']} | dönem={trial['phase'] + 1}/24 | kart={len(trial_samples)}")
+        except Exception as exc:  # noqa: BLE001
+            log(f"Amazon karşılaştırma ölçümü kaydedilemedi: {exc}")
 
 
 def log_cycle_banner(config: HermesConfig) -> None:

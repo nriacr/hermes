@@ -1,7 +1,7 @@
 # Hermes Cursor Handoff
 
 This document is the current technical and product handoff for continuing Hermes
-in Cursor. It describes the real repository at version `2.5.41`; source code and
+in Cursor. It describes the real repository at version `2.5.42`; source code and
 tests remain authoritative when this document and code ever differ.
 
 ## 1. Product snapshot
@@ -92,6 +92,8 @@ Current files under `/data`:
 | `cycle_history.json` | completed cycle durations from the rolling last seven days |
 | `status.json` | service health and cycle timing |
 | `error_events.json` | recent operational errors shown by UI |
+| `amazon_transport_trial.json` | optional 24-hour reader trial control, no credentials |
+| `amazon_transport_trial_results.json` | bounded scheduled-read trial measurements |
 | `login_state.json` | provider/browser login-related state when used |
 | `seen_messages.json` | Telegram deduplication |
 | `telegram_quick_add.json` | Saved Messages quick-add conversation |
@@ -249,6 +251,28 @@ verified warehouse offers remain separate identities.
 - Pi comparison on 2026-10-02: B0FQFTYPTQ returned no readable featured price through both HTTP and Chromium. Chromium returned real HTTP 200, 1,221,124 bytes without a challenge; navigation took 12,688 ms. The anonymous selected buybox had `Satın Alma Seçeneklerini Gör` and no explicit out-of-stock marker. Do not classify that page as stock absence. Its offer-listing link returned the product document without offer rows in a separate anonymous read. Keep HTTP primary: this comparison did not establish a browser reliability gain.
 - Visible `Amazon Depo içinde … için sonuç bulunamadı` / `… için sonuç bulamadık` notices raise normal `EmptySearchResultsHermesError(no_results_notice=True)` before card/detail reads. Ignore scripts/comments/hidden notices. Explicit absence retains a query-level unavailable row and sets a 300-second minimum next probe; normal medium/low intervals still apply. `Tüm Kategoriler içindeki sonuçlar` and `Tüm Kategorilerdeki sonuçlar` cut fallback cards alongside the existing All Departments marker. A valid `#search` document with zero cards is usable, so do not start a browser rescue for normal empty results. Shared Link Test displays typed empty search as a normal notice.
 - Link Test's optional `amazon_browser` flag selects browser-only reads for that temporary inspection. The real monitor remains HTTP-primary pending Pi comparison; both paths use the same provider/variation pipeline. No desktop browser, login, purchase or CAPTCHA solver is involved.
+- `amazon_transport_trial.py` controls an optional 24-hour crossover on existing
+  scheduled reads. Shared Test UI starts/stops/reports it through `/link-test`
+  form actions; ingress and token-protected public routes use the same renderer.
+  Hourly modes repeat browser/http/http/browser; choose once at cycle start and
+  restore HTTP at the next cycle after expiry/cancellation. Both process-lived
+  sessions remain intact; never clear guards, cookies or change fingerprints.
+  The normal HTTP arm retains its existing single non-protection browser fallback;
+  report actual curl_chrome/requests/browser attempts, not assumed methods.
+  Production state/summary/opportunity notifications remain the ordinary shared
+  pipeline; the trial never issues additional reads or notifications.
+- Trial samples distinguish priced, partial, unavailable, error, and protection
+  wait. Record network attempts, actual block events, distinct priced variants,
+  Depot readings and elapsed watch time. Protection-wait samples are at most one
+  per watch/minute, not the exact number of skips; no samples means no extra
+  trial file write. Retain at most 20,000 samples/3,000 measured cycles and report
+  discarded samples. Compare only watch/config fingerprints observed with actual
+  requests in both arms; include full watch scope, filters, priority and pacing
+  in that fingerprint. Exclude cache-only reads and waits from success/error rates.
+  Keep per-card counts to avoid hiding differences in coverage or workload.
+  No raw HTML, cookies or credentials are recorded. Failed browser startup stops
+  the trial and restores HTTP without a CAPTCHA rescue. Few samples or time-of-day
+  differences do not establish causation; no automatic production promotion.
 - CAPTCHA detection checks actual validation forms/inputs, a Robot Check title,
   or explicit challenge instructions. Ignore scripts, styles, templates,
   comments and captcha asset names; a raw keyword alone is insufficient.

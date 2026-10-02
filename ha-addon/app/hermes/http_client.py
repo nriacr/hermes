@@ -347,6 +347,9 @@ def _note_amazon_request(session, transport: str, candidate: str) -> None:
     client.last_transport = transport
     client.last_address = _amazon_timing_url(candidate)
     _increment_amazon_metric(session, "network_attempts")
+    trial_requests = getattr(session, "_hermes_amazon_trial_requests", None)
+    if isinstance(trial_requests, list):
+        trial_requests.append({"transport": transport, "address": client.last_address})
     log(
         "Amazon istek ölçümü: "
         f"taşıma={transport} | oturum_s={round(now - client.started_at)} | "

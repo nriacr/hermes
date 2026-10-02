@@ -14,6 +14,7 @@ APP_PATH = Path(__file__).resolve().parents[1] / "ha-addon" / "app"
 sys.path.insert(0, str(APP_PATH))
 
 from hermes import service  # noqa: E402
+from hermes import amazon_transport_trial as transport_trial  # noqa: E402
 from hermes import http_client  # noqa: E402
 from hermes import dashboard  # noqa: E402
 from hermes import dashboard_with_settings  # noqa: E402
@@ -75,6 +76,123 @@ from hermes.utils import detect_site_from_url, parse_decimal, utc_now  # noqa: E
 
 
 class HermesSmokeTests(unittest.TestCase):
+    def test_transport_trial_balances_modes_expires_and_does_not_restart_on_second_click(self):
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(transport_trial, "CONTROL_PATH", Path(directory) / "control.json"):
+            now = datetime(2026, 10, 2, 12, tzinfo=timezone.utc)
+            trial = transport_trial.start_trial(now)
+            self.assertEqual(transport_trial.start_trial(now + timedelta(minutes=1))["id"], trial["id"])
+            self.assertEqual([transport_trial.active_trial(now + timedelta(hours=i))["transport"] for i in range(4)],
+                             ["browser", "http", "http", "browser"])
+            self.assertIsNone(transport_trial.active_trial(now + timedelta(hours=24)))
+            self.assertIsNone(transport_trial.active_trial(now - timedelta(seconds=1)))
+            transport_trial.stop_trial(now + timedelta(minutes=10))
+            self.assertIsNone(transport_trial.active_trial(now + timedelta(minutes=11)))
+
+    def test_transport_trial_uses_existing_read_and_preserves_protection_wait(self):
+        priced = WatchRule("Fiyat", "amazon", "https://www.amazon.com.tr/dp/B000000001", Decimal("1000"))
+        blocked = WatchRule("Engelli", "amazon", "https://www.amazon.com.tr/dp/B000000002", Decimal("1000"))
+        config = SimpleNamespace(watches=[priced, blocked], interval_seconds=1, request_timeout_seconds=10,
+                                 pushover_user_key="user", pushover_api_token="token")
+        state = {}
+        key = service.normalize_item_key("watch", blocked.site, blocked.name, blocked.url, blocked.size)
+        service.note_amazon_protection(state, key, blocked.name, HermesError("Amazon captcha"))
+        trial = {"id": "test", "transport": "browser", "phase": 0}
+
+        def offers(session, watch, config):
+            self.assertEqual(session._hermes_amazon_client.transport, "browser")
+            http_client._note_amazon_request(session, "browser", watch.url)
+            return iter([OfferResult("Fiyat", Decimal("500"), url=watch.url)])
+
+        with (patch.object(service, "load_json", return_value=state), patch.object(service, "save_json"),
+              patch.object(transport_trial, "active_trial", return_value=trial),
+              patch.object(transport_trial, "append_cycle") as record,
+              patch.object(service, "wait_before_request"),
+              patch.object(service, "_iter_amazon_product_watch_offers", side_effect=offers) as fetch,
+              patch.object(service, "save_incremental_price_summary"), patch.object(service, "publish_price_summary"),
+              patch.object(service, "record_cycle_duration"), patch.object(service, "send_pushover") as notify):
+            service.check_once(config)
+        fetch.assert_called_once()
+        notify.assert_called_once()
+        samples = record.call_args.args[1]
+        self.assertEqual([item["network_attempts"] for item in samples], [1, 0])
+        self.assertEqual([item["outcome"] for item in samples], ["priced", "protection_wait"])
+        self.assertEqual(samples[0]["variant_count"], 1)
+        self.assertEqual(samples[1]["captcha"], 0)
+
+    def test_transport_trial_report_matches_cards_and_excludes_waits_from_error_rates(self):
+        base = {"watch": "same", "config": "unchanged", "name": "Ürün", "network_attempts": 1,
+                "seconds": 2, "captcha": 0, "http_503": 0, "outcome": "priced", "variant_count": 1, "warehouse_count": 0}
+        samples = [{**base, "transport": "http"}, {**base, "transport": "browser", "captcha": 1, "outcome": "error"},
+                   {**base, "transport": "browser", "network_attempts": 0, "captcha": 0, "outcome": "protection_wait"},
+                   {**base, "transport": "http", "watch": "only-http"},
+                   {**base, "transport": "browser", "config": "changed"}]
+        report = transport_trial.summarize({"samples": samples})
+        self.assertEqual(report["matched_cards"], 1)
+        self.assertEqual(report["modes"]["http"]["reads"], 1)
+        self.assertEqual(report["modes"]["browser"]["reads"], 1)
+        self.assertEqual(report["modes"]["browser"]["captcha"], 1)
+        self.assertEqual(report["protection_waits"], 1)
+        self.assertEqual(report["unmatched_reads"], 2)
+
+    def test_transport_trial_controls_never_launch_extra_product_reads(self):
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(transport_trial, "CONTROL_PATH", Path(directory) / "control.json"), \
+                patch.object(transport_trial, "RESULTS_PATH", Path(directory) / "results.json"), \
+                patch.object(link_test_ui, "inspect_link_now") as fetch:
+            for action in ("start", "report", "stop"):
+                page = link_test_ui.render_link_test_from_request("", "./link-test", "./",
+                    f"amazon_trial_action={action}".encode()).decode()
+                self.assertIn("Amazon okuyucu karşılaştırması", page)
+            fetch.assert_not_called()
+            self.assertIsNone(transport_trial.active_trial())
+
+    def test_transport_trial_expiry_restores_http_without_resetting_client(self):
+        config = SimpleNamespace(watches=[], interval_seconds=1)
+        with (http_client.AmazonClient(transport="browser") as client,
+              patch.object(transport_trial, "active_trial", return_value=None),
+              patch.object(service, "load_json", return_value={}), patch.object(service, "save_json")):
+            client.browser_driver = SimpleNamespace(quit=lambda: None)
+            service.check_once(config, client)
+            self.assertEqual(client.transport, "http")
+            self.assertIsNotNone(client.browser_driver)
+
+    def test_transport_trial_missing_browser_restores_http_for_remaining_watches(self):
+        watches = [WatchRule(f"Ürün {i}", "amazon", f"https://www.amazon.com.tr/dp/B00000000{i}", Decimal("1000"))
+                   for i in range(2)]
+        config = SimpleNamespace(watches=watches, interval_seconds=1, request_timeout_seconds=10,
+                                 pushover_user_key="", pushover_api_token="")
+        trial = {"id": "test", "transport": "browser", "phase": 0}
+        modes = []
+
+        def read(session, watch, config):
+            modes.append(session._hermes_amazon_client.transport)
+            if len(modes) == 1:
+                raise HermesError("Amazon gerçek tarayıcı oturumu başlatılamadı: Chromium bulunamadı.")
+            return iter([OfferResult("Ürün", Decimal("1500"), url=watch.url)])
+
+        with (patch.object(service, "load_json", return_value={}), patch.object(service, "save_json"),
+              patch.object(transport_trial, "active_trial", return_value=trial), patch.object(transport_trial, "stop_trial") as stop,
+              patch.object(transport_trial, "append_cycle"), patch.object(service, "wait_before_request"),
+              patch.object(service, "_iter_amazon_product_watch_offers", side_effect=read),
+              patch.object(service, "save_incremental_price_summary"), patch.object(service, "publish_price_summary"),
+              patch.object(service, "record_cycle_duration")):
+            service.check_once(config)
+        self.assertEqual(modes, ["browser", "http"])
+        stop.assert_called_once()
+
+    def test_transport_trial_measurements_do_not_mix_runs_or_overwrite_price_state(self):
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(transport_trial, "RESULTS_PATH", Path(directory) / "results.json"):
+            first = {"id": "first", "transport": "http", "phase": 0, "started_at": utc_now(), "ends_at": utc_now()}
+            second = {**first, "id": "second"}
+            transport_trial.append_cycle(first, [{"sample": "old"}], 1)
+            transport_trial.append_cycle(second, [{"sample": "new"}], 2)
+            saved = transport_trial.load_json(transport_trial.RESULTS_PATH, {})
+            self.assertEqual(saved["samples"], [{"sample": "new"}])
+            self.assertEqual(saved["id"], "second")
+
+
     def test_captcha_and_503_errors_do_not_notify_but_verified_depot_offer_does(self):
         errors = [HermesError("Amazon bot korumasi nedeniyle captcha/koruma sayfasi dondu."),
                   http_client.HttpStatusHermesError(503, "https://www.amazon.com.tr/s?k=test"),
