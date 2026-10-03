@@ -23,6 +23,10 @@ SENSOR_LAST_CYCLE = "sensor.hermes_son_tur"
 SENSOR_ERRORS = "sensor.hermes_hata_sayisi"
 # Keep entity attributes small; Home Assistant's recorder warns above ~16 KB.
 MAX_LISTED_ITEMS = 25
+# Idle cycles can finish every few seconds; every state change is written to
+# Home Assistant's database, so the last-cycle sensor is refreshed at most
+# this often and unchanged sensors are not sent again.
+LAST_CYCLE_MIN_INTERVAL_SECONDS = 60
 
 
 def _number(value) -> float:
@@ -36,6 +40,8 @@ class HomeAssistantBridge:
         self.timeout = timeout
         self._failing = False
         self._lock = threading.Lock()
+        self._published: Dict[str, Any] = {}
+        self._last_cycle_sent_at: Optional[datetime] = None
 
     @property
     def enabled(self) -> bool:
@@ -63,6 +69,13 @@ class HomeAssistantBridge:
     def set_state(self, entity_id: str, state: Any, attributes: Dict[str, Any]) -> bool:
         return self._post(f"/states/{entity_id}", {"state": state, "attributes": attributes})
 
+    def _set_if_changed(self, entity_id: str, state: Any, attributes: Dict[str, Any]) -> None:
+        payload = (state, attributes)
+        if self._published.get(entity_id) == payload:
+            return
+        if self.set_state(entity_id, state, attributes):
+            self._published[entity_id] = payload
+
     def fire_event(self, event_type: str, data: Dict[str, Any]) -> bool:
         return self._post(f"/events/{event_type}", data)
 
@@ -86,7 +99,7 @@ class HomeAssistantBridge:
                       cycle_seconds: float, scan_seconds: float, finished_at: Optional[datetime] = None) -> None:
         finished_at = finished_at or datetime.now().astimezone()
         opportunities = sorted((row for row in rows if row.price <= row.target_price), key=lambda row: row.difference)
-        self.set_state(SENSOR_OPPORTUNITIES, len(opportunities), {
+        self._set_if_changed(SENSOR_OPPORTUNITIES, len(opportunities), {
             "friendly_name": "Hermes fırsat sayısı",
             "icon": "mdi:tag-heart",
             "unit_of_measurement": "ürün",
@@ -97,17 +110,20 @@ class HomeAssistantBridge:
                 for row in opportunities[:MAX_LISTED_ITEMS]
             ],
         })
-        self.set_state(SENSOR_LAST_CYCLE, finished_at.isoformat(timespec="seconds"), {
-            "friendly_name": "Hermes son tur",
-            "icon": "mdi:timer-check-outline",
-            "device_class": "timestamp",
-            "sure_saniye": round(cycle_seconds),
-            "tarama_saniye": round(scan_seconds),
-            "urun_sayisi": len(rows),
-            "stokta_olmayan": stock_count,
-        })
+        last_sent = self._last_cycle_sent_at
+        if last_sent is None or (finished_at - last_sent).total_seconds() >= LAST_CYCLE_MIN_INTERVAL_SECONDS:
+            if self.set_state(SENSOR_LAST_CYCLE, finished_at.isoformat(timespec="seconds"), {
+                "friendly_name": "Hermes son tur",
+                "icon": "mdi:timer-check-outline",
+                "device_class": "timestamp",
+                "sure_saniye": round(cycle_seconds),
+                "tarama_saniye": round(scan_seconds),
+                "urun_sayisi": len(rows),
+                "stokta_olmayan": stock_count,
+            }):
+                self._last_cycle_sent_at = finished_at
         errors = recent_errors(state, finished_at)
-        self.set_state(SENSOR_ERRORS, len(errors), {
+        self._set_if_changed(SENSOR_ERRORS, len(errors), {
             "friendly_name": "Hermes hata sayısı",
             "icon": "mdi:alert-circle-outline",
             "unit_of_measurement": "hata",

@@ -1,5 +1,11 @@
 # Değişiklik günlüğü
 
+## 3.0.1
+
+- Home Assistant sensörleri yalnızca içerikleri değiştiğinde güncelleniyor;
+  `sensor.hermes_son_tur` en fazla dakikada bir yazılıyor. Böylece boşta geçen
+  kısa çevrimler Home Assistant veritabanına her birkaç saniyede kayıt yazmıyor.
+
 ## 3.0.0
 
 Hermes baştan yeniden düzenlendi. Takip kartların, fiyat geçmişi, bildirim

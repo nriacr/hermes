@@ -84,6 +84,27 @@ class BridgeTests(unittest.TestCase):
                                 "fiyat_metni": "8.787 TL", "hedef": 9000.0, "fark": -212.23, "depo": True,
                                 "satici": "Amazon Depo", "url": rule.url})
 
+    def test_idle_cycles_do_not_flood_home_assistant(self):
+        bridge = HomeAssistantBridge(token="secret")
+        now = datetime(2026, 10, 3, 18, 0, tzinfo=timezone.utc)
+        rows = [row("A", "900", "1000")]
+        with patch.object(bridge, "set_state", return_value=True) as set_state:
+            for seconds in (0, 3, 6, 59):
+                bridge.publish_cycle(rows, 0, {}, 3, 1, finished_at=now + timedelta(seconds=seconds))
+            self.assertEqual(set_state.call_count, 3)  # each sensor once
+            bridge.publish_cycle(rows, 0, {}, 3, 1, finished_at=now + timedelta(seconds=61))
+            self.assertEqual([call.args[0] for call in set_state.call_args_list[3:]], ["sensor.hermes_son_tur"])
+            bridge.publish_cycle([row("A", "800", "1000")], 0, {}, 3, 1, finished_at=now + timedelta(seconds=62))
+            self.assertEqual(set_state.call_args_list[-1].args[0], "sensor.hermes_firsat_sayisi")
+
+    def test_a_failed_sensor_update_is_sent_again(self):
+        bridge = HomeAssistantBridge(token="secret")
+        rows = [row("A", "900", "1000")]
+        with patch.object(bridge, "set_state", side_effect=[False, False, False, True, True, True]) as set_state:
+            bridge.publish_cycle(rows, 0, {}, 3, 1)
+            bridge.publish_cycle(rows, 0, {}, 3, 1)
+        self.assertEqual(set_state.call_count, 6)
+
     def test_long_lists_are_capped(self):
         bridge = HomeAssistantBridge(token="secret")
         rows = [row(f"P{i}", "1", "10") for i in range(40)]
