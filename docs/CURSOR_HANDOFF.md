@@ -1,7 +1,7 @@
 # Hermes Cursor Handoff
 
 This document is the current technical and product handoff for continuing Hermes
-in Cursor. It describes the real repository at version `2.5.46`; source code and
+in Cursor. It describes the real repository at version `2.5.47`; source code and
 tests remain authoritative when this document and code ever differ.
 
 ## 1. Product snapshot
@@ -283,6 +283,15 @@ verified warehouse offers remain separate identities.
   time, observations, signature changes and HTML reads, including failed reads.
   Cache-only responses emit no fresh timing. Normal offer parsing remains in
   the existing variant phase logs; browser total is not pure network latency.
+- Browser command reuse (2.5.47) derives main frame/loader identity from the
+  already collected Page.frameNavigated events, falling back to Page.getFrameTree
+  only when missing. The final event drain reuses this navigation's identity,
+  never another page's document. A late unproven navigation invalidates the old
+  response; late 503/cache responses and cross-ASIN redirects remain rejected.
+  Read current_url once after readiness; set page-load timeout only when changed
+  or a new driver is created. Existing first/tenth/full audits are unchanged.
+  A bounded 256-page timing buffer contributes per-watch browser_timings to
+  trial samples and phase_details to the report; old samples remain compatible.
 - Chromium static cache remains enabled. A Selenium CDP Fetch listener adds
   no-cache headers to Document requests only; natural identity and cookies are
   preserved, no URL/cache-busting query is added. Service workers are bypassed.

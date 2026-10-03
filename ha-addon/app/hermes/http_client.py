@@ -69,10 +69,13 @@ class AmazonClient:
         self.curl_session = None
         self.browser_profile = None
         self.browser_driver = None
+        self.browser_timeout = None
         self.browser_policy = browser_policy
         self.browser_coverage = {}
         self.browser_audits = deque(maxlen=128)
         self.browser_audit_total = 0
+        self.browser_timings = deque(maxlen=256)
+        self.browser_timing_total = 0
         self.browser_header_error = None
         self.transport = transport
         # Only absent/unreadable offers, with discovery metadata, never successful prices.
@@ -553,19 +556,46 @@ def _configure_amazon_document_revalidation(driver, client):
     )]))
 
 
-def _browser_document_response(driver):
-    """Observe the final main document, including cache provenance; ignore frames/assets."""
-    frame_id = driver.execute_cdp_cmd("Page.getFrameTree", {})["frameTree"]["frame"]["id"]
-    document = None
+def _browser_document_response(driver, previous=None):
+    """Validate this navigation from existing events, reusing its frame identity only."""
+    messages = []
     for entry in driver.get_log("performance"):
         try:
             message = json.loads(entry["message"])["message"]
-            params = message.get("params", {})
-            if (message.get("method") == "Network.responseReceived"
-                    and params.get("type") == "Document" and params.get("frameId") == frame_id):
-                document = {**params["response"], "status": int(params["response"]["status"])}
+            if isinstance(message, dict) and isinstance(message.get("params", {}), dict):
+                messages.append(message)
         except (KeyError, TypeError, ValueError):
             continue
+    frame_id = previous.get("_frame_id") if previous else None
+    loader_id = previous.get("_loader_id") if previous else None
+    for message in messages:
+        frame = message.get("params", {}).get("frame", {})
+        if message.get("method") == "Page.frameNavigated" and frame.get("id") and not frame.get("parentId"):
+            frame_id, loader_id = frame["id"], frame.get("loaderId")
+    if not frame_id:
+        # Missing frame events are uncommon; keep a conservative fallback.
+        frame = driver.execute_cdp_cmd("Page.getFrameTree", {})["frameTree"]["frame"]
+        frame_id, loader_id = frame["id"], frame.get("loaderId")
+    same_document = (previous and previous.get("_frame_id") == frame_id
+                     and previous.get("_loader_id") == loader_id)
+    document = previous if same_document else None
+    for message in messages:
+        params = message.get("params", {})
+        if params.get("type") != "Document" or params.get("frameId") != frame_id:
+            continue
+        if message.get("method") not in {"Network.requestWillBeSent", "Network.responseReceived"}:
+            continue
+        if loader_id and params.get("loaderId") != loader_id:
+            # A later navigation has started but its committed main document
+            # is not proven yet. Never pair an earlier 200 with the newer DOM.
+            document = None
+            continue
+        if message.get("method") == "Network.responseReceived":
+            try:
+                document = {**params["response"], "status": int(params["response"]["status"]),
+                            "_frame_id": frame_id, "_loader_id": params.get("loaderId")}
+            except (KeyError, TypeError, ValueError):
+                document = None
     return document
 
 
@@ -664,10 +694,14 @@ def _get_amazon_response_with_browser(session: requests.Session, candidate: str,
     if client.browser_driver is None:
         try:
             client.browser_driver = _start_amazon_browser(client)
+            client.browser_timeout = None
         except Exception as exc:
             raise HermesError(f"Amazon gerçek tarayıcı oturumu başlatılamadı: {exc}") from exc
     driver = client.browser_driver
-    driver.set_page_load_timeout(max(AMAZON_BROWSER_MIN_TIMEOUT_SECONDS, int(timeout)))
+    effective_timeout = max(AMAZON_BROWSER_MIN_TIMEOUT_SECONDS, int(timeout))
+    if client.browser_timeout != effective_timeout:
+        driver.set_page_load_timeout(effective_timeout)
+        client.browser_timeout = effective_timeout
     driver.get_log("performance")  # Drain the previous page's document events.
     started_at = time.monotonic()
     timings = {}
@@ -678,17 +712,18 @@ def _get_amazon_response_with_browser(session: requests.Session, candidate: str,
         document = _timed_browser_operation(timings, "document", lambda: _browser_document_response(driver))
         if not document:
             raise HermesError("Amazon tarayıcıda ana belge ağ yanıtı doğrulanamadı.")
-        _HtmlResponse(driver.current_url, "", document["status"]).raise_for_status()
-        deadline = started_at + max(AMAZON_BROWSER_MIN_TIMEOUT_SECONDS, int(timeout))
+        _HtmlResponse(candidate, "", document["status"]).raise_for_status()
+        deadline = started_at + effective_timeout
         html, readiness = _read_amazon_browser_html(driver, client, candidate, expect_search, deadline, timings)
-        document = _timed_browser_operation(timings, "document", lambda: _browser_document_response(driver)) or document
+        document = _timed_browser_operation(timings, "document", lambda: _browser_document_response(driver, document))
         if (client.browser_header_error or not document or any(document.get(field) for field in
                 ("fromDiskCache", "fromServiceWorker", "fromPrefetchCache"))):
             raise HermesError("Amazon tarayıcıda güncel ana belge ağ üzerinden doğrulanamadı.")
-        requested_asin, response_asin = extract_asin_from_url(candidate), extract_asin_from_url(driver.current_url)
+        final_url = driver.current_url
+        requested_asin, response_asin = extract_asin_from_url(candidate), extract_asin_from_url(final_url)
         if requested_asin and requested_asin != response_asin:
             raise HermesError("Amazon tarayıcı farklı ürün kimliğine yönlendirildi; fiyat kullanılmadı.")
-        response = _HtmlResponse(driver.current_url, html, document["status"])
+        response = _HtmlResponse(final_url, html, document["status"])
         log(f"Amazon tarayıcı okuması: politika={client.browser_policy} | veri={readiness} | belge_önbelleği=0")
     except HermesError:
         raise
@@ -699,6 +734,13 @@ def _get_amazon_response_with_browser(session: requests.Session, candidate: str,
         phases = {key: timings.get(key, 0.0) for key in (
             "navigation", "ready_script", "ready_wait", "html", "document", "coverage_parse", "audit_wait")}
         other = max(0.0, total - sum(phases.values()))
+        client.browser_timing_total += 1
+        client.browser_timings.append({"sequence": client.browser_timing_total, "at": utc_now(),
+            "url": _amazon_timing_url(candidate), "readiness": readiness,
+            "phases_ms": {**{key: round(value * 1000) for key, value in phases.items()},
+                          "other": round(other * 1000), "total": round(total * 1000)},
+            "observations": timings.get("observations", 0), "signature_changes": timings.get("signature_changes", 0),
+            "html_reads": timings.get("html_reads", 0)})
         log("Amazon tarayıcı aşama süreleri: "
             f"veri={readiness} | " + " | ".join(f"{key}={round(value * 1000)} ms" for key, value in phases.items()) +
             f" | other={round(other * 1000)} ms | total={round(total * 1000)} ms"

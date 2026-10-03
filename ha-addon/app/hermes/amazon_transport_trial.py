@@ -129,7 +129,9 @@ def summarize(results):
             "warehouse_reads": sum(item["warehouse_count"] > 0 for item in rows),
             "median_seconds": round(statistics.median([item["seconds"] for item in rows]), 2),
             "audits": len(audits), "late_data": sum(bool(item["changed"]) for item in audits),
-            "coverage_details": audits[-60:]})
+            "coverage_details": audits[-60:],
+            "phase_discarded": sum(row.get("browser_timing_dropped", 0) for row in rows),
+            "phase_details": [timing for row in rows for timing in row.get("browser_timings", [])]})
     return {"matched_cards": len(matched), "modes": modes, "cards": cards, "browser_validation": validation,
             "protection_waits": sum(item["outcome"] == "protection_wait" for item in samples),
             "unmatched_reads": sum(item.get("network_attempts", 0) > 0 and (item["watch"], item["config"]) not in matched

@@ -159,6 +159,7 @@ class HermesSmokeTests(unittest.TestCase):
         sample = {"watch": "a", "config": "same", "name": "phone", "network_attempts": 1,
                   "captcha": 0, "http_503": 0, "outcome": "priced", "variant_count": 2,
                   "warehouse_count": 1, "seconds": 3, "transport": "browser",
+                  "browser_timings": [{"url": "phone", "readiness": "erken", "phases_ms": {"total": 3000}}],
                   "browser_audits": [{"url": "phone", "changed": ["variants"], "early": {}, "full": {}}]}
         report = transport_trial.summarize({"samples": [sample, {**sample, "network_attempts": 0, "outcome": "protection_wait"}]})
         self.assertEqual(report['matched_cards'], 0)
@@ -167,6 +168,7 @@ class HermesSmokeTests(unittest.TestCase):
         self.assertEqual(report['browser_validation'][0]['audits'], 1)
         self.assertEqual(report['browser_validation'][0]['late_data'], 1)
         self.assertEqual(report['browser_validation'][0]['warehouse_reads'], 1)
+        self.assertEqual(report['browser_validation'][0]['phase_details'], sample['browser_timings'])
 
     def test_transport_trial_uses_existing_read_and_preserves_protection_wait(self):
         priced = WatchRule("Fiyat", "amazon", "https://www.amazon.com.tr/dp/B000000001", Decimal("1000"))
@@ -181,6 +183,10 @@ class HermesSmokeTests(unittest.TestCase):
         def offers(session, watch, config):
             self.assertEqual(session._hermes_amazon_client.transport, "browser")
             http_client._note_amazon_request(session, "browser", watch.url)
+            client = session._hermes_amazon_client
+            client.browser_timing_total += 1
+            client.browser_timings.append({"sequence": client.browser_timing_total, "url": watch.url,
+                                          "readiness": "erken", "phases_ms": {"total": 1000}})
             return iter([OfferResult("Fiyat", Decimal("500"), url=watch.url)])
 
         with (patch.object(service, "load_json", return_value=state), patch.object(service, "save_json"),
@@ -198,6 +204,8 @@ class HermesSmokeTests(unittest.TestCase):
         self.assertEqual([item["outcome"] for item in samples], ["priced", "protection_wait"])
         self.assertEqual(samples[0]["variant_count"], 1)
         self.assertEqual(samples[1]["captcha"], 0)
+        self.assertEqual(samples[0]['browser_timings'], [{"url": priced.url, "readiness": "erken", "phases_ms": {"total": 1000}}])
+        self.assertEqual(samples[1]['browser_timings'], [])
 
     def test_transport_trial_report_matches_cards_and_excludes_waits_from_error_rates(self):
         base = {"watch": "same", "config": "unchanged", "name": "Ürün", "network_attempts": 1,
@@ -2627,6 +2635,7 @@ class HermesSmokeTests(unittest.TestCase):
             self.assertTrue(profile_path.exists())
             launch.assert_called_once()
             self.assertEqual(driver.get.call_count, 2)
+            driver.set_page_load_timeout.assert_called_once_with(25)
         driver.quit.assert_called_once()
         self.assertFalse(profile_path.exists())
 
@@ -2640,6 +2649,85 @@ class HermesSmokeTests(unittest.TestCase):
         self.assertEqual(http_client._browser_document_response(driver)["status"], 200)
         driver.get_log.return_value = []
         self.assertIsNone(http_client._browser_document_response(driver))
+
+    def test_amazon_browser_document_events_preserve_late_main_response_without_frame_queries(self):
+        def event(method, **params):
+            return {'message': json.dumps({'message': {'method': method, 'params': params}})}
+        root = event('Page.frameNavigated', frame={'id': 'main', 'loaderId': 'one'})
+        response = event('Network.responseReceived', type='Document', frameId='main', loaderId='one', response={'status': 200})
+        driver = Mock()
+        driver.get_log.return_value = [response, root, event('Page.frameNavigated', frame={
+            'id': 'iframe', 'parentId': 'main', 'loaderId': 'child'}), event('Network.responseReceived',
+            type='Document', frameId='iframe', loaderId='child', response={'status': 503})]
+        initial = http_client._browser_document_response(driver)
+        self.assertEqual(initial['status'], 200)
+        driver.get_log.return_value = []
+        self.assertIs(http_client._browser_document_response(driver, initial), initial)
+        driver.get_log.return_value = [event('Network.responseReceived', type='Document', frameId='replacement',
+            loaderId='two', response={'status': 503}), event('Page.frameNavigated', frame={'id': 'replacement', 'loaderId': 'two'})]
+        self.assertEqual(http_client._browser_document_response(driver, initial)['status'], 503)
+        driver.get_log.return_value = [event('Network.responseReceived', type='Document', frameId='main',
+            loaderId='one', response={'status': 200, 'fromDiskCache': True})]
+        self.assertTrue(http_client._browser_document_response(driver, initial)['fromDiskCache'])
+        driver.execute_cdp_cmd.assert_not_called()
+
+    def test_amazon_browser_document_rejects_unproven_late_navigation_instead_of_previous_200(self):
+        previous = {'status': 200, '_frame_id': 'main', '_loader_id': 'one'}
+        for method, params in [
+            ('Page.frameNavigated', {'frame': {'id': 'main', 'loaderId': 'two'}}),
+            ('Page.frameNavigated', {'frame': {'id': 'replacement', 'loaderId': 'two'}}),
+            ('Network.requestWillBeSent', {'type': 'Document', 'frameId': 'main', 'loaderId': 'two'}),
+            ('Network.responseReceived', {'type': 'Document', 'frameId': 'main', 'loaderId': 'two', 'response': {'status': 200}}),
+        ]:
+            driver = Mock()
+            driver.get_log.return_value = [{'message': json.dumps({'message': {'method': method, 'params': params}})}]
+            with self.subTest(method=method, params=params):
+                self.assertIsNone(http_client._browser_document_response(driver, previous))
+                driver.execute_cdp_cmd.assert_not_called()
+
+    def test_amazon_browser_final_validation_rejects_late_errors_and_reads_url_once(self):
+        from unittest.mock import PropertyMock
+        address = 'https://www.amazon.com.tr/dp/B000000001'
+        for final in (None, {'status': 503}, {'status': 200, 'fromDiskCache': True}, {'status': 200}):
+            driver = Mock()
+            final_url = PropertyMock(return_value=address)
+            type(driver).current_url = final_url
+            with (self.subTest(final=final), http_client.AmazonClient() as client,
+                  patch.object(http_client, '_browser_document_response', side_effect=[{'status': 200}, final]),
+                  patch.object(http_client, '_read_amazon_browser_html', return_value=('<html>product</html>', 'erken')),
+                  patch.object(http_client, '_is_usable_amazon_response', return_value=True)):
+                client.browser_driver = driver
+                session = requests.Session()
+                session._hermes_amazon_client = client
+                if final == {'status': 200}:
+                    http_client._get_amazon_response_with_browser(session, address, 25, False)
+                    final_url.assert_called_once_with()
+                else:
+                    with self.assertRaises(HermesError):
+                        http_client._get_amazon_response_with_browser(session, address, 25, False)
+                    self.assertEqual(http_client._amazon_response_cache(session), {})
+                    self.assertLessEqual(final_url.call_count, 1)
+
+    def test_amazon_browser_timeout_changes_only_when_required_or_driver_replaced(self):
+        address = 'https://www.amazon.com.tr/dp/B000000001'
+        driver, replacement = Mock(current_url=address), Mock(current_url=address)
+        with (http_client.AmazonClient() as client,
+              patch.object(http_client, '_browser_document_response', return_value={'status': 200}),
+              patch.object(http_client, '_read_amazon_browser_html', return_value=('<html>product</html>', 'erken')),
+              patch.object(http_client, '_is_usable_amazon_response', return_value=True),
+              patch.object(http_client, '_start_amazon_browser', return_value=replacement)):
+            client.browser_driver = driver
+            for timeout in (10, 25, 35, 35):
+                with requests.Session() as session:
+                    session._hermes_amazon_client = client
+                    http_client._get_amazon_response_with_browser(session, address, timeout, False)
+            self.assertEqual([call.args[0] for call in driver.set_page_load_timeout.call_args_list], [25, 35])
+            driver.quit()
+            client.browser_driver = None
+            with requests.Session() as session:
+                session._hermes_amazon_client = client
+                http_client._get_amazon_response_with_browser(session, address, 35, False)
+            replacement.set_page_load_timeout.assert_called_once_with(35)
 
     def test_amazon_browser_document_headers_do_not_change_identity_or_static_requests(self):
         from selenium.webdriver.common.devtools import v154 as devtools
