@@ -137,8 +137,10 @@ of each site are described in `docs/ARCHITECTURE.md`.
 4. Make the smallest coherent architectural change; remove superseded logic.
 5. Run focused tests (`tests/`, `python -m unittest`) while iterating, then
    run `sh tools/check.sh` before release.
-6. For runtime behavior changes, increment the current add-on patch version.
-   Never guess the version from conversation history.
+6. For runtime behavior changes, bump the version as the owner asked
+   (2026-10-03): a major change raises X in 3.X.Y and resets Y (3.2.1 → 3.3.0);
+   a minor change raises Y (3.2.1 → 3.2.2). Never guess the version from
+   conversation history.
 7. Update README/docs when behavior, options, providers, or operations change.
 8. Review the diff for secrets, unrelated changes, stale code, and compatibility.
 9. Commit intentionally and push to `main` so Home Assistant receives the update.
