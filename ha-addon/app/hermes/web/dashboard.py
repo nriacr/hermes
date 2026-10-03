@@ -403,9 +403,15 @@ document.querySelectorAll('form[data-confirm]').forEach((form) => {
 LIVE_REFRESH_NOTE = "Sayfa açıkken veriler kendiliğinden güncellenir."
 
 
+# Seconds between in-place refreshes. Statistics summarize seven days and are
+# several megabytes, so they refresh rarely; the old full reload was 60 s.
+LIVE_INTERVAL_SECONDS = {"live/dashboard": 15, "live/statistics": 300}
+
+
 def live_region(base: str, endpoint: str, html: str) -> str:
     """A block whose contents the browser refreshes in place (see assets.LIVE_SCRIPT)."""
-    return f"<div id='live-region' data-live-url='{escape(link(base, endpoint), quote=True)}'>{html}</div>"
+    return (f"<div id='live-region' data-live-url='{escape(link(base, endpoint), quote=True)}' "
+            f"data-live-interval='{LIVE_INTERVAL_SECONDS[endpoint]}'>{html}</div>")
 
 
 def dashboard_live_html(base: str) -> str:
@@ -544,7 +550,8 @@ def render_cycle_days(points) -> str:
 
 
 def statistics_live_html(base: str) -> str:
-    now = datetime.now().astimezone()
+    # Whole minutes keep the chart identical between cycles, so an unchanged block is not resent.
+    now = datetime.now().astimezone().replace(second=0, microsecond=0)
     points = recent_cycle_history(load_json(CYCLE_HISTORY_PATH, []), now)
     durations = [duration for _, duration in points]
 

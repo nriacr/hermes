@@ -351,7 +351,7 @@ LIVE_SCRIPT = """
       busy = false;
     }
   };
-  window.setInterval(refresh, 15000);
+  window.setInterval(refresh, (Number(region.dataset.liveInterval) || 15) * 1000);
   document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
 })();
 """.strip()

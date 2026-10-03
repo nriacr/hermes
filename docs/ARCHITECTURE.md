@@ -232,8 +232,9 @@ actions: `test-pushover`, `reset-notifications`, `reset-price-history`,
 `settings/save`, `link-test`. Every page has the same navigation.
 
 The summary and statistics pages update in place: `live.js` fetches
-`live/dashboard` or `live/statistics` (JSON with the region's HTML) every 15
-seconds while the tab is visible and swaps only the live region, keeping open
+`live/dashboard` (every 15 seconds) or `live/statistics` (every 5 minutes;
+its chart is anchored to the minute) as JSON with the region's HTML while the
+tab is visible and swaps only the live region, keeping open
 groups (`details[data-key]`) and the scroll position. The browser sends the
 version it shows (`v`); an unchanged block is answered with `{"same": true}`.
 Text responses of 1 KB or more are gzip-compressed when accepted. Tools, notices and forms

@@ -147,7 +147,8 @@ class RouterTests(DataFilesMixin, unittest.TestCase):
     def test_live_data_refreshes_in_place_on_both_surfaces(self):
         self.data.write_summary({"rows": [price_row(product_title="Canlı ürün")], "checked_at": "2026-10-03 20:00:00"})
         page = self.request("/").payload.decode()
-        self.assertIn("data-live-url='./live/dashboard'", page)
+        self.assertIn("data-live-url='./live/dashboard' data-live-interval='15'", page)
+        self.assertIn("data-live-interval='300'", self.request("/statistics").payload.decode())
         self.assertIn("src='./live.js'", page)
         self.assertIn("<noscript><meta http-equiv='refresh' content='60'></noscript>", page)
         response = self.request("/live/dashboard")
@@ -166,7 +167,7 @@ class RouterTests(DataFilesMixin, unittest.TestCase):
 
     def test_live_script_keeps_open_groups_and_scroll(self):
         script = self.request("/live.js").payload.decode()
-        for text in ("details[data-key][open]", "window.scrollTo", "document.hidden", "data.same", "&v="):
+        for text in ("details[data-key][open]", "window.scrollTo", "document.hidden", "data.same", "&v=", "liveInterval"):
             self.assertIn(text, script)
 
     def test_unchanged_live_block_is_not_sent_again(self):

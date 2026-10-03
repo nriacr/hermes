@@ -1,5 +1,11 @@
 # Değişiklik günlüğü
 
+## 3.1.2
+
+- İstatistik sayfası 5 dakikada bir güncelleniyor (yedi günlük özet olduğu
+  için daha sık gerekmiyor); Özet sayfası 15 saniyede bir. Grafik dakikaya
+  sabitlendi, böylece değişmeyen istatistik yeniden gönderilmiyor.
+
 ## 3.1.1
 
 - Canlı güncelleme veri değişmediyse sayfayı yeniden göndermiyor; İstatistik
