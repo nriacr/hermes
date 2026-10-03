@@ -150,7 +150,7 @@ class RouterTests(DataFilesMixin, unittest.TestCase):
         page = self.request("/").payload.decode()
         self.assertIn("data-live-url='./live/dashboard' data-live-interval='15'", page)
         self.assertIn("data-live-interval='300'", self.request("/statistics").payload.decode())
-        self.assertIn("src='./live.js'", page)
+        self.assertIn("src='./live.js?v=", page)  # versioned, so a new release is never served from cache
         self.assertIn("<noscript><meta http-equiv='refresh' content='60'></noscript>", page)
         response = self.request("/live/dashboard")
         self.assertEqual(response.content_type, "application/json; charset=utf-8")
@@ -421,7 +421,7 @@ class SettingsTests(DataFilesMixin, unittest.TestCase):
         self.assertEqual(page.count("data-settings-save"), 1)
         for text in ("id='saving-overlay'", "Değişiklikleri uygula", "Ayarlar kaydediliyor", "id='watch-search'",
                      "data-watch-search='Mevcut'", "class='button danger'", "data-delete-watch", "value='100'",
-                     "src='./settings.js' defer"):
+                     "src='./settings.js?v="):
             self.assertIn(text, page)
         for text in ("name='delete_watch_index'", "name='update_watch_index'", "name='watch_index'"):
             self.assertNotIn(text, page)

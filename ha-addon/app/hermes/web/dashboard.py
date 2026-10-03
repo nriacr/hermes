@@ -8,6 +8,7 @@ from html import escape
 from typing import Any, Dict, List, Optional
 
 from ..constants import (
+    APP_VERSION,
     DATABASE_PATH,
     STATE_PATH,
     SUMMARY_PATH,
@@ -458,7 +459,7 @@ def render_dashboard_page(base: str, params: Dict[str, List[str]], config_error:
 
 
 def live_script_tag(base: str) -> str:
-    return f"<script src='{escape(link(base, 'live.js'), quote=True)}' defer></script>"
+    return f"<script src='{escape(link(base, 'live.js'), quote=True)}?v={escape(APP_VERSION)}' defer></script>"
 
 
 # -- statistics -------------------------------------------------------------------------

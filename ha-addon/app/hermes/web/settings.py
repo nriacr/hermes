@@ -6,7 +6,7 @@ from html import escape
 from typing import Any, Dict, List, Optional
 
 from ..config import DEFAULT_TELEGRAM_CHANNELS, WATCH_URL_FIELDS, options_with_defaults, read_options, watch_group, watch_urls
-from ..constants import PRIORITIES, STATE_PATH, SUMMARY_PATH
+from ..constants import APP_VERSION, PRIORITIES, STATE_PATH, SUMMARY_PATH
 from ..logging_utils import log
 from ..storage import load_json
 from ..supervisor import save_options_and_restart
@@ -281,7 +281,7 @@ def render_settings_page(base: str, params: Dict[str, List[str]]) -> bytes:
     overlay = ("<div id='saving-overlay' class='saving-overlay' hidden><div class='saving-dialog'><div class='saving-spinner'></div>"
                "<h2 id='saving-title'>Ayarlar kaydediliyor</h2><p id='saving-message'>Tüm değişiklikler tek seferde Home Assistant'a "
                "yazılıyor. Hermes bir kez yeniden başlayacak; hazır olduğunda ayarlara otomatik dönülecek.</p></div></div>")
-    script = f"<script src='{escape(link(base, 'settings.js'), quote=True)}' defer></script>"
+    script = f"<script src='{escape(link(base, 'settings.js'), quote=True)}?v={escape(APP_VERSION)}' defer></script>"
     return render_page(base, "settings", "Hermes Ayarlar", body, body_class="public settings-page", after_main=overlay, scripts=script)
 
 
@@ -298,7 +298,7 @@ def render_restart_page(base: str, params: Dict[str, List[str]]) -> bytes:
         f"<div class='actions'><a class='button secondary' href='{escape(destination, quote=True)}'>"
         f"{'Ana ekrana dön' if return_to_main else 'Ayarlar ekranına dön'}</a></div>"
     )
-    script = (f"<script id='hermes-restart-script' src='{escape(link(base, 'restart.js'), quote=True)}' defer "
+    script = (f"<script id='hermes-restart-script' src='{escape(link(base, 'restart.js'), quote=True)}?v={escape(APP_VERSION)}' defer "
               f"data-settings-path='{escape(link(base, 'settings'), quote=True)}' data-return-path='{escape(destination, quote=True)}' "
               f"data-health-path='{escape(link(base, 'health'), quote=True)}'></script>")
     return render_page(base, "settings", "Hermes yeniden başlatılıyor", body, scripts=script)

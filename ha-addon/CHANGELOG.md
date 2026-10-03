@@ -1,5 +1,11 @@
 # Değişiklik günlüğü
 
+## 3.2.3
+
+- Sayfa betiklerinin adresine sürüm eklendi. Tarayıcı eski sürümün betiğini
+  bir gün boyunca önbellekten kullanmaya devam ediyordu; bu yüzden İstatistik'te
+  bir güne dokunmak çevrimleri yüklemeyebiliyordu.
+
 ## 3.2.2
 
 - İstatistik sayfası artık yalnız gün özetlerini gönderiyor; bir günün tek tek
