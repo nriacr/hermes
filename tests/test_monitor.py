@@ -1,11 +1,13 @@
 """Monitoring cycle: scheduling, notifications, guards, summary and state."""
 
 import json
+import threading
+import time
 import unittest
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import requests
 
@@ -354,18 +356,11 @@ class SchedulingTests(CycleTestCase):
             with self.subTest(elapsed=elapsed, priority=rule.priority), patch.object(scheduling, "local_now", return_value=now + elapsed):
                 self.assertEqual(scheduling.watch_check_due(rule, checked, 60), due)
 
-    def test_high_priority_is_read_before_medium_and_low(self):
-        tasks = [{"watch": watch(p, f"https://www.amazon.com.tr/dp/{p}{s}", priority=p), "site": s}
-                 for p, s in (("low", "amazon"), ("high", "hepsiburada"), ("medium", "zara"), ("high", "amazon"))]
-        self.assertEqual([task["watch"].priority for task in scheduling.priority_request_order(tasks)],
-                         ["high", "high", "medium", "low"])
-
-    def test_requests_alternate_between_sites(self):
-        items = [{"site": site, "name": f"{site}-{n}"} for site, n in
-                 (("amazon", 1), ("amazon", 2), ("amazon", 3), ("hepsiburada", 1), ("hepsiburada", 2), ("nordbron", 1))]
-        sites = [item["site"] for item in scheduling.balanced_request_order(items)]
-        self.assertCountEqual(sites, [item["site"] for item in items])
-        self.assertEqual(sum(1 for a, b in zip(sites, sites[1:]) if a == b), 0)
+    def test_each_site_reads_high_priority_before_medium_and_low(self):
+        rules = [watch(p, f"https://www.amazon.com.tr/dp/B00000000{i}", priority=p)
+                 for i, p in enumerate(("low", "high", "medium", "high"), start=1)]
+        self.assertEqual([rule.priority for rule in scheduling.priority_order(rules)], ["high", "high", "medium", "low"])
+        self.assertEqual([rule.url for rule in scheduling.priority_order(rules)][:2], [rules[1].url, rules[3].url])
 
     def test_deferred_medium_and_low_watches_keep_their_last_prices(self):
         now = datetime.now(timezone.utc)
@@ -405,6 +400,107 @@ class SchedulingTests(CycleTestCase):
         hermes_monitor.close()
         self.assertEqual(len(calls), 1)
         self.assertIn(key(rules[0]), self.data.state())
+
+
+class SiteQueueTests(CycleTestCase):
+    def test_a_slow_amazon_read_does_not_delay_other_sites(self):
+        amazon = watch(url=AMAZON)
+        nordbron = watch("Çanta", "https://nordbron.com/canta")
+        other_site_done = threading.Event()
+
+        def slow_amazon(rule, ctx, outcome):
+            # Sequential reading would deadlock here: Nordbron could never run.
+            self.assertTrue(other_site_done.wait(5), "Nordbron waited for Amazon")
+            return [OfferResult("iPhone", Decimal("2000"), url=rule.url)]
+
+        def nordbron_read(rule, ctx, outcome):
+            other_site_done.set()
+            return [OfferResult("Çanta", Decimal("2000"), url=rule.url)]
+
+        with (patch.object(AmazonProvider, "read", side_effect=slow_amazon),
+              patch.object(NordbronProvider, "read", side_effect=nordbron_read)):
+            state = self.run_cycle(config([amazon, nordbron]))
+        self.assertEqual(len(self.published_rows()), 2)
+        self.assertTrue(state[key(amazon)]["offer_keys"] and state[key(nordbron)]["offer_keys"])
+
+    def test_one_site_keeps_a_single_sequential_queue(self):
+        rules = [watch(f"Ürün {i}", f"https://www.amazon.com.tr/dp/B00000000{i}") for i in range(1, 5)]
+        active, peak = [0], [0]
+        lock = threading.Lock()
+
+        def read(rule, ctx, outcome):
+            with lock:
+                active[0] += 1
+                peak[0] = max(peak[0], active[0])
+            time.sleep(0.02)
+            with lock:
+                active[0] -= 1
+            return [OfferResult(rule.name, Decimal("2000"), url=rule.url)]
+
+        with patch.object(AmazonProvider, "read", side_effect=read):
+            self.run_cycle(config(rules))
+        self.assertEqual(peak[0], 1)
+        self.assertEqual(len(self.published_rows()), 4)
+
+    def test_parallel_sites_record_every_offer_and_notification(self):
+        rules = [watch(f"Ürün {site}{i}", url, target="1000")
+                 for i in range(3)
+                 for site, url in (("a", f"https://www.amazon.com.tr/dp/B00000000{i}"), ("n", f"https://nordbron.com/{i}"),
+                                   ("t", f"https://www.trendyol.com/x-p-{i}"), ("z", f"https://www.zara.com/tr/tr/x-p0{i}.html"))]
+
+        def read(rule, ctx, outcome):
+            time.sleep(0.005)
+            return [OfferResult(rule.name, Decimal("900"), url=rule.url)]
+
+        from hermes.providers.trendyol import TrendyolProvider
+        from hermes.providers.zara import ZaraProvider
+        with (patch.object(AmazonProvider, "read", side_effect=read), patch.object(NordbronProvider, "read", side_effect=read),
+              patch.object(TrendyolProvider, "read", side_effect=read), patch.object(ZaraProvider, "read", side_effect=read)):
+            state = self.run_cycle(config(rules))
+        self.assertEqual(len(self.published_rows()), 12)
+        self.assertEqual(self.notify.send.call_count, 12)
+        self.assertTrue(all(state[key(rule)]["offer_keys"] for rule in rules))
+        self.assertEqual(sum(1 for entry in state.values() if isinstance(entry, dict) and entry.get("last_alerted_price")), 12)
+
+    def test_an_unexpected_error_in_a_site_queue_reaches_the_cycle(self):
+        rule = watch("Çanta", "https://nordbron.com/canta")
+        hermes_monitor = monitor(config([rule]), self.data, self.notify)
+        with (patch.object(NordbronProvider, "read", side_effect=reader([OfferResult("x", Decimal("1"))])),
+              patch.object(hermes_monitor, "_record_success", side_effect=OSError("disk full")),
+              patch.object(hermes_monitor, "_record_failure", side_effect=OSError("disk full"))):
+            with self.assertRaises(OSError):
+                hermes_monitor.run_cycle()
+        hermes_monitor.close()
+
+
+class HomeAssistantTests(CycleTestCase):
+    def test_cycle_publishes_sensors_and_an_event_per_opportunity(self):
+        bridge = Mock(enabled=True)
+        rules = [watch("iPhone", AMAZON, target="1000"), watch("Çanta", "https://nordbron.com/canta", target="100")]
+        hermes_monitor = monitor(config(rules), self.data, self.notify)
+        hermes_monitor.home_assistant = bridge
+        with (patch.object(AmazonProvider, "read", side_effect=reader([OfferResult("iPhone", Decimal("900"), url=AMAZON)])),
+              patch.object(NordbronProvider, "read", side_effect=reader([OfferResult("Çanta", Decimal("150"), url=rules[1].url)]))):
+            hermes_monitor.run_cycle()
+        hermes_monitor.close()
+        bridge.publish_opportunity.assert_called_once()
+        self.assertEqual(bridge.publish_opportunity.call_args.args[1].price, Decimal("900"))
+        rows = bridge.publish_cycle.call_args.args[0]
+        self.assertEqual(len(rows), 2)
+
+    def test_home_assistant_failures_never_break_monitoring(self):
+        from hermes.homeassistant import HomeAssistantBridge
+
+        rule = watch("iPhone", AMAZON, target="1000")
+        hermes_monitor = monitor(config([rule]), self.data, self.notify)
+        hermes_monitor.home_assistant = HomeAssistantBridge(token="token")
+        with (patch.object(AmazonProvider, "read", side_effect=reader([OfferResult("iPhone", Decimal("900"), url=AMAZON)])),
+              patch("hermes.homeassistant.requests.post", side_effect=requests.ConnectionError("down")) as post):
+            hermes_monitor.run_cycle()
+        hermes_monitor.close()
+        self.assertEqual(post.call_count, 4)  # one event + three sensors, all failed quietly
+        self.assertEqual(len(self.published_rows()), 1)
+        self.notify.send.assert_called_once()
 
 
 class FilterTests(unittest.TestCase):

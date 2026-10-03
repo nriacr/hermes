@@ -1,6 +1,7 @@
 """One monitoring cycle: read due watches, record prices, notify, publish the table."""
 
 import random
+import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -12,6 +13,7 @@ import requests
 
 from ..constants import CYCLE_HISTORY_PATH, PRIORITIES, STATE_PATH, SUMMARY_PATH
 from ..errors import EmptySearchResultsHermesError, OutOfStockHermesError, error_status
+from ..homeassistant import HomeAssistantBridge
 from ..logging_utils import log
 from ..models import HermesConfig, OfferResult, PriceSummaryRow, StockSummaryRow, WatchRule
 from ..notifier import Pushover
@@ -74,13 +76,17 @@ class Monitor:
 
     def __init__(self, config: HermesConfig, providers: Optional[ProviderSet] = None, notifier: Optional[Pushover] = None,
                  files: Optional[DataFiles] = None, sleep: Callable[[float], None] = time.sleep,
-                 should_stop: Callable[[], bool] = lambda: False) -> None:
+                 should_stop: Callable[[], bool] = lambda: False, home_assistant: Optional[HomeAssistantBridge] = None) -> None:
         self.config = config
+        self.home_assistant = home_assistant
         self.should_stop = should_stop
         self.providers = providers or ProviderSet()
         self.notifier = notifier or Pushover(config.pushover_user_key, config.pushover_api_token, config.request_timeout_seconds)
         self.files = files or DataFiles()
         self.sleep = sleep
+        # Site queues run in parallel; every change to the cycle's shared
+        # state, summary and files happens under this lock.
+        self._lock = threading.RLock()
 
     def close(self) -> None:
         self.providers.close()
@@ -123,21 +129,15 @@ class Monitor:
         started_at = time.monotonic()
         run = CycleRun(state=self.load_state())
         self.providers.begin_cycle()
-        with requests.Session() as session:
-            ctx = ReadContext(timeout=self.config.request_timeout_seconds, session=session, pace=self.pace,
-                              watch_names=self._watch_names())
-            tasks = []
-            for watch in self.config.watches:
-                task = self._plan(run, watch)
-                if task:
-                    tasks.append(task)
-            for task in scheduling.priority_request_order(tasks):
-                if self.should_stop():
-                    # Shutting down: keep what was read, publish nothing partial.
-                    log("Hermes kapanıyor; çevrim yarıda bırakıldı, okunan sonuçlar kaydedildi.")
-                    self.save_state(run.state)
-                    return
-                self.check_watch(run, ctx, task["watch"])
+        queues: Dict[str, List[WatchRule]] = {}
+        for watch in self.config.watches:
+            if self._plan(run, watch):
+                queues.setdefault(watch.site, []).append(watch)
+        if self._run_site_queues(run, queues):
+            # Shutting down: keep what was read, publish nothing partial.
+            log("Hermes kapanıyor; çevrim yarıda bırakıldı, okunan sonuçlar kaydedildi.")
+            self.save_state(run.state)
+            return
 
         log("Çevrim öncelik kapsamı: " + " | ".join(
             f"{label}={run.priority_scope[key]['started']} başladı, {run.priority_scope[key]['due']} sırası geldi, "
@@ -145,6 +145,7 @@ class Monitor:
             for key, label in (("high", "yüksek"), ("medium", "orta"), ("low", "düşük"))
         ))
         if self.config.watches:
+            # A cycle lasts until the slowest site queue has finished.
             scan_seconds = time.monotonic() - started_at
             cycle_seconds = scan_seconds + self.config.interval_seconds
             rows = summary.deduplicate_summary_rows(run.summary_rows)
@@ -152,10 +153,54 @@ class Monitor:
             summary.record_cycle_duration(self.files.cycle_history, cycle_seconds)
             alerts.maybe_alert_summary_drop(run.state, rows, self.config, self.notifier)
             alerts.maybe_alert_search_failures(run.state, run.search_failures, self.notifier)
+            self.on_cycle_published(run, rows, cycle_seconds, scan_seconds)
         self.save_state(run.state)
 
-    def _plan(self, run: CycleRun, watch: WatchRule) -> Optional[Dict[str, Any]]:
-        """Return a task for a due watch; keep the last result of a deferred one."""
+    def on_cycle_published(self, run: "CycleRun", rows: List[PriceSummaryRow], cycle_seconds: float, scan_seconds: float) -> None:
+        """Mirror the finished cycle as Home Assistant sensors."""
+        if self.home_assistant is not None and self.home_assistant.enabled:
+            self.home_assistant.publish_cycle(rows, len(run.stock_rows), run.state, cycle_seconds, scan_seconds)
+
+    def on_opportunity(self, watch: WatchRule, offer: OfferResult, display_name: str, url: str) -> None:
+        """Fire a Home Assistant event for a delivered opportunity notification."""
+        if self.home_assistant is not None and self.home_assistant.enabled:
+            self.home_assistant.publish_opportunity(watch, offer, display_name, url)
+
+    def _run_site_queues(self, run: "CycleRun", queues: Dict[str, List[WatchRule]]) -> bool:
+        """Read every site's due watches in its own queue; True when stopped early.
+
+        Each site keeps one sequential queue with its own request pacing, so a
+        slow or protected site never delays the others.
+        """
+        watch_names = self._watch_names()
+        stopped = threading.Event()
+        failures: List[BaseException] = []
+
+        def work(site_watches: List[WatchRule]) -> None:
+            try:
+                with requests.Session() as session:
+                    ctx = ReadContext(timeout=self.config.request_timeout_seconds, session=session, pace=self.pace,
+                                      watch_names=watch_names)
+                    for watch in scheduling.priority_order(site_watches):
+                        if self.should_stop():
+                            stopped.set()
+                            return
+                        self.check_watch(run, ctx, watch)
+            except BaseException as exc:  # noqa: BLE001 - re-raised in the cycle's own thread
+                failures.append(exc)
+
+        workers = [threading.Thread(target=work, args=(site_watches,), name=f"hermes-{site}", daemon=True)
+                   for site, site_watches in queues.items()]
+        for worker in workers:
+            worker.start()
+        for worker in workers:
+            worker.join()
+        if failures:
+            raise failures[0]
+        return stopped.is_set()
+
+    def _plan(self, run: CycleRun, watch: WatchRule) -> bool:
+        """True for a due watch; a deferred one keeps its last result."""
         priority = scheduling.watch_priority(watch)
         provider = self.providers[watch.site]
         key = make_watch_key(watch)
@@ -173,29 +218,33 @@ class Monitor:
             if not guard or entry.get("amazon_partial_result"):
                 run.summary_rows.extend(summary.cached_summary_rows(watch, key, run.state, seller))
                 run.stock_rows.extend(summary.cached_stock_rows(watch, entry, seller))
-            return None
+            return False
         run.priority_scope[priority]["due"] += 1
-        return {"site": watch.site, "watch": watch}
+        return True
 
     def check_watch(self, run: CycleRun, ctx: ReadContext, watch: WatchRule) -> None:
         provider = self.providers[watch.site]
         key = make_watch_key(watch)
-        entry = run.state.get(key, {})
-        entry = entry if isinstance(entry, dict) else {}
         seller = site_label(watch.site)
         outcome = WatchRead()
-        if provider.backs_off_on_protection and self._guarded(run, watch, key, entry, seller):
-            return
-        try:
+        with self._lock:
+            entry = run.state.get(key, {})
+            entry = entry if isinstance(entry, dict) else {}
+            if provider.backs_off_on_protection and self._guarded(run, watch, key, entry, seller):
+                return
             run.priority_scope[scheduling.watch_priority(watch)]["started"] += 1
+        try:
             ctx.pace(f"{seller} | {(watch.name or watch.url)[:64]}")
             offers = (offer for offer in provider.read(watch, ctx, outcome) if provider.keeps_offer(watch, offer))
             recorded = self._record_offers(run, provider, watch, entry, seller, offers)
-            self._record_success(run, provider, watch, key, seller, recorded, outcome)
+            with self._lock:
+                self._record_success(run, provider, watch, key, seller, recorded, outcome)
         except OutOfStockHermesError as exc:
-            self._record_out_of_stock(run, provider, watch, key, entry, seller, outcome, exc)
+            with self._lock:
+                self._record_out_of_stock(run, provider, watch, key, entry, seller, outcome, exc)
         except Exception as exc:  # noqa: BLE001
-            self._record_failure(run, provider, watch, key, entry, seller, outcome, exc)
+            with self._lock:
+                self._record_failure(run, provider, watch, key, entry, seller, outcome, exc)
 
     def _guarded(self, run: CycleRun, watch: WatchRule, key: str, entry: Dict[str, Any], seller: str) -> bool:
         remaining = state_ops.guard_remaining_seconds(run.state, key)
@@ -231,6 +280,7 @@ class Monitor:
 
     def _record_offers(self, run: CycleRun, provider: Provider, watch: WatchRule, entry: Dict[str, Any],
                        seller: str, offers) -> "RecordedOffers":
+        """Record streamed offers; network reads and notifications stay outside the lock."""
         state = run.state
         offers, entry, stock_return_sent = self._stock_return(provider, watch, entry, seller, offers)
         offer_iterator = iter(offers)
@@ -246,27 +296,30 @@ class Monitor:
                 log(f"Sonuç dikkate alınmadı: {seller} | {display_name} | {skip_reason}")
                 continue
             matched_url = offer.url or watch.url
-            item_key = self._offer_key(state, watch, entry, matched_url, offer.is_warehouse)
-            offer_entry = state.get(item_key, {})
-            offer_entry = offer_entry if isinstance(offer_entry, dict) else {}
-            recorded.offer_keys.append(item_key)
             context = f"{seller} | {display_name}"
-            min_price, max_price = state_ops.sanitized_price_bounds(offer_entry, offer.price, watch.target_price, context)
             price_checked_at = datetime.now(timezone.utc).isoformat()
-            run.summary_rows.append(PriceSummaryRow(
-                seller=seller, product_title=display_name, product_url=matched_url, price=offer.price,
-                target_price=watch.target_price, min_price=min_price, max_price=max_price,
-                search_group=recorded.search_group, search_group_label=recorded.search_group_label,
-                is_warehouse=offer.is_warehouse, tracking_id=watch.tracking_id, priority=watch.priority,
-                price_checked_at=price_checked_at,
-            ))
+            with self._lock:
+                item_key = self._offer_key(state, watch, entry, matched_url, offer.is_warehouse)
+                offer_entry = state.get(item_key, {})
+                offer_entry = offer_entry if isinstance(offer_entry, dict) else {}
+                recorded.offer_keys.append(item_key)
+                min_price, max_price = state_ops.sanitized_price_bounds(offer_entry, offer.price, watch.target_price, context)
+                run.summary_rows.append(PriceSummaryRow(
+                    seller=seller, product_title=display_name, product_url=matched_url, price=offer.price,
+                    target_price=watch.target_price, min_price=min_price, max_price=max_price,
+                    search_group=recorded.search_group, search_group_label=recorded.search_group_label,
+                    is_warehouse=offer.is_warehouse, tracking_id=watch.tracking_id, priority=watch.priority,
+                    price_checked_at=price_checked_at,
+                ))
+                wants_alert = not stock_return_sent and state_ops.should_alert(
+                    offer_entry, offer.price, watch.target_price, watch.notify_once_in_24h)
             log(f"Kontrol edildi: {seller} | {display_name} | fiyat={format_tl(offer.price, with_currency=True)} | "
                 f"hedef={format_tl(watch.target_price, with_currency=True)}")
 
             # A stock-return notification already reached the user for this
             # watch; it counts as the alert instead of a second message.
             alert_sent = False
-            if not stock_return_sent and state_ops.should_alert(offer_entry, offer.price, watch.target_price, watch.notify_once_in_24h):
+            if wants_alert:
                 seller_note = f" ({offer.seller})" if offer.seller and (provider.alert_shows_seller or offer.is_warehouse) else ""
                 message = (f"Site: {seller}\n{display_name}\n"
                            f"Güncel fiyat: {format_tl(offer.price, with_currency=True)}{seller_note}\n"
@@ -276,22 +329,25 @@ class Monitor:
             elif offer.price <= watch.target_price and watch.notify_once_in_24h:
                 log(f"Bildirim atlandı, 24 saat dolmadı veya fiyat daha düşük değil: {seller} | {matched_url}")
 
-            updated = state_ops.updated_offer_entry(offer_entry, offer.price, watch.target_price,
-                                                    alert_sent or stock_return_sent, context)
-            updated.update({
-                "title": display_name, "url": matched_url, "configured_url": watch.url, "watch_name": watch.name,
-                "tracking_id": watch.tracking_id, "size": watch.size, "site": watch.site,
-                "include_variations": watch.include_variations, "priority": watch.priority,
-                "last_price_checked_at": price_checked_at, "search_group": recorded.search_group,
-                "search_group_label": recorded.search_group_label, "is_warehouse": offer.is_warehouse,
-                "warehouse_evidence": bool(offer.is_warehouse), "last_error": None, "last_error_status": None,
-            })
-            state[item_key] = updated
+            with self._lock:
+                updated = state_ops.updated_offer_entry(state.get(item_key, offer_entry), offer.price, watch.target_price,
+                                                        alert_sent or stock_return_sent, context)
+                updated.update({
+                    "title": display_name, "url": matched_url, "configured_url": watch.url, "watch_name": watch.name,
+                    "tracking_id": watch.tracking_id, "size": watch.size, "site": watch.site,
+                    "include_variations": watch.include_variations, "priority": watch.priority,
+                    "last_price_checked_at": price_checked_at, "search_group": recorded.search_group,
+                    "search_group_label": recorded.search_group_label, "is_warehouse": offer.is_warehouse,
+                    "warehouse_evidence": bool(offer.is_warehouse), "last_error": None, "last_error_status": None,
+                })
+                state[item_key] = updated
+                if alert_sent:
+                    log(f"Bildirim gönderildi: {seller} | {display_name}")
+                    # Publish the opportunity now; rows of watches still pending stay visible.
+                    summary.save_incremental_summary(self.files.summary, run.summary_rows, run.stock_rows)
+                    self.save_state(state)
             if alert_sent:
-                log(f"Bildirim gönderildi: {seller} | {display_name}")
-                # Publish the opportunity now; rows of watches still pending stay visible.
-                summary.save_incremental_summary(self.files.summary, run.summary_rows, run.stock_rows)
-                self.save_state(state)
+                self.on_opportunity(watch, offer, display_name, matched_url)
         return recorded
 
     @staticmethod

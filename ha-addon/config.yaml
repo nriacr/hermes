@@ -18,6 +18,8 @@ watchdog: "http://[HOST]:[PORT:8099]/health"
 timeout: 20
 hassio_api: true
 hassio_role: manager
+# Publishes Hermes sensors and the hermes_firsat event to Home Assistant.
+homeassistant_api: true
 panel_title: Hermes
 panel_icon: mdi:tag-heart
 ports:

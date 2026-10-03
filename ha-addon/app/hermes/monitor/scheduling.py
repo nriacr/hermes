@@ -35,32 +35,6 @@ def watch_check_due(watch: WatchRule, state_entry: Dict[str, Any], global_interv
     return elapsed_seconds >= interval_seconds
 
 
-def balanced_request_order(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Alternate sites so one site never receives a long run of requests."""
-    buckets: Dict[str, List[Dict[str, Any]]] = {}
-    site_order: List[str] = []
-    for item in items:
-        site = str(item.get("site") or "unknown").strip().lower() or "unknown"
-        if site not in buckets:
-            buckets[site] = []
-            site_order.append(site)
-        buckets[site].append(item)
-
-    ordered: List[Dict[str, Any]] = []
-    last_site = ""
-    while any(buckets.values()):
-        candidates = [site for site in site_order if buckets[site] and site != last_site]
-        if not candidates:
-            candidates = [site for site in site_order if buckets[site]]
-        selected_site = max(candidates, key=lambda site: (len(buckets[site]), -site_order.index(site)))
-        ordered.append(buckets[selected_site].pop(0))
-        last_site = selected_site
-    return ordered
-
-
-def priority_request_order(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Prioritize high watches while still balancing sites within each tier."""
-    ordered: List[Dict[str, Any]] = []
-    for priority in PRIORITIES:
-        ordered.extend(balanced_request_order([item for item in items if watch_priority(item["watch"]) == priority]))
-    return ordered
+def priority_order(watches: List[WatchRule]) -> List[WatchRule]:
+    """One site's due watches: high first, then medium, then low; stable within a tier."""
+    return sorted(watches, key=lambda watch: PRIORITIES.index(watch_priority(watch)))

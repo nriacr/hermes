@@ -14,6 +14,7 @@ from datetime import timedelta
 from typing import Any, Callable, Dict, Optional
 
 from ..constants import APP_VERSION
+from ..homeassistant import HomeAssistantBridge
 from ..logging_utils import log
 from ..models import HermesConfig
 from ..notifier import Pushover
@@ -78,14 +79,15 @@ def log_cycle_banner(config: HermesConfig) -> None:
 
 class MonitorService:
     def __init__(self, config: HermesConfig, files: Optional[DataFiles] = None, providers: Optional[ProviderSet] = None,
-                 notifier: Optional[Pushover] = None) -> None:
+                 notifier: Optional[Pushover] = None, home_assistant: Optional[HomeAssistantBridge] = None) -> None:
         self.config = config
         self.files = files or DataFiles()
         self._commands: "queue.Queue[Command]" = queue.Queue()
         self._wake = threading.Event()
         self._stop = threading.Event()
         self.monitor = Monitor(config, providers=providers, notifier=notifier, files=self.files, sleep=self._sleep,
-                               should_stop=self._stop.is_set)
+                               should_stop=self._stop.is_set,
+                               home_assistant=home_assistant if home_assistant is not None else HomeAssistantBridge())
         # Set when the loop has ended; until then panel actions are queued.
         self.finished = False
         self.cycle_started_at: Optional[float] = None

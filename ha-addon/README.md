@@ -69,6 +69,28 @@ Bu yapıda Hermes, arama sonuçlarındaki ürün kartlarını okur; taksit ve ku
 
 Telegram dinleme varsayılan olarak kapalıdır. Aktif edildiğinde Hermes config'teki kanalları dinler; mesajda keyword geçer ve exclude keyword'e takılmazsa Pushover bildirimi gönderir. `telegram_saved_messages_enabled` açıksa Kayıtlı Mesajlar'a gönderilen desteklenen ürün bağlantısı için Hermes önce hedef fiyatı sorar. Uygulamaların gönderdiği kısa bağlantılar da gerçek desteklenen ürün adresine çevrilir. Doğrudan ürün linkinde fiyat yanıtı kaydı oluşturur; arama linkinde ek olarak ürün adını ister. Grup ve beden daha sonra Hermes Ayarlar ekranından eklenebilir. İlk Telegram girişinde kod telefona gönderilir; gelen kod `verification_code` alanına yazılıp Hermes yeniden başlatıldığında session `/data/telegram_keyword_alert` altında kalıcı hale gelir.
 
+## Home Assistant'ta Hermes
+
+Hermes her çevrimden sonra Home Assistant'a şu sensörleri yazar:
+
+- `sensor.hermes_firsat_sayisi`: hedef fiyatın altındaki ürün sayısı. `firsatlar`
+  özelliğinde site, ürün, fiyat, hedef, fark, depo ve link bulunur (en fazla 25).
+- `sensor.hermes_son_tur`: son çevrimin bittiği zaman; süre, ürün ve stok dışı
+  sayıları özelliklerde.
+- `sensor.hermes_hata_sayisi`: son 24 saatte okunamayan takip sayısı ve hatalar.
+
+Her fırsat bildiriminde `hermes_firsat` olayı tetiklenir (site, takip, ürün,
+fiyat, hedef, fark, depo, satıcı, link). Örnek otomasyon tetikleyicisi:
+
+```yaml
+trigger:
+  - trigger: event
+    event_type: hermes_firsat
+```
+
+Sensörler Home Assistant yeniden başladığında bir sonraki çevrim bitince
+yeniden oluşur. Home Assistant'a ulaşılamaması izlemeyi etkilemez.
+
 ## Veri Dosyaları
 
 - `/data/options.json`: Home Assistant tarafından yazılan ayarlar
@@ -89,8 +111,9 @@ public panel (8100) ve Telegram dinleme aynı süreçtedir.
 
 1. Ayarlar yüklenir ve doğrulanır. Ayarlarda hata varsa izleme başlamaz; panel
    açık kalır ve hatayı ana ekranda gösterir.
-2. Sırası gelen takipler önceliğe göre (yüksek → orta → düşük) ve siteler
-   arasında dengeli sırayla kontrol edilir.
+2. Her site kendi sırasında, aynı anda kontrol edilir; bir sitenin yavaşlığı
+   veya koruması diğerlerini bekletmez. Her sitede takipler önceliğe göre
+   (yüksek → orta → düşük) ve sitenin kendi istek aralığıyla okunur.
 3. Linkin ürün mü arama mı olduğu otomatik anlaşılır.
 4. Hedef altındaki fırsat hemen bildirilir ve tablo o anda güncellenir.
 5. Çevrim sonunda tablo, istatistik ve durum dosyası kaydedilir.
@@ -114,7 +137,7 @@ Hermes her siteyi kendi sağlayıcısında okur. Bir sitenin fiyat okuma kuralı
 - **H&M:** Renk ve beden stok bilgisini siteye özel veri yolu üzerinden okur. Stokta olmayan beden hata olarak değil, `Stokta Olmayanlar` bölümünde gösterilir.
 - **Ben Gurme:** Shopify ürün verisindeki canlı stok ve varyant bilgisini okur. Stoktaki her gramaj ayrı satır olarak değerlendirilir; ürün tamamen tükendiyse bu teknik hata sayılmaz ve `Stokta Olmayanlar` bölümünde gösterilir. Ürün tekrar stokta olduğunda hedef fiyattan bağımsız tek bir stok bildirimi gönderilir.
 
-Kontrol sırası aynı siteye art arda istek gelmesini azaltacak biçimde dengelenir. Amazon ve Hepsiburada'nın bot koruması veya değişken sayfa yapısı nedeniyle ek kurtarma denemeleri yalnızca ilk okuma başarısız olduğunda çalışır. Amazon CAPTCHA/429/503 döndürürse, arama bağlantılarındaki 503 yanıtları dahil, Hermes yalnızca etkilenen takip bağlantısını önce 15 dakika, yinelenirse 30 ve en fazla 60 dakika bekletip kendiliğinden yeniden dener. Hata görünür kalır, başarılı okumada bekleme sıfırlanır; diğer bağlantılar taranmaya devam eder. Koruma, fiyat okunmuş bir varyanttan sonra gelirse o doğrulanmış teklif korunur. Amazon Depo teklifi denetimi otomatik yürür; hızlı çevrim için varyasyon taramasını yalnızca gerçekten ihtiyaç duyulan takiplerde etkinleştirmek en verimli yaklaşımdır.
+Her site kendi sırasıyla ve istekler arasında ayarlanan bekleme süresiyle okunur. Amazon ve Hepsiburada'nın bot koruması veya değişken sayfa yapısı nedeniyle ek kurtarma denemeleri yalnızca ilk okuma başarısız olduğunda çalışır. Amazon CAPTCHA/429/503 döndürürse, arama bağlantılarındaki 503 yanıtları dahil, Hermes yalnızca etkilenen takip bağlantısını önce 15 dakika, yinelenirse 30 ve en fazla 60 dakika bekletip kendiliğinden yeniden dener. Hata görünür kalır, başarılı okumada bekleme sıfırlanır; diğer bağlantılar taranmaya devam eder. Koruma, fiyat okunmuş bir varyanttan sonra gelirse o doğrulanmış teklif korunur. Amazon Depo teklifi denetimi otomatik yürür; hızlı çevrim için varyasyon taramasını yalnızca gerçekten ihtiyaç duyulan takiplerde etkinleştirmek en verimli yaklaşımdır.
 
 Amazon aramalarında başlığı `Hariç tut` terimleriyle eşleşen sonuçlar, ürün ayrıntısı isteği açılmadan elenir. Varyasyonlu ürünlerde bulunan her varyasyon her uygun çevrimde yeniden okunur; varyasyon bağlantıları veya fiyatları önbellekten atlanmaz.
 

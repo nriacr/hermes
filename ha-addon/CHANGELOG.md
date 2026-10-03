@@ -6,6 +6,16 @@ Hermes baştan yeniden düzenlendi. Takip kartların, fiyat geçmişi, bildirim
 hafızası, Telegram oturumu, ayar anahtarları ve adresler aynı kalır; veri
 dosyalarının biçimi değişmediği için 2.5.48'e geri dönmek mümkündür.
 
+**Yeni**
+
+- Her site kendi sırasında kontrol ediliyor. Amazon yavaşladığında veya
+  korumaya girdiğinde Hepsiburada, Zara ve diğerleri artık beklemiyor. Her
+  sitenin (Amazon dahil) tek bir sırası ve kendi istek aralığı var.
+- Home Assistant'ta Hermes sensörleri: `sensor.hermes_firsat_sayisi`
+  (fırsatların listesiyle), `sensor.hermes_son_tur`, `sensor.hermes_hata_sayisi`.
+  Her fırsat bildiriminde `hermes_firsat` olayı tetikleniyor; HA
+  otomasyonlarında ve panolarında kullanılabilir. Pushover aynen çalışıyor.
+
 **Düzeltmeler**
 
 - Panel ve izleyici artık tek uygulama. "Bildirim Sıfırla" ikinci bir tarama

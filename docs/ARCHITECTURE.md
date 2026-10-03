@@ -35,6 +35,7 @@ Hermes is a Home Assistant add-on running continuously on a Raspberry Pi. It:
 │       ├── supervisor.py             # Save options + restart via Supervisor
 │       ├── storage.py                # Atomic JSON files under /data
 │       ├── notifier.py               # Pushover
+│       ├── homeassistant.py          # HA sensors and the hermes_firsat event
 │       ├── models.py, errors.py, utils.py, constants.py
 │       ├── monitor/
 │       │   ├── cycle.py              # One cycle: read, record, notify, publish
@@ -117,8 +118,13 @@ card due immediately after the restart.
 2. For each watch: if a guard is active, the absence retry time has not come,
    or the priority interval has not passed, keep its last rows (not for a
    guarded watch without partial results) and skip it.
-3. Read due watches high → medium → low, alternating sites inside a tier, with
-   the configured random delay before each request.
+3. Every site reads its due watches in its own queue (one thread per site),
+   high → medium → low, with the configured random delay before each of its
+   requests. A slow or protected site never delays another; each site, Amazon
+   included, still has exactly one sequential queue. All changes to the
+   cycle's state, table and files are serialized under one lock; network reads
+   and notifications happen outside it. The cycle ends when the slowest queue
+   has finished.
 4. The provider returns offers (Amazon product families stream them). Apply
    the own-seller filter, the minimum price and exclusions, then record each
    offer: history, summary row, notification.
@@ -126,7 +132,8 @@ card due immediately after the restart.
    immediately so the dashboard never shows a partial cycle. A failed
    notification is logged and retried on the next read.
 6. At the end publish the table, record the cycle duration, run the
-   summary-drop and search-error warnings, save the state.
+   summary-drop and search-error warnings, update the Home Assistant sensors,
+   save the state.
 
 Out-of-stock results become stock rows and allow a later notification at the
 same price. Errors remove only that watch's stale rows. An explicit "no
@@ -191,7 +198,26 @@ results" search notice is a normal stock row read again after five minutes.
 - Zara, H&M: colors and the requested size; a missing size is a stock state.
 - Ben Gurme: Shopify JSON; every weight variant is a row; stock-return notice.
 
-## 9. Panel
+## 9. Home Assistant entities
+
+With `homeassistant_api: true` Hermes writes through the Supervisor proxy:
+
+- `sensor.hermes_firsat_sayisi`: number of rows at or below target; attribute
+  `firsatlar` (site, urun, fiyat, hedef, fark, depo, url; at most 25, biggest
+  saving first).
+- `sensor.hermes_son_tur`: end of the last cycle (timestamp); attributes
+  `sure_saniye`, `tarama_saniye`, `urun_sayisi`, `stokta_olmayan`.
+- `sensor.hermes_hata_sayisi`: watches whose last read failed in 24 hours;
+  attribute `hatalar` (site, takip, hata).
+- Event `hermes_firsat` after every delivered opportunity notification with
+  `site`, `takip`, `urun`, `fiyat`, `fiyat_metni`, `hedef`, `fark`, `depo`,
+  `satici`, `url`.
+
+These entities are not stored by Home Assistant itself; Hermes rewrites them
+after every cycle, so they reappear after a Home Assistant restart at the end
+of the next cycle. Home Assistant being unreachable never affects monitoring.
+
+## 10. Panel
 
 One router serves both surfaces. Ingress pages use relative links ("." or
 ".."), public pages `/public/<token>`; the token needs at least 24
@@ -205,7 +231,7 @@ whole-lira prices (`1.500 TL`), product names 60 characters without ellipsis,
 group titles 70 characters, full text in the tooltip, priority dots on normal
 rows only, DEPO tag on warehouse rows, compact mobile cards, correct Turkish.
 
-## 10. Telegram
+## 11. Telegram
 
 Channel messages matching a keyword (and no exclusion) are relayed with their
 link. In Saved Messages a supported link (short links are resolved) starts a
@@ -214,7 +240,7 @@ quick add: Hermes asks for the target price and adds a card to the
 connection is re-established after 60 seconds; a login waiting for a code or
 2FA stops until the settings are saved again.
 
-## 11. Testing and release
+## 12. Testing and release
 
 ```bash
 python3 -m venv .venv

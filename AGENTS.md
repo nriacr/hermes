@@ -113,7 +113,11 @@ of each site are described in `docs/ARCHITECTURE.md`.
 - Keep add-on slug `hermes`, ingress port `8099`, public port `8100`, and health
   route `/health` unless an explicit migration is approved.
 - Preserve `hassio_api: true` and `hassio_role: manager`; settings writes and
-  restarts depend on Supervisor access.
+  restarts depend on Supervisor access. `homeassistant_api: true` publishes the
+  Hermes sensors and the `hermes_firsat` event; their names are a public
+  interface for the user's automations.
+- Each site reads in its own sequential queue; never add parallel requests
+  within one site. Shared cycle state is changed only under the monitor lock.
 - The container runs one process (`python -m hermes`): the monitor loop in the
   main thread; the ingress (8099) and public (8100) servers and Telegram in
   threads. While it runs, only the monitor writes `state.json`; panel actions
