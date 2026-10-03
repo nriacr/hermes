@@ -14,7 +14,7 @@ from ..logging_utils import log
 from ..models import HermesConfig, PriceSummaryRow
 from ..notifier import Pushover
 from ..utils import local_now, normalize_offer_text, parse_iso_datetime, utc_now
-from .state import guard_store, meta, watch_key
+from .state import guard_store, meta, site_guard_key, watch_key
 
 # Search pages can fluctuate by a few products between normal cycles. Alert
 # only when both the absolute loss and the relative loss are meaningful.
@@ -67,7 +67,7 @@ def has_silent_access_failure(state: Dict[str, Any], config: HermesConfig) -> bo
         if isinstance(entry, dict) and entry.get("last_error"):
             if entry.get("last_error_status") == 503 or is_silent_access_error(HermesError(str(entry["last_error"]))):
                 return True
-        guard = guards.get(key, {})
+        guard = guards.get(site_guard_key(watch.site), {})
         if isinstance(guard, dict) and guard.get("kind") in SILENT_GUARD_KINDS:
             return True
     return False

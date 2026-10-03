@@ -1,5 +1,30 @@
 # Değişiklik günlüğü
 
+## 3.3.0
+
+- Amazon engeli azaltıldı. İlk CAPTCHA/503'te artık tüm Amazon kartları durur
+  (kart başına değil); mola 3 → 6 → 12 → 20 dakika, her molanın sonunda tek bir
+  yoklama isteği atılır. Yoklama engellenirse bir üst basamağa çıkılır, bir
+  okuma başarılı olunca merdiven baştan başlar. Mola sürerken kartlar son
+  fiyatlarını göstermeye devam eder.
+- Kayan istek penceresi: son 35 dakikada en çok 300 Amazon isteği. Sınır, engelsiz
+  her saatte (pencere sınıra yaklaşmışsa) %5 yükselir (en çok 500); engel
+  gelince o anki pencere sayısı "eşik" olarak kaydedilir, sınır eşiğin %85'ine
+  iner ve orada sabit kalır. Engelden sonra ilk saat, ayrıca her açılışta ilk
+  10 dakika yarım hızla (istek aralığı iki katı) çalışılır. Sınır, eşik ve yarım
+  hız süresi yeniden başlatmada kaybolmaz (`/data/amazon_access.json`).
+- Amazon çerezleri `/data/amazon_cookies.json` dosyasında saklanır; yeniden
+  başlatma Amazon'a yeni bir ziyaretçi gibi görünmez.
+- Ürün sayfası ve ikinci el (Depo) listesi her ~100 saniyede, varyant taraması
+  ~270 saniyede bir okunur. Taramalar arasında diğer varyantların son fiyatları
+  gerçekte okundukları zamanla gösterilir; bu fiyatlar yeni fiyat noktası ya da
+  yeni bildirim sayılmaz. Hızlı okumalar uzun taramalardan önce yapılır.
+- Hariç tut filtresine takılan varyant sayfası bir kez okunup komşuları 15–45
+  dakika hatırlanır; sayfa her turda yeniden istenmez (loglarda isteklerin
+  %43'ü 1 TB / 2 TB sayfalarıydı).
+- Log: 10 dakikada bir `Amazon ölçüm:` satırı (pencere, sınır, eşik, anlık
+  istek/dk, son 60 dk istek ve engel, Depo kontrolü ve doğrulanan teklif sayısı).
+
 ## 3.2.3
 
 - Sayfa betiklerinin adresine sürüm eklendi. Tarayıcı eski sürümün betiğini

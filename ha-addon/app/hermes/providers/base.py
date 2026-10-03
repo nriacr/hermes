@@ -237,6 +237,14 @@ class Provider:
     def begin_cycle(self) -> None:
         """Forget per-cycle caches; prices are always read again next cycle."""
 
+    def read_rank(self, watch) -> int:
+        """Order inside a priority tier: lower ranks are read first (quick reads before long ones)."""
+        return 0
+
+    def read_due(self, watch) -> bool:
+        """False while the provider's own rhythm says this watch need not be read yet."""
+        return True
+
     def close(self) -> None:
         """Release process-lived resources such as sessions or browsers."""
 

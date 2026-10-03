@@ -1,12 +1,16 @@
 """Shared helpers for the Hermes regression tests."""
 
 import json
+import os
 import sys
 import tempfile
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from unittest.mock import Mock
+
+# Nothing in the tests may touch the real /data (Amazon's budget and cookie files live there).
+os.environ.setdefault("HERMES_DATA_DIR", tempfile.mkdtemp(prefix="hermes-test-data-"))
 
 APP_PATH = Path(__file__).resolve().parents[1] / "ha-addon" / "app"
 if str(APP_PATH) not in sys.path:

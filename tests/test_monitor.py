@@ -77,41 +77,47 @@ class CycleTestCase(unittest.TestCase):
 
 
 class NotificationTests(CycleTestCase):
-    def test_captcha_and_503_errors_stay_silent_but_a_verified_depot_offer_notifies(self):
-        errors = [BotProtectionHermesError("Amazon bot koruması nedeniyle doğrulama (captcha) sayfası döndü."),
-                  HttpStatusHermesError(503, "https://www.amazon.com.tr/s?k=test"),
-                  requests.HTTPError("Service Unavailable", response=SimpleNamespace(status_code=503)),
-                  BotProtectionHermesError("Hepsiburada bot koruması nedeniyle doğrulama (captcha) sayfası döndü."),
-                  HermesError("Amazon varyantları okunamadı.")]
-        searches = [watch(f"Arama {i}", f"https://www.hepsiburada.com/ara?q=test{i}" if i == 3 else f"https://www.amazon.com.tr/s?k=test{i}")
-                    for i in range(5)]
+    def test_access_errors_are_silent_kinds(self):
+        for error in (BotProtectionHermesError("Amazon bot koruması nedeniyle doğrulama (captcha) sayfası döndü."),
+                      HttpStatusHermesError(503, "https://www.amazon.com.tr/s?k=test"),
+                      requests.HTTPError("Service Unavailable", response=SimpleNamespace(status_code=503)),
+                      BotProtectionHermesError("Hepsiburada bot koruması nedeniyle doğrulama (captcha) sayfası döndü.")):
+            with self.subTest(error=str(error)):
+                self.assertTrue(alerts.is_silent_access_error(error))
+        self.assertFalse(alerts.is_silent_access_error(HermesError("Amazon varyantları okunamadı.")))
+
+    def test_captcha_stays_silent_but_a_verified_depot_offer_notifies(self):
+        searches = [watch("Arama 0", "https://www.amazon.com.tr/s?k=test0"),
+                    watch("Arama 1", "https://www.amazon.com.tr/s?k=test1"),
+                    watch("Arama 3", "https://www.hepsiburada.com/ara?q=test3")]
         depot = watch("Depo", AMAZON)
-        cfg = config(searches + [depot])
+        cfg = config([depot] + searches)
         self.data.write_state({"_meta": {"summary_config_signature": alerts.summary_config_signature(cfg),
                                          "summary_expected_row_count": 20, "summary_drop_consecutive_cycles": 4}})
 
         def amazon_read(rule, ctx, outcome):
             if rule is depot:
                 return [OfferResult("Depo ürünü", Decimal("500"), seller="Amazon Depo", url=depot.url, is_warehouse=True)]
-            if rule is searches[4]:
-                outcome.blocked = HttpStatusHermesError(503, rule.url)
-            raise errors[searches.index(rule)]
+            raise BotProtectionHermesError("Amazon bot koruması nedeniyle doğrulama (captcha) sayfası döndü.")
 
         now = datetime(2026, 10, 2, SEARCH_ERROR_NOTIFICATION_HOUR, tzinfo=timezone.utc)
+        hepsiburada_error = BotProtectionHermesError("Hepsiburada bot koruması nedeniyle doğrulama (captcha) sayfası döndü.")
         with (patch.object(AmazonProvider, "read", side_effect=amazon_read),
-              patch.object(HepsiburadaProvider, "read", side_effect=lambda rule, *_a: (_ for _ in ()).throw(errors[3])),
+              patch.object(HepsiburadaProvider, "read", side_effect=lambda rule, *_a: (_ for _ in ()).throw(hepsiburada_error)),
               patch.object(alerts, "local_now", return_value=now)):
             state = self.run_cycle(cfg)
         self.notify.send.assert_called_once()
         self.assertIn("Depo ürünü", self.notify.send.call_args.args[1])
         self.assertEqual(len(self.published_rows()), 1)
         self.assertTrue(self.published_rows()[0]["is_warehouse"])
-        for rule in searches:
-            self.assertTrue(state[key(rule)]["last_error"])
+        # The first Amazon search hit the block; the site is paused, so the second never ran.
+        self.assertTrue(state[key(searches[0])]["last_error"])
+        self.assertNotIn("last_error", state.get(key(searches[1]), {}))
+        self.assertTrue(state[key(searches[2])]["last_error"])
+        for rule in (searches[0], searches[2]):
             self.assertNotIn("last_error_notified_at", state[key(rule)])
         self.assertNotIn("last_search_failure_alert_at", state["_meta"])
         self.assertNotIn("last_summary_drop_alert_at", state["_meta"])
-        self.assertEqual(state[key(searches[4])]["last_error_status"], 503)
 
     def test_partial_depot_opportunity_notifies_even_when_a_sibling_hits_captcha(self):
         rule = watch("Depo", AMAZON)
@@ -126,7 +132,7 @@ class NotificationTests(CycleTestCase):
         self.notify.send.assert_called_once()
         self.assertTrue(state[key(rule)]["amazon_partial_result"])
         self.assertIn("captcha", state[key(rule)]["last_error"])
-        self.assertGreater(state_ops.guard_remaining_seconds(state, key(rule)), 0)
+        self.assertGreater(state_ops.guard_remaining_seconds(state, state_ops.site_guard_key("amazon")), 0)
 
     def test_other_search_errors_send_individual_and_aggregate_notifications(self):
         searches = [watch(f"Arama {i}", f"https://www.amazon.com.tr/s?k=test{i}") for i in range(4)]
@@ -262,60 +268,89 @@ class EmptyAndStockTests(CycleTestCase):
 
 
 class ProtectionGuardTests(CycleTestCase):
-    def test_guard_backs_off_15_then_30_minutes_and_clears(self):
+    SITE = state_ops.site_guard_key("amazon")
+
+    def test_guard_pauses_3_6_12_then_20_minutes_and_clears(self):
         state = {}
         error = BotProtectionHermesError("Amazon captcha")
         now = datetime(2026, 10, 1, 12, tzinfo=timezone.utc)
-        with patch.object(state_ops, "local_now", return_value=now):
-            state_ops.note_guard(state, "amazon-a", "test", error)
-            self.assertEqual(state_ops.guard_remaining_seconds(state, "amazon-a"), 15 * 60)
-            self.assertEqual(state_ops.guard_remaining_seconds(state, "amazon-b"), 0)
-        with patch.object(state_ops, "local_now", return_value=now + timedelta(minutes=15, seconds=1)):
-            self.assertEqual(state_ops.guard_remaining_seconds(state, "amazon-a"), 0)
-            state_ops.note_guard(state, "amazon-a", "test", error)
-            self.assertEqual(state_ops.guard_remaining_seconds(state, "amazon-a"), 30 * 60)
-        state_ops.clear_guard(state, "amazon-a")
-        self.assertNotIn("amazon-a", state["_meta"]["amazon_protection"])
+        waited = []
+        for _ in range(5):
+            with patch.object(state_ops, "local_now", return_value=now):
+                state_ops.note_guard(state, self.SITE, "test", error)
+                waited.append(state_ops.guard_remaining_seconds(state, self.SITE))
+                self.assertEqual(state_ops.guard_remaining_seconds(state, "site:other"), 0)
+            now += timedelta(seconds=waited[-1] + 1)
+        self.assertEqual(waited, [3 * 60, 6 * 60, 12 * 60, 20 * 60, 20 * 60])
+        state_ops.clear_guard(state, self.SITE)
+        self.assertNotIn(self.SITE, state["_meta"]["amazon_protection"])
 
-    def test_http_503_from_a_search_pauses_the_watch(self):
+    def test_guards_of_older_versions_are_forgotten(self):
+        state = {}
+        state_ops.note_guard(state, "amazon-a", "old", BotProtectionHermesError("captcha"))
+        state_ops.note_guard(state, self.SITE, "new", BotProtectionHermesError("captcha"))
+        state_ops.drop_watch_guards(state)
+        self.assertEqual(list(state["_meta"]["amazon_protection"]), [self.SITE])
+
+    def test_http_503_from_a_search_pauses_the_whole_site(self):
         response = requests.Response()
         response.status_code = 503
         error = requests.HTTPError("503 Server Error", response=response)
         rule = watch("Hue", "https://www.amazon.com.tr/s?k=hue")
         with patch.object(AmazonProvider, "read", side_effect=reader(error)) as read:
             state = self.run_cycle(config([rule]))
-            self.assertEqual(state["_meta"]["amazon_protection"][key(rule)]["kind"], "http_503")
+            self.assertEqual(state["_meta"]["amazon_protection"][self.SITE]["kind"], "http_503")
             self.run_later(config([rule]), seconds=120)
         read.assert_called_once()
 
-    def test_guarded_watch_shows_no_stale_price_and_recovers_after_expiry(self):
+    def test_a_block_stops_every_other_amazon_watch_in_the_same_cycle(self):
+        first = watch("Bir", "https://www.amazon.com.tr/s?k=bir")
+        second = watch("İki", "https://www.amazon.com.tr/s?k=iki")
+        with patch.object(AmazonProvider, "read", side_effect=reader(BotProtectionHermesError("Amazon captcha"))) as read:
+            state = self.run_cycle(config([first, second]))
+        read.assert_called_once()
+        self.assertIn(self.SITE, state["_meta"]["amazon_protection"])
+        self.assertTrue(any("erişim molasında" in line for line in LOG_LINES))
+
+    def test_paused_site_keeps_the_last_price_and_recovers_after_expiry(self):
         rule = watch(url=AMAZON, target="100000")
         state = {key(rule): {"last_price": "90000", "url": AMAZON,
                              "last_checked_at": (datetime.now(timezone.utc) - timedelta(minutes=2)).isoformat()}}
-        state_ops.note_guard(state, key(rule), "iPhone", BotProtectionHermesError("Amazon captcha"))
+        state_ops.note_guard(state, self.SITE, "iPhone", BotProtectionHermesError("Amazon captcha"))
         self.data.write_state(state)
         offers = [OfferResult("iPhone", Decimal("120000"), "Amazon.com.tr", AMAZON)]
         with patch.object(AmazonProvider, "read", side_effect=reader(offers)) as read:
             state = self.run_cycle(config([rule]))
             read.assert_not_called()
-            self.assertEqual(self.published_rows(), [])
-            state["_meta"]["amazon_protection"][key(rule)]["retry_after"] = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
+            state["_meta"]["amazon_protection"][self.SITE]["retry_after"] = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
             self.data.write_state(state)
             state = self.run_cycle(config([rule]))
         read.assert_called_once()
         self.assertEqual(len(self.published_rows()), 1)
-        self.assertNotIn(key(rule), state["_meta"]["amazon_protection"])
+        self.assertNotIn(self.SITE, state["_meta"]["amazon_protection"])
 
-    def test_expired_guard_of_a_medium_watch_is_probed_once_then_follows_its_priority(self):
-        rule = watch("Juo", "https://www.amazon.com.tr/s?k=Juo", priority="medium")
-        state = {key(rule): {"last_checked_at": utc_now()}}
-        state_ops.note_guard(state, key(rule), "Juo", BotProtectionHermesError("Amazon captcha"))
-        state["_meta"]["amazon_protection"][key(rule)]["retry_after"] = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
+    def test_after_the_pause_the_first_read_is_the_probe_and_a_failed_probe_climbs_a_step(self):
+        rule = watch("Juo", "https://www.amazon.com.tr/s?k=Juo")
+        state = {}
+        state_ops.note_guard(state, self.SITE, "Juo", BotProtectionHermesError("Amazon captcha"))
+        state["_meta"]["amazon_protection"][self.SITE]["retry_after"] = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
         self.data.write_state(state)
-        with patch.object(AmazonProvider, "read", side_effect=reader(EmptySearchResultsHermesError("Boş sonuç"))) as read:
+        with patch.object(AmazonProvider, "read", side_effect=reader(BotProtectionHermesError("Amazon captcha"))) as read:
             state = self.run_cycle(config([rule]), times=2)
         read.assert_called_once()
-        self.assertNotIn(key(rule), state["_meta"]["amazon_protection"])
+        guard = state["_meta"]["amazon_protection"][self.SITE]
+        self.assertEqual(guard["consecutive_blocks"], 2)
+        self.assertGreater(state_ops.guard_remaining_seconds(state, self.SITE), 5 * 60)
+
+    def test_a_probe_that_finds_nothing_ends_the_pause(self):
+        rule = watch("Juo", "https://www.amazon.com.tr/s?k=Juo")
+        state = {}
+        state_ops.note_guard(state, self.SITE, "Juo", BotProtectionHermesError("Amazon captcha"))
+        state["_meta"]["amazon_protection"][self.SITE]["retry_after"] = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
+        self.data.write_state(state)
+        with patch.object(AmazonProvider, "read", side_effect=reader(EmptySearchResultsHermesError("Boş sonuç"))):
+            state = self.run_cycle(config([rule]))
+        self.assertNotIn(self.SITE, state["_meta"]["amazon_protection"])
         self.assertIsNone(state[key(rule)]["last_error"])
 
     def test_partial_family_keeps_its_offer_while_paused(self):
@@ -328,7 +363,7 @@ class ProtectionGuardTests(CycleTestCase):
         with patch.object(AmazonProvider, "read", side_effect=partial) as read:
             state = self.run_cycle(config([rule]))
             self.assertEqual(len(self.published_rows()), 1)
-            self.assertGreater(state_ops.guard_remaining_seconds(state, key(rule)), 0)
+            self.assertGreater(state_ops.guard_remaining_seconds(state, self.SITE), 0)
             self.run_later(config([rule]), seconds=120)
         read.assert_called_once()
         self.assertEqual(len(self.published_rows()), 1)
@@ -340,6 +375,65 @@ class ProtectionGuardTests(CycleTestCase):
             state = self.run_later(config([rule]))
         self.assertEqual(read.call_count, 2)
         self.assertNotIn(key(rule), state["_meta"].get("amazon_protection", {}))
+
+
+class ReplayedOfferTests(CycleTestCase):
+    """Offers a provider replays from its memory are shown, but are not new readings."""
+
+    def test_replayed_offer_keeps_its_read_time_and_is_neither_a_price_point_nor_an_alert(self):
+        rule = watch(url=AMAZON, target="100000", include_variations=True)
+        fresh = OfferResult("Apple iPhone 17", Decimal("90000"), "Amazon.com.tr", AMAZON)
+        replayed = OfferResult("Apple Watch Ultra", Decimal("80000"), "Amazon.com.tr", AMAZON + "2",
+                               checked_at="2026-10-03T10:00:00+00:00")
+        with patch.object(AmazonProvider, "read", side_effect=reader([fresh, replayed])):
+            state = self.run_cycle(config([rule]))
+        entries = {entry["url"]: entry for entry in state.values() if isinstance(entry, dict) and entry.get("url")}
+        self.assertEqual(set(entries), {AMAZON, AMAZON + "2"})
+        self.assertEqual(entries[AMAZON + "2"]["last_price_checked_at"], "2026-10-03T10:00:00+00:00")
+        self.assertNotEqual(entries[AMAZON]["last_price_checked_at"], "2026-10-03T10:00:00+00:00")
+        # The summary shows the replayed offer with the time it was really read.
+        self.assertEqual([row["price_checked_at"] for row in self.published_rows()], ["2026-10-03T10:00:00+00:00"])
+        # Only the fresh offer notified; the replayed one is below target too but was not read now.
+        self.notify.send.assert_called_once()
+        self.assertIn("Apple iPhone 17", self.notify.send.call_args.args[1])
+
+    def test_replayed_offer_adds_no_price_history_point(self):
+        rule = watch(url=AMAZON, target="100000", include_variations=True)
+        fresh = OfferResult("Apple iPhone 17", Decimal("90000"), "Amazon.com.tr", AMAZON)
+        replayed = OfferResult("Apple Watch Ultra", Decimal("80000"), "Amazon.com.tr", AMAZON + "2",
+                               checked_at="2026-10-03T10:00:00+00:00")
+        hermes_monitor = monitor(config([rule]), self.data, self.notify)
+        try:
+            with patch.object(AmazonProvider, "read", side_effect=reader([fresh, replayed])):
+                with patch.object(hermes_monitor.history, "record_price") as record_price:
+                    hermes_monitor.run_cycle()
+        finally:
+            hermes_monitor.close()
+        self.assertEqual(record_price.call_count, 1)
+
+    def test_watch_not_due_for_the_provider_keeps_its_last_rows_and_is_not_read(self):
+        rule = watch(url=AMAZON, target="100000")
+        hermes_monitor = monitor(config([rule]), self.data, self.notify)
+        try:
+            with patch.object(AmazonProvider, "read", side_effect=reader([OfferResult("iPhone", Decimal("90000"), "Amazon.com.tr", AMAZON)])) as read:
+                hermes_monitor.run_cycle()
+                self.assertEqual(read.call_count, 1)
+                with patch.object(AmazonProvider, "read_due", return_value=False):
+                    hermes_monitor.run_cycle()
+                self.assertEqual(read.call_count, 1)
+        finally:
+            hermes_monitor.close()
+        self.assertEqual(len(self.published_rows()), 1)
+
+
+class ReadOrderTests(CycleTestCase):
+    def test_quick_reads_come_before_long_ones_inside_a_priority_tier(self):
+        long_read = watch("Uzun", "https://www.amazon.com.tr/dp/B000000001", include_variations=True)
+        quick = watch("Hızlı", "https://www.amazon.com.tr/dp/B000000002", include_variations=True)
+        medium_quick = watch("Orta", "https://www.amazon.com.tr/dp/B000000003", priority="medium")
+        ranks = {long_read.url: 1, quick.url: 0, medium_quick.url: 0}
+        ordered = scheduling.priority_order([medium_quick, long_read, quick], lambda rule: ranks[rule.url])
+        self.assertEqual([rule.name for rule in ordered], ["Hızlı", "Uzun", "Orta"])
 
 
 class SchedulingTests(CycleTestCase):

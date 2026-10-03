@@ -9,7 +9,7 @@ from datetime import timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any, Dict
 
-from ..constants import NOTIFY_REPEAT_SECONDS
+from ..constants import NOTIFY_REPEAT_SECONDS, PROTECTION_PAUSE_LADDER_SECONDS
 from ..errors import error_status
 from ..logging_utils import log
 from ..models import WatchRule
@@ -197,8 +197,22 @@ def guard_store(state: Dict[str, Any]) -> Dict[str, Any]:
     return store
 
 
+def site_guard_key(site: str) -> str:
+    """One guard per site: a protection page pauses every watch of the site."""
+    return f"site:{site}"
+
+
+def drop_watch_guards(state: Dict[str, Any]) -> None:
+    """3.3.0 keeps one guard per site; per-watch guards of older versions are forgotten."""
+    store = guard_store(state)
+    for key in [key for key in store if not str(key).startswith("site:")]:
+        del store[key]
+
+
 def guard_cooldown_seconds(consecutive_blocks: int = 1) -> int:
-    return min(60 * 60, 15 * 60 * (2 ** min(max(consecutive_blocks - 1, 0), 2)))
+    """3 → 6 → 12 → 20 minutes; each failed probe climbs one step, a success starts over."""
+    steps = PROTECTION_PAUSE_LADDER_SECONDS
+    return steps[min(max(consecutive_blocks - 1, 0), len(steps) - 1)]
 
 
 def guard_remaining_seconds(state: Dict[str, Any], key: str) -> int:
@@ -224,7 +238,7 @@ GUARD_LABELS = {
 
 
 def note_guard(state: Dict[str, Any], key: str, source: str, exc: BaseException, site_label: str = "Amazon") -> None:
-    """Pause one watch 15 → 30 → 60 minutes after repeated protection pages."""
+    """Pause the whole site after a protection page; repeated blocks climb the ladder."""
     store = guard_store(state)
     now = local_now().astimezone(timezone.utc)
     previous = store.get(key)
@@ -233,7 +247,7 @@ def note_guard(state: Dict[str, Any], key: str, source: str, exc: BaseException,
         previous_count = int(previous.get("consecutive_blocks") or 1) if isinstance(previous, dict) else 1
     except (TypeError, ValueError):
         previous_count = 1
-    consecutive = min(3, previous_count + 1) if previous_at and 0 <= (now - previous_at).total_seconds() < 6 * 60 * 60 else 1
+    consecutive = min(len(PROTECTION_PAUSE_LADDER_SECONDS), previous_count + 1) if previous_at and 0 <= (now - previous_at).total_seconds() < 6 * 60 * 60 else 1
     cooldown = guard_cooldown_seconds(consecutive)
     kind = guard_kind(exc)
     store[key] = {

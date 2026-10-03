@@ -75,6 +75,8 @@ class OfferResult:
     url: Optional[str] = None
     is_warehouse: bool = False
     stock_quantity: Optional[int] = None
+    # Set only on an offer a provider replays from memory: when it was really read (ISO, UTC).
+    checked_at: Optional[str] = None
 
 
 @dataclass

@@ -1,5 +1,6 @@
 """Provider read flows: Amazon variants/search and the other sites' fetchers."""
 
+import time
 import unittest
 from decimal import Decimal
 from types import SimpleNamespace
@@ -59,8 +60,152 @@ class AmazonTestCase(unittest.TestCase):
 
         return patch.object(self.provider, "fetch", side_effect=fetch)
 
-    def read(self, rule, outcome=None, ctx=None):
+    def read(self, rule, outcome=None, ctx=None, fresh=True):
+        """One read; by default as the first read of a watch (a full sweep, nothing remembered).
+
+        `fresh=False` is the next cycle: page caches are dropped, the rhythm memory stays.
+        """
+        if fresh:
+            self.provider.rhythms.clear()
+        else:
+            self.provider.begin_cycle()
         return list(self.provider.read(rule, ctx or context(), outcome or WatchRead()))
+
+
+class AmazonRhythmTests(AmazonTestCase):
+    """The configured page every 100 s, the variant family every 270 s."""
+
+    def family(self, pages):
+        variations = [amazon_parser.AmazonProductVariation("Gümüş", ROOT), amazon_parser.AmazonProductVariation("Turuncu", CHILD)]
+        return (self.serve(pages), patch.object(amazon_parser, "extract_product_variations", return_value=variations))
+
+    def test_a_watch_is_due_until_it_was_read_then_after_its_interval(self):
+        product = watch(url=ROOT, include_variations=True)
+        search = watch("Hue", "https://www.amazon.com.tr/s?k=hue")
+        self.assertTrue(self.provider.read_due(product))
+        with self.serve({ROOT: priced()}), patch.object(amazon_reader.time, "monotonic", return_value=1000):
+            self.read(product)
+            self.assertFalse(self.provider.read_due(product))
+        for seconds, due in ((99, False), (100, True)):
+            with patch.object(amazon_reader.time, "monotonic", return_value=1000 + seconds):
+                self.assertEqual(self.provider.read_due(product), due)
+        with patch.object(amazon_reader.time, "monotonic", return_value=1000):
+            self.provider.rhythms[self.provider._rhythm_key(search)] = amazon_reader.WatchRhythm(main_at=1000)
+        for seconds, due in ((269, False), (270, True)):
+            with patch.object(amazon_reader.time, "monotonic", return_value=1000 + seconds):
+                self.assertEqual(self.provider.read_due(search), due)
+
+    def test_main_reads_rank_before_sweeps(self):
+        rule = watch(url=ROOT, include_variations=True)
+        self.assertEqual(self.provider.read_rank(rule), 1)  # nothing remembered: a sweep is coming
+        with self.serve({ROOT: priced()}), patch.object(amazon_reader.time, "monotonic", return_value=1000):
+            self.read(rule)
+            self.assertEqual(self.provider.read_rank(rule), 0)  # next read is a main read
+        with patch.object(amazon_reader.time, "monotonic", return_value=1270):
+            self.assertEqual(self.provider.read_rank(rule), 1)  # the sweep is due again
+        self.assertEqual(self.provider.read_rank(watch("Hue", "https://www.amazon.com.tr/s?k=hue")), 1)
+
+    def test_main_read_fetches_only_the_configured_page_and_replays_the_other_variants(self):
+        rule = watch(url=ROOT, target="100000", include_variations=True)
+        pages = {ROOT: priced("100,00", "iPhone Gümüş"), CHILD: priced("200,00", "iPhone Turuncu")}
+        serving, variations = self.family(pages)
+        with serving, variations, patch.object(amazon_reader.time, "monotonic", return_value=1000):
+            first = self.read(rule)
+            self.assertEqual(self.fetched, [ROOT, CHILD])
+            self.assertTrue(all(offer.checked_at is None for offer in first))
+        pages[ROOT] = priced("90,00", "iPhone Gümüş")
+        pages[CHILD] = priced("150,00", "iPhone Turuncu")
+        with serving, variations, patch.object(amazon_reader.time, "monotonic", return_value=1100):
+            second = self.read(rule, fresh=False)
+        self.assertEqual(self.fetched, [ROOT, CHILD, ROOT])
+        by_url = {offer.url: offer for offer in second}
+        self.assertEqual(by_url[ROOT].price, Decimal("90"))
+        self.assertIsNone(by_url[ROOT].checked_at)
+        # The other variant is the sweep's price (200), not the new page (150), with the time it was read.
+        self.assertEqual(by_url[CHILD].price, Decimal("200"))
+        self.assertIsNotNone(by_url[CHILD].checked_at)
+
+    def test_the_variant_sweep_runs_again_after_270_seconds(self):
+        rule = watch(url=ROOT, target="100000", include_variations=True)
+        pages = {ROOT: priced("100,00", "iPhone Gümüş"), CHILD: priced("200,00", "iPhone Turuncu")}
+        serving, variations = self.family(pages)
+        with serving, variations:
+            with patch.object(amazon_reader.time, "monotonic", return_value=1000):
+                self.read(rule)
+            pages[CHILD] = priced("150,00", "iPhone Turuncu")
+            with patch.object(amazon_reader.time, "monotonic", return_value=1269):
+                self.assertEqual({o.price for o in self.read(rule, fresh=False)}, {Decimal("100"), Decimal("200")})
+            with patch.object(amazon_reader.time, "monotonic", return_value=1270):
+                self.assertEqual({o.price for o in self.read(rule, fresh=False)}, {Decimal("100"), Decimal("150")})
+        self.assertEqual(self.fetched, [ROOT, CHILD, ROOT, ROOT, CHILD])
+
+    def test_a_sold_out_main_page_drops_its_own_offer_but_not_the_others(self):
+        rule = watch(url=ROOT, target="100000", include_variations=True)
+        pages = {ROOT: priced("100,00", "iPhone Gümüş"), CHILD: priced("200,00", "iPhone Turuncu")}
+        serving, variations = self.family(pages)
+        with serving, variations:
+            with patch.object(amazon_reader.time, "monotonic", return_value=1000):
+                self.read(rule)
+            pages[ROOT] = UNAVAILABLE
+            outcome = WatchRead()
+            with patch.object(amazon_reader.time, "monotonic", return_value=1100):
+                offers = self.read(rule, outcome, fresh=False)
+            self.assertEqual([offer.url for offer in offers], [CHILD])
+            self.assertEqual(outcome.unavailable[0]["product_url"], ROOT)
+            # And the next main read does not bring the sold-out offer back from memory.
+            with patch.object(amazon_reader.time, "monotonic", return_value=1200):
+                self.assertEqual([offer.url for offer in self.read(rule, fresh=False)], [CHILD])
+
+    def test_a_block_in_a_main_read_keeps_the_others_visible_and_reports_the_block(self):
+        rule = watch(url=ROOT, target="100000", include_variations=True)
+        pages = {ROOT: priced("100,00", "iPhone Gümüş"), CHILD: priced("200,00", "iPhone Turuncu")}
+        serving, variations = self.family(pages)
+        with serving, variations:
+            with patch.object(amazon_reader.time, "monotonic", return_value=1000):
+                self.read(rule)
+            pages[ROOT] = BotProtectionHermesError("Amazon captcha")
+            outcome = WatchRead()
+            with patch.object(amazon_reader.time, "monotonic", return_value=1100):
+                offers = self.read(rule, outcome, fresh=False)
+        self.assertEqual([offer.url for offer in offers], [CHILD])
+        self.assertIsInstance(outcome.blocked, BotProtectionHermesError)
+
+    def test_a_block_with_nothing_remembered_raises(self):
+        rule = watch(url=ROOT, target="100000", include_variations=True)
+        with self.serve({ROOT: BotProtectionHermesError("Amazon captcha")}):
+            with self.assertRaises(BotProtectionHermesError):
+                self.read(rule)
+
+    def test_a_watch_without_variants_is_read_in_full_every_time(self):
+        rule = watch(url=ROOT, target="100000")
+        with self.serve({ROOT: priced("100,00")}), patch.object(amazon_reader.time, "monotonic", return_value=1000):
+            self.read(rule)
+            self.read(rule, fresh=False)
+        self.assertEqual(self.fetched, [ROOT, ROOT])
+
+    def test_changed_settings_forget_the_memory(self):
+        rule = watch(url=ROOT, include_variations=True)
+        other = watch(url=ROOT, include_variations=True, excluded_terms=["1 TB"])
+        self.assertNotEqual(self.provider._rhythm_key(rule), self.provider._rhythm_key(other))
+
+    def test_depot_checks_are_counted(self):
+        listing = '<a href="/gp/offer-listing/B000000001?condition=used">Kullanılmış teklifler</a>'
+        depot = OfferResult("iPhone", Decimal("90"), "Amazon Depo", ROOT, True)
+        with (self.serve(lambda url: "depot-listing"),
+              patch.object(amazon_parser, "extract_verified_warehouse_offers_from_listing", side_effect=[[], [depot]])):
+            self.provider.page_offers(ROOT, UNAVAILABLE + listing, context(), WatchRead())
+        counters = self.client.access.counters
+        self.assertEqual((counters["depo_sayfa"], counters["depo_liste"], counters["depo_dogrulanan"]), (1, 1, 1))
+
+    def test_measurements_are_logged_every_ten_minutes(self):
+        LOG_LINES.clear()
+        self.client.access._last_stats_log -= 601
+        self.provider.begin_cycle()
+        self.provider.begin_cycle()
+        lines = [line for line in LOG_LINES if "Amazon ölçüm:" in line]
+        self.assertEqual(len(lines), 1)
+        for expected in ("pencere=", "eşik=", "depo: sayfa kontrolü=", "ana sayfa okuması", "varyant taraması"):
+            self.assertIn(expected, lines[0])
 
 
 class AmazonProductTests(AmazonTestCase):
@@ -158,6 +303,30 @@ class AmazonProductTests(AmazonTestCase):
             expected = Decimal(90000 + index) + Decimal(".87") if offer.is_warehouse else Decimal(120000 + index)
             self.assertEqual(offer.price, expected)
 
+    def test_remembered_exclusions_lose_no_variant_of_a_color_capacity_grid(self):
+        rule = watch(url=ROOT, target="100000", include_variations=True, excluded_terms=["capacity 2"])
+
+        def page_for(url):
+            index = int(extract_asin_from_url(url)[-1]) - 1
+            color, capacity = divmod(index, 3)
+            neighbors = {color * 3 + n for n in range(3)} | {n * 3 + capacity for n in range(3)}
+            swatches = "".join(f'<li data-asin="B00000000{n + 1}" class="swatchUnavailable">Option {n}</li>' for n in sorted(neighbors))
+            return (f'<span id="productTitle">iPhone color {color} capacity {capacity}</span>'
+                    f'<div id="variation_size_name"><ul>{swatches}</ul></div>'
+                    f'<div id="corePriceDisplay_desktop_feature_div"><span class="a-price"><span class="a-offscreen">{120000 + index},00 TL</span></span></div>')
+
+        with self.serve(page_for):
+            first = {offer.url for offer in self.read(rule)}
+            first_fetches = len(self.fetched)
+            self.provider.begin_cycle()
+            second = {offer.url for offer in self.read(rule)}
+        self.assertEqual(first_fetches, 9)
+        # Capacity 2 is excluded: 3 of 9 pages, read once for their neighbours, then taken from memory.
+        self.assertEqual(len(first), 6)
+        self.assertEqual(second, first)
+        self.assertEqual(len(self.fetched) - first_fetches, 6)
+        self.assertEqual(self.client.access.counters["hariç_atlanan"], 3)
+
     def test_exclusions_skip_offer_read_but_still_expand_and_can_upgrade_cache(self):
         urls = [f"https://www.amazon.com.tr/dp/B00000000{number}" for number in range(1, 4)]
         labels = {urls[0]: "256 GB", urls[1]: "1 TB", urls[2]: "512 GB"}
@@ -202,7 +371,7 @@ class AmazonProductTests(AmazonTestCase):
         self.assertEqual(reader.call_count, 3)
         self.assertEqual([offer.url for offer in offers], urls)
 
-    def test_excluded_variants_are_read_again_each_cycle(self):
+    def test_excluded_variants_are_requested_once_then_remembered_with_their_neighbours(self):
         rule = watch(url=ROOT, target="100000", include_variations=True, excluded_terms=["1 TB"])
         variants = {"B000000001": "256 GB", "B000000002": "1 TB", "B000000003": "512 GB"}
 
@@ -217,7 +386,23 @@ class AmazonProductTests(AmazonTestCase):
             for _ in range(2):
                 self.provider.begin_cycle()
                 self.assertEqual(len(self.read(rule)), 2)
-        self.assertEqual([extract_asin_from_url(url) for url in self.fetched], list(variants) * 2)
+        asins = [extract_asin_from_url(url) for url in self.fetched]
+        # The excluded 1 TB page is read in the first cycle only (for its neighbours); the second cycle skips it.
+        self.assertEqual(asins, ["B000000001", "B000000002", "B000000003", "B000000001", "B000000003"])
+        self.assertEqual(self.client.access.counters["hariç_atlanan"], 1)
+
+    def test_remembered_exclusion_expires_and_follows_the_watchs_terms(self):
+        rule = watch(url=ROOT, include_variations=True, excluded_terms=["1 TB"])
+        self.provider._remember_exclusion(CHILD, rule, [])
+        self.assertIsNotNone(self.provider._remembered_exclusion(CHILD, rule))
+        changed = watch(url=ROOT, include_variations=True, excluded_terms=["2 TB"])
+        self.assertIsNone(self.provider._remembered_exclusion(CHILD, changed))
+        self.provider._remember_exclusion(CHILD, rule, [])
+        entry = self.client.excluded_pages[CHILD]
+        self.assertGreater(entry["refresh_at"], time.monotonic() + 15 * 60 - 1)
+        self.assertLess(entry["refresh_at"], time.monotonic() + 45 * 60 + 1)
+        with patch.object(amazon_reader.time, "monotonic", return_value=entry["refresh_at"] + 1):
+            self.assertIsNone(self.provider._remembered_exclusion(CHILD, rule))
 
     def test_parsed_product_page_is_shared_between_watches_in_one_cycle(self):
         rules = [watch(url=ROOT, target="100000", include_variations=True),

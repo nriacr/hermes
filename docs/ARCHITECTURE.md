@@ -42,7 +42,7 @@ Hermes is a Home Assistant add-on running continuously on a Raspberry Pi. It:
 │       │   ├── cycle.py              # One cycle: read, record, notify, publish
 │       │   ├── runner.py             # Loop, panel commands, health
 │       │   ├── scheduling.py         # Due checks, priority and site order
-│       │   ├── state.py              # state.json entries, history, guards
+│       │   ├── state.py              # state.json entries, history, the per-site guard
 │       │   ├── summary.py            # latest_price_summary.json, cycle history
 │       │   ├── alerts.py             # Summary-drop and search-error warnings
 │       │   └── inspect.py            # Link test (no state, no notification)
@@ -50,7 +50,7 @@ Hermes is a Home Assistant add-on running continuously on a Raspberry Pi. It:
 │       │   ├── base.py               # Provider interface + shared parse helpers
 │       │   ├── http.py               # Shared HTTP helpers
 │       │   ├── registry.py           # All sites
-│       │   ├── amazon/               # client, browser, parser, search, reader
+│       │   ├── amazon/               # client, access (budget), browser, parser, search, reader
 │       │   ├── hepsiburada/          # fetching; parsing split into common,
 │       │   │                         # prices, variants, search, detail
 │       │   └── trendyol.py, network.py, beymenclub.py, bengurme.py,
@@ -87,7 +87,9 @@ Hermes is a Home Assistant add-on running continuously on a Raspberry Pi. It:
 | File | Purpose |
 |---|---|
 | `options.json` | Supervisor-managed options; contains secrets |
-| `state.json` | per-watch/offer state, price history, suppression, guards |
+| `state.json` | per-watch/offer state, price history, suppression, the per-site guard |
+| `amazon_access.json` | Amazon's request-window limit, threshold, last block and slow-start end (since 3.3) |
+| `amazon_cookies.json` | Amazon's anonymous cookies, so a restart is not a new visitor (since 3.3, mode 600) |
 | `latest_price_summary.json` | the published table (complete or merged) |
 | `hermes.db` | SQLite (since 3.2): cycles, price points, site reads and requests |
 | `cycle_history.json` | cycle durations up to 3.1; read once for the migration, then left as is |
@@ -134,11 +136,13 @@ card due immediately after the restart.
 ## 6. Monitoring cycle
 
 1. Load `state.json`; reset every provider's cycle caches.
-2. For each watch: if a guard is active, the absence retry time has not come,
-   or the priority interval has not passed, keep its last rows (not for a
-   guarded watch without partial results) and skip it.
+2. For each watch: if the absence retry time has not come, the priority
+   interval has not passed or the provider's own rhythm says it is not due
+   (`Provider.read_due`), keep its last rows and skip it. While a site's guard
+   is active (Amazon pauses as a whole), its watches keep their last rows too.
 3. Every site reads its due watches in its own queue (one thread per site),
-   high → medium → low, with the configured random delay before each of its
+   high → medium → low (inside a tier the provider's `read_rank` puts quick
+   reads before long ones), with the configured random delay before each of its
    requests. A slow or protected site never delays another; each site, Amazon
    included, still has exactly one sequential queue. All changes to the
    cycle's state, table and files are serialized under one lock; network reads
@@ -191,14 +195,38 @@ results" search notice is a normal stock row read again after five minutes.
   late navigations and redirects to another ASIN.
 - Challenge detection looks at validation forms/inputs, a Robot Check title
   or explicit instructions; script text alone is not a challenge.
-- Protection back-off: the affected watch pauses 15 → 30 → 60 minutes; the
-  pause survives restarts, ends with a successful read, and an expired pause
-  is probed once before the normal priority schedule applies again. Partial
-  family results stay visible while paused.
+- Protection back-off (since 3.3): one guard for the whole site. The first
+  CAPTCHA/HTTP 503 pauses every Amazon watch (3 → 6 → 12 → 20 minutes, the
+  ladder in `PROTECTION_PAUSE_LADDER_SECONDS`); the first read after the pause
+  is the single probe. A failed probe climbs one step, any successful read
+  clears the guard. The pause survives restarts (`state.json`); watches keep
+  showing their last rows while it lasts. Guards of older versions (one per
+  watch) are dropped at the first cycle.
+- Request budget (`access.py`, since 3.3): a rolling 35-minute window caps how
+  many requests may start. The limit begins at 300, rises 5 % after every
+  clean hour in which the window reached 80 % of it (never above 500), and a
+  block records the window count as the threshold, lowers the limit to 85 % of
+  it and freezes it (floor 60). After a block the minimum request gap doubles
+  for an hour, and for ten minutes after every start. Limit, threshold and slow
+  start survive restarts in `amazon_access.json`; cookies in
+  `amazon_cookies.json`. Every ten minutes the log gets one `Amazon ölçüm:`
+  line (window, limit, threshold, requests/min, last-hour requests and blocks,
+  Depo checks and verified offers, skipped excluded pages).
+- Two rhythms per product watch (since 3.3, `WatchRhythm`): the configured page
+  with its used listing (where Depo offers show) every 100 s, the variant
+  family every 270 s. Between sweeps the other variants' offers are replayed
+  from memory with `OfferResult.checked_at` (the time they were really read);
+  the cycle shows them but adds no price point and no alert for them. Search
+  watches follow the sweep interval.
 - Product families (`include_variations`, at most 60 ASINs) follow the real
   Twister edges of every fetched page. Exclusions are applied to the title and
-  selected variant before any price is read; discovery continues. A verified
-  Amazon Depo offer is yielded before the next variant is read.
+  selected variant before any price is read; discovery continues. A page a
+  watch excludes by title is read once for its neighbours; the neighbours are
+  then kept for 15–45 minutes (spread per page) and the page itself is not
+  requested again (`client.excluded_pages`; the watch's exclusion terms are
+  part of the key). A first page lists only one dimension's edges, so the page
+  cannot be skipped before it was read once. A verified Amazon Depo offer is
+  yielded before the next variant is read.
 - An explicitly unavailable or unpriced variant is not requested again for
   five minutes (process-wide, at most 512 entries); prices are never cached.
 - Search pages stop at "All Departments / Tüm Kategoriler içindeki sonuçlar",

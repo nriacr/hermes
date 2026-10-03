@@ -1,5 +1,6 @@
 """One monitoring cycle: read due watches, record prices, notify, publish the table."""
 
+import math
 import random
 import threading
 import time
@@ -165,6 +166,7 @@ class Monitor:
     def run_cycle(self) -> None:
         started_at = time.monotonic()
         run = CycleRun(state=self.load_state())
+        state_ops.drop_watch_guards(run.state)
         self.providers.begin_cycle()
         queues: Dict[str, List[WatchRule]] = {}
         for watch in self.config.watches:
@@ -243,7 +245,7 @@ class Monitor:
                                       pace=self._site_pace(site), watch_names=watch_names,
                                       measure=lambda method, kind, result, ms, site=site:
                                       self.history.record_request(site, method, kind, result, ms))
-                    for watch in scheduling.priority_order(site_watches):
+                    for watch in scheduling.priority_order(site_watches, self.providers[site].read_rank):
                         if self.should_stop():
                             stopped.set()
                             return
@@ -269,18 +271,16 @@ class Monitor:
         entry = run.state.get(key, {})
         entry = entry if isinstance(entry, dict) else {}
         seller = site_label(watch.site)
-        guard = state_ops.guard_store(run.state).get(key) if provider.backs_off_on_protection else None
-        recovery_due = bool(guard) and state_ops.guard_remaining_seconds(run.state, key) == 0
         retry_after = parse_iso_datetime(entry.get("amazon_no_offer_retry_after"))
         absence_deferred = (not scheduling.manually_due(watch, entry) and retry_after is not None
                             and datetime.now(timezone.utc) < retry_after)
-        if not recovery_due and (absence_deferred or not scheduling.watch_check_due(watch, entry, self.config.interval_seconds)):
-            run.priority_scope[priority]["deferred"] += 1
-            # A guarded watch shows no stale price; partial results stay visible.
-            if not guard or entry.get("amazon_partial_result"):
+        if (absence_deferred or not provider.read_due(watch)
+                or not scheduling.watch_check_due(watch, entry, self.config.interval_seconds)):
+            if not scheduling.manually_due(watch, entry) or absence_deferred:
+                run.priority_scope[priority]["deferred"] += 1
                 run.summary_rows.extend(summary.cached_summary_rows(watch, key, run.state, seller))
                 run.stock_rows.extend(summary.cached_stock_rows(watch, entry, seller))
-            return False
+                return False
         run.priority_scope[priority]["due"] += 1
         return True
 
@@ -323,18 +323,19 @@ class Monitor:
             self.history.record_read(watch.site, result, round((time.monotonic() - started_at) * 1000))
 
     def _guarded(self, run: CycleRun, watch: WatchRule, key: str, entry: Dict[str, Any], seller: str) -> bool:
-        remaining = state_ops.guard_remaining_seconds(run.state, key)
+        """True while the site is paused after a protection page; the watch keeps its last result."""
+        guard_key = state_ops.site_guard_key(watch.site)
+        remaining = state_ops.guard_remaining_seconds(run.state, guard_key)
         if remaining <= 0:
             return False
-        if entry.get("amazon_partial_result"):
-            run.summary_rows.extend(summary.cached_summary_rows(watch, key, run.state, seller))
-            run.stock_rows.extend(summary.cached_stock_rows(watch, entry, seller))
-        guard = state_ops.guard_store(run.state).get(key, {})
+        run.summary_rows.extend(summary.cached_summary_rows(watch, key, run.state, seller))
+        run.stock_rows.extend(summary.cached_stock_rows(watch, entry, seller))
+        guard = state_ops.guard_store(run.state).get(guard_key, {})
         last_logged = parse_iso_datetime(guard.get("last_skip_logged_at"))
         if not last_logged or (local_now().astimezone(timezone.utc) - last_logged).total_seconds() >= 60:
             guard["last_skip_logged_at"] = utc_now()
-            log(f"{seller} linki son erişim hatası nedeniyle atlandı ({guard.get('kind', 'captcha')}): "
-                f"{watch.name or watch.url} | kalan={max(1, round(remaining / 60))} dk")
+            log(f"{seller} erişim molasında ({guard.get('kind', 'captcha')}): tüm {seller} kartları bekliyor | "
+                f"kalan={max(1, math.ceil(remaining / 60))} dk")
         return True
 
     def _stock_return(self, provider: Provider, watch: WatchRule, entry: Dict[str, Any], seller: str, offers):
@@ -373,14 +374,17 @@ class Monitor:
                 continue
             matched_url = offer.url or watch.url
             context = f"{seller} | {display_name}"
-            price_checked_at = datetime.now(timezone.utc).isoformat()
+            # An offer the provider replays from its own memory keeps the time it was read;
+            # it is neither a new price point nor a new alert.
+            replayed = offer.checked_at is not None
+            price_checked_at = offer.checked_at or datetime.now(timezone.utc).isoformat()
             with self._lock:
                 item_key = self._offer_key(state, watch, entry, matched_url, offer.is_warehouse)
                 offer_entry = state.get(item_key, {})
                 offer_entry = offer_entry if isinstance(offer_entry, dict) else {}
                 recorded.offer_keys.append(item_key)
                 min_price, max_price = state_ops.sanitized_price_bounds(offer_entry, offer.price, watch.target_price, context)
-                if not state_ops.is_absurd_price(offer_entry, offer.price, watch.target_price):
+                if not replayed and not state_ops.is_absurd_price(offer_entry, offer.price, watch.target_price):
                     self.history.record_price(item_key, watch.site, display_name, offer.price)
                 run.summary_rows.append(PriceSummaryRow(
                     seller=seller, product_title=display_name, product_url=matched_url, price=offer.price,
@@ -389,8 +393,18 @@ class Monitor:
                     is_warehouse=offer.is_warehouse, tracking_id=watch.tracking_id, priority=watch.priority,
                     price_checked_at=price_checked_at,
                 ))
-                wants_alert = not stock_return_sent and state_ops.should_alert(
+                wants_alert = not replayed and not stock_return_sent and state_ops.should_alert(
                     offer_entry, offer.price, watch.target_price, watch.notify_once_in_24h)
+            if replayed:
+                with self._lock:
+                    state[item_key] = {**offer_entry, "last_price_checked_at": price_checked_at, "last_error": None,
+                                       "last_error_status": None, "site": watch.site, "is_warehouse": offer.is_warehouse,
+                                       "title": display_name, "url": matched_url, "configured_url": watch.url,
+                                       "watch_name": watch.name, "tracking_id": watch.tracking_id, "size": watch.size,
+                                       "include_variations": watch.include_variations, "priority": watch.priority,
+                                       "search_group": recorded.search_group, "search_group_label": recorded.search_group_label,
+                                       "warehouse_evidence": bool(offer.is_warehouse)}
+                continue
             log(f"Kontrol edildi: {seller} | {display_name} | fiyat={format_tl(offer.price, with_currency=True)} | "
                 f"hedef={format_tl(watch.target_price, with_currency=True)}")
 
@@ -467,11 +481,12 @@ class Monitor:
         if not provider.backs_off_on_protection:
             return
         if outcome.blocked:
-            state_ops.note_guard(run.state, key, watch.name or watch.url, outcome.blocked, seller)
+            state_ops.note_guard(run.state, state_ops.site_guard_key(watch.site), watch.name or watch.url,
+                                 outcome.blocked, seller)
             run.state[key]["last_error"] = str(outcome.blocked)
             run.state[key]["amazon_partial_result"] = True
         else:
-            state_ops.clear_guard(run.state, key, seller)
+            state_ops.clear_guard(run.state, state_ops.site_guard_key(watch.site), seller)
 
     def _record_out_of_stock(self, run: CycleRun, provider: Provider, watch: WatchRule, key: str, entry: Dict[str, Any],
                              seller: str, outcome: WatchRead, exc: OutOfStockHermesError) -> None:
@@ -495,7 +510,7 @@ class Monitor:
         stock_rows = summary.cached_stock_rows(watch, failed, seller)
         run.stock_rows.extend(stock_rows)
         if provider.backs_off_on_protection:
-            state_ops.clear_guard(run.state, key, seller)
+            state_ops.clear_guard(run.state, state_ops.site_guard_key(watch.site), seller)
         # A missing item must not keep its previous price visible until the cycle ends.
         summary.save_incremental_summary(self.files.summary, [], stock_rows, removed_price_ids=stale_ids)
 
@@ -511,11 +526,12 @@ class Monitor:
         access_error = outcome.blocked or exc
         if provider.backs_off_on_protection:
             if outcome.blocked or provider.is_protection_error(exc):
-                state_ops.note_guard(run.state, key, watch.name or watch.url, access_error, seller)
+                state_ops.note_guard(run.state, state_ops.site_guard_key(watch.site), watch.name or watch.url,
+                                     access_error, seller)
             else:
                 # A recovery probe is consumed once even when access worked but found
                 # nothing; an old guard cannot keep bypassing the priority schedule.
-                state_ops.clear_guard(run.state, key, seller)
+                state_ops.clear_guard(run.state, state_ops.site_guard_key(watch.site), seller)
         silent = alerts.is_silent_access_error(access_error)
         reportable_search_error = is_search and not normal_empty and not silent
         if reportable_search_error:

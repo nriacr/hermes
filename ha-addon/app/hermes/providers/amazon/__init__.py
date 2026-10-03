@@ -3,10 +3,20 @@
 import math
 import re
 import time
+import zlib
+from collections import deque
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
-from typing import Dict, Iterator, List, Optional
+from typing import Deque, Dict, Iterator, List, Optional, Tuple
 
-from ...constants import SITE_AMAZON
+from ...constants import (
+    AMAZON_ACCESS_PATH,
+    AMAZON_COOKIES_PATH,
+    AMAZON_EXCLUDED_PAGE_REFRESH_SECONDS,
+    AMAZON_MAIN_INTERVAL_SECONDS,
+    AMAZON_SWEEP_INTERVAL_SECONDS,
+    SITE_AMAZON,
+)
 from ...errors import EmptySearchResultsHermesError, HermesError, OutOfStockHermesError, PriceUnavailableHermesError
 from ...logging_utils import log
 from ...models import OfferResult, SearchResultItem, WatchRule
@@ -14,6 +24,7 @@ from ...utils import extract_asin_from_url, is_amazon_search_url, log_cell, norm
 from ..base import Provider, ReadContext, WatchRead, excluded_term_in_title
 from ..http import raise_if_age_verification
 from . import parser
+from .access import AmazonAccess
 from .client import AmazonClient, is_protection_error
 from .search import dedupe_results, extract_result_candidates, filter_matching_results, title_matches_any_keyword, title_matches_keyword
 
@@ -23,6 +34,23 @@ NO_OFFER_RECHECK_SECONDS = 5 * 60
 NO_OFFER_CACHE_LIMIT = 512
 PAGE_CACHE_LIMIT = 128
 VARIATION_LIMIT = 60
+EXCLUDED_PAGE_CACHE_LIMIT = 512
+
+
+@dataclass
+class WatchRhythm:
+    """What the provider remembers of one product watch between cycles.
+
+    The configured page (with its used listing, where Amazon Depo offers show
+    up) is read every AMAZON_MAIN_INTERVAL_SECONDS; the whole variant family
+    every AMAZON_SWEEP_INTERVAL_SECONDS. Between sweeps the other variants'
+    offers are replayed with the time they were really read.
+    """
+
+    main_at: Optional[float] = None
+    sweep_at: Optional[float] = None
+    offers: Dict[str, List[OfferResult]] = field(default_factory=dict)
+    unavailable: List[dict] = field(default_factory=list)
 
 
 def is_platform_seller(seller: Optional[str]) -> bool:
@@ -77,7 +105,9 @@ class AmazonProvider(Provider):
     spaces_own_requests = True
 
     def __init__(self, client: Optional[AmazonClient] = None) -> None:
-        self.client = client or AmazonClient()
+        self.client = client or AmazonClient(access=AmazonAccess(AMAZON_ACCESS_PATH), cookies_path=AMAZON_COOKIES_PATH)
+        self.rhythms: Dict[Tuple, WatchRhythm] = {}
+        self.read_seconds: Dict[str, Deque[float]] = {"ana": deque(maxlen=20), "tarama": deque(maxlen=20)}
         self.begin_cycle()
 
     def begin_cycle(self) -> None:
@@ -86,6 +116,44 @@ class AmazonProvider(Provider):
         self.responses: Dict = {}
         self.pages: Dict[str, dict] = {}
         self.details: Dict[str, List[SearchResultItem]] = {}
+        self._log_measurements()
+
+    def _log_measurements(self) -> None:
+        access = self.client.access
+        if not access.stats_due():
+            return
+
+        def mean(name: str) -> str:
+            values = self.read_seconds[name]
+            return f"{sum(values) / len(values):.0f} sn" if values else "-"
+
+        counters = access.counters
+        log(f"Amazon ölçüm: {access.stats_line()} | ana sayfa okuması ort={mean('ana')} | "
+            f"varyant taraması ort={mean('tarama')} | depo: sayfa kontrolü={counters.get('depo_sayfa', 0)}, "
+            f"ikinci el listesi={counters.get('depo_liste', 0)}, doğrulanan={counters.get('depo_dogrulanan', 0)} | "
+            f"hariç nedeniyle atlanan istek={counters.get('hariç_atlanan', 0)}")
+
+    # -- rhythm ----------------------------------------------------------------
+
+    @staticmethod
+    def _rhythm_key(watch: WatchRule) -> Tuple:
+        return (watch.url, watch.include_variations, watch.official_seller_only, tuple(watch.excluded_terms))
+
+    def read_rank(self, watch: WatchRule) -> int:
+        """Main-page reads (one request) go before variant sweeps (many requests)."""
+        rhythm = self.rhythms.get(self._rhythm_key(watch))
+        sweeping = (self.is_search_url(watch.url) or rhythm is None or rhythm.sweep_at is None
+                    or not watch.include_variations
+                    or time.monotonic() - rhythm.sweep_at >= AMAZON_SWEEP_INTERVAL_SECONDS)
+        return 1 if sweeping else 0
+
+    def read_due(self, watch: WatchRule) -> bool:
+        """A product page is due again after the main interval, a search page after the sweep interval."""
+        rhythm = self.rhythms.get(self._rhythm_key(watch))
+        if rhythm is None or rhythm.main_at is None:
+            return True
+        interval = AMAZON_SWEEP_INTERVAL_SECONDS if self.is_search_url(watch.url) else AMAZON_MAIN_INTERVAL_SECONDS
+        return time.monotonic() - rhythm.main_at >= interval
 
     def close(self) -> None:
         self.client.close()
@@ -105,9 +173,66 @@ class AmazonProvider(Provider):
         return False
 
     def read(self, watch: WatchRule, ctx: ReadContext, outcome: WatchRead):
+        rhythm = self.rhythms.setdefault(self._rhythm_key(watch), WatchRhythm())
+        now = time.monotonic()
+        rhythm.main_at = now
         if self.is_search_url(watch.url):
             return self.read_search(watch, ctx, outcome)
-        return self.iter_product(watch, ctx, outcome)
+        if (watch.include_variations and rhythm.sweep_at is not None
+                and now - rhythm.sweep_at < AMAZON_SWEEP_INTERVAL_SECONDS):
+            return self._read_main(watch, ctx, outcome, rhythm)
+        return self._read_sweep(watch, ctx, outcome, rhythm)
+
+    def _read_sweep(self, watch: WatchRule, ctx: ReadContext, outcome: WatchRead, rhythm: WatchRhythm) -> Iterator[OfferResult]:
+        """The whole variant family; what it finds becomes the memory the main reads replay."""
+        started = time.monotonic()
+        collected: Dict[str, List[OfferResult]] = {}
+        try:
+            for offer in self.iter_product(watch, ctx, outcome):
+                collected.setdefault(offer.url or watch.url, []).append(
+                    replace(offer, checked_at=datetime.now(timezone.utc).isoformat()))
+                yield offer
+        except Exception as exc:  # noqa: BLE001
+            if not outcome.blocked and not is_protection_error(exc):
+                # Nothing readable: no stale offer may be replayed later.
+                rhythm.offers, rhythm.sweep_at = collected, started
+                rhythm.unavailable = list(outcome.unavailable)
+            raise
+        if outcome.blocked:
+            rhythm.offers.update(collected)
+        else:
+            rhythm.offers, rhythm.sweep_at = collected, started
+            rhythm.unavailable = list(outcome.unavailable)
+            self.read_seconds["tarama"].append(time.monotonic() - started)
+
+    def _read_main(self, watch: WatchRule, ctx: ReadContext, outcome: WatchRead, rhythm: WatchRhythm) -> Iterator[OfferResult]:
+        """The configured page and its used listing now; the other variants from memory."""
+        started = time.monotonic()
+        fresh: List[OfferResult] = []
+        error: Optional[BaseException] = None
+        try:
+            for offer in self.iter_product(watch, ctx, outcome, main_only=True):
+                fresh.append(replace(offer, checked_at=datetime.now(timezone.utc).isoformat()))
+                yield offer
+        except Exception as exc:  # noqa: BLE001
+            error = exc
+        main_url = watch.url
+        if not (outcome.blocked or (error is not None and is_protection_error(error))):
+            # A page that answered without offers clears its own memory (sold out, no price).
+            if fresh:
+                rhythm.offers[main_url] = fresh
+            else:
+                rhythm.offers.pop(main_url, None)
+        replay = [offer for url, offers in rhythm.offers.items() if url != main_url for offer in offers]
+        # Out-of-stock variants of the last sweep stay listed; only the main page's entry is fresh.
+        rhythm.unavailable = [item for item in rhythm.unavailable if item.get("product_url") != main_url] + list(outcome.unavailable)
+        outcome.unavailable[:] = rhythm.unavailable
+        if error is not None and is_protection_error(error) and outcome.blocked is None:
+            outcome.blocked = error
+        if error is not None and not fresh and not replay:
+            raise error
+        yield from replay
+        self.read_seconds["ana"].append(time.monotonic() - started)
 
     # -- pages ---------------------------------------------------------------
 
@@ -130,6 +255,8 @@ class AmazonProvider(Provider):
         listing only when needed; both paths verify condition and seller together.
         """
         soup = soup or parser.parse_product_page(html)
+        counters = self.client.access
+        counters.count("depo_sayfa")
         # Capture the link before extract_offers removes the used accordion from the shared tree.
         used_listing_url = parser.extract_used_offer_listing_url(html, source_url=url, soup=soup)
         primary_error = None
@@ -139,12 +266,14 @@ class AmazonProvider(Provider):
             primary_error = exc
             offers = []
         if any(offer.is_warehouse for offer in offers):
+            counters.count("depo_dogrulanan", sum(1 for offer in offers if offer.is_warehouse))
             return offers
         if not used_listing_url:
             if primary_error:
                 raise primary_error
             return offers
         try:
+            counters.count("depo_liste")
             listing_html = self.fetch(used_listing_url, ctx)
             warehouse_offers = parser.extract_verified_warehouse_offers_from_listing(listing_html, source_url=url)
         except Exception as exc:  # noqa: BLE001
@@ -154,6 +283,7 @@ class AmazonProvider(Provider):
                 raise
             return offers
         if warehouse_offers:
+            counters.count("depo_dogrulanan", len(warehouse_offers))
             log(f"Amazon Depo teklifi doğrulandı: adet={len(warehouse_offers)} | url={log_cell(url, 70)}")
         if not offers and not warehouse_offers and primary_error:
             raise primary_error
@@ -290,7 +420,26 @@ class AmazonProvider(Provider):
         cache[cache_key] = {"snapshot": snapshot, "retry_at": now + NO_OFFER_RECHECK_SECONDS, "last_skip_logged_at": now}
         log(f"Amazon fiyat/teklif bulunmayan varyant: {cache_key} | yeniden kontrol={NO_OFFER_RECHECK_SECONDS} sn")
 
-    def iter_product(self, watch: WatchRule, ctx: ReadContext, outcome: WatchRead) -> Iterator[OfferResult]:
+    def _remembered_exclusion(self, cache_key: str, watch: WatchRule) -> Optional[dict]:
+        entry = self.client.excluded_pages.get(cache_key)
+        if not entry:
+            return None
+        if entry["terms"] != tuple(watch.excluded_terms) or time.monotonic() >= entry["refresh_at"]:
+            self.client.excluded_pages.pop(cache_key, None)
+            return None
+        return entry
+
+    def _remember_exclusion(self, cache_key: str, watch: WatchRule, variations) -> None:
+        cache = self.client.excluded_pages
+        if cache_key not in cache and len(cache) >= EXCLUDED_PAGE_CACHE_LIMIT:
+            cache.pop(next(iter(cache)))
+        # Each page refreshes at its own time (15-45 minutes) so they never all expire in one sweep.
+        spread = 0.5 + (zlib.crc32(cache_key.encode("utf-8")) % 100) / 100
+        cache[cache_key] = {"variations": list(variations), "terms": tuple(watch.excluded_terms),
+                            "refresh_at": time.monotonic() + AMAZON_EXCLUDED_PAGE_REFRESH_SECONDS * spread}
+
+    def iter_product(self, watch: WatchRule, ctx: ReadContext, outcome: WatchRead,
+                     main_only: bool = False) -> Iterator[OfferResult]:
         """Yield verified depot offers before continuing to the next variant.
 
         Follow actual Twister ASIN edges on every fetched page. A single dimension
@@ -298,10 +447,11 @@ class AmazonProvider(Provider):
         """
         pending = [parser.AmazonProductVariation(label="", url=watch.url)]
         queued = {extract_asin_from_url(watch.url) or watch.url}
-        limit = VARIATION_LIMIT if watch.include_variations else 1
+        follow_variations = watch.include_variations and not main_only
+        limit = VARIATION_LIMIT if follow_variations else 1
         absence_cache = self.client.unavailable_product_pages
         errors: List[str] = []
-        found = discovery_pages = excluded_reads = 0
+        found = discovery_pages = excluded_reads = skipped_excluded = 0
 
         def enqueue(items) -> None:
             for item in items or []:
@@ -319,8 +469,15 @@ class AmazonProvider(Provider):
                 if snapshot is not None:
                     self._remember_page(cache_key, snapshot)
             page_was_reused = snapshot is not None
+            remembered = self._remembered_exclusion(cache_key, watch) if snapshot is None and follow_variations else None
+            if remembered is not None:
+                # Excluded by title and read recently: its neighbours are known, the page is not needed.
+                skipped_excluded += 1
+                self.client.access.count("hariç_atlanan")
+                enqueue(remembered["variations"])
+                continue
             try:
-                needs_variation_upgrade = snapshot is not None and watch.include_variations and snapshot.get("variations") is None
+                needs_variation_upgrade = snapshot is not None and follow_variations and snapshot.get("variations") is None
                 needs_offer_upgrade = (
                     snapshot is not None
                     and snapshot.get("offers_skipped_by_exclusion")
@@ -333,7 +490,7 @@ class AmazonProvider(Provider):
                     html = self.fetch(variation.url, ctx)
                     page_soup = parser.parse_product_page(html)
                     discovered = None
-                    if watch.include_variations:
+                    if follow_variations:
                         discovery_pages += 1
                         discovered = parser.extract_product_variations(html, variation.url, limit, soup=page_soup)
                     enqueue(discovered)
@@ -345,6 +502,8 @@ class AmazonProvider(Provider):
                     offer_error = None
                     if exclusion_term:
                         excluded_reads += 1
+                        if discovered is not None:
+                            self._remember_exclusion(cache_key, watch, discovered)
                         page_offers: List[OfferResult] = []
                         log("Amazon varyant fiyat okuması hariç tutuldu: "
                             f"{log_cell(page_title or selected_label or variation.label, 90)} | hariç tut filtresi: {exclusion_term}")
@@ -371,9 +530,10 @@ class AmazonProvider(Provider):
                         self._remember_absence(cache_key, snapshot)
                     elif not exclusion_term:
                         absence_cache.pop(cache_key, None)
+                        self.client.excluded_pages.pop(cache_key, None)
 
                 page_offers = snapshot["offers"]
-                if watch.include_variations:
+                if follow_variations:
                     for item in snapshot.get("variations") or []:
                         if (extract_asin_from_url(item.url) or item.url) == identity and item.label:
                             variation = parser.AmazonProductVariation(label=item.label, url=item.url)
@@ -416,7 +576,7 @@ class AmazonProvider(Provider):
                 break
         log(f"Amazon varyasyon taraması: {watch.name or watch.url} | varyant={len(pending)} | teklif={found} | "
             f"hatalı={len(errors)} | varyant_keşif_sayfası={discovery_pages} | "
-            f"hariç_nedeniyle_fiyat_okuması_atlandı={excluded_reads}")
+            f"hariç_nedeniyle_fiyat_okuması_atlandı={excluded_reads} | hariç_nedeniyle_istek_atlandı={skipped_excluded}")
         if found:
             return
         if outcome.blocked:

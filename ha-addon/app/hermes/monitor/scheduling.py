@@ -1,7 +1,7 @@
 """When each watch is due and in which order due watches are read."""
 
 from datetime import timezone
-from typing import Any, Dict, List
+from typing import Any, Callable, Dict, List
 
 from ..constants import PRIORITIES, PRIORITY_INTERVAL_SECONDS
 from ..models import WatchRule
@@ -35,6 +35,10 @@ def watch_check_due(watch: WatchRule, state_entry: Dict[str, Any], global_interv
     return elapsed_seconds >= interval_seconds
 
 
-def priority_order(watches: List[WatchRule]) -> List[WatchRule]:
-    """One site's due watches: high first, then medium, then low; stable within a tier."""
-    return sorted(watches, key=lambda watch: PRIORITIES.index(watch_priority(watch)))
+def priority_order(watches: List[WatchRule], rank: Callable[[WatchRule], int] = lambda _watch: 0) -> List[WatchRule]:
+    """One site's due watches: high first, then medium, then low; stable within a tier.
+
+    Inside a tier the provider's `rank` puts quick reads (Amazon's main-page
+    reads) before long ones (a whole variant sweep).
+    """
+    return sorted(watches, key=lambda watch: (PRIORITIES.index(watch_priority(watch)), rank(watch)))

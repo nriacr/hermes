@@ -5,19 +5,29 @@ survive between cycles. Page caches are passed in per cycle; a later cycle
 always reads prices from the server again.
 """
 
+import os
 import time
 from html.parser import HTMLParser
+from pathlib import Path
 from typing import Callable, Dict, Optional, Tuple
 from urllib.parse import parse_qsl, urlencode, urlsplit
 
 import requests
 
-from ...constants import CHROME_CLIENT_HINTS, CHROME_USER_AGENT, SITE_AMAZON, SITE_MIN_REQUEST_GAP_SECONDS
+from ...constants import (
+    AMAZON_COOKIE_MAX_AGE_SECONDS,
+    CHROME_CLIENT_HINTS,
+    CHROME_USER_AGENT,
+    SITE_AMAZON,
+    SITE_MIN_REQUEST_GAP_SECONDS,
+)
 from ...errors import BotProtectionHermesError, HermesError, error_status
 from ...logging_utils import log
+from ...storage import load_json, save_json
 from ...utils import canonical_amazon_product_url, normalize_offer_text, referer_for_url, repair_mojibake
 from ..base import RequestSpacing
 from ..http import cleaned_html, curl_requests, decode_response_text
+from .access import AmazonAccess
 from .browser import AmazonBrowser
 
 PROTECTION_MESSAGE = "Amazon bot koruması nedeniyle doğrulama (captcha) sayfası döndü."
@@ -179,10 +189,58 @@ def _seed_session(session) -> None:
     session.cookies.set("lc-acbtr", "tr_TR", domain=".amazon.com.tr")
 
 
+COOKIE_SAVE_EVERY_SECONDS = 60
+
+
+def _cookie_jar(session):
+    cookies = session.cookies
+    return getattr(cookies, "jar", cookies)
+
+
+def load_cookies(session, path: Optional[Path]) -> int:
+    """Put the saved anonymous cookies back, so a restart does not look like a new visitor."""
+    if path is None:
+        return 0
+    try:
+        if time.time() - path.stat().st_mtime > AMAZON_COOKIE_MAX_AGE_SECONDS:
+            return 0
+    except OSError:
+        return 0
+    stored = load_json(path, [])
+    restored = 0
+    for item in stored if isinstance(stored, list) else []:
+        try:
+            if not str(item["domain"]).endswith("amazon.com.tr"):
+                continue
+            expires = item.get("expires")
+            if expires is not None and float(expires) <= time.time():
+                continue
+            session.cookies.set(str(item["name"]), str(item["value"]), domain=str(item["domain"]),
+                                path=str(item.get("path") or "/"))
+            restored += 1
+        except (KeyError, TypeError, ValueError):
+            continue
+    return restored
+
+
+def save_cookies(session, path: Optional[Path]) -> None:
+    if path is None or session is None:
+        return
+    items = [{"name": cookie.name, "value": cookie.value, "domain": cookie.domain, "path": cookie.path,
+              "expires": cookie.expires}
+             for cookie in _cookie_jar(session) if str(cookie.domain).endswith("amazon.com.tr")]
+    try:
+        save_json(path, items)
+        os.chmod(path, 0o600)
+    except OSError as exc:
+        log(f"Amazon çerezleri kaydedilemedi: {exc}")
+
+
 class AmazonClient:
     """Process-lived anonymous transports; page/offer caches stay cycle-local."""
 
-    def __init__(self, transport: str = "http", spacing: Optional[RequestSpacing] = None):
+    def __init__(self, transport: str = "http", spacing: Optional[RequestSpacing] = None,
+                 access: Optional[AmazonAccess] = None, cookies_path: Optional[Path] = None):
         # "http" reads with curl (Chrome TLS) and falls back to Chromium once;
         # "browser" reads only through Chromium (used by the link test option).
         self.transport = transport
@@ -190,15 +248,24 @@ class AmazonClient:
         _seed_session(self.requests_session)
         self.curl_session = None
         self.browser = AmazonBrowser()
+        # Request budget (window, slow start) and the cookie jar that survives restarts.
+        self.access = access or AmazonAccess()
+        self.cookies_path = cookies_path
+        self._cookies_saved_at = 0.0
         # Every network request (product, variant, listing, search detail,
         # browser fallback) waits for this gap; cached pages never do.
         self.spacing = spacing or RequestSpacing(SITE_MIN_REQUEST_GAP_SECONDS[SITE_AMAZON])
+        self.base_gap_seconds = self.spacing.min_gap_seconds
         # Only absent/unreadable offers, with discovery metadata, never successful prices.
         self.unavailable_product_pages: dict = {}
+        # Variant pages a watch excludes by title: their neighbours (edges) are kept for a while
+        # so the page itself is not requested every sweep. Process-wide, bounded.
+        self.excluded_pages: dict = {}
 
     def close(self) -> None:
         try:
             if self.curl_session is not None:
+                save_cookies(self.curl_session, self.cookies_path)
                 self.curl_session.close()
             self.requests_session.close()
         finally:
@@ -239,19 +306,28 @@ class AmazonClient:
         return html
 
     def _timed(self, method: str, url: str, expect_search: bool, read, on_request=None):
+        self.access.wait_for_window()
+        # Half speed after a block and right after a start: the gap doubles.
+        self.spacing.min_gap_seconds = self.base_gap_seconds * self.access.gap_multiplier()
         waited = self.spacing.wait()
         if waited >= 0.05:
             log(f"Amazon istek aralığı için {waited:.1f} sn ek bekleme.")
+        self.access.request_started()
         started_at = time.monotonic()
         outcome = "ok"
+        blocked = False
         try:
             return read()
         except Exception as exc:  # noqa: BLE001
             outcome = block_reason(exc)
-            if is_protection_error(exc):
+            blocked = is_protection_error(exc)
+            if blocked:
                 log(f"Amazon engeli: sebep={outcome} | yöntem={method} | adres={_short_url(url)}")
             raise
         finally:
+            self.access.request_finished(blocked)
+            if outcome == "ok":
+                self._save_cookies_soon()
             elapsed_ms = round((time.monotonic() - started_at) * 1000)
             kind = _request_type(url, expect_search)
             log(f"Amazon isteği: yöntem={method} | tip={kind} | sonuç={outcome} | süre={elapsed_ms} ms | adres={_short_url(url)}")
@@ -263,12 +339,21 @@ class AmazonClient:
             if self.curl_session is None:
                 self.curl_session = curl_requests.Session()
                 _seed_session(self.curl_session)
+                restored = load_cookies(self.curl_session, self.cookies_path)
+                if restored:
+                    log(f"Amazon çerezleri geri yüklendi: adet={restored}")
             response = self.curl_session.get(
                 url, headers=amazon_headers(url), timeout=timeout, allow_redirects=True, impersonate="chrome124"
             )
         else:
             response = self.requests_session.get(url, headers=amazon_headers(url), timeout=timeout, allow_redirects=True)
         return checked_html(response, expect_search)
+
+    def _save_cookies_soon(self) -> None:
+        now = time.monotonic()
+        if self.curl_session is not None and now - self._cookies_saved_at >= COOKIE_SAVE_EVERY_SECONDS:
+            self._cookies_saved_at = now
+            save_cookies(self.curl_session, self.cookies_path)
 
     def _browser_read(self, url: str, timeout: int, expect_search: bool) -> str:
         return checked_html(self.browser.read(url, timeout), expect_search)

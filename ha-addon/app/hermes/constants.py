@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 
-APP_VERSION = "3.2.3"
+APP_VERSION = "3.3.0"
 
 # Persistent add-on data. File names are a public interface: 2.x releases read
 # the same files, so a rollback never loses history or notification state.
@@ -14,6 +14,8 @@ CYCLE_HISTORY_PATH = DATA_DIR / "cycle_history.json"
 # History and measurements since 3.2 (see history.py); the JSON files above
 # keep their data for a rollback.
 DATABASE_PATH = DATA_DIR / "hermes.db"
+AMAZON_ACCESS_PATH = DATA_DIR / "amazon_access.json"
+AMAZON_COOKIES_PATH = DATA_DIR / "amazon_cookies.json"
 TELEGRAM_SESSION_PATH = DATA_DIR / "telegram_keyword_alert"
 TELEGRAM_LOGIN_STATE_PATH = DATA_DIR / "login_state.json"
 TELEGRAM_SEEN_MESSAGES_PATH = DATA_DIR / "seen_messages.json"
@@ -86,6 +88,37 @@ SITE_MIN_REQUEST_GAP_SECONDS = {
     SITE_NETWORK: 1.0,
 }
 PRIORITY_INTERVAL_SECONDS = {"medium": 2 * 60 * 60, "low": 6 * 60 * 60}
+
+# -- Amazon access control (3.3.0) ---------------------------------------------
+# Measured 2026-10-03 (Pi logs, 1,147 requests): three unbroken runs at ~10.8
+# requests/min ran 32-36 minutes (347-395 requests) before the first block.
+# After a block the whole site pauses; each failed single probe climbs one step.
+PROTECTION_PAUSE_LADDER_SECONDS = (3 * 60, 6 * 60, 12 * 60, 20 * 60)
+# After a block requests run at half speed (the minimum gap doubles) for an hour,
+# and for ten minutes after every start.
+AMAZON_RECOVERY_SLOW_SECONDS = 60 * 60
+AMAZON_START_SLOW_SECONDS = 10 * 60
+AMAZON_RECOVERY_SLOW_FACTOR = 2.0
+# Rolling request window: starts at 300 in 35 minutes, +5 % after every clean
+# hour whose window reached 80 % of the limit, never above 500. A block lowers
+# the limit to 85 % of the window count it happened at and freezes it there.
+AMAZON_WINDOW_SECONDS = 35 * 60
+AMAZON_WINDOW_START_LIMIT = 300
+AMAZON_WINDOW_MIN_LIMIT = 60
+AMAZON_WINDOW_MAX_LIMIT = 500
+AMAZON_WINDOW_RAISE_EVERY_SECONDS = 60 * 60
+AMAZON_WINDOW_RAISE_FACTOR = 1.05
+AMAZON_WINDOW_RAISE_MIN_USE = 0.8
+AMAZON_WINDOW_THRESHOLD_FACTOR = 0.85
+# Two reading rhythms per product watch: the configured page (with its used
+# listing, where Amazon Depo offers show up) every 100 s, and the variant
+# sweep every 270 s. A variant page that a watch excludes by title is read once
+# for its neighbours and then taken from memory for 30 minutes.
+AMAZON_MAIN_INTERVAL_SECONDS = 100
+AMAZON_SWEEP_INTERVAL_SECONDS = 270
+AMAZON_EXCLUDED_PAGE_REFRESH_SECONDS = 30 * 60
+AMAZON_STATS_LOG_SECONDS = 10 * 60
+AMAZON_COOKIE_MAX_AGE_SECONDS = 7 * 24 * 60 * 60
 
 DEFAULT_HEADERS = {
     "Accept": (
