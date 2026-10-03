@@ -120,6 +120,12 @@ tbody tr.site-other { --site-bg:rgba(183,177,222,.13); --site-bg-strong:rgba(183
 .statistics-table th:last-child,.statistics-table td:last-child { text-align:right !important; }
 .statistics-table thead { position:sticky; top:0; z-index:1; }
 .statistics-empty { padding:14px; color:var(--muted); }
+.measure-title { margin:16px 0 8px; font-size:14px; color:#e1e3e3; }
+.measure-note { margin:12px 0 8px; }
+.measure-wrap { border:1px solid var(--line); border-radius:14px; }
+.measure-table th:not(:first-child),.measure-table td:not(:first-child) { text-align:right !important; }
+.measure-table td.zero { color:var(--muted); }
+.measure-table td.measure-alert { color:#ff9caf; }
 .statistics-metrics { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin-top:14px; }
 .statistics-metrics .public-cycle-pill { min-height:64px; }
 @media (max-width:720px) {

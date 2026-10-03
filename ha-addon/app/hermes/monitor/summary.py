@@ -1,7 +1,6 @@
-"""The published price table (`latest_price_summary.json`) and cycle durations."""
+"""The published price table (`latest_price_summary.json`) and its log copy."""
 
-import math
-from datetime import datetime, timedelta, timezone
+import time
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -19,13 +18,15 @@ from ..utils import (
     log_cell,
     normalize_item_key,
     parse_decimal,
-    parse_iso_datetime,
     tracking_offer_identity,
     tracking_offer_title_identity,
 )
 from .state import sanitized_price_bounds, state_decimal
 
-CYCLE_HISTORY_DAYS = 7
+# The log repeats an unchanged table at most this often; idle cycles run every
+# few seconds and would otherwise fill the log with identical tables.
+UNCHANGED_TABLE_LOG_SECONDS = 30 * 60
+_last_logged_table: Dict[str, Any] = {"signature": None, "at": 0.0}
 
 
 def result_group_for_watch(watch: WatchRule, fallback_label: str = "") -> tuple[str, str]:
@@ -300,8 +301,14 @@ def reset_summary_price_ranges(path: Path) -> None:
     save_json(path, summary)
 
 
-def log_price_summary(rows: List[PriceSummaryRow]) -> None:
+def log_price_summary(rows: List[PriceSummaryRow], now: float | None = None) -> None:
+    """Log the table when it changed, otherwise at most every 30 minutes."""
     unique_rows = sorted_summary_rows(deduplicate_summary_rows(rows))
+    signature = tuple((row.seller, row.product_title, str(row.price), str(row.target_price)) for row in unique_rows)
+    now = time.monotonic() if now is None else now
+    if signature == _last_logged_table["signature"] and now - _last_logged_table["at"] < UNCHANGED_TABLE_LOG_SECONDS:
+        return
+    _last_logged_table.update(signature=signature, at=now)
     log(f"Özet: eşleşen={len(unique_rows)}")
     if not unique_rows:
         return
@@ -324,25 +331,3 @@ def publish_price_summary(path: Path, rows: List[PriceSummaryRow], stock_rows: L
     save_price_summary(path, unique_rows, stock_rows, cycle_duration_seconds, scan_duration_seconds)
     log_price_summary(unique_rows)
 
-
-def record_cycle_duration(path: Path, duration_seconds: float, checked_at=None) -> None:
-    """Persist completed cycles of the last seven days; incremental updates are not cycles."""
-    checked_at = checked_at or datetime.now(timezone.utc)
-    cutoff = checked_at - timedelta(days=CYCLE_HISTORY_DAYS)
-    previous = load_json(path, [])
-    history = []
-    for item in previous if isinstance(previous, list) else []:
-        if not isinstance(item, dict):
-            continue
-        recorded_at = parse_iso_datetime(str(item.get("checked_at") or ""))
-        try:
-            duration = float(item.get("duration_seconds"))
-        except (TypeError, ValueError):
-            continue
-        if recorded_at and recorded_at >= cutoff and math.isfinite(duration) and duration >= 0:
-            history.append({"checked_at": recorded_at.isoformat(), "duration_seconds": duration})
-    history.append({"checked_at": checked_at.isoformat(), "duration_seconds": max(0.0, float(duration_seconds))})
-    try:
-        save_json(path, history)
-    except OSError as exc:
-        log(f"Çevrim süresi geçmişi kaydedilemedi: {exc}")

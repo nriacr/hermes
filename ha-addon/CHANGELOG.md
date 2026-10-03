@@ -1,5 +1,20 @@
 # Değişiklik günlüğü
 
+## 3.2.0
+
+- Fiyat geçmişi ve çevrim istatistikleri artık bir SQLite veritabanında
+  (`hermes.db`) tutuluyor. İlk açılışta mevcut geçmiş otomatik aktarılıyor;
+  eski JSON dosyaları silinmiyor ve `state.json` aynen yazılmaya devam ediyor,
+  böylece eski sürüme dönmek mümkün. Fiyat her değiştiğinde bir kayıt
+  ekleniyor (ileride ürün başına fiyat grafiği için).
+- İstatistik sayfasında yeni "Site ölçümleri" bölümü: son 24 saat ve 7 gün için
+  her sitede kaç okuma yapıldığı, kaçının başarılı olduğu, kaçında koruma
+  (captcha/503/429) veya hata çıktığı ve tipik süre. Amazon için her isteğin
+  ayrı dökümü (captcha, 503, 429, tarayıcı yedeği).
+- Boşta geçen kısa turlar loga artık yazılmıyor; fiyat tablosu yalnız
+  değiştiğinde ya da en fazla yarım saatte bir yazılıyor. Hata ve koruma
+  satırları aynen kalıyor.
+
 ## 3.1.2
 
 - İstatistik sayfası 5 dakikada bir güncelleniyor (yedi günlük özet olduğu

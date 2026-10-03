@@ -7,7 +7,7 @@ always reads prices from the server again.
 
 import time
 from html.parser import HTMLParser
-from typing import Dict, Optional, Tuple
+from typing import Callable, Dict, Optional, Tuple
 from urllib.parse import parse_qsl, urlencode, urlsplit
 
 import requests
@@ -210,12 +210,14 @@ class AmazonClient:
     def __exit__(self, *_args):
         self.close()
 
-    def fetch(self, url: str, timeout: int, expect_search: bool = False, cache: Optional[PageCache] = None) -> str:
+    def fetch(self, url: str, timeout: int, expect_search: bool = False, cache: Optional[PageCache] = None,
+              on_request: Optional[Callable[[str, str, str, int], None]] = None) -> str:
         """Return the cleaned HTML of one Amazon page.
 
         A challenge or HTTP 429/503 is terminal. Never reset cookies or multiply
         requests through URL/transport variants after the server rejects a read.
         Another failure gets at most one Chromium read of the same address.
+        `on_request` receives every network request: (method, kind, outcome, ms).
         """
         cache = {} if cache is None else cache
         candidate = request_url(url)
@@ -223,20 +225,20 @@ class AmazonClient:
         if key in cache:
             return cache[key]
         if self.transport == "browser":
-            html = self._timed("browser", candidate, expect_search, lambda: self._browser_read(candidate, timeout, expect_search))
+            html = self._timed("browser", candidate, expect_search, lambda: self._browser_read(candidate, timeout, expect_search), on_request)
         else:
             method = "curl" if curl_requests is not None else "requests"
             try:
-                html = self._timed(method, candidate, expect_search, lambda: self._http_read(candidate, timeout, expect_search))
+                html = self._timed(method, candidate, expect_search, lambda: self._http_read(candidate, timeout, expect_search), on_request)
             except Exception as exc:  # noqa: BLE001
                 if is_protection_error(exc):
                     raise
                 log(f"Amazon {method} okuması başarısız, tarayıcıyla bir kez denenecek: {block_reason(exc)} | {_short_url(candidate)}")
-                html = self._timed("browser", candidate, expect_search, lambda: self._browser_read(candidate, timeout, expect_search))
+                html = self._timed("browser", candidate, expect_search, lambda: self._browser_read(candidate, timeout, expect_search), on_request)
         cache[key] = html
         return html
 
-    def _timed(self, method: str, url: str, expect_search: bool, read):
+    def _timed(self, method: str, url: str, expect_search: bool, read, on_request=None):
         waited = self.spacing.wait()
         if waited >= 0.05:
             log(f"Amazon istek aralığı için {waited:.1f} sn ek bekleme.")
@@ -251,8 +253,10 @@ class AmazonClient:
             raise
         finally:
             elapsed_ms = round((time.monotonic() - started_at) * 1000)
-            log(f"Amazon isteği: yöntem={method} | tip={_request_type(url, expect_search)} | "
-                f"sonuç={outcome} | süre={elapsed_ms} ms | adres={_short_url(url)}")
+            kind = _request_type(url, expect_search)
+            log(f"Amazon isteği: yöntem={method} | tip={kind} | sonuç={outcome} | süre={elapsed_ms} ms | adres={_short_url(url)}")
+            if on_request is not None:
+                on_request(method, kind, outcome, elapsed_ms)
 
     def _http_read(self, url: str, timeout: int, expect_search: bool) -> str:
         if curl_requests is not None:

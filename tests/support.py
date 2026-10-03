@@ -13,6 +13,7 @@ if str(APP_PATH) not in sys.path:
     sys.path.insert(0, str(APP_PATH))
 
 from hermes import logging_utils  # noqa: E402
+from hermes.history import History  # noqa: E402
 from hermes.models import HermesConfig, TelegramConfig, WatchRule  # noqa: E402
 from hermes.monitor.cycle import DataFiles, Monitor  # noqa: E402
 from hermes.monitor.state import watch_key  # noqa: E402
@@ -74,9 +75,11 @@ class TempData:
         self._dir = tempfile.TemporaryDirectory()
         root = Path(self._dir.name)
         self.root = root
-        self.files = DataFiles(state=root / "state.json", summary=root / "summary.json", cycle_history=root / "cycles.json")
+        self.files = DataFiles(state=root / "state.json", summary=root / "summary.json", cycle_history=root / "cycles.json",
+                               database=root / "hermes.db")
 
     def cleanup(self) -> None:
+        History.at(self.files.database).close()
         self._dir.cleanup()
 
     def write_state(self, state: Dict[str, Any]) -> None:

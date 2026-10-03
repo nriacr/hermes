@@ -1,6 +1,5 @@
 """Summary table, statistics, errors and Telegram cards."""
 
-import math
 import re
 import statistics
 from datetime import datetime, timedelta
@@ -9,12 +8,13 @@ from html import escape
 from typing import Any, Dict, List, Optional
 
 from ..constants import (
-    CYCLE_HISTORY_PATH,
+    DATABASE_PATH,
     STATE_PATH,
     SUMMARY_PATH,
     TELEGRAM_ERROR_EVENTS_PATH,
     TELEGRAM_STATUS_PATH,
 )
+from ..history import SiteReads, SiteRequests, read_cycles, read_site_reads, read_site_requests
 from ..storage import load_json
 from ..utils import is_search_url, parse_bool, parse_iso_datetime, repair_mojibake, site_label
 from .pages import link, render_notice, render_page
@@ -464,21 +464,10 @@ def live_script_tag(base: str) -> str:
 # -- statistics -------------------------------------------------------------------------
 
 
-def recent_cycle_history(raw_history, now=None):
+def recent_cycle_history(now=None):
+    """Completed cycles of the last seven days, oldest first."""
     now = now or datetime.now().astimezone()
-    cutoff = now - timedelta(days=7)
-    points = []
-    for item in raw_history if isinstance(raw_history, list) else []:
-        if not isinstance(item, dict):
-            continue
-        checked_at = parse_iso_datetime(str(item.get("checked_at") or ""))
-        try:
-            duration = float(item.get("duration_seconds"))
-        except (TypeError, ValueError):
-            continue
-        if checked_at and cutoff <= checked_at.astimezone() <= now and math.isfinite(duration) and duration >= 0:
-            points.append((checked_at.astimezone(), duration))
-    return sorted(points, key=lambda point: point[0])
+    return read_cycles(DATABASE_PATH, now - timedelta(days=7), now)
 
 
 def render_cycle_chart(points, now) -> str:
@@ -549,10 +538,66 @@ def render_cycle_days(points) -> str:
     return "".join(result)
 
 
+def _ms_text(value: Optional[float]) -> str:
+    if value is None:
+        return "-"
+    return f"{value / 1000:.1f} sn".replace(".", ",")
+
+
+def _count_cell(value: int, alert: bool = False) -> str:
+    css = " class='measure-alert'" if alert and value else (" class='zero'" if not value else "")
+    return f"<td{css}>{value}</td>"
+
+
+def render_site_reads(reports: List[SiteReads]) -> str:
+    if not reports:
+        return '<p class="statistics-empty">Henüz ölçüm yok.</p>'
+    rows = "".join(
+        f"<tr><td>{escape(site_label(report.site))}</td><td>{report.total}</td>{_count_cell(report.ok)}"
+        f"{_count_cell(report.blocked, alert=True)}{_count_cell(report.errors, alert=True)}"
+        f"<td>{escape(_ms_text(report.typical_ms))}</td></tr>"
+        for report in reports
+    )
+    return ('<div class="table-wrap measure-wrap"><table class="statistics-table measure-table"><thead><tr>'
+            "<th>Site</th><th>Okuma</th><th>Başarılı</th><th>Koruma</th><th>Hata</th><th>Tipik süre</th>"
+            f"</tr></thead><tbody>{rows}</tbody></table></div>")
+
+
+def render_site_requests(reports: List[SiteRequests]) -> str:
+    if not reports:
+        return ""
+    rows = "".join(
+        f"<tr><td>{escape(site_label(report.site))}</td><td>{report.total}</td>{_count_cell(report.ok)}"
+        f"{_count_cell(report.captcha, alert=True)}{_count_cell(report.http_503, alert=True)}"
+        f"{_count_cell(report.http_429, alert=True)}{_count_cell(report.other, alert=True)}{_count_cell(report.browser)}"
+        f"<td>{escape(_ms_text(report.typical_ms))}</td></tr>"
+        for report in reports
+    )
+    return ('<div class="table-wrap measure-wrap"><table class="statistics-table measure-table"><thead><tr>'
+            "<th>Site</th><th>İstek</th><th>Başarılı</th><th>Captcha</th><th>503</th><th>429</th><th>Diğer</th>"
+            f"<th>Tarayıcı</th><th>Tipik süre</th></tr></thead><tbody>{rows}</tbody></table></div>")
+
+
+def render_site_measurements(now) -> str:
+    """Per-site reads and requests of the last 24 hours and 7 days."""
+    parts = []
+    for label, since in (("Son 24 saat", now - timedelta(hours=24)), ("Son 7 gün", now - timedelta(days=7))):
+        requests_table = render_site_requests(read_site_requests(DATABASE_PATH, since))
+        parts.append(
+            f"<h3 class='measure-title'>{label}</h3>{render_site_reads(read_site_reads(DATABASE_PATH, since))}"
+            + (f"<p class='statistics-intro measure-note'>Ağ istekleri (Amazon her isteği ayrı bildirir)</p>{requests_table}"
+               if requests_table else "")
+        )
+    return ("<section class='summary-panel'><div class='summary-head'><h2>Site ölçümleri</h2></div>"
+            "<p class='statistics-intro'>Okuma, bir takip kartının bir kez kontrol edilmesidir. Başarılı; fiyat, stokta yok veya "
+            "boş arama sonucuyla biten okumalardır. Koruma; captcha, 503 ve 429 yanıtlarıdır. Tipik süre, başarılı "
+            "okumaların ortadaki değeridir.</p>" + "".join(parts) + "</section>")
+
+
 def statistics_live_html(base: str) -> str:
     # Whole minutes keep the chart identical between cycles, so an unchanged block is not resent.
     now = datetime.now().astimezone().replace(second=0, microsecond=0)
-    points = recent_cycle_history(load_json(CYCLE_HISTORY_PATH, []), now)
+    points = recent_cycle_history(now)
     durations = [duration for _, duration in points]
 
     def metric(value) -> str:
@@ -571,6 +616,7 @@ def statistics_live_html(base: str) -> str:
         "<section class='summary-panel'><div class='summary-head'><h2>Çevrim süreleri grafiği</h2></div>"
         "<p class='statistics-intro'>Grafikte son yedi günün tamamlanan çevrimleri gösterilir. Süre, tarama ve çevrimler arası beklemeyi kapsar.</p>"
         f"{render_cycle_chart(points, now)}</section>"
+        f"{render_site_measurements(now)}"
     )
 
 

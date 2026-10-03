@@ -34,6 +34,7 @@ Hermes is a Home Assistant add-on running continuously on a Raspberry Pi. It:
 │       ├── config.py                 # Options: read, validate, defaults
 │       ├── supervisor.py             # Save options + restart via Supervisor
 │       ├── storage.py                # Atomic JSON files under /data
+│       ├── history.py                # SQLite: cycles, price points, measurements
 │       ├── notifier.py               # Pushover
 │       ├── homeassistant.py          # HA sensors and the hermes_firsat event
 │       ├── models.py, errors.py, utils.py, constants.py
@@ -75,6 +76,8 @@ Hermes is a Home Assistant add-on running continuously on a Raspberry Pi. It:
   commands applied between cycles; "Bildirim Sıfırla" then starts a new cycle
   immediately. With the monitor off they apply directly to the file.
 - Every JSON write is atomic (unique temporary file, fsync, rename).
+- A cycle in which no watch was due logs nothing; the price table is logged
+  when it changes and otherwise at most every 30 minutes.
 - `HERMES_DATA_DIR` overrides `/data` only for running Hermes outside Home
   Assistant.
 
@@ -85,7 +88,8 @@ Hermes is a Home Assistant add-on running continuously on a Raspberry Pi. It:
 | `options.json` | Supervisor-managed options; contains secrets |
 | `state.json` | per-watch/offer state, price history, suppression, guards |
 | `latest_price_summary.json` | the published table (complete or merged) |
-| `cycle_history.json` | completed cycle durations of the last seven days |
+| `hermes.db` | SQLite (since 3.2): cycles, price points, site reads and requests |
+| `cycle_history.json` | cycle durations up to 3.1; read once for the migration, then left as is |
 | `status.json`, `error_events.json` | Telegram status and its 24-hour errors |
 | `seen_messages.json`, `telegram_quick_add.json`, `login_state.json` | Telegram |
 | `telegram_keyword_alert*` | Telegram session |
@@ -95,6 +99,19 @@ State keys and fields are unchanged from 2.x (`watch_<site>_<card>_<url>_<size>`
 `amazon_partial_result`), so 2.5.48 can read a 3.x state and vice versa. Never
 delete or reset these files except through the explicit, confirmed panel
 actions. Never commit them.
+
+`hermes.db` (`history.py`) uses WAL with one writer per file: a single
+connection behind a lock, shared by the site queues; the panel reads through
+separate read-only connections. Tables: `cycles` (kept 90 days), `prices`
+(a point whenever an offer's price changes; kept, cleared by "Fiyat geçmişini
+sıfırla"), `reads` (each watch read: ok, empty, stock, captcha, http_<status>,
+error and its duration) and `requests` (each Amazon network request with
+method and outcome); measurements are kept 30 days. On first start the cycle
+durations of `cycle_history.json` and the min/max/last prices in `state.json`
+are copied in once (`meta.json_migrated_at`); the JSON files are not changed.
+`state.json` keeps min/max, alerts and guards, so older versions still work
+after a rollback; they only miss the cycle statistics recorded since 3.2. A
+database error is logged once and never stops monitoring.
 
 ## 5. Configuration
 
@@ -229,7 +246,9 @@ One router serves both surfaces. Ingress pages use relative links ("." or
 characters, `public_dashboard_enabled`, and is compared in constant time.
 Pages: summary (`/`), `statistics`, `link-test`, `settings`, `restarting`;
 actions: `test-pushover`, `reset-notifications`, `reset-price-history`,
-`settings/save`, `link-test`. Every page has the same navigation.
+`settings/save`, `link-test`. Every page has the same navigation. The
+statistics page also shows per-site reads and Amazon requests (last 24 hours
+and 7 days) from `hermes.db`.
 
 The summary and statistics pages update in place: `live.js` fetches
 `live/dashboard` (every 15 seconds) or `live/statistics` (every 5 minutes;

@@ -1,6 +1,5 @@
 """Monitoring cycle: scheduling, notifications, guards, summary and state."""
 
-import json
 import threading
 import time
 import unittest
@@ -685,15 +684,6 @@ class SummaryFileTests(CycleTestCase):
         rows = summary.deduplicate_summary_rows([older, newer])
         self.assertEqual((rows[0].price_checked_at, rows[0].min_price, rows[0].max_price),
                          (newer.price_checked_at, Decimal("80"), Decimal("100")))
-
-    def test_cycle_history_keeps_the_last_seven_days(self):
-        now = datetime.now(timezone.utc)
-        self.data.files.cycle_history.write_text(json.dumps([
-            {"checked_at": (now - timedelta(days=8)).isoformat(), "duration_seconds": 400},
-            {"checked_at": (now - timedelta(days=2)).isoformat(), "duration_seconds": 300}]), encoding="utf-8")
-        summary.record_cycle_duration(self.data.files.cycle_history, 180, now)
-        history = json.loads(self.data.files.cycle_history.read_text(encoding="utf-8"))
-        self.assertEqual([item["duration_seconds"] for item in history], [300, 180])
 
     def test_price_age_survives_incremental_saves_and_skipped_watches(self):
         checked_at = (datetime.now(timezone.utc) - timedelta(minutes=125)).isoformat()

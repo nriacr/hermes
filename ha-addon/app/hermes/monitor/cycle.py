@@ -11,8 +11,17 @@ from typing import Any, Callable, Dict, List, Optional
 
 import requests
 
-from ..constants import CYCLE_HISTORY_PATH, PRIORITIES, SITE_MIN_REQUEST_GAP_SECONDS, STATE_PATH, SUMMARY_PATH
-from ..errors import EmptySearchResultsHermesError, OutOfStockHermesError, error_status
+from ..constants import (
+    APP_VERSION,
+    CYCLE_HISTORY_PATH,
+    DATABASE_PATH,
+    PRIORITIES,
+    SITE_MIN_REQUEST_GAP_SECONDS,
+    STATE_PATH,
+    SUMMARY_PATH,
+)
+from ..errors import BotProtectionHermesError, EmptySearchResultsHermesError, OutOfStockHermesError, error_status
+from ..history import History
 from ..homeassistant import HomeAssistantBridge
 from ..logging_utils import log
 from ..models import HermesConfig, OfferResult, PriceSummaryRow, StockSummaryRow, WatchRule
@@ -32,7 +41,16 @@ NO_RESULTS_RECHECK_SECONDS = 5 * 60
 class DataFiles:
     state: Path = STATE_PATH
     summary: Path = SUMMARY_PATH
+    # Read only once, to move the 3.0 cycle history into the database.
     cycle_history: Path = CYCLE_HISTORY_PATH
+    database: Path = DATABASE_PATH
+
+
+def log_cycle_banner(config: HermesConfig) -> None:
+    line = "=" * 92
+    log(line)
+    log(f">>> HERMES v{APP_VERSION} | YENİ KONTROL TURU | Kontrol aralığı: {config.interval_seconds} saniye <<<")
+    log(line)
 
 
 def skipped_offer_reason(watch: WatchRule, offer: OfferResult, display_name: str) -> str:
@@ -41,6 +59,16 @@ def skipped_offer_reason(watch: WatchRule, offer: OfferResult, display_name: str
                 f"{format_tl(watch.minimum_price, with_currency=True)}")
     excluded_term = excluded_term_in_title(watch, display_name)
     return f"hariç tut filtresi: {excluded_term}" if excluded_term else ""
+
+
+def read_outcome(provider: Provider, exc: BaseException) -> str:
+    """Measurement label of a failed read: captcha, http_<status> or error."""
+    status = error_status(exc)
+    if status:
+        return f"http_{status}"
+    if isinstance(exc, BotProtectionHermesError) or provider.is_protection_error(exc):
+        return "captcha"
+    return "error"
 
 
 def is_normal_empty_result(exc: BaseException) -> bool:
@@ -89,9 +117,14 @@ class Monitor:
         self._lock = threading.RLock()
         # Minimum gaps between request starts per site; they span cycles.
         self._spacing: Dict[str, RequestSpacing] = {}
+        # False after a cycle in which no watch was due (an idle cycle logs nothing).
+        self.last_cycle_read = False
+        self.history = History.at(self.files.database)
+        self.history.migrate_json(self.files.state, self.files.cycle_history)
 
     def close(self) -> None:
         self.providers.close()
+        self.history.close()
 
     # -- helpers ---------------------------------------------------------------
 
@@ -135,24 +168,28 @@ class Monitor:
         for watch in self.config.watches:
             if self._plan(run, watch):
                 queues.setdefault(watch.site, []).append(watch)
+        self.last_cycle_read = bool(queues)
+        if queues:
+            log_cycle_banner(self.config)
         if self._run_site_queues(run, queues):
             # Shutting down: keep what was read, publish nothing partial.
             log("Hermes kapanıyor; çevrim yarıda bırakıldı, okunan sonuçlar kaydedildi.")
             self.save_state(run.state)
             return
 
-        log("Çevrim öncelik kapsamı: " + " | ".join(
-            f"{label}={run.priority_scope[key]['started']} başladı, {run.priority_scope[key]['due']} sırası geldi, "
-            f"{run.priority_scope[key]['deferred']} ertelendi"
-            for key, label in (("high", "yüksek"), ("medium", "orta"), ("low", "düşük"))
-        ))
+        if queues:
+            log("Çevrim öncelik kapsamı: " + " | ".join(
+                f"{label}={run.priority_scope[key]['started']} başladı, {run.priority_scope[key]['due']} sırası geldi, "
+                f"{run.priority_scope[key]['deferred']} ertelendi"
+                for key, label in (("high", "yüksek"), ("medium", "orta"), ("low", "düşük"))
+            ))
         if self.config.watches:
             # A cycle lasts until the slowest site queue has finished.
             scan_seconds = time.monotonic() - started_at
             cycle_seconds = scan_seconds + self.config.interval_seconds
             rows = summary.deduplicate_summary_rows(run.summary_rows)
             summary.publish_price_summary(self.files.summary, rows, run.stock_rows, cycle_seconds, scan_seconds)
-            summary.record_cycle_duration(self.files.cycle_history, cycle_seconds)
+            self.history.record_cycle(cycle_seconds)
             alerts.maybe_alert_summary_drop(run.state, rows, self.config, self.notifier)
             alerts.maybe_alert_search_failures(run.state, run.search_failures, self.notifier)
             self.on_cycle_published(run, rows, cycle_seconds, scan_seconds)
@@ -195,8 +232,11 @@ class Monitor:
         def work(site_watches: List[WatchRule]) -> None:
             try:
                 with requests.Session() as session:
+                    site = site_watches[0].site
                     ctx = ReadContext(timeout=self.config.request_timeout_seconds, session=session,
-                                      pace=self._site_pace(site_watches[0].site), watch_names=watch_names)
+                                      pace=self._site_pace(site), watch_names=watch_names,
+                                      measure=lambda method, kind, result, ms, site=site:
+                                      self.history.record_request(site, method, kind, result, ms))
                     for watch in scheduling.priority_order(site_watches):
                         if self.should_stop():
                             stopped.set()
@@ -249,18 +289,27 @@ class Monitor:
             if provider.backs_off_on_protection and self._guarded(run, watch, key, entry, seller):
                 return
             run.priority_scope[scheduling.watch_priority(watch)]["started"] += 1
+        ctx.pace(f"{seller} | {(watch.name or watch.url)[:64]}")
+        # Read duration includes the provider's own extra page delays.
+        started_at = time.monotonic()
+        result = "ok"
         try:
-            ctx.pace(f"{seller} | {(watch.name or watch.url)[:64]}")
             offers = (offer for offer in provider.read(watch, ctx, outcome) if provider.keeps_offer(watch, offer))
             recorded = self._record_offers(run, provider, watch, entry, seller, offers)
+            if outcome.blocked:
+                result = read_outcome(provider, outcome.blocked)
             with self._lock:
                 self._record_success(run, provider, watch, key, seller, recorded, outcome)
         except OutOfStockHermesError as exc:
+            result = "stock"
             with self._lock:
                 self._record_out_of_stock(run, provider, watch, key, entry, seller, outcome, exc)
         except Exception as exc:  # noqa: BLE001
+            result = "empty" if is_normal_empty_result(exc) else read_outcome(provider, outcome.blocked or exc)
             with self._lock:
                 self._record_failure(run, provider, watch, key, entry, seller, outcome, exc)
+        finally:
+            self.history.record_read(watch.site, result, round((time.monotonic() - started_at) * 1000))
 
     def _guarded(self, run: CycleRun, watch: WatchRule, key: str, entry: Dict[str, Any], seller: str) -> bool:
         remaining = state_ops.guard_remaining_seconds(run.state, key)
@@ -320,6 +369,8 @@ class Monitor:
                 offer_entry = offer_entry if isinstance(offer_entry, dict) else {}
                 recorded.offer_keys.append(item_key)
                 min_price, max_price = state_ops.sanitized_price_bounds(offer_entry, offer.price, watch.target_price, context)
+                if not state_ops.is_absurd_price(offer_entry, offer.price, watch.target_price):
+                    self.history.record_price(item_key, watch.site, display_name, offer.price)
                 run.summary_rows.append(PriceSummaryRow(
                     seller=seller, product_title=display_name, product_url=matched_url, price=offer.price,
                     target_price=watch.target_price, min_price=min_price, max_price=max_price,

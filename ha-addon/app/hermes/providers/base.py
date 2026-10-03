@@ -204,6 +204,8 @@ class ReadContext:
     pace: Callable[[str], None] = lambda _label: None
     # Configured card names per site; search pages use them for specificity.
     watch_names: Dict[str, List[str]] = field(default_factory=dict)
+    # Reports one network request: (method, kind, outcome, duration_ms).
+    measure: Callable[[str, str, str, int], None] = lambda _method, _kind, _outcome, _ms: None
 
 
 @dataclass

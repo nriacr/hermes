@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 
-APP_VERSION = "3.1.2"
+APP_VERSION = "3.2.0"
 
 # Persistent add-on data. File names are a public interface: 2.x releases read
 # the same files, so a rollback never loses history or notification state.
@@ -11,6 +11,9 @@ OPTIONS_PATH = DATA_DIR / "options.json"
 STATE_PATH = DATA_DIR / "state.json"
 SUMMARY_PATH = DATA_DIR / "latest_price_summary.json"
 CYCLE_HISTORY_PATH = DATA_DIR / "cycle_history.json"
+# History and measurements since 3.2 (see history.py); the JSON files above
+# keep their data for a rollback.
+DATABASE_PATH = DATA_DIR / "hermes.db"
 TELEGRAM_SESSION_PATH = DATA_DIR / "telegram_keyword_alert"
 TELEGRAM_LOGIN_STATE_PATH = DATA_DIR / "login_state.json"
 TELEGRAM_SEEN_MESSAGES_PATH = DATA_DIR / "seen_messages.json"

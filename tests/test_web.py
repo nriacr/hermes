@@ -13,6 +13,7 @@ from support import TempData
 
 from hermes.config import prepare_watches
 from hermes.errors import EmptySearchResultsHermesError
+from hermes.history import History
 from hermes.models import OfferResult
 from hermes.utils import parse_decimal, utc_now
 from hermes.web import assets, dashboard, link_test, server, settings
@@ -50,7 +51,7 @@ class DataFilesMixin:
             patch("hermes.config.OPTIONS_PATH", self.options_path),
             patch.object(dashboard, "SUMMARY_PATH", self.data.files.summary),
             patch.object(dashboard, "STATE_PATH", self.data.files.state),
-            patch.object(dashboard, "CYCLE_HISTORY_PATH", self.data.files.cycle_history),
+            patch.object(dashboard, "DATABASE_PATH", self.data.files.database),
             patch.object(dashboard, "TELEGRAM_STATUS_PATH", root / "status.json"),
             patch.object(dashboard, "TELEGRAM_ERROR_EVENTS_PATH", root / "error_events.json"),
             patch.object(settings, "SUMMARY_PATH", self.data.files.summary),
@@ -324,9 +325,9 @@ class DashboardTests(DataFilesMixin, unittest.TestCase):
 
     def test_statistics_show_a_compact_daily_range_without_outliers(self):
         same_day = datetime.now(timezone.utc).replace(hour=12, minute=0, second=0, microsecond=0)
-        history = [{"checked_at": (same_day - timedelta(days=1, minutes=m)).isoformat(), "duration_seconds": d}
-                   for m, d in ((0, 120), (1, 230), (2, 240), (3, 250), (4, 900))]
-        self.data.files.cycle_history.write_text(json.dumps(history), encoding="utf-8")
+        cycles = History.at(self.data.files.database)
+        for m, d in ((0, 120), (1, 230), (2, 240), (3, 250), (4, 900)):
+            cycles.record_cycle(d, same_day - timedelta(days=1, minutes=m))
         html = dashboard.render_statistics_page(".").decode()
         self.assertIn("Son 7 gün · 5 çevrim", html)
         self.assertIn('class="cycle-line"', html)
@@ -335,6 +336,20 @@ class DashboardTests(DataFilesMixin, unittest.TestCase):
         self.assertIn("<span><strong>3:50–4:10</strong></span>", html)
         self.assertIn('<span class="statistics-day-slow"><strong>1</strong></span>', html)
         self.assertIn("En uzun <strong>15 dk 0 sn</strong>", html)
+
+    def test_statistics_show_site_measurements(self):
+        store = History.at(self.data.files.database)
+        self.assertIn("Henüz ölçüm yok.", dashboard.render_statistics_page(".").decode())
+        for outcome in ("ok", "ok", "captcha"):
+            store.record_read("amazon", outcome, 2000)
+        store.record_read("hepsiburada", "ok", 1500)
+        store.record_request("amazon", "curl", "ürün", "http_503", 300)
+        html = dashboard.render_statistics_page(".").decode()
+        self.assertIn("Site ölçümleri", html)
+        self.assertEqual(html.count("<td>Amazon</td><td>3</td><td>2</td><td class='measure-alert'>1</td>"), 2)
+        self.assertIn("<td>Hepsiburada</td><td>1</td><td>1</td><td class='zero'>0</td>", html)
+        self.assertIn("<td>2,0 sn</td>", html)
+        self.assertIn("<th>Captcha</th><th>503</th>", html)
 
     def test_telegram_notifications_are_listed(self):
         (self.data.root / "status.json").write_text(json.dumps({"recent_notifications": [

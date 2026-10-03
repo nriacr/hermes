@@ -14,6 +14,7 @@ from datetime import timedelta
 from typing import Any, Callable, Dict, Optional
 
 from ..constants import APP_VERSION
+from ..history import History
 from ..homeassistant import HomeAssistantBridge
 from ..logging_utils import log
 from ..models import HermesConfig
@@ -46,6 +47,7 @@ def reset_price_history(files: DataFiles) -> int:
         count = state_ops.clear_price_history(state)
         save_json(files.state, state)
     summary.reset_summary_price_ranges(files.summary)
+    History.at(files.database).clear_prices()
     log(f"Min/maks fiyat geçmişi sıfırlandı: alan={count}")
     return count
 
@@ -68,13 +70,6 @@ COMMANDS: Dict[str, Callable[[], Command]] = {
     "reset_notifications": lambda: Command("reset_notifications", reset_notifications, run_cycle=True),
     "reset_price_history": lambda: Command("reset_price_history", reset_price_history),
 }
-
-
-def log_cycle_banner(config: HermesConfig) -> None:
-    line = "=" * 92
-    log(line)
-    log(f">>> HERMES v{APP_VERSION} | YENİ KONTROL TURU | Kontrol aralığı: {config.interval_seconds} saniye <<<")
-    log(line)
 
 
 class MonitorService:
@@ -140,7 +135,6 @@ class MonitorService:
         try:
             while not self._stop.is_set():
                 self._apply_commands()
-                log_cycle_banner(self.config)
                 self.cycle_started_at = time.monotonic()
                 try:
                     self.monitor.run_cycle()
@@ -151,7 +145,8 @@ class MonitorService:
                     self.last_cycle_finished_at = time.monotonic()
                 if self._stop.is_set():
                     break
-                log(f"Sonraki kontrol: {format_local_datetime(local_now() + timedelta(seconds=self.config.interval_seconds))}")
+                if self.monitor.last_cycle_read:
+                    log(f"Sonraki kontrol: {format_local_datetime(local_now() + timedelta(seconds=self.config.interval_seconds))}")
                 self._wait_for_next_cycle()
         finally:
             self.finished = True

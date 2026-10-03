@@ -112,7 +112,7 @@ class AmazonProvider(Provider):
     # -- pages ---------------------------------------------------------------
 
     def fetch(self, url: str, ctx: ReadContext, expect_search: bool = False) -> str:
-        html = self.client.fetch(url, ctx.timeout, expect_search=expect_search, cache=self.responses)
+        html = self.client.fetch(url, ctx.timeout, expect_search=expect_search, cache=self.responses, on_request=ctx.measure)
         raise_if_age_verification(html)
         return html
 
