@@ -86,6 +86,7 @@ class AmazonClient:
         self.attempts_since_block = 0
         self.block_count = 0
         self.last_attempt_at = None
+        self.min_request_gap_seconds = 0
         self.last_transport = ""
         self.last_address = ""
         self.block_events = deque(maxlen=200)
@@ -348,6 +349,14 @@ def _is_usable_amazon_response(response, expect_search: bool) -> bool:
 def _note_amazon_request(session, transport: str, candidate: str) -> None:
     client = _amazon_client(session)
     now = time.monotonic()
+    wait_started = now
+    if client.min_request_gap_seconds and client.last_attempt_at is not None:
+        remaining = client.last_attempt_at + client.min_request_gap_seconds - now
+        if remaining > 0:
+            log(f"Amazon karşılaştırma sorgu aralığı: {remaining:.2f} sn bekleniyor | yöntem={transport}")
+            time.sleep(remaining)
+            now = time.monotonic()
+    pacing_wait_ms = round((now - wait_started) * 1000)
     while client.attempt_times and client.attempt_times[0] <= now - 60:
         client.attempt_times.popleft()
     gap_ms = round((now - client.last_attempt_at) * 1000) if client.last_attempt_at is not None else "-"
@@ -360,12 +369,13 @@ def _note_amazon_request(session, transport: str, candidate: str) -> None:
     _increment_amazon_metric(session, "network_attempts")
     trial_requests = getattr(session, "_hermes_amazon_trial_requests", None)
     if isinstance(trial_requests, list):
-        trial_requests.append({"transport": transport, "address": client.last_address})
+        trial_requests.append({"transport": transport, "address": client.last_address, "at": utc_now(),
+                               "gap_ms": gap_ms, "pacing_wait_ms": pacing_wait_ms})
     log(
         "Amazon istek ölçümü: "
         f"taşıma={transport} | oturum_s={round(now - client.started_at)} | "
         f"oturum_deneme={client.total_attempts} | son_60sn_deneme={len(client.attempt_times)} | "
-        f"ara_ms={gap_ms} | adres={_amazon_timing_url(candidate)}"
+        f"ara_ms={gap_ms} | deney_bekleme_ms={pacing_wait_ms} | adres={_amazon_timing_url(candidate)}"
     )
 
 
@@ -381,8 +391,8 @@ def _log_amazon_response(response, transport: str) -> None:
 
 
 def _timed_amazon_network_call(session, transport: str, candidate: str, expect_search: bool, request):
-    started_at = time.monotonic()
     _note_amazon_request(session, transport, candidate)
+    started_at = time.monotonic()  # Trial pacing is not network response latency.
     try:
         response = request()
     except Exception as exc:  # noqa: BLE001
@@ -702,11 +712,11 @@ def _get_amazon_response_with_browser(session: requests.Session, candidate: str,
     if client.browser_timeout != effective_timeout:
         driver.set_page_load_timeout(effective_timeout)
         client.browser_timeout = effective_timeout
-    driver.get_log("performance")  # Drain the previous page's document events.
+    driver.get_log("performance")  # Drain the previous page's events.
+    _note_amazon_request(session, "browser", candidate)
     started_at = time.monotonic()
     timings = {}
     readiness = "başarısız"
-    _note_amazon_request(session, "browser", candidate)
     try:
         _timed_browser_operation(timings, "navigation", lambda: driver.get(candidate))
         document = _timed_browser_operation(timings, "document", lambda: _browser_document_response(driver))

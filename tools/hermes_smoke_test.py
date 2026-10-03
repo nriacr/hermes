@@ -155,6 +155,122 @@ class HermesSmokeTests(unittest.TestCase):
             self.assertIsNone(transport_trial.active_trial(now + timedelta(hours=1)))
             self.assertEqual(transport_trial.load_json(Path(directory) / f"amazon_trial_archive_{'a' * 32}.json", {}), previous)
 
+    def test_density_trial_reverses_three_hour_half_and_expires_without_restarting(self):
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.object(transport_trial, 'CONTROL_PATH', Path(directory) / 'control.json'), \
+                patch.object(transport_trial, 'RESULTS_PATH', Path(directory) / 'results.json'):
+            now = datetime(2026, 10, 3, 14, tzinfo=timezone.utc)
+            control = transport_trial.start_trial(now, purpose=transport_trial.DENSITY_PURPOSE)
+            self.assertEqual(control['min_request_gap_seconds'], 18)
+            self.assertEqual((datetime.fromisoformat(control['ends_at']) - now).total_seconds(), 6 * 3600)
+            self.assertEqual([transport_trial.active_trial(now + timedelta(hours=i))['transport'] for i in range(6)],
+                             ['browser', 'http', 'http', 'http', 'browser', 'browser'])
+            self.assertEqual(transport_trial.start_trial(now + timedelta(hours=1))['id'], control['id'])
+            for hour in range(3):
+                first = transport_trial.active_trial(now + timedelta(hours=hour))
+                second = transport_trial.active_trial(now + timedelta(hours=hour + 3))
+                self.assertNotEqual(first['transport'], second['transport'])
+                self.assertEqual(first['min_request_gap_seconds'], second['min_request_gap_seconds'])
+            self.assertIsNone(transport_trial.active_trial(now + timedelta(hours=6)))
+
+    def test_density_trial_paces_real_attempts_across_cycles_transports_and_preserves_no_trial_defaults(self):
+        clock = [0.0]
+        def sleep(seconds):
+            clock[0] += seconds
+        with (http_client.AmazonClient() as client,
+              patch.object(http_client.time, 'monotonic', side_effect=lambda: clock[0]),
+              patch.object(http_client.time, 'sleep', side_effect=sleep) as wait,
+              patch.object(http_client, 'log')):
+            client.min_request_gap_seconds = 18
+            first, second = requests.Session(), requests.Session()
+            first._hermes_amazon_client = second._hermes_amazon_client = client
+            first._hermes_amazon_trial_requests = []
+            second._hermes_amazon_trial_requests = []
+            http_client._note_amazon_request(first, 'curl_chrome', 'https://www.amazon.com.tr/dp/B000000001')
+            clock[0] = 3
+            http_client._note_amazon_request(second, 'browser', 'https://www.amazon.com.tr/dp/B000000002')
+            clock[0] = 20
+            http_client._note_amazon_request(second, 'requests', 'https://www.amazon.com.tr/dp/B000000003')
+            self.assertEqual(clock[0], 36)
+            self.assertEqual([item['gap_ms'] for item in second._hermes_amazon_trial_requests], [18000, 18000])
+            self.assertEqual([item['pacing_wait_ms'] for item in second._hermes_amazon_trial_requests], [15000, 16000])
+            client.min_request_gap_seconds = 0
+            clock[0] = 37
+            http_client._note_amazon_request(second, 'curl_chrome', 'https://www.amazon.com.tr/dp/B000000004')
+            self.assertEqual(clock[0], 37)
+            self.assertEqual(wait.call_count, 2)
+            self.assertEqual(client.total_attempts, 4)
+
+    def test_density_pacing_is_not_recorded_as_http_network_latency(self):
+        clock = [0.0]
+        def advance(seconds):
+            clock[0] += seconds
+        def request():
+            self.assertEqual(clock[0], 18)
+            advance(1)
+            return SimpleNamespace(status_code=200)
+        with (http_client.AmazonClient() as client,
+              patch.object(http_client.time, 'monotonic', side_effect=lambda: clock[0]),
+              patch.object(http_client.time, 'sleep', side_effect=advance),
+              patch.object(http_client, '_log_amazon_response'), patch.object(http_client, 'log') as logger):
+            session = requests.Session()
+            session._hermes_amazon_client = client
+            client.min_request_gap_seconds, client.last_attempt_at = 18, 0
+            clock[0] = 3
+            http_client._timed_amazon_network_call(session, 'curl_chrome', 'https://www.amazon.com.tr/dp/B000000001', False, request)
+            timing = next(call.args[0] for call in logger.call_args_list if 'Amazon ağ yanıt süresi:' in call.args[0])
+            self.assertIn('süre=1000 ms', timing)
+
+    def test_density_clock_report_matches_actual_request_hours_and_rejects_boundary_wait_or_changed_config(self):
+        start = datetime(2026, 10, 3, 14, tzinfo=timezone.utc)
+        def sample(slot, mode, signature='same', later_slot=None):
+            requests_made = [{'at': (start + timedelta(hours=slot, minutes=5)).isoformat(),
+                             'gap_ms': 18000, 'pacing_wait_ms': 5000, 'transport': 'browser' if mode == 'browser' else 'curl_chrome'}]
+            if later_slot is not None:
+                requests_made.append({**requests_made[0], 'at': (start + timedelta(hours=later_slot)).isoformat()})
+            return {'watch': 'phone', 'config': signature, 'name': 'Phone', 'network_attempts': len(requests_made),
+                    'requests': requests_made, 'transport': mode, 'captcha': 0, 'http_503': 0,
+                    'warehouse_count': 1, 'variant_count': 3, 'outcome': 'priced', 'seconds': 100}
+        rows = [sample(0, 'browser'), sample(3, 'http'), sample(1, 'http', 'edited'),
+                sample(4, 'browser'), sample(0, 'browser', later_slot=1), sample(1, 'browser')]
+        rows.append({**rows[0], 'network_attempts': 0, 'requests': [], 'outcome': 'protection_wait'})
+        report = transport_trial.summarize({'purpose': transport_trial.DENSITY_PURPOSE, 'started_at': start.isoformat(), 'samples': rows})
+        d = report['density_comparison']
+        self.assertEqual(d['matched_clock_pairs'], 1)
+        self.assertEqual(d['boundary_or_invalid_reads'], 2)
+        self.assertEqual(d['unmatched_clock_groups'], 2)
+        self.assertEqual(d['pairs'][0]['modes']['http']['median_gap_ms'], 18000)
+        self.assertEqual(d['pairs'][0]['modes']['browser']['reads'], 1)
+        self.assertEqual(d['pairs'][0]['modes']['http']['actual_transports']['curl_chrome'], 1)
+
+    def test_density_browser_pacing_is_outside_deadline_and_cache_hit_never_waits(self):
+        clock = [3.0]
+        address = 'https://www.amazon.com.tr/dp/B000000001'
+        driver = Mock(current_url=address)
+        def advance(seconds):
+            clock[0] += seconds
+        def navigate(url):
+            self.assertEqual(clock[0], 18)
+            advance(2)
+        driver.get.side_effect = navigate
+        with (http_client.AmazonClient() as client,
+              patch.object(http_client.time, 'monotonic', side_effect=lambda: clock[0]),
+              patch.object(http_client.time, 'sleep', side_effect=advance) as wait,
+              patch.object(http_client, '_browser_document_response', return_value={'status': 200}),
+              patch.object(http_client, '_read_amazon_browser_html', return_value=('<html>product</html>', 'erken')) as read,
+              patch.object(http_client, '_is_usable_amazon_response', return_value=True),
+              patch.object(http_client, '_log_amazon_response'), patch.object(http_client, 'log')):
+            client.browser_driver = driver
+            client.min_request_gap_seconds, client.last_attempt_at = 18, 0
+            session = requests.Session()
+            session._hermes_amazon_client = client
+            response = http_client._get_amazon_response_with_browser(session, address, 25, False)
+            self.assertEqual(read.call_args.args[4], 43)
+            self.assertEqual(client.browser_timings[-1]['phases_ms']['total'], 2000)
+            self.assertIs(http_client._get_amazon_response_with_browser(session, address, 25, False), response)
+            driver.get.assert_called_once()
+            wait.assert_called_once_with(15)
+
     def test_browser_validation_report_counts_same_page_audits_without_claiming_http_match(self):
         sample = {"watch": "a", "config": "same", "name": "phone", "network_attempts": 1,
                   "captcha": 0, "http_503": 0, "outcome": "priced", "variant_count": 2,
@@ -178,10 +294,12 @@ class HermesSmokeTests(unittest.TestCase):
         state = {}
         key = service.normalize_item_key("watch", blocked.site, blocked.name, blocked.url, blocked.size)
         service.note_amazon_protection(state, key, blocked.name, HermesError("Amazon captcha"))
-        trial = {"id": "test", "transport": "browser", "phase": 0}
+        trial = {"id": "test", "transport": "browser", "phase": 0,
+                 "purpose": transport_trial.DENSITY_PURPOSE, "min_request_gap_seconds": 18}
 
         def offers(session, watch, config):
             self.assertEqual(session._hermes_amazon_client.transport, "browser")
+            self.assertEqual(session._hermes_amazon_client.min_request_gap_seconds, 18)
             http_client._note_amazon_request(session, "browser", watch.url)
             client = session._hermes_amazon_client
             client.browser_timing_total += 1
@@ -203,6 +321,7 @@ class HermesSmokeTests(unittest.TestCase):
         self.assertEqual([item["network_attempts"] for item in samples], [1, 0])
         self.assertEqual([item["outcome"] for item in samples], ["priced", "protection_wait"])
         self.assertEqual(samples[0]["variant_count"], 1)
+        self.assertEqual(samples[0]['accepted_asins'], ['B000000001'])
         self.assertEqual(samples[1]["captcha"], 0)
         self.assertEqual(samples[0]['browser_timings'], [{"url": priced.url, "readiness": "erken", "phases_ms": {"total": 1000}}])
         self.assertEqual(samples[1]['browser_timings'], [])
@@ -227,7 +346,7 @@ class HermesSmokeTests(unittest.TestCase):
                 patch.object(transport_trial, "CONTROL_PATH", Path(directory) / "control.json"), \
                 patch.object(transport_trial, "RESULTS_PATH", Path(directory) / "results.json"), \
                 patch.object(link_test_ui, "inspect_link_now") as fetch:
-            for action in ("start", "report", "stop"):
+            for action in ("start", "report", "stop", "density", "report", "stop"):
                 page = link_test_ui.render_link_test_from_request("", "./link-test", "./",
                     f"amazon_trial_action={action}".encode()).decode()
                 self.assertIn("Amazon okuyucu karşılaştırması", page)
@@ -240,8 +359,10 @@ class HermesSmokeTests(unittest.TestCase):
               patch.object(transport_trial, "active_trial", return_value=None),
               patch.object(service, "load_json", return_value={}), patch.object(service, "save_json")):
             client.browser_driver = SimpleNamespace(quit=lambda: None)
+            client.min_request_gap_seconds = 18
             service.check_once(config, client)
             self.assertEqual(client.transport, "http")
+            self.assertEqual(client.min_request_gap_seconds, 0)
             self.assertIsNotNone(client.browser_driver)
 
     def test_transport_trial_missing_browser_restores_http_for_remaining_watches(self):

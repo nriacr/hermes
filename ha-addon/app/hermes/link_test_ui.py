@@ -62,8 +62,10 @@ def _render_transport_trial(action_path):
         results = {}
     report = amazon_transport_trial.summarize(results)
     validation = control.get("purpose") == "browser_validation"
+    density = control.get("purpose") == amazon_transport_trial.DENSITY_PURPOSE
+    hours = amazon_transport_trial.DENSITY_HOURS if density else 24
     status = (("Çalışıyor · Pi tarayıcısı kapsam kontrolü" if validation else
-               f"Çalışıyor · dönem {active['phase'] + 1}/24 · "
+               f"Çalışıyor · dönem {active['phase'] + 1}/{hours} · "
                + ("Pi Chromium" if active["transport"] == "browser" else "mevcut okuyucu")) if active else "Çalışmıyor")
     rows = []
     for key, label in (("http", "Mevcut okuyucu"), ("browser", "Pi Chromium")):
@@ -72,10 +74,25 @@ def _render_transport_trial(action_path):
                     f"<td data-label='Kontrol'>{mode['reads']}</td><td data-label='Ağ isteği'>{mode['network_attempts']}</td>"
                     f"<td data-label='CAPTCHA'>{mode['captcha']}</td><td data-label='503'>{mode['http_503']}</td>"
                     f"<td data-label='Fiyat okunan'>{mode['priced']}</td><td data-label='Tipik süre'>{mode['median_seconds']} sn</td></tr>")
-    action = "stop" if active else "validate" if validation else "start"
-    button = "Testi durdur" if active else "1 saatlik doğrulamayı başlat" if validation else "24 saatlik karşılaştırmayı başlat"
+    action = "stop" if active else "validate" if validation else "density" if density else "start"
+    button = "Testi durdur" if active else "1 saatlik doğrulamayı başlat" if validation else f"{hours} saatlik karşılaştırmayı başlat"
     data = {"control": control, "active": active, "summary": report,
             "updated_at": results.get("updated_at"), "cycles": results.get("cycles", [])[-8:]}
+    if density:
+        data["network_samples"] = [row for row in results.get("samples", []) if row.get("network_attempts", 0) > 0]
+        data["cycles"] = results.get("cycles", [])
+    density_button = (f"<form method='post' action='{escape(action_path, quote=True)}'>"
+        "<input type='hidden' name='amazon_trial_action' value='density'>"
+        "<button class='button secondary' type='submit'>Aynı sorgu aralığıyla 6 saat karşılaştır</button></form>") if not active and not density else ""
+    description = ("6 saat boyunca iki okuyucuda Amazon istek başlangıçları en az 18 saniye arayla yapılır. "
+        "İlk üç saat tarayıcı–HTTP–HTTP, sonraki üç saat HTTP–tarayıcı–tarayıcı sırasıyla okunur. Bu geçici deney ayarı güvenli hız garantisi değildir. "
+        "Gerçek aralıklar ve aynı kartın üç saat arayla ters yöntemle okunan sonuçları ayrıca ölçülür. "
+        "Devam eden çevrim saat sınırını aşabilir; bu kontroller saat eşleştirmesinden ayrılır. "
+        "Süre sonunda normal okuyucu ve sorgu ayarlarına dönülür.") if density else (
+        "Saatlik dönemlerde iki yöntem karşılaştırılır; 24 saat sonunda mevcut okuyucuya dönülür.")
+    density_note = (f"<p>İki üç saatlik bölümde aynı kart/ayar ve karşılıklı saat döneminde eşleşen karşılaştırma: "
+        f"{report['density_comparison'].get('matched_clock_pairs', 0)}. "
+        "Eşit alt sınır gerçek sorgu yoğunluğunun eşit olduğu anlamına gelmez; gerçek aralıklar raporda tutulur.</p>") if density else ""
     card_rows = "".join(
         f"<tr><td data-label='Kart'>{escape(card['name'])}</td>"
         f"<td data-label='Yöntem'>{label}</td><td data-label='Kontrol'>{card['modes'][mode]['reads']}</td>"
@@ -102,7 +119,7 @@ def _render_transport_trial(action_path):
                 f"<h2>Amazon tarayıcısı kapsam doğrulaması</h2><span>{escape(status)}</span></div>"
                 f"{validation_html}<form method='post' action='{escape(action_path, quote=True)}'>"
                 f"<input type='hidden' name='amazon_trial_action' value='{action}'>"
-                f"<button class='button secondary' type='submit'>{button}</button></form>{comparison_button}"
+                f"<button class='button secondary' type='submit'>{button}</button></form>{comparison_button}{density_button}"
                 f"<p>Koruma beklemesi örneği: {report['protection_waits']}. Bekleyen ve yalnızca önbellekten "
                 "gelen okumalar kontrol sayısına dahil edilmez. Kapsam kontrolü aynı sayfanın iki zamanını karşılaştırır; "
                 "tüm ürün ailesinin eksiksizliğini veya CAPTCHA'nın önleneceğini garanti etmez.</p>"
@@ -111,12 +128,14 @@ def _render_transport_trial(action_path):
     return f"""<section class='summary-panel link-test-result'>
       <div class='summary-head'><h2>Amazon okuyucu karşılaştırması</h2><span>{escape(status)}</span></div>
       <p>Normal taramalar ölçülür; ek ürün sorgusu yapılmaz. Öncelikler, filtreler ve koruma beklemeleri korunur.
-      Fırsat bildirimleri devam eder. Saatlik dönemlerde iki yöntem karşılaştırılır; 24 saat sonunda mevcut okuyucuya dönülür.</p>
+      Fırsat bildirimleri devam eder. {description}</p>
       <form method='post' action='{escape(action_path, quote=True)}'>
         <input type='hidden' name='amazon_trial_action' value='{action}'>
         <button class='button secondary' type='submit'>{button}</button>
       </form>
       {validation_button}
+      {density_button}
+      {density_note}
       {validation_html}
       <p>{report['matched_cards']} kart her iki yöntemle okundu. Koruma beklemesi kaydı: {report['protection_waits']}.
       İki yöntemle henüz okunmayan kontroller: {report['unmatched_reads']}.</p>
@@ -211,9 +230,10 @@ def render_link_test_from_request(css, action_path, back_path, body) -> bytes:
     if str(form.get("amazon_browser_check", [""])[0]) == "1":
         return render_link_test_page(css, action_path, back_path, browser_check=run_browser_check())
     trial_action = str(form.get("amazon_trial_action", [""])[0])
-    if trial_action in {"start", "stop", "report", "validate"}:
-        if trial_action in {"start", "validate"}:
-            amazon_transport_trial.start_trial(purpose="browser_validation" if trial_action == "validate" else "reader_comparison")
+    if trial_action in {"start", "stop", "report", "validate", "density"}:
+        if trial_action in {"start", "validate", "density"}:
+            purpose = {"validate": "browser_validation", "density": amazon_transport_trial.DENSITY_PURPOSE}.get(trial_action, "reader_comparison")
+            amazon_transport_trial.start_trial(purpose=purpose)
         elif trial_action == "stop":
             amazon_transport_trial.stop_trial()
         return render_link_test_page(css, action_path, back_path)

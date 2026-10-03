@@ -1,7 +1,7 @@
 # Hermes Cursor Handoff
 
 This document is the current technical and product handoff for continuing Hermes
-in Cursor. It describes the real repository at version `2.5.47`; source code and
+in Cursor. It describes the real repository at version `2.5.48`; source code and
 tests remain authoritative when this document and code ever differ.
 
 ## 1. Product snapshot
@@ -292,6 +292,25 @@ verified warehouse offers remain separate identities.
   or a new driver is created. Existing first/tenth/full audits are unchanged.
   A bounded 256-page timing buffer contributes per-watch browser_timings to
   trial samples and phase_details to the report; old samples remain compatible.
+- Matched-density trial (2.5.48): Test POST amazon_trial_action=density starts
+  matched_density_comparison for six hours: browser/http/http then http/browser/browser
+  in hourly slots. Each arm has three hours; paired slots are three hours apart,
+  not the same clock hour across days. Time-of-day effects remain a limitation. Both arms share an 18-second minimum
+  request-start gap on the process-lived AmazonClient, including HTTP fallbacks,
+  variants, listings and cycle boundaries. Cache hits never wait. User options,
+  priorities, filters, guards and notifications stay unchanged. Clear the trial
+  gap at expiry/stop on the next cycle, or immediately on browser-start abort.
+  Pacing sits outside network/browser timings and timeout deadlines, inside
+  card/cycle time. Record real UTC starts, gaps, pacing waits and actual methods.
+  Paired hourly slots require all sample requests in one valid hourly slot, its
+  intended arm, and matching watch/config across the two three-hour halves; boundary carryover is
+  separately counted. Equal minimum spacing is not equal observed load or a
+  safe CAPTCHA threshold. Static browser subresources and internal redirects
+  are not each paced/counted as independent reader attempts.
+  Density JSON exposes network_samples and all cycles (with priority scope),
+  accepted ASINs and density_comparison. Persistent sample limit is 40,000 for
+  this trial (20,000 for existing modes); dropped rows are reported. Report
+  performs no Amazon queries; active trials are never silently restarted.
 - Chromium static cache remains enabled. A Selenium CDP Fetch listener adds
   no-cache headers to Document requests only; natural identity and cookies are
   preserved, no URL/cache-busting query is added. Service workers are bypassed.
