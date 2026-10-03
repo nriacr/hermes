@@ -337,6 +337,40 @@ class DashboardTests(DataFilesMixin, unittest.TestCase):
         self.assertIn('<span class="statistics-day-slow"><strong>1</strong></span>', html)
         self.assertIn("En uzun <strong>15 dk 0 sn</strong>", html)
 
+    def test_statistics_list_days_and_load_cycles_on_demand(self):
+        router = server.Router(FakeRuntime())
+        self.request = lambda path: router.handle(server.split_request(path, "GET", b"", False))
+        store = History.at(self.data.files.database)
+        day = datetime.now().astimezone().replace(hour=12, minute=0, second=0, microsecond=0) - timedelta(days=1)
+        for minute, duration in ((0, 120), (1, 240)):
+            store.record_cycle(duration, day + timedelta(minutes=minute))
+        html = dashboard.render_statistics_page(".").decode()
+        self.assertNotIn("<td>12:01:00</td>", html)  # rows are not part of the page
+        day_url = f"./statistics/day?d={day.date().isoformat()}"
+        self.assertIn(f'data-day-url="{day_url}"', html)
+        self.assertIn(f'<a href="{day_url}">Tüm çevrimler</a>', html)
+
+        part = self.request(f"/statistics/day?d={day.date().isoformat()}&part=1")
+        rows = json.loads(part.payload)["html"]
+        self.assertLess(rows.index("<td>12:01:00</td><td>4 dk 0 sn</td>"), rows.index("<td>12:00:00</td>"))
+        page = self.request(f"/statistics/day?d={day.date().isoformat()}").payload.decode()
+        self.assertIn("<td>12:00:00</td><td>2 dk 0 sn</td>", page)
+        self.assertIn("İstatistiğe dön", page)
+        self.assertEqual(self.request("/statistics/day?d=bozuk").status, 404)
+        self.assertEqual(self.request("/statistics/day?d=bozuk&part=1").status, 404)
+        script = self.request("/live.js").payload.decode()
+        self.assertIn("data-day-url", script)
+        self.assertIn("part=1", script)
+
+    def test_cycle_chart_keeps_one_point_per_column(self):
+        now = datetime.now().astimezone()
+        points = [(now - timedelta(seconds=10 * i), 3.0 if i % 100 else 600.0) for i in range(5000)][::-1]
+        svg = dashboard.render_cycle_chart(points, now)
+        coordinates = svg.split('points="')[1].split('"')[0].split()
+        self.assertLessEqual(len(coordinates), 843)
+        # The slowest cycle of a column is the one drawn.
+        self.assertIn("40.0", {xy.split(",")[1] for xy in coordinates})
+
     def test_statistics_show_site_measurements(self):
         store = History.at(self.data.files.database)
         self.assertIn("Henüz ölçüm yok.", dashboard.render_statistics_page(".").decode())

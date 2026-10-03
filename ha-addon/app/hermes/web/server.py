@@ -20,7 +20,15 @@ from ..logging_utils import log
 from ..notifier import Pushover
 from ..utils import parse_bool
 from . import assets
-from .dashboard import dashboard_live_html, render_dashboard_page, render_statistics_page, statistics_live_html
+from .dashboard import (
+    cycle_day,
+    dashboard_live_html,
+    render_dashboard_page,
+    render_statistics_day_page,
+    render_statistics_page,
+    statistics_day_rows_html,
+    statistics_live_html,
+)
 from .icons import HERMES_ICON_PNG, HERMES_ICON_SVG, render_web_manifest
 from .link_test import render_link_test_page, render_link_test_result
 from .pages import link
@@ -153,6 +161,13 @@ class Router:
             version = hashlib.sha256(html.encode("utf-8")).hexdigest()[:16]
             data = {"v": version, "same": True} if request.params.get("v", [""])[0] == version else {"v": version, "html": html}
             return Response(200, json.dumps(data, ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8")
+        if path == "/statistics/day":
+            day = cycle_day(request.params.get("d", [""])[0])
+            if request.params.get("part", [""])[0] == "1":
+                html = statistics_day_rows_html(day) if day else ""
+                return Response(200 if day else 404, json.dumps({"html": html}, ensure_ascii=False).encode("utf-8"),
+                                "application/json; charset=utf-8")
+            return Response(200 if day else 404, render_statistics_day_page(request.base, day), HTML)
         if path in ASSETS:
             response = ASSETS[path](request)
             response.headers["Cache-Control"] = "public, max-age=86400"

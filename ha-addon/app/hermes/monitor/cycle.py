@@ -119,8 +119,10 @@ class Monitor:
         self._spacing: Dict[str, RequestSpacing] = {}
         # False after a cycle that read no watch (nothing due or all paused); such a cycle logs nothing.
         self.last_cycle_read = False
+        self._last_durations = (0.0, 0.0)
         self.history = History.at(self.files.database)
         self.history.migrate_json(self.files.state, self.files.cycle_history)
+        self.history.drop_idle_cycles(self.config.interval_seconds)
 
     def close(self) -> None:
         self.providers.close()
@@ -183,11 +185,17 @@ class Monitor:
             ))
         if self.config.watches:
             # A cycle lasts until the slowest site queue has finished.
-            scan_seconds = time.monotonic() - started_at
-            cycle_seconds = scan_seconds + self.config.interval_seconds
+            if self.last_cycle_read:
+                scan_seconds = time.monotonic() - started_at
+                self._last_durations = (scan_seconds + self.config.interval_seconds, scan_seconds)
+                self.history.record_cycle(self._last_durations[0])
+            # A cycle that read nothing (nothing due, or every due watch paused)
+            # is not a cycle in the statistics; the last working one stays shown.
+            cycle_seconds, scan_seconds = self._last_durations
             rows = summary.deduplicate_summary_rows(run.summary_rows)
-            summary.publish_price_summary(self.files.summary, rows, run.stock_rows, cycle_seconds, scan_seconds)
-            self.history.record_cycle(cycle_seconds)
+            summary.publish_price_summary(self.files.summary, rows, run.stock_rows,
+                                          cycle_seconds if self.last_cycle_read else None,
+                                          scan_seconds if self.last_cycle_read else None)
             alerts.maybe_alert_summary_drop(run.state, rows, self.config, self.notifier)
             alerts.maybe_alert_search_failures(run.state, run.search_failures, self.notifier)
             self.on_cycle_published(run, rows, cycle_seconds, scan_seconds)

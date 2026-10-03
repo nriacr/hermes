@@ -288,6 +288,34 @@ class MonitorHistoryTests(HistoryCase):
         self.assertEqual(read_prices(self.data.files.database, offer_key), [])
 
 
+class IdleCycleTests(HistoryCase):
+    def test_cycles_that_read_nothing_are_not_statistics(self):
+        rule = watch("iPhone", AMAZON, target="100")
+        hermes_monitor = monitor(config([rule]), self.data, notifier())
+        hermes_monitor.providers["amazon"].read = lambda _w, _ctx, _o: [amazon_offer("90")]
+        try:
+            hermes_monitor.run_cycle()
+            published = self.data.summary()["cycle_duration_seconds"]
+            hermes_monitor.run_cycle()  # nothing due
+            hermes_monitor.run_cycle()
+        finally:
+            hermes_monitor.close()
+        now = datetime.now(timezone.utc)
+        self.assertEqual(len(read_cycles(self.data.files.database, now - timedelta(hours=1), now + timedelta(hours=1))), 1)
+        self.assertEqual(self.data.summary()["cycle_duration_seconds"], published)
+
+    def test_idle_cycles_from_older_versions_are_removed_once(self):
+        now = datetime.now(timezone.utc)
+        for seconds, duration in ((10, 1.0), (20, 1.9), (30, 2.4), (40, 270.0)):
+            self.history.record_cycle(duration, now - timedelta(seconds=seconds))
+        self.history.drop_idle_cycles(1)
+        self.history.record_cycle(1.0, now)  # later rows are not touched again
+        self.history.drop_idle_cycles(1)
+        durations = [d for _, d in read_cycles(self.data.files.database, now - timedelta(hours=1), now + timedelta(hours=1))]
+        self.assertEqual(durations, [270.0, 2.4, 1.0])
+        self.assertTrue(any("kısa çevrimler çıkarıldı: 2" in line for line in LOG_LINES))
+
+
 class QuietLogTests(HistoryCase):
     def test_idle_cycle_logs_no_banner_and_unchanged_table_is_logged_rarely(self):
         rule = watch("iPhone", AMAZON, target="100")
@@ -328,6 +356,7 @@ class QuietLogTests(HistoryCase):
         self.assertTrue(any("atlandı (captcha)" in line for line in LOG_LINES))  # the pause itself stays visible
 
     def test_unchanged_table_is_logged_again_after_thirty_minutes(self):
+        summary._last_logged_table.update(signature=None, at=0.0)
         row = summary.PriceSummaryRow(seller="Amazon", product_title="iPhone", product_url=AMAZON, price=Decimal("90"),
                                       target_price=Decimal("100"), min_price=Decimal("90"), max_price=Decimal("90"))
         summary.log_price_summary([row], now=10_000)

@@ -46,6 +46,7 @@ CYCLE_KEEP_DAYS = 90
 MEASUREMENT_KEEP_DAYS = 30
 PRUNE_EVERY_SECONDS = 24 * 60 * 60
 MIGRATED_KEY = "json_migrated_at"
+IDLE_DROPPED_KEY = "idle_cycles_dropped_at"
 # Read and request outcomes that mean the site refused us (back-off material).
 BLOCKED_OUTCOMES = ("captcha", "http_429", "http_503")
 
@@ -177,6 +178,28 @@ class History:
         self._write("fiyat sıfırlama", [("DELETE FROM prices", ())])
 
     # -- first start ----------------------------------------------------------------
+
+    def drop_idle_cycles(self, interval_seconds: float) -> None:
+        """Once: remove cycles recorded before 3.2.2 that read nothing.
+
+        Such a cycle lasted only the wait interval (plus under a second); a cycle
+        that read a page takes longer. `cycle_history.json` keeps the originals.
+        """
+        with self._lock:
+            try:
+                done = self._db().execute("SELECT value FROM meta WHERE key = ?", (IDLE_DROPPED_KEY,)).fetchone()
+                count = self._db().execute("SELECT COUNT(*) FROM cycles WHERE duration_seconds < ?",
+                                           (float(interval_seconds) + 1,)).fetchone()[0]
+            except sqlite3.Error as exc:
+                log(f"Veritabanı açılamadı; boş çevrimler temizlenemedi: {exc}")
+                return
+        if done:
+            return
+        if self._write("boş çevrim temizliği", [
+            ("DELETE FROM cycles WHERE duration_seconds < ?", (float(interval_seconds) + 1,)),
+            ("INSERT OR REPLACE INTO meta VALUES (?, ?)", (IDLE_DROPPED_KEY, _at())),
+        ]):
+            log(f"İstatistikten okuma yapmayan kısa çevrimler çıkarıldı: {count}")
 
     def migrate_json(self, state_path: Path, cycle_history_path: Path) -> None:
         """Copy the JSON history once; the JSON files stay as they are for a rollback."""

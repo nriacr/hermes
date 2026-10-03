@@ -480,7 +480,12 @@ def render_cycle_chart(points, now) -> str:
     def xy(checked_at, duration):
         return round(110 + 842 * (checked_at - cutoff).total_seconds() / span_seconds, 1), round(204 - 164 * duration / max_duration, 1)
 
-    coordinates = [xy(checked_at, duration) for checked_at, duration in points]
+    # One point per horizontal unit (the slowest cycle in it): the line looks
+    # the same as with every cycle, without tens of thousands of points.
+    columns: Dict[float, tuple] = {}
+    for x, y in (xy(checked_at, duration) for checked_at, duration in points):
+        columns[round(x)] = min(columns.get(round(x), (x, y)), (x, y), key=lambda point: point[1])
+    coordinates = list(columns.values()) if len(points) > 842 else [xy(c, d) for c, d in points]
     polyline = " ".join(f"{x},{y}" for x, y in coordinates)
     grid = "".join(
         f'<line class="grid-line" x1="110" x2="952" y1="{y}" y2="{y}"/>'
@@ -501,7 +506,16 @@ def _compact(duration) -> str:
     return f"{minutes}:{seconds:02d}"
 
 
-def render_cycle_days(points) -> str:
+def render_cycle_rows(day_entries) -> str:
+    """Every cycle of one day, newest first."""
+    rows = "".join(f'<tr><td>{escape(checked_at.strftime("%H:%M:%S"))}</td><td>{escape(duration_text(duration))}</td></tr>'
+                   for checked_at, duration in reversed(day_entries))
+    return ('<div class="table-wrap statistics-table-wrap"><table class="statistics-table">'
+            f'<thead><tr><th>Saat</th><th>Çevrim süresi</th></tr></thead><tbody>{rows}</tbody></table></div>')
+
+
+def render_cycle_days(points, base: str = ".") -> str:
+    """One summary per day; a day's cycles are loaded when the day is opened."""
     days: Dict[Any, list] = {}
     for checked_at, duration in points:
         days.setdefault(checked_at.date(), []).append((checked_at, duration))
@@ -516,8 +530,7 @@ def render_cycle_days(points) -> str:
         lower, upper = statistics.quantiles(durations, n=4, method="inclusive")[::2] if count > 1 else (durations[0], durations[0])
         typical = _compact(statistics.median(durations))
         slow_class = " class='zero'" if not slow else ""
-        rows = "".join(f'<tr><td>{escape(checked_at.strftime("%H:%M:%S"))}</td><td>{escape(duration_text(duration))}</td></tr>'
-                       for checked_at, duration in reversed(day_entries))
+        day_url = escape(link(base, f"statistics/day?d={day.isoformat()}"), quote=True)
         result.append(
             f'<details class="statistics-day" data-key="day:{day.isoformat()}"><summary aria-label="{day.strftime("%d.%m.%Y")}: {count} çevrim; tipik {typical}; '
             f'orta yüzde elli {_compact(lower)} ile {_compact(upper)}; on dakika ve üzeri {slow}">'
@@ -531,9 +544,8 @@ def render_cycle_days(points) -> str:
             f'<span>Ortalama <strong>{escape(duration_text(statistics.mean(durations)))}</strong></span>'
             f'<span>En kısa <strong>{escape(duration_text(min(durations)))}</strong></span>'
             f'<span>En uzun <strong>{escape(duration_text(max(durations)))}</strong></span>'
-            '<span>Aşağıda tüm çevrimler yeni tarihten eskiye sıralı.</span></div>'
-            '<div class="table-wrap statistics-table-wrap"><table class="statistics-table">'
-            f'<thead><tr><th>Saat</th><th>Çevrim süresi</th></tr></thead><tbody>{rows}</tbody></table></div></details>'
+            f'<span><a href="{day_url}">Tüm çevrimler</a></span></div>'
+            f'<div class="statistics-day-rows" data-day-url="{day_url}"></div></details>'
         )
     return "".join(result)
 
@@ -606,8 +618,8 @@ def statistics_live_html(base: str) -> str:
     return (
         f"<section class='summary-panel'><div class='summary-head'><h2>Günlük çevrim özeti</h2><span>Son 7 gün · {len(points)} çevrim</span></div>"
         "<p class='statistics-intro'>Süreler dakika:saniye biçiminde. Tipik, ortadaki çevrim; Orta %50, uç değerler yerine "
-        "çevrimlerin ortadaki yarısını gösterir. Güne dokunarak tüm kayıtları açabilirsin.</p>"
-        f"<div class='statistics-day-list'>{render_cycle_days(points)}</div>"
+        "çevrimlerin ortadaki yarısını gösterir. Güne dokununca o günün tüm çevrimleri yüklenir.</p>"
+        f"<div class='statistics-day-list'>{render_cycle_days(points, base)}</div>"
         "<div class='statistics-metrics'>"
         f"<section class='public-cycle-pill'><span>En kısa</span><strong>{metric(min(durations) if durations else None)}</strong></section>"
         f"<section class='public-cycle-pill'><span>En uzun</span><strong>{metric(max(durations) if durations else None)}</strong></section>"
@@ -623,3 +635,28 @@ def statistics_live_html(base: str) -> str:
 def render_statistics_page(base: str) -> bytes:
     body = live_region(base, "live/statistics", statistics_live_html(base))
     return render_page(base, "statistics", "Hermes İstatistik", body, refresh_seconds=60, scripts=live_script_tag(base))
+
+
+def cycle_day(value: str):
+    try:
+        return datetime.strptime(str(value or ""), "%Y-%m-%d").date()
+    except ValueError:
+        return None
+
+
+def cycle_day_points(day):
+    start = datetime.combine(day, datetime.min.time()).astimezone()
+    return [point for point in read_cycles(DATABASE_PATH, start, start + timedelta(days=1)) if point[0].date() == day]
+
+
+def statistics_day_rows_html(day) -> str:
+    points = cycle_day_points(day)
+    return render_cycle_rows(points) if points else '<p class="statistics-empty">Bu gün için kayıt yok.</p>'
+
+
+def render_statistics_day_page(base: str, day) -> bytes:
+    title = day.strftime("%d.%m.%Y") if day else "Geçersiz gün"
+    rows = statistics_day_rows_html(day) if day else '<p class="statistics-empty">Gün bulunamadı.</p>'
+    body = (f"<section class='summary-panel'><div class='summary-head'><h2>{escape(title)} çevrimleri</h2>"
+            f"<span><a href='{escape(link(base, 'statistics'), quote=True)}'>İstatistiğe dön</a></span></div>{rows}</section>")
+    return render_page(base, "statistics", f"Hermes İstatistik {title}", body)

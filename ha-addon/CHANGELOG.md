@@ -1,5 +1,17 @@
 # Değişiklik günlüğü
 
+## 3.2.2
+
+- İstatistik sayfası artık yalnız gün özetlerini gönderiyor; bir günün tek tek
+  çevrimleri o güne dokununca yükleniyor (JavaScript yoksa "Tüm çevrimler"
+  bağlantısı ayrı sayfada açar). Grafik aynı görünüyor ama her yatay nokta
+  için yalnız en uzun çevrimi çiziyor. Sayfa çok daha hızlı açılıyor.
+- Hiçbir kart okunmayan turlar (sırası gelen kart yok ya da hepsi Amazon
+  koruma beklemesinde) artık çevrim istatistiğine girmiyor; Özet'teki çevrim
+  süresi son gerçek turu gösteriyor. Eski sürümlerden kalan bu tür kısa
+  kayıtlar veritabanından bir kez temizlendi (`cycle_history.json`'daki
+  asılları duruyor).
+
 ## 3.2.1
 
 - Amazon kartları koruma beklemesindeyken geçen kısa turlar da loga artık

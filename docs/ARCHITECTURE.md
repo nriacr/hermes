@@ -248,7 +248,11 @@ characters, `public_dashboard_enabled`, and is compared in constant time.
 Pages: summary (`/`), `statistics`, `link-test`, `settings`, `restarting`;
 actions: `test-pushover`, `reset-notifications`, `reset-price-history`,
 `settings/save`, `link-test`. Every page has the same navigation. The
-statistics page also shows per-site reads and Amazon requests (last 24 hours
+statistics page sends day summaries only; a day's cycles come from
+`statistics/day?d=YYYY-MM-DD` (`&part=1` for the JSON fragment `live.js`
+loads when the day is opened; the plain page is the no-JS fallback). Cycles
+that read no watch are not recorded, and such rows from before 3.2.2 were
+removed once (`meta.idle_cycles_dropped_at`). The page also shows per-site reads and Amazon requests (last 24 hours
 and 7 days) from `hermes.db`.
 
 The summary and statistics pages update in place: `live.js` fetches

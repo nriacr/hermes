@@ -357,6 +357,26 @@ LIVE_SCRIPT = """
       busy = false;
     }
   };
+  // A day's cycles are loaded the first time the day is opened (statistics).
+  const loadDay = async (details) => {
+    const box = details.querySelector('.statistics-day-rows[data-day-url]');
+    if (!box || box.dataset.loaded) return;
+    box.dataset.loaded = '1';
+    box.innerHTML = '<p class="statistics-empty">Yükleniyor…</p>';
+    try {
+      const target = box.dataset.dayUrl;
+      const response = await fetch(`${target}${target.includes('?') ? '&' : '?'}part=1`, { cache: 'no-store' });
+      const data = await response.json();
+      box.innerHTML = data.html || '<p class="statistics-empty">Bu gün için kayıt yok.</p>';
+    } catch (_error) {
+      delete box.dataset.loaded;
+      box.innerHTML = '<p class="statistics-empty">Yüklenemedi; günü kapatıp yeniden aç.</p>';
+    }
+  };
+  const loadOpenDays = () => region.querySelectorAll('details[open]').forEach(loadDay);
+  region.addEventListener('toggle', (event) => { if (event.target.open) loadDay(event.target); }, true);
+  const swapped = new MutationObserver(loadOpenDays);
+  swapped.observe(region, { childList: true });
   window.setInterval(refresh, (Number(region.dataset.liveInterval) || 15) * 1000);
   document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
 })();
