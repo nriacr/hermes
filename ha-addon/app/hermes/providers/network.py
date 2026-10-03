@@ -1,10 +1,13 @@
 import json
 import re
 
+from ..constants import SITE_NETWORK
 from ..errors import HermesError, OutOfStockHermesError
+from ..logging_utils import log
 from ..models import OfferResult
 from ..utils import parse_decimal
 from .base import (
+    Provider,
     extract_jsonld_product,
     extract_price_from_meta,
     extract_price_from_scripts,
@@ -12,6 +15,7 @@ from .base import (
     extract_title,
     soup_from_html,
 )
+from .http import fetch_with_retries, read_site_html
 from .size_availability import requested_size_state, size_matches
 
 NETWORK_SELECTORS = [
@@ -127,3 +131,14 @@ def extract_offers(html: str, source_url: str = "", size: str = "") -> list[Offe
             f"Network beden stokta değil: {requested_size}", title, source_url
         )
     return [extract_offer(html, source_url=source_url)]
+
+
+class NetworkProvider(Provider):
+    site = SITE_NETWORK
+
+    def read(self, watch, ctx, outcome):
+        response = fetch_with_retries(ctx.session, watch.url, ctx.timeout)
+        offers = extract_offers(read_site_html(response, "Network"), source_url=watch.url, size=watch.size)
+        if watch.size:
+            log(f"Network beden kontrol edildi: {watch.name or watch.url} | beden={watch.size} | adet={len(offers)}")
+        return offers

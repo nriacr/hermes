@@ -1,8 +1,8 @@
 # Hermes Development Contract
 
 This file is the authoritative working agreement for coding agents in this
-repository. Read it before making changes. The detailed system handoff is in
-`docs/CURSOR_HANDOFF.md`.
+repository. Read it before making changes. The architecture and the behavior
+of each site are described in `docs/ARCHITECTURE.md`.
 
 ## Product and user
 
@@ -18,13 +18,18 @@ repository. Read it before making changes. The detailed system handoff is in
 ## Non-negotiable architecture rules
 
 - Each commerce site has an isolated provider under
-  `ha-addon/app/hermes/providers/`. A fix for one site must not change another
-  site's parser or pricing semantics.
-- New sites receive a new provider and focused tests. Register them through
-  `providers/registry.py`; do not add site-specific parsing to `service.py`.
-- Shared orchestration belongs in `service.py`, shared HTTP behavior in
-  `http_client.py`, persistence in `storage.py`, and UI rendering in the shared
-  dashboard/settings modules.
+  `ha-addon/app/hermes/providers/` (`<site>.py`, or a `<site>/` package for
+  Amazon and Hepsiburada). The provider owns both fetching and parsing for its
+  site and implements the `Provider` interface in `providers/base.py`. A fix
+  for one site must not change another site's parser or pricing semantics.
+- New sites receive a new provider and focused tests. Register them in
+  `providers/registry.py`; never add site-specific logic to `monitor/`.
+  Site differences the monitor needs are provider attributes (for example
+  `backs_off_on_protection`, `notifies_stock_return`, `keeps_offer`).
+- One cycle lives in `monitor/cycle.py`, the loop and panel commands in
+  `monitor/runner.py`, scheduling/state/summary/alerts in their `monitor/`
+  modules, shared HTTP helpers in `providers/http.py`, persistence in
+  `storage.py`, and every panel page in `web/` behind one router.
 - Do not solve problems with monkey patches, duplicate parsers, wrapper scripts,
   runtime source rewriting, or a second implementation left beside the first.
 - Remove obsolete code when replacing behavior. Prefer a coherent redesign over
@@ -109,8 +114,13 @@ repository. Read it before making changes. The detailed system handoff is in
   route `/health` unless an explicit migration is approved.
 - Preserve `hassio_api: true` and `hassio_role: manager`; settings writes and
   restarts depend on Supervisor access.
-- The container starts three processes through `ha-addon/run.sh`: ingress UI,
-  public UI, and the foreground monitoring service.
+- The container runs one process (`python -m hermes`): the monitor loop in the
+  main thread; the ingress (8099) and public (8100) servers and Telegram in
+  threads. While it runs, only the monitor writes `state.json`; panel actions
+  (resets) are queued commands applied between cycles.
+- `/health` reports the monitor: it fails when the loop has stopped or a cycle
+  hangs, and the Supervisor watchdog then restarts Hermes. With invalid
+  settings the panel stays up (health ok) and shows the error.
 - Persistent runtime data stays under `/data`; code stays under `/app`.
 - Do not expose the public dashboard without its token path and the user's
   reverse proxy/tunnel controls.
@@ -121,7 +131,8 @@ repository. Read it before making changes. The detailed system handoff is in
 2. Confirm the working tree and current version in `ha-addon/config.yaml`.
 3. Add a regression test that demonstrates parser or business-rule bugs.
 4. Make the smallest coherent architectural change; remove superseded logic.
-5. Run focused tests while iterating, then run `sh tools/check.sh` before release.
+5. Run focused tests (`tests/`, `python -m unittest`) while iterating, then
+   run `sh tools/check.sh` before release.
 6. For runtime behavior changes, increment the current add-on patch version.
    Never guess the version from conversation history.
 7. Update README/docs when behavior, options, providers, or operations change.

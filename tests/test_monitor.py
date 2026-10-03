@@ -1,0 +1,624 @@
+"""Monitoring cycle: scheduling, notifications, guards, summary and state."""
+
+import json
+import unittest
+from datetime import datetime, timedelta, timezone
+from decimal import Decimal
+from types import SimpleNamespace
+from unittest.mock import patch
+
+import requests
+
+from support import LOG_LINES, TempData, config, key, monitor, notifier, watch
+
+from hermes.config import prepare_watches
+from hermes.constants import SEARCH_ERROR_NOTIFICATION_HOUR
+from hermes.errors import BotProtectionHermesError, EmptySearchResultsHermesError, HermesError, HttpStatusHermesError, OutOfStockHermesError
+from hermes.models import OfferResult, PriceSummaryRow, StockSummaryRow
+from hermes.monitor import alerts, runner, scheduling, state as state_ops, summary
+from hermes.monitor.cycle import skipped_offer_reason
+from hermes.providers.amazon import AmazonProvider
+from hermes.providers.bengurme import BenGurmeProvider
+from hermes.providers.hepsiburada import HepsiburadaProvider
+from hermes.providers.nordbron import NordbronProvider
+from hermes.utils import format_duration, utc_now
+
+AMAZON = "https://www.amazon.com.tr/dp/B000000001"
+
+
+def reader(*results):
+    """A provider `read` replacement: offers, a callable, or an exception per call."""
+    calls = list(results)
+
+    def read(rule, ctx, outcome):
+        item = calls.pop(0) if len(calls) > 1 else calls[0]
+        if isinstance(item, BaseException):
+            raise item
+        if callable(item):
+            return item(rule, ctx, outcome)
+        return list(item)
+
+    return read
+
+
+class CycleTestCase(unittest.TestCase):
+    def setUp(self):
+        self.data = TempData()
+        self.notify = notifier()
+        LOG_LINES.clear()
+
+    def tearDown(self):
+        self.data.cleanup()
+
+    def run_cycle(self, cfg, times=1):
+        hermes_monitor = monitor(cfg, self.data, self.notify)
+        try:
+            for _ in range(times):
+                hermes_monitor.run_cycle()
+        finally:
+            hermes_monitor.close()
+        return self.data.state()
+
+    def run_later(self, cfg, seconds=5):
+        """Another cycle once a high-priority watch is due again."""
+        later = datetime.now().astimezone() + timedelta(seconds=seconds)
+        with patch.object(scheduling, "local_now", return_value=later):
+            return self.run_cycle(cfg)
+
+    def published_rows(self):
+        return self.data.summary().get("rows", [])
+
+    def published_stock(self):
+        return self.data.summary().get("stock_rows", [])
+
+    def titles_sent(self):
+        return [call.args[0] for call in self.notify.send.call_args_list]
+
+
+class NotificationTests(CycleTestCase):
+    def test_captcha_and_503_errors_stay_silent_but_a_verified_depot_offer_notifies(self):
+        errors = [BotProtectionHermesError("Amazon bot koruması nedeniyle doğrulama (captcha) sayfası döndü."),
+                  HttpStatusHermesError(503, "https://www.amazon.com.tr/s?k=test"),
+                  requests.HTTPError("Service Unavailable", response=SimpleNamespace(status_code=503)),
+                  BotProtectionHermesError("Hepsiburada bot koruması nedeniyle doğrulama (captcha) sayfası döndü."),
+                  HermesError("Amazon varyantları okunamadı.")]
+        searches = [watch(f"Arama {i}", f"https://www.hepsiburada.com/ara?q=test{i}" if i == 3 else f"https://www.amazon.com.tr/s?k=test{i}")
+                    for i in range(5)]
+        depot = watch("Depo", AMAZON)
+        cfg = config(searches + [depot])
+        self.data.write_state({"_meta": {"summary_config_signature": alerts.summary_config_signature(cfg),
+                                         "summary_expected_row_count": 20, "summary_drop_consecutive_cycles": 4}})
+
+        def amazon_read(rule, ctx, outcome):
+            if rule is depot:
+                return [OfferResult("Depo ürünü", Decimal("500"), seller="Amazon Depo", url=depot.url, is_warehouse=True)]
+            if rule is searches[4]:
+                outcome.blocked = HttpStatusHermesError(503, rule.url)
+            raise errors[searches.index(rule)]
+
+        now = datetime(2026, 10, 2, SEARCH_ERROR_NOTIFICATION_HOUR, tzinfo=timezone.utc)
+        with (patch.object(AmazonProvider, "read", side_effect=amazon_read),
+              patch.object(HepsiburadaProvider, "read", side_effect=lambda rule, *_a: (_ for _ in ()).throw(errors[3])),
+              patch.object(alerts, "local_now", return_value=now)):
+            state = self.run_cycle(cfg)
+        self.notify.send.assert_called_once()
+        self.assertIn("Depo ürünü", self.notify.send.call_args.args[1])
+        self.assertEqual(len(self.published_rows()), 1)
+        self.assertTrue(self.published_rows()[0]["is_warehouse"])
+        for rule in searches:
+            self.assertTrue(state[key(rule)]["last_error"])
+            self.assertNotIn("last_error_notified_at", state[key(rule)])
+        self.assertNotIn("last_search_failure_alert_at", state["_meta"])
+        self.assertNotIn("last_summary_drop_alert_at", state["_meta"])
+        self.assertEqual(state[key(searches[4])]["last_error_status"], 503)
+
+    def test_partial_depot_opportunity_notifies_even_when_a_sibling_hits_captcha(self):
+        rule = watch("Depo", AMAZON)
+        cfg = config([rule])
+
+        def partial(rule, ctx, outcome):
+            yield OfferResult("Depo ürünü", Decimal("500"), seller="Amazon Depo", url=rule.url, is_warehouse=True)
+            outcome.blocked = BotProtectionHermesError("Amazon captcha")
+
+        with patch.object(AmazonProvider, "read", side_effect=partial):
+            state = self.run_cycle(cfg)
+        self.notify.send.assert_called_once()
+        self.assertTrue(state[key(rule)]["amazon_partial_result"])
+        self.assertIn("captcha", state[key(rule)]["last_error"])
+        self.assertGreater(state_ops.guard_remaining_seconds(state, key(rule)), 0)
+
+    def test_other_search_errors_send_individual_and_aggregate_notifications(self):
+        searches = [watch(f"Arama {i}", f"https://www.amazon.com.tr/s?k=test{i}") for i in range(4)]
+        now = datetime(2026, 10, 2, SEARCH_ERROR_NOTIFICATION_HOUR, tzinfo=timezone.utc)
+        with (patch.object(AmazonProvider, "read", side_effect=reader(HttpStatusHermesError(500, "x"))),
+              patch.object(alerts, "local_now", return_value=now)):
+            self.run_cycle(config(searches))
+        self.assertEqual(self.notify.send.call_count, 5)
+        self.assertIn("Hermes arama erişim uyarısı", self.titles_sent())
+
+    def test_opportunity_is_notified_and_saved_before_the_next_variant_is_read(self):
+        rule = watch(url=AMAZON, target="100000", include_variations=True)
+        events = []
+
+        def stream(rule, ctx, outcome):
+            yield OfferResult("iPhone Gümüş 256 GB", Decimal("89040.87"), "Amazon Depo", rule.url, True)
+            events.append("second")
+            self.assertTrue(self.data.state())  # state was saved after the notification
+            yield OfferResult("iPhone Abis 512 GB", Decimal("132000"), url="https://www.amazon.com.tr/dp/B000000002")
+
+        self.notify.send.side_effect = lambda *_args, **_kwargs: events.append("notify")
+        with patch.object(AmazonProvider, "read", side_effect=stream):
+            self.run_cycle(config([rule]))
+        self.assertEqual(events, ["notify", "second"])
+        self.assertIn("Depo", self.notify.send.call_args.args[0])
+        self.assertIn("Amazon Depo", self.notify.send.call_args.args[1])
+
+    def test_a_failed_notification_keeps_the_price_and_retries_next_cycle(self):
+        rule = watch(url=AMAZON, target="1000")
+        self.notify.send.side_effect = requests.ConnectionError("pushover down")
+        with patch.object(AmazonProvider, "read", side_effect=reader([OfferResult("iPhone", Decimal("900"), "Amazon.com.tr", AMAZON)])):
+            state = self.run_cycle(config([rule]))
+            self.assertIsNone(state[key(rule)]["last_error"])
+            self.assertEqual(len(self.published_rows()), 1)
+            offer_key = state[key(rule)]["offer_keys"][0]
+            self.assertNotIn("last_alerted_price", state[offer_key])
+            self.notify.send.side_effect = None
+            state = self.run_later(config([rule]))
+        self.assertEqual(self.notify.send.call_count, 2)
+        self.assertEqual(state[offer_key]["last_alerted_price"], "900")
+
+    def test_repeat_alerts_follow_the_24_hour_rule_and_lower_prices(self):
+        rule = watch(url=AMAZON, target="1000")
+        offers = [OfferResult("iPhone", Decimal("900"), url=AMAZON)]
+        with patch.object(AmazonProvider, "read", side_effect=reader(offers)) as read:
+            self.run_cycle(config([rule]))
+            state = self.run_later(config([rule]))
+        self.assertEqual(read.call_count, 2)
+        self.notify.send.assert_called_once()
+        entry = state[state[key(rule)]["offer_keys"][0]]
+        self.assertFalse(state_ops.should_alert(entry, Decimal("900"), Decimal("1000"), True))
+        self.assertTrue(state_ops.should_alert(entry, Decimal("850"), Decimal("1000"), True))
+        entry["last_alerted_at"] = (datetime.now(timezone.utc) - timedelta(hours=25)).isoformat()
+        self.assertTrue(state_ops.should_alert(entry, Decimal("900"), Decimal("1000"), True))
+
+    def test_stock_return_notifies_once_and_still_records_the_offers(self):
+        rule = watch("Kan üzümü", "https://bengurme.com/products/uzum", target="100")
+        offers = [OfferResult("Kan üzümü 500 g", Decimal("80"), url=rule.url), OfferResult("Kan üzümü 1 kg", Decimal("150"), url=rule.url + "?v=2")]
+        with patch.object(BenGurmeProvider, "read",
+                          side_effect=reader(OutOfStockHermesError("Ben Gurme ürünü stokta değil.", "Kan üzümü", rule.url), offers)):
+            state = self.run_cycle(config([rule]))
+            self.assertTrue(state[key(rule)]["last_out_of_stock_at"])
+            state = self.run_later(config([rule]))
+        self.assertEqual(self.titles_sent(), ["Ben Gurme stok alarmı"])
+        self.assertNotIn("last_out_of_stock_at", state[key(rule)])
+        self.assertEqual(len(state[key(rule)]["offer_keys"]), 2)
+        self.assertEqual(len(self.published_rows()), 2)
+
+    def test_variant_url_change_preserves_alert_suppression_and_history(self):
+        rule = watch(url=AMAZON, target="100000", include_variations=True)
+        self.data.write_state({key(rule): {"offer_keys": ["existing-offer"]},
+                               "existing-offer": {"url": AMAZON + "?th=1", "is_warehouse": True, "last_alerted_price": "90000",
+                                                  "last_alerted_at": utc_now(), "min_price": "85000", "max_price": "95000"}})
+        offers = [OfferResult("iPhone", Decimal("90000"), "Amazon Depo", AMAZON + "?psc=1", True)]
+        with patch.object(AmazonProvider, "read", side_effect=reader(offers)):
+            state = self.run_cycle(config([rule]))
+        self.notify.send.assert_not_called()
+        self.assertEqual(state[key(rule)]["offer_keys"], ["existing-offer"])
+        self.assertEqual(state["existing-offer"]["min_price"], "85000")
+
+
+class EmptyAndStockTests(CycleTestCase):
+    def test_explicit_no_results_notice_is_a_normal_stock_row_read_at_most_every_five_minutes(self):
+        rule = watch("Juo 240W", "https://www.amazon.com.tr/s?k=juo+240w&i=warehouse-deals")
+        error = EmptySearchResultsHermesError("Aranan ürün bulunamadı: Amazon Depo içinde juo 240w için sonuç bulunamadı",
+                                              no_results_notice=True)
+        with patch.object(AmazonProvider, "read", side_effect=reader(error)) as read:
+            self.run_cycle(config([rule]))
+            state = self.run_later(config([rule]), seconds=60)
+        read.assert_called_once()
+        self.notify.send.assert_not_called()
+        self.assertIsNone(state[key(rule)]["last_error"])
+        self.assertEqual(len(self.published_stock()), 1)
+        self.assertIn("sonuç bulunamadı", self.published_stock()[0]["reason"])
+
+    def test_deferred_stock_row_keeps_its_last_classification(self):
+        rule = watch(url=AMAZON, priority="medium")
+        with patch.object(AmazonProvider, "read", side_effect=reader(OutOfStockHermesError("Stokta yok", "iPhone", AMAZON))) as read:
+            self.run_cycle(config([rule]), times=2)
+        read.assert_called_once()
+        self.assertEqual([row["product_url"] for row in self.published_stock()], [AMAZON])
+
+    def test_unavailable_family_waits_until_its_next_probe_unless_edited(self):
+        rule = watch(url=AMAZON)
+        retry_after = (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat()
+
+        def unavailable(rule, ctx, outcome):
+            outcome.retry_after = retry_after
+            raise OutOfStockHermesError("Stokta yok", "iPhone", AMAZON)
+
+        with patch.object(AmazonProvider, "read", side_effect=unavailable) as read:
+            self.run_cycle(config([rule]))
+            state = self.run_later(config([rule]), seconds=60)
+            read.assert_called_once()
+            self.assertEqual(state[key(rule)]["amazon_no_offer_retry_after"], retry_after)
+            self.assertEqual(len(self.published_stock()), 1)
+            rule.check_now_token = "edited"
+            self.run_cycle(config([rule]))
+        self.assertEqual(read.call_count, 2)
+
+    def test_empty_offer_keys_never_restore_a_legacy_price(self):
+        rule = watch(url=AMAZON)
+        self.assertEqual(summary.cached_summary_rows(rule, "watch", {"watch": {"offer_keys": [], "last_price": "100",
+                                                                               "last_checked_at": utc_now()}}, "Amazon"), [])
+
+    def test_normal_empty_result_is_not_an_operational_error(self):
+        self.assertTrue(isinstance(EmptySearchResultsHermesError("x"), HermesError))
+        rule = watch("Arama", "https://www.amazon.com.tr/s?k=test")
+        with patch.object(AmazonProvider, "read", side_effect=reader(EmptySearchResultsHermesError("Boş sonuç"))):
+            state = self.run_cycle(config([rule]))
+        self.assertIsNone(state[key(rule)]["last_error"])
+        self.notify.send.assert_not_called()
+
+
+class ProtectionGuardTests(CycleTestCase):
+    def test_guard_backs_off_15_then_30_minutes_and_clears(self):
+        state = {}
+        error = BotProtectionHermesError("Amazon captcha")
+        now = datetime(2026, 10, 1, 12, tzinfo=timezone.utc)
+        with patch.object(state_ops, "local_now", return_value=now):
+            state_ops.note_guard(state, "amazon-a", "test", error)
+            self.assertEqual(state_ops.guard_remaining_seconds(state, "amazon-a"), 15 * 60)
+            self.assertEqual(state_ops.guard_remaining_seconds(state, "amazon-b"), 0)
+        with patch.object(state_ops, "local_now", return_value=now + timedelta(minutes=15, seconds=1)):
+            self.assertEqual(state_ops.guard_remaining_seconds(state, "amazon-a"), 0)
+            state_ops.note_guard(state, "amazon-a", "test", error)
+            self.assertEqual(state_ops.guard_remaining_seconds(state, "amazon-a"), 30 * 60)
+        state_ops.clear_guard(state, "amazon-a")
+        self.assertNotIn("amazon-a", state["_meta"]["amazon_protection"])
+
+    def test_http_503_from_a_search_pauses_the_watch(self):
+        response = requests.Response()
+        response.status_code = 503
+        error = requests.HTTPError("503 Server Error", response=response)
+        rule = watch("Hue", "https://www.amazon.com.tr/s?k=hue")
+        with patch.object(AmazonProvider, "read", side_effect=reader(error)) as read:
+            state = self.run_cycle(config([rule]))
+            self.assertEqual(state["_meta"]["amazon_protection"][key(rule)]["kind"], "http_503")
+            self.run_later(config([rule]), seconds=120)
+        read.assert_called_once()
+
+    def test_guarded_watch_shows_no_stale_price_and_recovers_after_expiry(self):
+        rule = watch(url=AMAZON, target="100000")
+        state = {key(rule): {"last_price": "90000", "url": AMAZON,
+                             "last_checked_at": (datetime.now(timezone.utc) - timedelta(minutes=2)).isoformat()}}
+        state_ops.note_guard(state, key(rule), "iPhone", BotProtectionHermesError("Amazon captcha"))
+        self.data.write_state(state)
+        offers = [OfferResult("iPhone", Decimal("120000"), "Amazon.com.tr", AMAZON)]
+        with patch.object(AmazonProvider, "read", side_effect=reader(offers)) as read:
+            state = self.run_cycle(config([rule]))
+            read.assert_not_called()
+            self.assertEqual(self.published_rows(), [])
+            state["_meta"]["amazon_protection"][key(rule)]["retry_after"] = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
+            self.data.write_state(state)
+            state = self.run_cycle(config([rule]))
+        read.assert_called_once()
+        self.assertEqual(len(self.published_rows()), 1)
+        self.assertNotIn(key(rule), state["_meta"]["amazon_protection"])
+
+    def test_expired_guard_of_a_medium_watch_is_probed_once_then_follows_its_priority(self):
+        rule = watch("Juo", "https://www.amazon.com.tr/s?k=Juo", priority="medium")
+        state = {key(rule): {"last_checked_at": utc_now()}}
+        state_ops.note_guard(state, key(rule), "Juo", BotProtectionHermesError("Amazon captcha"))
+        state["_meta"]["amazon_protection"][key(rule)]["retry_after"] = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
+        self.data.write_state(state)
+        with patch.object(AmazonProvider, "read", side_effect=reader(EmptySearchResultsHermesError("Boş sonuç"))) as read:
+            state = self.run_cycle(config([rule]), times=2)
+        read.assert_called_once()
+        self.assertNotIn(key(rule), state["_meta"]["amazon_protection"])
+        self.assertIsNone(state[key(rule)]["last_error"])
+
+    def test_partial_family_keeps_its_offer_while_paused(self):
+        rule = watch(url=AMAZON, target="100000", include_variations=True)
+
+        def partial(rule, ctx, outcome):
+            yield OfferResult("iPhone Gümüş", Decimal("120000"), "Amazon.com.tr", rule.url)
+            outcome.blocked = BotProtectionHermesError("Amazon captcha")
+
+        with patch.object(AmazonProvider, "read", side_effect=partial) as read:
+            state = self.run_cycle(config([rule]))
+            self.assertEqual(len(self.published_rows()), 1)
+            self.assertGreater(state_ops.guard_remaining_seconds(state, key(rule)), 0)
+            self.run_later(config([rule]), seconds=120)
+        read.assert_called_once()
+        self.assertEqual(len(self.published_rows()), 1)
+
+    def test_other_sites_never_receive_a_guard(self):
+        rule = watch("Çanta", "https://nordbron.com/canta")
+        with patch.object(NordbronProvider, "read", side_effect=reader(BotProtectionHermesError("Nordbron captcha"))) as read:
+            self.run_cycle(config([rule]))
+            state = self.run_later(config([rule]))
+        self.assertEqual(read.call_count, 2)
+        self.assertNotIn(key(rule), state["_meta"].get("amazon_protection", {}))
+
+
+class SchedulingTests(CycleTestCase):
+    def test_priorities_use_the_cycle_two_hours_and_six_hours(self):
+        now = datetime.now(timezone.utc)
+        checked = {"last_checked_at": now.isoformat()}
+        high, medium, low = (watch(name, f"https://www.amazon.com.tr/dp/B00000000{i}", priority=name)
+                             for i, name in enumerate(("high", "medium", "low"), start=1))
+        cases = ((timedelta(seconds=59), high, False), (timedelta(seconds=60), high, True),
+                 (timedelta(hours=1, minutes=59), medium, False), (timedelta(hours=1, minutes=59), low, False),
+                 (timedelta(hours=2), medium, True), (timedelta(hours=2), low, False), (timedelta(hours=6), low, True))
+        for elapsed, rule, due in cases:
+            with self.subTest(elapsed=elapsed, priority=rule.priority), patch.object(scheduling, "local_now", return_value=now + elapsed):
+                self.assertEqual(scheduling.watch_check_due(rule, checked, 60), due)
+
+    def test_high_priority_is_read_before_medium_and_low(self):
+        tasks = [{"watch": watch(p, f"https://www.amazon.com.tr/dp/{p}{s}", priority=p), "site": s}
+                 for p, s in (("low", "amazon"), ("high", "hepsiburada"), ("medium", "zara"), ("high", "amazon"))]
+        self.assertEqual([task["watch"].priority for task in scheduling.priority_request_order(tasks)],
+                         ["high", "high", "medium", "low"])
+
+    def test_requests_alternate_between_sites(self):
+        items = [{"site": site, "name": f"{site}-{n}"} for site, n in
+                 (("amazon", 1), ("amazon", 2), ("amazon", 3), ("hepsiburada", 1), ("hepsiburada", 2), ("nordbron", 1))]
+        sites = [item["site"] for item in scheduling.balanced_request_order(items)]
+        self.assertCountEqual(sites, [item["site"] for item in items])
+        self.assertEqual(sum(1 for a, b in zip(sites, sites[1:]) if a == b), 0)
+
+    def test_deferred_medium_and_low_watches_keep_their_last_prices(self):
+        now = datetime.now(timezone.utc)
+        medium = watch("Orta öncelik", "https://nordbron.com/orta", target="150", priority="medium")
+        low = watch("Düşük öncelik", "https://nordbron.com/dusuk", target="250", priority="low")
+        high = watch("Yüksek öncelik", "https://nordbron.com/yuksek", target="350", priority="high")
+        state = {}
+        for rule, price in ((medium, "120"), (low, "220")):
+            offer_key = f"cached-{rule.priority}"
+            state[key(rule)] = {"offer_keys": [offer_key], "last_checked_at": now.isoformat()}
+            state[offer_key] = {"last_price": price, "min_price": price, "max_price": price, "title": f"Önceden {rule.name}",
+                                "url": rule.url, "configured_url": rule.url, "site": rule.site, "priority": rule.priority,
+                                "last_checked_at": now.isoformat()}
+        self.data.write_state(state)
+        with patch.object(NordbronProvider, "read", side_effect=reader([OfferResult("Yeni fırsat", Decimal("300"), url=high.url)])) as read:
+            self.run_cycle(config([medium, low, high], interval_seconds=60))
+        read.assert_called_once()
+        rows = {row["priority"]: row for row in self.published_rows()}
+        self.assertEqual({p: rows[p]["price"] for p in rows}, {"medium": "120 TL", "low": "220 TL", "high": "300 TL"})
+        self.assertEqual(rows["medium"]["price_checked_at"], now.isoformat())
+        coverage = next(line for line in LOG_LINES if "Çevrim öncelik kapsamı:" in line)
+        self.assertIn("yüksek=1 başladı, 1 sırası geldi, 0 ertelendi", coverage)
+        self.assertIn("orta=0 başladı, 0 sırası geldi, 1 ertelendi", coverage)
+
+    def test_stopping_hermes_ends_the_cycle_between_watches(self):
+        rules = [watch(f"Ürün {i}", f"https://nordbron.com/{i}") for i in range(3)]
+        hermes_monitor = monitor(config(rules), self.data, self.notify)
+        calls = []
+
+        def read(rule, ctx, outcome):
+            calls.append(rule)
+            hermes_monitor.should_stop = lambda: True
+            return [OfferResult(rule.name, Decimal("1"), url=rule.url)]
+
+        with patch.object(NordbronProvider, "read", side_effect=read):
+            hermes_monitor.run_cycle()
+        hermes_monitor.close()
+        self.assertEqual(len(calls), 1)
+        self.assertIn(key(rules[0]), self.data.state())
+
+
+class FilterTests(unittest.TestCase):
+    def test_minimum_price_and_comma_separated_exclusions(self):
+        rule = prepare_watches([{"name": "Samsung S11", "target_price": 40000, "minimum_price": "10.000",
+                                 "exclude_terms": "kılıf, koruyucu, çizilmez, temperli",
+                                 "url_1": "https://www.amazon.com.tr/s?k=samsung+s11"}])[0]
+        self.assertEqual(rule.minimum_price, Decimal("10000"))
+        self.assertEqual(rule.excluded_terms, ["kılıf", "koruyucu", "çizilmez", "temperli"])
+        self.assertIn("minimum fiyat filtresi", skipped_offer_reason(rule, OfferResult("Samsung S11", Decimal("1000")), "Samsung S11"))
+        self.assertIn("hariç tut filtresi: kılıf", skipped_offer_reason(
+            rule, OfferResult("x", Decimal("20000")), "Samsung S11 koruyucu kılıf"))
+        self.assertEqual(skipped_offer_reason(rule, OfferResult("x", Decimal("20000")), "Samsung S11 tablet"), "")
+
+    def test_absurd_current_price_does_not_overwrite_history(self):
+        bounds = state_ops.sanitized_price_bounds({"last_price": "10448.99", "min_price": "10448.99", "max_price": "12398.40"},
+                                                  Decimal("3210448.99"), Decimal("9500"))
+        self.assertEqual(bounds, (Decimal("10448.99"), Decimal("12398.40")))
+
+
+class SummaryAlertTests(CycleTestCase):
+    def test_drop_threshold_requires_a_meaningful_loss(self):
+        self.assertEqual(alerts.summary_drop_threshold(18), 6)
+        self.assertEqual(alerts.summary_drop_threshold(23), 8)
+
+    def test_drop_needs_five_cycles_and_stays_silent_during_captcha_or_503(self):
+        rule = watch("Arama", "https://www.amazon.com.tr/s?k=test")
+        cfg = config([rule])
+        now = datetime(2026, 10, 2, 12, tzinfo=timezone.utc)
+        for message, status in (("Amazon captcha", None), ("Service Unavailable", 503)):
+            with self.subTest(status=status), patch.object(alerts, "local_now", return_value=now):
+                notify = notifier()
+                state = {key(rule): {"last_error": message, "last_error_status": status},
+                         "_meta": {"summary_config_signature": alerts.summary_config_signature(cfg),
+                                   "summary_expected_row_count": 20, "summary_drop_consecutive_cycles": 4}}
+                for _ in range(6):
+                    alerts.maybe_alert_summary_drop(state, [], cfg, notify)
+                notify.send.assert_not_called()
+                state[key(rule)].update(last_error=None, last_error_status=None)
+                for _ in range(4):
+                    alerts.maybe_alert_summary_drop(state, [], cfg, notify)
+                notify.send.assert_not_called()
+                alerts.maybe_alert_summary_drop(state, [], cfg, notify)
+                notify.send.assert_called_once()
+
+    def test_drop_warning_respects_quiet_hours(self):
+        rule = watch("Arama", "https://www.amazon.com.tr/s?k=test")
+        cfg = config([rule])
+        state = {"_meta": {"summary_config_signature": alerts.summary_config_signature(cfg),
+                           "summary_expected_row_count": 20, "summary_drop_consecutive_cycles": 4}}
+        notify = notifier()
+        with patch.object(alerts, "local_now", return_value=datetime(2026, 10, 2, 23, tzinfo=timezone.utc)):
+            alerts.maybe_alert_summary_drop(state, [], cfg, notify)
+        notify.send.assert_not_called()
+
+
+class SummaryFileTests(CycleTestCase):
+    def row(self, title, url, price, target="90", **fields):
+        return PriceSummaryRow("Amazon", title, url, Decimal(price), Decimal(target), Decimal(price), Decimal(price), **fields)
+
+    def test_early_save_keeps_the_previous_cycle_duration(self):
+        self.data.write_summary({"cycle_duration_seconds": 90, "scan_duration_seconds": 30, "rows": []})
+        rows = [self.row("Test ürün", "https://example.com", "100")]
+        summary.save_price_summary(self.data.files.summary, rows)
+        self.assertEqual((self.data.summary()["cycle_duration_seconds"], self.data.summary()["scan_duration_seconds"]), (90, 30))
+        summary.publish_price_summary(self.data.files.summary, rows, cycle_duration_seconds=180, scan_duration_seconds=120)
+        self.assertEqual(self.data.summary()["cycle_duration_seconds"], 180)
+
+    def test_incremental_save_keeps_rows_waiting_for_the_cycle(self):
+        summary.save_price_summary(self.data.files.summary, [self.row("Önce okunan", "https://example.com/old", "200", "180")])
+        summary.save_incremental_summary(self.data.files.summary, [self.row("Bildirim", "https://example.com/fresh", "90", "100")])
+        prices = {row["product_url"]: row["price"] for row in self.data.summary()["rows"]}
+        self.assertEqual(prices, {"https://example.com/old": "200 TL", "https://example.com/fresh": "90 TL"})
+
+    def test_incremental_save_removes_only_the_failed_watch_rows(self):
+        stale = PriceSummaryRow("Nordbron", "Stark", "https://nordbron.com/stark", Decimal("4850"), Decimal("4500"),
+                                Decimal("4850"), Decimal("4850"))
+        summary.save_price_summary(self.data.files.summary, [stale, self.row("Güncel", "https://example.com/current", "300")])
+        summary.save_incremental_summary(self.data.files.summary, [], removed_price_ids={summary.price_row_identity(stale)})
+        self.assertEqual([row["product_url"] for row in self.data.summary()["rows"]], ["https://example.com/current"])
+
+    def test_normal_and_warehouse_rows_of_one_asin_stay_separate(self):
+        url = "https://www.amazon.com.tr/dp/B0D95QG8W4?th=1"
+        normal = self.row("Edifier M60 Siyah", url, "8899", "9000", priority="low")
+        warehouse = self.row("Edifier M60 Siyah", url, "8787.77", "9000", is_warehouse=True)
+        summary.save_price_summary(self.data.files.summary, [normal])
+        summary.save_incremental_summary(self.data.files.summary, [warehouse])
+        rows = self.data.summary()["rows"]
+        self.assertEqual(sorted(row["is_warehouse"] for row in rows), [False, True])
+        summary.save_incremental_summary(self.data.files.summary, [], removed_price_ids={summary.price_row_identity(warehouse)})
+        self.assertEqual([row["is_warehouse"] for row in self.data.summary()["rows"]], [False])
+
+    def test_stock_rows_are_saved_separately(self):
+        summary.save_price_summary(self.data.files.summary, [], [StockSummaryRow("Zara", "Polo / M", "https://example.com/zara",
+                                                                                 Decimal("1290"), "Zara beden stokta değil: M")])
+        payload = self.data.summary()
+        self.assertEqual((payload["row_count"], payload["stock_row_count"]), (0, 1))
+        self.assertEqual(payload["stock_rows"][0]["reason"], "Zara beden stokta değil: M")
+
+    def test_deduplication_rules(self):
+        same = [self.row("Ürün", "https://example.test/product", "100"), self.row("Ürün", "https://example.test/product", "95"),
+                self.row("Farklı", "https://example.test/product?color=blue", "96")]
+        unique = summary.deduplicate_summary_rows(same)
+        self.assertEqual((len(unique), unique[0].price), (2, Decimal("95")))
+        cards = [self.row("iPhone", AMAZON, "121499", "100000", tracking_id="a"), self.row("iPhone", AMAZON, "121499", "110000", tracking_id="b")]
+        self.assertEqual(len(summary.deduplicate_summary_rows(cards)), 2)
+        equivalent = [self.row("Ürün", AMAZON + "?th=1", "100"), self.row("Ürün", "https://www.amazon.com.tr/gp/product/B000000001?smid=A1", "95")]
+        self.assertEqual([row.price for row in summary.deduplicate_summary_rows(equivalent)], [Decimal("95")])
+        conditions = [self.row("Normal", AMAZON, "100"), self.row("Depo", AMAZON, "80", is_warehouse=True)]
+        self.assertEqual(len(summary.deduplicate_summary_rows(conditions)), 2)
+
+    def test_same_offer_from_normal_and_depot_searches_is_merged(self):
+        rows = [PriceSummaryRow("Amazon", "Edifier M60 - Siyah (Stok 10)", AMAZON + "?th=1", Decimal("7799"), Decimal("9000"),
+                                Decimal("7799"), Decimal("9421"), is_warehouse=True, tracking_id="m60"),
+                PriceSummaryRow("Amazon", "Edifier M60 - Siyah", "https://www.amazon.com.tr/dp/B000000002", Decimal("7799"),
+                                Decimal("9000"), Decimal("7799"), Decimal("7799"), is_warehouse=True, tracking_id="m60")]
+        unique = summary.deduplicate_summary_rows(rows)
+        self.assertEqual((len(unique), unique[0].min_price, unique[0].max_price), (1, Decimal("7799"), Decimal("9421")))
+
+    def test_equal_duplicate_keeps_the_latest_read(self):
+        older = self.row("Aynı", AMAZON, "90", "100", price_checked_at="2026-09-24T10:00:00+00:00")
+        older.min_price = Decimal("80")
+        newer = self.row("Aynı", AMAZON, "90", "100", price_checked_at="2026-09-24T11:00:00+00:00")
+        newer.max_price = Decimal("100")
+        rows = summary.deduplicate_summary_rows([older, newer])
+        self.assertEqual((rows[0].price_checked_at, rows[0].min_price, rows[0].max_price),
+                         (newer.price_checked_at, Decimal("80"), Decimal("100")))
+
+    def test_cycle_history_keeps_the_last_seven_days(self):
+        now = datetime.now(timezone.utc)
+        self.data.files.cycle_history.write_text(json.dumps([
+            {"checked_at": (now - timedelta(days=8)).isoformat(), "duration_seconds": 400},
+            {"checked_at": (now - timedelta(days=2)).isoformat(), "duration_seconds": 300}]), encoding="utf-8")
+        summary.record_cycle_duration(self.data.files.cycle_history, 180, now)
+        history = json.loads(self.data.files.cycle_history.read_text(encoding="utf-8"))
+        self.assertEqual([item["duration_seconds"] for item in history], [300, 180])
+
+    def test_price_age_survives_incremental_saves_and_skipped_watches(self):
+        checked_at = (datetime.now(timezone.utc) - timedelta(minutes=125)).isoformat()
+        rule = watch("Ürün", AMAZON, target="100")
+        row = summary.summary_row_from_state(rule, {"last_price": "90", "last_price_checked_at": checked_at}, "Amazon")
+        summary.save_price_summary(self.data.files.summary, [row])
+        summary.save_incremental_summary(self.data.files.summary, [self.row("Yeni", "https://www.amazon.com.tr/dp/B000000002", "80", "100",
+                                                                            price_checked_at=utc_now())])
+        old_row = next(item for item in self.data.summary()["rows"] if item["product_url"].endswith("B000000001"))
+        self.assertEqual(old_row["price_checked_at"], checked_at)
+
+    def test_variation_watch_rows_share_the_watch_group(self):
+        group, label = summary.result_group_for_watch(watch("Tablet", AMAZON + "?th=1", include_variations=True))
+        self.assertTrue(group)
+        self.assertEqual(label, "Tablet")
+
+    def test_duration_is_formatted_in_minutes(self):
+        self.assertEqual(format_duration(75), "1 dk 15 sn")
+        self.assertEqual(format_duration(600), "10 dk 0 sn")
+
+
+class PanelCommandTests(CycleTestCase):
+    def test_price_history_reset_keeps_alert_state_and_restarts_ranges(self):
+        self.data.write_state({"product_a": {"last_price": "100", "min_price": "80", "max_price": "300", "last_alerted_price": "90"},
+                               "_meta": {"keep": "yes"}})
+        self.data.write_summary({"rows": [{"price": "100,00", "min_price": "80,00", "max_price": "300,00", "price_range": "80,00 / 300,00"}]})
+        self.assertEqual(runner.reset_price_history(self.data.files), 2)
+        state = self.data.state()
+        self.assertEqual((state["product_a"]["last_price"], state["product_a"]["last_alerted_price"]), ("100", "90"))
+        self.assertNotIn("min_price", state["product_a"])
+        self.assertEqual(state["_meta"]["keep"], "yes")
+        self.assertEqual(self.data.summary()["rows"][0]["price_range"], "100,00 / 100,00")
+
+    def test_notification_reset_makes_every_watch_due(self):
+        self.data.write_state({"offer": {"last_alerted_price": "90", "last_alerted_at": utc_now(), "last_price": "90"},
+                               "watch": {"last_checked_at": utc_now()}, "_meta": {}})
+        self.assertEqual(runner.reset_notifications(self.data.files), 2)
+        state = self.data.state()
+        self.assertNotIn("last_alerted_price", state["offer"])
+        self.assertNotIn("last_checked_at", state["watch"])
+        self.assertEqual(state["offer"]["last_price"], "90")
+
+    def test_commands_are_applied_between_cycles_and_can_start_one_now(self):
+        rule = watch("Ürün", "https://nordbron.com/x", target="100")
+        service = runner.MonitorService(config([rule], interval_seconds=3600), self.data.files, notifier=self.notify)
+        cycles = []
+
+        def read(rule, ctx, outcome):
+            cycles.append(1)
+            if len(cycles) == 1:
+                command = service.submit("reset_notifications")
+                self.assertFalse(command.done.is_set())  # not applied during a running cycle
+            else:
+                service.stop()
+            return [OfferResult("Ürün", Decimal("90"), url=rule.url)]
+
+        with patch.object(NordbronProvider, "read", side_effect=read):
+            service.run()
+        self.assertEqual(len(cycles), 2)  # the reset started a new cycle immediately
+        self.assertEqual(self.notify.send.call_count, 2)  # suppression was reset in between
+        self.assertTrue(service.finished)
+        self.assertFalse(service.health()[0])
+
+    def test_unexpected_cycle_error_does_not_stop_monitoring(self):
+        rule = watch("Ürün", "https://nordbron.com/x")
+        service = runner.MonitorService(config([rule], interval_seconds=1), self.data.files, notifier=self.notify)
+        runs = []
+
+        def run_cycle():
+            runs.append(1)
+            if len(runs) == 1:
+                raise OSError("disk full")
+            service.stop()
+
+        with patch.object(service.monitor, "run_cycle", side_effect=run_cycle):
+            service.run()
+        self.assertEqual(len(runs), 2)
+
+
+if __name__ == "__main__":
+    unittest.main()

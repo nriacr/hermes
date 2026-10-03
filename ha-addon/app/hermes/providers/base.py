@@ -1,11 +1,13 @@
 import json
 import re
-from typing import Any, Iterable, Optional
+from dataclasses import dataclass, field
+from typing import Any, Callable, Dict, Iterable, List, Optional
 
+import requests
 from bs4 import BeautifulSoup
 
 from ..errors import HermesError
-from ..utils import parse_decimal, repair_mojibake
+from ..utils import normalize_offer_text, parse_decimal, repair_mojibake
 
 PRODUCT_TITLE_SELECTORS = [
     "#productTitle",
@@ -150,3 +152,73 @@ def extract_jsonld_product(soup: BeautifulSoup):
             if price is not None:
                 found_price = price if found_price is None else min(found_price, price)
     return found_title, found_price
+
+
+def excluded_term_in_title(watch, title: str) -> str:
+    """The first configured exclusion found in a title (comma-separated OR filter)."""
+    normalized_title = normalize_offer_text(title)
+    return next((term for term in watch.excluded_terms if normalize_offer_text(term) in normalized_title), "")
+
+
+# ---------------------------------------------------------------------------
+# Provider interface
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class ReadContext:
+    """What a provider may use while reading one watch in a monitoring cycle."""
+
+    timeout: int
+    session: requests.Session
+    # Waits the configured random delay before an additional page request.
+    pace: Callable[[str], None] = lambda _label: None
+    # Configured card names per site; search pages use them for specificity.
+    watch_names: Dict[str, List[str]] = field(default_factory=dict)
+
+
+@dataclass
+class WatchRead:
+    """Side results a provider reports while its offers are being consumed."""
+
+    # Positively unavailable variants: {"product_title", "product_url", "reason"}.
+    unavailable: List[dict] = field(default_factory=list)
+    # An access block that stopped further requests after partial results.
+    blocked: Optional[BaseException] = None
+    # ISO time before which a new read cannot change the result.
+    retry_after: Optional[str] = None
+
+
+class Provider:
+    """One commerce site. Fetching and parsing stay inside the site's module."""
+
+    site = ""
+    # Notify when a previously out-of-stock product returns.
+    notifies_stock_return = False
+    # Include the offer's seller in opportunity notifications.
+    alert_shows_seller = False
+    # Pause a watch with growing back-off after a protection page.
+    backs_off_on_protection = False
+
+    def begin_cycle(self) -> None:
+        """Forget per-cycle caches; prices are always read again next cycle."""
+
+    def close(self) -> None:
+        """Release process-lived resources such as sessions or browsers."""
+
+    def is_search_url(self, url: str) -> bool:
+        return False
+
+    def read(self, watch, ctx: ReadContext, outcome: WatchRead) -> Iterable:
+        """Return (or yield) the watch's offers. Raise typed Hermes errors."""
+        raise NotImplementedError
+
+    def is_protection_error(self, exc: BaseException) -> bool:
+        return False
+
+    def keeps_offer(self, watch, offer) -> bool:
+        """Site-specific seller filter; most sites have none."""
+        return True
+
+    def display_title(self, title: str) -> str:
+        return title

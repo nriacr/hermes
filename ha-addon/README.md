@@ -84,12 +84,21 @@ Telegram dinleme varsayılan olarak kapalıdır. Aktif edildiğinde Hermes confi
 
 ## Çalışma Akışı
 
-1. Config yüklenir ve doğrulanır.
-2. Takip edilen linkler siteye göre dengeli sırayla kontrol edilir.
+Hermes tek bir uygulama olarak çalışır: izleyici, Home Assistant paneli (8099),
+public panel (8100) ve Telegram dinleme aynı süreçtedir.
+
+1. Ayarlar yüklenir ve doğrulanır. Ayarlarda hata varsa izleme başlamaz; panel
+   açık kalır ve hatayı ana ekranda gösterir.
+2. Sırası gelen takipler önceliğe göre (yüksek → orta → düşük) ve siteler
+   arasında dengeli sırayla kontrol edilir.
 3. Linkin ürün mü arama mı olduğu otomatik anlaşılır.
-4. Telegram aktifse ayrı arka plan worker içinde kanal mesajları dinlenir.
-5. Gerekirse Pushover bildirimi gönderilir.
-6. State ve özet dosyaları güncellenir.
+4. Hedef altındaki fırsat hemen bildirilir ve tablo o anda güncellenir.
+5. Çevrim sonunda tablo, istatistik ve durum dosyası kaydedilir.
+
+Panelden yapılan sıfırlamalar izleyiciye iletilir ve taramalar arasında
+uygulanır; "Bildirim Sıfırla" ardından hemen yeni bir kontrol başlatır.
+Home Assistant watchdog'u izleyici durursa veya bir çevrim üç saatten uzun
+sürerse Hermes'i yeniden başlatır.
 
 ## Sağlayıcı Davranışları ve Performans
 
@@ -109,25 +118,24 @@ Kontrol sırası aynı siteye art arda istek gelmesini azaltacak biçimde dengel
 
 Amazon aramalarında başlığı `Hariç tut` terimleriyle eşleşen sonuçlar, ürün ayrıntısı isteği açılmadan elenir. Varyasyonlu ürünlerde bulunan her varyasyon her uygun çevrimde yeniden okunur; varyasyon bağlantıları veya fiyatları önbellekten atlanmaz.
 
-Amazon istek günlüklerinde, istek öncesi bekleme süresi ile ağ yanıt süresi ayrı gösterilir. Varyasyon okumalarında sayfa ayrıştırma, teklif çıkarma ve sonuç işleme süreleri de ayrı kaydedilir; sayfa okuma süresi yedek bağlantı denemelerini kapsayabilir. Ürün sayfası ayrıştırıcıları aynı HTML ağacını paylaşır. Aynı Amazon ürün linki aynı çevrimde birden fazla kartta varsa, ayrıştırılmış sayfa sonucu da kartlar arasında yeniden kullanılır; bu önbellek çevrim sonunda silinir ve sonraki çevrimde fiyat tekrar ağdan okunur. Her çevrim sonunda öncelik başına başlayan, sırası gelen ve ertelenen kart sayıları ile Amazon sayfa isteği, ağ denemesi ve önbellek isabeti sayıları kaydedilir.
+Amazon'a giden her istek günlüğe tek satırla yazılır (yöntem, sonuç, süre).
+Aynı Amazon ürün linki aynı çevrimde birden fazla kartta varsa sayfa bir kez
+okunur; bu önbellek çevrim sonunda silinir ve sonraki çevrimde fiyat tekrar
+ağdan okunur. Her çevrim sonunda öncelik başına başlayan, sırası gelen ve
+ertelenen kart sayıları kaydedilir.
 
-Pi Chromium okuyucusu gerekli ürün/arama verileri kararlı olduğunda erken okuyabilir. Statik kaynak önbelleği açık kalır; belge isteklerine yalnızca belge kapsamındaki `Cache-Control: no-cache` uygulanır. Ana belgenin ağ yanıtı ve ürün kimliği doğrulanmadan fiyat yayımlanmaz. İlk ve her onuncu hızlı okuma aynı sayfanın tam yüklenmiş haliyle karşılaştırılır; geç veri farkı tam okuma gerektirir. `Test` sayfasından bir saatlik normal tarama doğrulaması başlatılabilir; mevcut koruma ve öncelik aralıkları korunur, sonunda HTTP okuyucuya dönülür.
+Amazon'un HTTP okuması başarısız olursa (CAPTCHA/429/503 dışında) aynı adres
+Pi'deki Chromium ile bir kez, sayfanın tamamı yüklenerek okunur. Ana belgenin
+ağ yanıtı ve ürün kimliği doğrulanmadan fiyat kullanılmaz.
 
 ## Geliştirme Notu
 
-Hermes mimarisi provider tabanlıdır. Her site için parser/fiyat yakalama kodu ayrı dosyadadır:
-
-- `app/hermes/providers/amazon.py`
-- `app/hermes/providers/hepsiburada.py`
-- `app/hermes/providers/trendyol.py`
-- `app/hermes/providers/network.py`
-- `app/hermes/providers/beymenclub.py`
-- `app/hermes/providers/nordbron.py`
-- `app/hermes/providers/zara.py`
-- `app/hermes/providers/hm.py`
-- `app/hermes/providers/bengurme.py`
-
-Amazon ürün ve Amazon arama içindeki ortak fiyat yakalama yardımcıları `app/hermes/providers/amazon_common.py` altında tutulur. Yeni site eklerken mevcut provider dosyalarını değiştirmek yerine yeni siteye özel ayrı bir provider eklenmelidir.
+Her site kendi okuyucusunda (`app/hermes/providers/`) hem sayfayı indirir hem
+fiyatı ayrıştırır: `amazon/`, `hepsiburada/`, `trendyol.py`, `network.py`,
+`beymenclub.py`, `nordbron.py`, `zara.py`, `hm.py`, `bengurme.py`. Yeni site
+eklerken mevcut okuyuculara dokunulmaz; yeni bir okuyucu yazılıp
+`providers/registry.py` dosyasına eklenir. Mimari ayrıntılar
+[`docs/ARCHITECTURE.md`](../docs/ARCHITECTURE.md) dosyasındadır.
 
 ## Geliştirme ve Kontrol
 
@@ -138,6 +146,14 @@ cd ..
 python -m venv .venv
 .venv/bin/pip install -r ha-addon/app/requirements.txt -r requirements-dev.txt
 sh tools/check.sh
+```
+
+Testler `tests/` klasöründedir. Hermes'i Home Assistant dışında denemek için
+`HERMES_DATA_DIR` ile geçici bir veri klasörü verilebilir:
+
+```sh
+cd ha-addon/app
+HERMES_DATA_DIR=/tmp/hermes-data python -m hermes
 ```
 
 GitHub Actions aynı kontrolleri ve add-on container build işlemini her `main` gönderiminde yürütür. Bu sayede Docker kurulu olmayan geliştirme makinelerinde de container yapısı doğrulanır.

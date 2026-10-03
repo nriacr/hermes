@@ -5,11 +5,11 @@ from decimal import Decimal
 from typing import Any, Iterable, Optional
 from urllib.parse import unquote, urljoin, urlsplit
 
-from ..errors import EmptySearchResultsHermesError, HermesError
-from ..logging_utils import log
-from ..models import OfferResult
-from ..utils import format_tl, normalize_offer_text, parse_decimal, repair_mojibake
-from .base import extract_price_from_selectors, extract_title, soup_from_html
+from ...errors import EmptySearchResultsHermesError, HermesError
+from ...logging_utils import log
+from ...models import OfferResult
+from ...utils import format_tl, normalize_offer_text, parse_decimal, repair_mojibake
+from ..base import extract_price_from_selectors, extract_title, soup_from_html
 
 BASE_URL = "https://www.hepsiburada.com"
 MIN_PRICE = Decimal("50")

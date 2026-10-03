@@ -1,7 +1,9 @@
 FROM python:3.12-slim
 
 WORKDIR /app
-ENV PATH="/opt/venv/bin:$PATH"
+ENV PATH="/opt/venv/bin:$PATH" \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends chromium chromium-driver ca-certificates fonts-liberation \

@@ -1,13 +1,18 @@
 import json
 import re
 from decimal import Decimal
-from typing import Any, Iterable, List
-from urllib.parse import urljoin
+from typing import Any, Dict, Iterable, List
+from urllib.parse import urlencode, urljoin
 
+import requests
+
+from ..constants import CHROME_CLIENT_HINTS, SITE_HM
 from ..errors import HermesError, OutOfStockHermesError
+from ..logging_utils import log
 from ..models import OfferResult
-from ..utils import normalize_offer_text, parse_decimal, repair_mojibake
-from .base import extract_jsonld_product, extract_price_from_meta, iter_json_objects, soup_from_html
+from ..utils import build_headers, normalize_offer_text, parse_decimal, repair_mojibake
+from .base import Provider, extract_jsonld_product, extract_price_from_meta, iter_json_objects, soup_from_html
+from .http import HtmlResponse, curl_requests, read_site_html
 
 OUT_OF_STOCK_MARKERS = (
     "benzer urunler",
@@ -340,3 +345,118 @@ def extract_offers(html: str, source_url: str = "", size: str = "") -> List[Offe
 
 def extract_offer(html: str, source_url: str = "") -> OfferResult:
     return extract_offers(html, source_url=source_url)[0]
+
+
+# ---------------------------------------------------------------------------
+# Fetching: H&M's product search API returns every color with its sizes.
+# ---------------------------------------------------------------------------
+
+HM_API_BASE_URL = "https://api.hm.com/search-services/v1/tr_tr/search/byids"
+ACCESS_DENIED_MARKERS = (
+    "access denied",
+    "sec-if-cpt",
+    "you don't have permission to access",
+    "akamai bot manager",
+    "akamai security",
+)
+
+
+def is_access_denied_page(html: str) -> bool:
+    normalized = normalize_offer_text(html)
+    return any(marker in normalized for marker in ACCESS_DENIED_MARKERS)
+
+
+def hm_headers(url: str) -> Dict[str, str]:
+    headers = build_headers(url)
+    headers.update(
+        {
+            "Accept": "application/json, text/plain, */*",
+            "Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7",
+            "Origin": "https://www2.hm.com",
+            "Referer": url,
+            **CHROME_CLIENT_HINTS,
+        }
+    )
+    return headers
+
+
+def article_id_from_url(url: str) -> str:
+    match = re.search(r"productpage\.(\d+)\.html", url)
+    if match:
+        return match.group(1)
+    raise HermesError("H&M linkinden ürün kodu okunamadı.")
+
+
+def _api_url(article_ids: List[str]) -> str:
+    unique_ids = list(dict.fromkeys(article_id for article_id in article_ids if article_id))
+    return f"{HM_API_BASE_URL}?{urlencode({'ids': '|'.join(unique_ids), 'touchPoint': 'DESKTOP'})}"
+
+
+def _api_get(session: requests.Session, api_url: str, source_url: str, timeout: int) -> Dict[str, Any]:
+    headers = hm_headers(source_url)
+    if curl_requests is not None:
+        response = curl_requests.get(api_url, headers=headers, timeout=timeout, impersonate="chrome124")
+    else:
+        response = session.get(api_url, headers=headers, timeout=timeout)
+    response.raise_for_status()
+    try:
+        data = response.json()
+    except ValueError as exc:
+        raise HermesError("H&M API ürün verisini JSON olarak döndürmedi.") from exc
+    if not isinstance(data, dict):
+        raise HermesError("H&M API beklenmeyen ürün verisi döndürdü.")
+    return data
+
+
+def _products_from_api_data(data: Dict[str, Any]) -> List[Dict[str, Any]]:
+    product_list = (data.get("articles") or {}).get("productList") if isinstance(data.get("articles"), dict) else None
+    return [item for item in product_list if isinstance(item, dict)] if isinstance(product_list, list) else []
+
+
+def _swatch_article_ids(products: List[Dict[str, Any]]) -> List[str]:
+    return [
+        str(swatch.get("articleId") or "").strip()
+        for product in products
+        for swatch in product.get("swatches") or []
+        if isinstance(swatch, dict) and str(swatch.get("articleId") or "").strip()
+    ]
+
+
+def fetch_hm_page(session: requests.Session, url: str, timeout: int) -> HtmlResponse:
+    article_id = article_id_from_url(url)
+    products = _products_from_api_data(_api_get(session, _api_url([article_id]), url, timeout))
+    if not products:
+        raise HermesError("H&M API ürün verisi döndürmedi.")
+    swatch_ids = _swatch_article_ids(products)
+    if swatch_ids:
+        products = _products_from_api_data(_api_get(session, _api_url([article_id, *swatch_ids]), url, timeout))
+        if not products:
+            raise HermesError("H&M API varyasyon verisi döndürmedi.")
+    html = (
+        '<html><body><script type="application/json" id="hm-product-data">'
+        f"{json.dumps({'products': products}, ensure_ascii=False)}"
+        "</script></body></html>"
+    )
+    return HtmlResponse(url, html)
+
+
+class HMProvider(Provider):
+    site = SITE_HM
+
+    def __init__(self) -> None:
+        self.pages: dict = {}
+
+    def begin_cycle(self) -> None:
+        self.pages = {}
+
+    def read(self, watch, ctx, outcome):
+        if watch.url not in self.pages:
+            self.pages[watch.url] = fetch_hm_page(ctx.session, watch.url, ctx.timeout)
+        html = read_site_html(
+            self.pages[watch.url], "H&M", is_access_denied_page,
+            message="H&M bot koruması nedeniyle ürün verisi okunamadı.",
+        )
+        offers = extract_offers(html, source_url=watch.url, size=watch.size)
+        if watch.size:
+            log(f"H&M beden kontrol edildi: {watch.name or watch.url} | beden={watch.size} | adet={len(offers)}")
+        return offers

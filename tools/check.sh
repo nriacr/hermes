@@ -11,6 +11,6 @@ export PYTHONPYCACHEPREFIX
 export RUFF_CACHE_DIR
 
 "$PYTHON" -m pip check
-"$PYTHON" -m py_compile ha-addon/app/hermes/*.py ha-addon/app/hermes/providers/*.py tools/hermes_smoke_test.py
-"$RUFF" check ha-addon/app tools/hermes_smoke_test.py
-"$PYTHON" tools/hermes_smoke_test.py
+"$PYTHON" -m compileall -q ha-addon/app tests
+"$RUFF" check ha-addon/app tests
+"$PYTHON" -m unittest discover --start-directory tests --top-level-directory tests

@@ -1,0 +1,431 @@
+"""Provider read flows: Amazon variants/search and the other sites' fetchers."""
+
+import unittest
+from decimal import Decimal
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
+
+import requests
+
+from support import LOG_LINES, watch
+
+from hermes.errors import BotProtectionHermesError, EmptySearchResultsHermesError, HermesError, OutOfStockHermesError
+from hermes.models import OfferResult, SearchResultItem
+from hermes.providers import amazon as amazon_reader
+from hermes.providers.amazon import AmazonProvider
+from hermes.providers.amazon import parser as amazon_parser
+from hermes.providers.amazon.client import AmazonClient
+from hermes.providers.amazon.search import AmazonSearchCandidate
+from hermes.providers.base import ReadContext, WatchRead
+from hermes.providers.bengurme import fetch_bengurme_page
+from hermes.providers.beymenclub import fetch_beymenclub_page, fetch_beymenclub_size_summary
+from hermes.providers.hepsiburada import HepsiburadaProvider, is_challenge_page as hepsiburada_challenge
+from hermes.providers.nordbron import is_challenge_page as nordbron_challenge
+from hermes.providers.zara import is_interstitial as zara_interstitial
+from hermes.utils import extract_asin_from_url
+
+ROOT = "https://www.amazon.com.tr/dp/B000000001"
+CHILD = "https://www.amazon.com.tr/dp/B000000002"
+UNAVAILABLE = '<span id="productTitle">iPhone</span><div id="availability">Şu anda mevcut değil.</div>'
+
+
+def priced(price: str = "100,00", title: str = "iPhone") -> str:
+    return (f'<span id="productTitle">{title}</span><div id="corePrice_feature_div"><span class="a-price">'
+            f'<span class="a-offscreen">{price} TL</span></span></div>')
+
+
+def context(watch_names=None) -> ReadContext:
+    return ReadContext(timeout=10, session=requests.Session(), pace=Mock(), watch_names=watch_names or {})
+
+
+class AmazonTestCase(unittest.TestCase):
+    def setUp(self):
+        self.client = AmazonClient()
+        self.provider = AmazonProvider(self.client)
+        self.fetched = []
+
+    def tearDown(self):
+        self.provider.close()
+
+    def serve(self, pages):
+        """Answer fetches from a dict (or callable) of URL → HTML."""
+
+        def fetch(url, _ctx, expect_search=False):
+            self.fetched.append(url)
+            page = pages(url) if callable(pages) else pages[url]
+            if isinstance(page, Exception):
+                raise page
+            return page
+
+        return patch.object(self.provider, "fetch", side_effect=fetch)
+
+    def read(self, rule, outcome=None, ctx=None):
+        return list(self.provider.read(rule, ctx or context(), outcome or WatchRead()))
+
+
+class AmazonProductTests(AmazonTestCase):
+    def test_missing_root_price_still_visits_all_discovered_variants(self):
+        rule = watch(url=ROOT, include_variations=True)
+        variations = [amazon_parser.AmazonProductVariation("Gümüş", ROOT), amazon_parser.AmazonProductVariation("Turuncu", CHILD)]
+        outcome = WatchRead()
+        with (self.serve({ROOT: UNAVAILABLE, CHILD: priced()}),
+              patch.object(amazon_parser, "extract_product_variations", return_value=variations)):
+            offers = self.read(rule, outcome)
+        self.assertEqual(self.fetched, [ROOT, CHILD])
+        self.assertEqual([offer.url for offer in offers], [CHILD])
+        self.assertEqual(outcome.unavailable[0]["product_url"], ROOT)
+
+    def test_depot_listing_is_read_without_a_new_product_price(self):
+        html = UNAVAILABLE + '<a href="/gp/offer-listing/B000000001?condition=used">Kullanılmış teklifler</a>'
+        depot = OfferResult("iPhone", Decimal("90"), "Amazon Depo", ROOT, True)
+        with (self.serve(lambda url: "depot-listing"),
+              patch.object(amazon_parser, "extract_verified_warehouse_offers_from_listing", side_effect=[[], [depot]])):
+            offers = self.provider.page_offers(ROOT, html, context(), WatchRead())
+        self.assertEqual(len(self.fetched), 1)
+        self.assertEqual(offers, [depot])
+
+    def test_no_offer_probe_is_bounded_without_hiding_priced_siblings(self):
+        rule = watch(url=ROOT, include_variations=True)
+        pages = {ROOT: UNAVAILABLE, CHILD: priced("100,00")}
+        variations = [amazon_parser.AmazonProductVariation("Gümüş", ROOT), amazon_parser.AmazonProductVariation("Turuncu", CHILD)]
+        with (self.serve(pages), patch.object(amazon_parser, "extract_product_variations", return_value=variations),
+              patch.object(amazon_reader.time, "monotonic", return_value=100)):
+            for price in ("100,00", "101,00"):
+                pages[CHILD] = priced(price)
+                self.provider.begin_cycle()
+                offers = self.read(rule)
+            self.assertEqual(self.fetched, [ROOT, CHILD, CHILD])
+            self.assertEqual(offers[0].price, Decimal("101"))
+            # The expiry is fixed: looking at the cached absence never postpones its probe.
+            pages[ROOT] = pages[CHILD]
+            with patch.object(amazon_reader.time, "monotonic", return_value=401):
+                self.provider.begin_cycle()
+                offers = self.read(rule)
+        self.assertEqual(self.fetched, [ROOT, CHILD, CHILD, ROOT, CHILD])
+        self.assertEqual({offer.url for offer in offers}, {ROOT, CHILD})
+        self.assertFalse(self.client.unavailable_product_pages)
+
+    def test_missing_price_probe_is_bounded_but_never_becomes_fake_stock(self):
+        rule = watch(url=ROOT)
+        with self.serve({ROOT: '<span id="productTitle">iPhone</span>'}):
+            for _ in range(2):
+                self.provider.begin_cycle()
+                with self.assertRaises(HermesError) as caught:
+                    self.read(rule)
+                self.assertNotIsInstance(caught.exception, OutOfStockHermesError)
+        self.assertEqual(self.fetched, [ROOT])
+        self.assertEqual(len(self.client.unavailable_product_pages), 1)
+
+    def test_access_failure_never_enters_the_no_offer_cache(self):
+        with self.serve({ROOT: BotProtectionHermesError("Amazon captcha")}):
+            with self.assertRaisesRegex(HermesError, "captcha"):
+                self.read(watch(url=ROOT))
+        self.assertFalse(self.client.unavailable_product_pages)
+
+    def test_all_unavailable_family_reports_its_next_useful_probe(self):
+        outcome = WatchRead()
+        with self.serve({ROOT: UNAVAILABLE}):
+            with self.assertRaises(OutOfStockHermesError):
+                self.read(watch(url=ROOT), outcome)
+        self.assertIsNotNone(outcome.retry_after)
+
+    def test_walks_color_capacity_graph_and_yields_depot_immediately(self):
+        rule = watch(url=ROOT, target="100000", include_variations=True)
+
+        def page_for(url):
+            index = int(extract_asin_from_url(url)[-1]) - 1
+            color, capacity = divmod(index, 3)
+            neighbors = {color * 3 + n for n in range(3)} | {n * 3 + capacity for n in range(3)}
+            swatches = "".join(f'<li data-asin="B00000000{n + 1}" class="swatchUnavailable">Option {n}</li>' for n in sorted(neighbors))
+            return (f'<span id="productTitle">iPhone color {color} capacity {capacity}</span>'
+                    f'<div id="variation_size_name"><ul>{swatches}</ul></div>'
+                    f'<div id="corePriceDisplay_desktop_feature_div"><span class="a-price"><span class="a-offscreen">{120000 + index},00 TL</span></span></div>'
+                    f'<div id="usedBuySection">Kullanılmış ve yeni gibi Satıcı: Amazon Depo'
+                    f'<span class="a-price"><span class="a-offscreen">{90000 + index},87 TL</span></span></div>')
+
+        with (self.serve(page_for),
+              patch.object(amazon_parser, "extract_product_variations", wraps=amazon_parser.extract_product_variations) as discover):
+            stream = iter(self.provider.read(rule, context(), WatchRead()))
+            first = next(stream)
+            self.assertTrue(first.is_warehouse)
+            self.assertEqual(len(self.fetched), 1)
+            offers = [first, *stream]
+        self.assertEqual(len(set(self.fetched)), 9)
+        self.assertEqual(discover.call_count, 9)
+        self.assertEqual(len(offers), 18)
+        for offer in offers:
+            index = int(extract_asin_from_url(offer.url)[-1]) - 1
+            expected = Decimal(90000 + index) + Decimal(".87") if offer.is_warehouse else Decimal(120000 + index)
+            self.assertEqual(offer.price, expected)
+
+    def test_exclusions_skip_offer_read_but_still_expand_and_can_upgrade_cache(self):
+        urls = [f"https://www.amazon.com.tr/dp/B00000000{number}" for number in range(1, 4)]
+        labels = {urls[0]: "256 GB", urls[1]: "1 TB", urls[2]: "512 GB"}
+        variations = [amazon_parser.AmazonProductVariation(labels[item], item) for item in urls]
+        filtered = watch(url=ROOT, target="100000", include_variations=True, excluded_terms=["1 TB"])
+        unfiltered = watch("iPhone full", url=ROOT, target="100000", include_variations=True)
+
+        def offers_for(page_url, _html, _ctx, _outcome, soup=None):
+            return [OfferResult(f"Apple iPhone {labels[page_url]}", Decimal("90000"))]
+
+        LOG_LINES.clear()
+        with (self.serve(lambda url: f'<span id="productTitle">Apple iPhone {labels[url]}</span>'),
+              patch.object(amazon_parser, "extract_product_variations", return_value=variations) as discover,
+              patch.object(self.provider, "page_offers", side_effect=offers_for) as offer_reader):
+            self.assertEqual([offer.url for offer in self.read(filtered)], [urls[0], urls[2]])
+            self.assertEqual(len(self.fetched), 3)
+            self.assertEqual(offer_reader.call_count, 2)
+            self.assertEqual([offer.url for offer in self.read(filtered)], [urls[0], urls[2]])
+            self.assertEqual(len(self.fetched), 3)
+            unfiltered_offers = self.read(unfiltered)
+        self.assertEqual([offer.url for offer in unfiltered_offers], urls)
+        self.assertEqual(self.fetched, [*urls, urls[1]])
+        self.assertEqual(offer_reader.call_count, 3)
+        self.assertEqual(discover.call_count, 4)
+        self.assertTrue(any("hariç tut filtresi: 1 TB" in line for line in LOG_LINES))
+        self.assertIn("hariç_nedeniyle_fiyat_okuması_atlandı=1",
+                      next(line for line in LOG_LINES if "Amazon varyasyon taraması:" in line))
+
+    def test_every_variant_page_is_inspected_even_with_a_collapsed_family_list(self):
+        rule = watch(url=ROOT, target="100000", include_variations=True)
+        urls = [f"https://www.amazon.com.tr/dp/B00000000{number}" for number in range(1, 4)]
+        variations = [amazon_parser.AmazonProductVariation(str(number), url) for number, url in enumerate(urls)]
+        html = ('<script type="a-state" data-a-state=\'{"key":"twister-plus-desktop-inline-twister-collapse-view-asins-data"}\'>'
+                '{"asinsInCollapsedView":["B000000002","B000000003"]}</script>')
+        with (self.serve(lambda _url: html),
+              patch.object(amazon_parser, "extract_product_variations", return_value=variations) as discover,
+              patch.object(amazon_parser, "selected_variation_label", return_value="Gümüş"),
+              patch.object(self.provider, "page_offers", side_effect=lambda url, *_a, **_k: [OfferResult("iPhone", Decimal("90000"))]) as reader):
+            offers = self.read(rule)
+        self.assertEqual(self.fetched, urls)
+        self.assertEqual(discover.call_count, 3)
+        self.assertEqual(reader.call_count, 3)
+        self.assertEqual([offer.url for offer in offers], urls)
+
+    def test_excluded_variants_are_read_again_each_cycle(self):
+        rule = watch(url=ROOT, target="100000", include_variations=True, excluded_terms=["1 TB"])
+        variants = {"B000000001": "256 GB", "B000000002": "1 TB", "B000000003": "512 GB"}
+
+        def page_for(url):
+            asin = extract_asin_from_url(url)
+            swatches = "".join(f'<li data-asin="{item}" class="swatchUnavailable">{label}</li>' for item, label in variants.items())
+            return (f'<div id="variation_size_name"><ul>{swatches}</ul><span class="selection">{variants[asin]}</span></div>'
+                    f'<span id="productTitle">iPhone {variants[asin]}</span>'
+                    '<div id="corePriceDisplay_desktop_feature_div"><span class="a-price"><span class="a-offscreen">100.000,00 TL</span></span></div>')
+
+        with self.serve(page_for):
+            for _ in range(2):
+                self.provider.begin_cycle()
+                self.assertEqual(len(self.read(rule)), 2)
+        self.assertEqual([extract_asin_from_url(url) for url in self.fetched], list(variants) * 2)
+
+    def test_parsed_product_page_is_shared_between_watches_in_one_cycle(self):
+        rules = [watch(url=ROOT, target="100000", include_variations=True),
+                 watch("Telefon fırsatı", url=ROOT, target="95000", include_variations=True)]
+        offer = OfferResult("iPhone Gümüş", Decimal("90000"), is_warehouse=True)
+        with (self.serve(lambda _url: "html"),
+              patch.object(amazon_parser, "parse_product_page", return_value=object()) as parse,
+              patch.object(amazon_parser, "extract_product_variations", return_value=[]) as variations,
+              patch.object(amazon_parser, "selected_variation_label", return_value="Gümüş"),
+              patch.object(amazon_parser, "extract_title", return_value="iPhone"),
+              patch.object(self.provider, "page_offers", return_value=[offer]) as extract):
+            results = [self.read(rule) for rule in rules]
+        self.assertEqual(len(self.fetched), 1)
+        self.assertEqual((parse.call_count, variations.call_count, extract.call_count), (1, 1, 1))
+        self.assertEqual([len(result) for result in results], [1, 1])
+
+    def test_all_enabled_color_variations_are_read_with_their_labels(self):
+        rule = watch("Tablet", url="https://www.amazon.com.tr/dp/B000000001?th=1", target="20000", include_variations=True)
+        urls = [rule.url, "https://www.amazon.com.tr/dp/B000000002?psc=1", "https://www.amazon.com.tr/dp/B000000003?psc=1"]
+        variations = [SimpleNamespace(label=label, url=url) for label, url in zip(("Antrasit", "Mavi", "Pembe"), urls)]
+        with (self.serve(lambda url: url), patch.object(amazon_parser, "extract_product_variations", return_value=variations),
+              patch.object(amazon_parser, "extract_offers",
+                           side_effect=lambda html, source_url, soup=None: [OfferResult("Örnek tablet", Decimal("18999"), "Amazon", source_url)])):
+            offers = self.read(rule)
+        self.assertEqual([offer.url for offer in offers], urls)
+        self.assertEqual([offer.title for offer in offers],
+                         ["Örnek tablet / Antrasit", "Örnek tablet / Mavi", "Örnek tablet / Pembe"])
+        self.assertEqual(self.fetched[0], rule.url)
+        self.assertEqual(len(self.fetched), 3)
+
+    def test_variant_scan_stops_after_a_protection_page(self):
+        with self.serve({ROOT: BotProtectionHermesError("Amazon captcha")}):
+            with self.assertRaisesRegex(HermesError, "captcha"):
+                self.read(watch(url=ROOT, include_variations=True))
+        self.assertEqual(len(self.fetched), 1)
+
+    def test_partial_family_keeps_yielded_offers_and_reports_the_block(self):
+        variations = [amazon_parser.AmazonProductVariation("Gümüş", ROOT), amazon_parser.AmazonProductVariation("Turuncu", CHILD)]
+        outcome = WatchRead()
+        with (self.serve({ROOT: priced(), CHILD: BotProtectionHermesError("Amazon captcha")}),
+              patch.object(amazon_parser, "extract_product_variations", return_value=variations)):
+            offers = self.read(watch(url=ROOT, include_variations=True), outcome)
+        self.assertEqual(len(offers), 1)
+        self.assertIsInstance(outcome.blocked, BotProtectionHermesError)
+
+    def test_variations_are_only_followed_when_enabled(self):
+        variations = [amazon_parser.AmazonProductVariation("Gümüş", ROOT), amazon_parser.AmazonProductVariation("Turuncu", CHILD)]
+        with self.serve({ROOT: priced(), CHILD: priced()}), \
+                patch.object(amazon_parser, "extract_product_variations", return_value=variations):
+            self.read(watch(url=ROOT))
+        self.assertEqual(self.fetched, [ROOT])
+
+
+class AmazonSearchTests(AmazonTestCase):
+    def test_depot_no_results_notice_ignores_all_category_fallback(self):
+        html = ('<div id="search"><h2>Tüm Kategoriler içindeki sonuçlar gösteriliyor</h2><h3>Amazon Depo içinde <b>juo 240w</b> '
+                'için sonuç bulunamadı</h3><div class="s-main-slot"><div data-component-type="s-search-result" data-asin="B000000001">'
+                '<h2><a href="/dp/B000000001"><span>Juo 240W</span></a></h2><span class="a-price"><span class="a-offscreen">100,00 TL</span>'
+                '</span><span>Kullanılmış Amazon Depo</span></div></div></div>')
+        rule = watch("Juo 240W", "https://www.amazon.com.tr/s?k=juo+240w&i=warehouse-deals")
+        with self.serve({rule.url: html}), patch.object(self.provider, "_detail_offers") as detail:
+            with self.assertRaises(EmptySearchResultsHermesError) as caught:
+                self.read(rule)
+        self.assertTrue(caught.exception.no_results_notice)
+        detail.assert_not_called()
+
+    def test_excluded_cards_are_skipped_before_detail_requests(self):
+        rule = watch(url="https://www.amazon.com.tr/s?k=iphone", target="100000", excluded_terms=["1 TB"])
+        candidates = [AmazonSearchCandidate("iPhone 1 TB", ROOT, Decimal("100000")),
+                      AmazonSearchCandidate("iPhone 256 GB", CHILD, Decimal("90000"))]
+        with (self.serve(lambda _url: "html"), patch.object(amazon_reader, "extract_result_candidates", return_value=candidates),
+              patch.object(self.provider, "_detail_offers", return_value=[]) as detail):
+            offers = self.read(rule)
+        self.assertEqual([offer.title for offer in offers], ["iPhone 256 GB"])
+        self.assertEqual(detail.call_count, 1)
+        self.assertEqual(detail.call_args.args[0].title, "iPhone 256 GB")
+
+    def test_read_card_is_kept_but_details_stop_on_captcha(self):
+        rule = watch(url="https://www.amazon.com.tr/s?k=iphone", target="100000")
+        candidates = [AmazonSearchCandidate("iPhone 256 GB", ROOT, Decimal("90000")),
+                      AmazonSearchCandidate("iPhone 512 GB", CHILD, Decimal("120000"))]
+        outcome = WatchRead()
+        with (self.serve(lambda _url: "html"), patch.object(amazon_reader, "extract_result_candidates", return_value=candidates),
+              patch.object(self.provider, "_detail_offers", side_effect=BotProtectionHermesError("Amazon captcha")) as detail):
+            offers = self.read(rule, outcome)
+        self.assertEqual([offer.title for offer in offers], ["iPhone 256 GB"])
+        detail.assert_called_once()
+        self.assertIsInstance(outcome.blocked, BotProtectionHermesError)
+
+    def test_deep_scan_always_adds_a_verified_used_price(self):
+        search_url = "https://www.amazon.com.tr/s?k=edifier+m60"
+        search_html = ('<div class="s-main-slot"><div data-component-type="s-search-result" data-asin="B0D95QG8W4">'
+                       '<h2><a href="/dp/B0D95QG8W4"><span>Edifier M60 Compact Masa Hoparlörü - Siyah</span></a></h2>'
+                       '<span class="a-price"><span class="a-offscreen">8.899,00 TL</span></span></div></div>')
+        detail_html = ('<html><head><title>Edifier M60 Compact Masa Hoparlörü - Siyah</title></head><body>'
+                       '<div id="corePriceDisplay_desktop_feature_div"><span class="a-price"><span class="a-offscreen">8.899,00 TL</span></span></div>'
+                       '<a href="/gp/offer-listing/B0D95QG8W4?condition=used">Yeni & İkinci El Ürün</a></body></html>')
+        listing_html = ('<html><head><title>Edifier M60 Compact Masa Hoparlörü - Siyah</title></head><body><div class="aod-offer">'
+                        '<span>İkinci El - Çok İyi</span><a>Amazon Depo</a><span class="a-price"><span class="a-offscreen">8.787,77 TL</span></span>'
+                        '</div></body></html>')
+        rule = watch("Edifier M60", search_url, target="9000")
+
+        def pages(url):
+            return search_html if url == search_url else listing_html if "offer-listing" in url else detail_html
+
+        with self.serve(pages):
+            offers = self.read(rule)
+        self.assertEqual([offer.price for offer in offers], [Decimal("8899.00"), Decimal("8787.77")])
+        self.assertEqual([offer.is_warehouse for offer in offers], [False, True])
+
+    def test_warehouse_search_keeps_only_used_results(self):
+        rule = watch("Edifier M60", "https://www.amazon.com.tr/s?k=edifier+m60&i=warehouse-deals", target="9000")
+        candidates = [AmazonSearchCandidate("Edifier M60", ROOT, Decimal("8787.77"), is_warehouse=True),
+                      AmazonSearchCandidate("Edifier M60 yeni", CHILD, Decimal("8899"))]
+        with self.serve(lambda _url: "html"), patch.object(amazon_reader, "extract_result_candidates", return_value=candidates):
+            offers = self.read(rule)
+        self.assertEqual([(offer.title, offer.is_warehouse) for offer in offers], [("Edifier M60", True)])
+
+    def test_overlapping_models_go_to_the_most_specific_configured_card(self):
+        rule = watch("Apple iPhone 17 Pro", "https://www.amazon.com.tr/s?k=iphone+17+pro")
+        candidates = [AmazonSearchCandidate("Apple iPhone 17 Pro 256 GB", ROOT, Decimal("100")),
+                      AmazonSearchCandidate("Apple iPhone 17 Pro Max 256 GB", CHILD, Decimal("110"))]
+        ctx = context({"amazon": ["Apple iPhone 17 Pro", "Apple iPhone 17 Pro Max"]})
+        with (self.serve(lambda _url: "html"), patch.object(amazon_reader, "extract_result_candidates", return_value=candidates),
+              patch.object(self.provider, "_detail_offers", return_value=[])):
+            offers = self.read(rule, ctx=ctx)
+        self.assertEqual([offer.url for offer in offers], [ROOT])
+
+
+class AmazonSellerFilterTests(unittest.TestCase):
+    def test_own_seller_option_keeps_amazon_new_offers_and_every_depot_offer(self):
+        provider = AmazonProvider.__new__(AmazonProvider)
+        rule = watch(url=ROOT, target="100000", official_seller_only=True)
+        offers = [OfferResult("Üçüncü taraf", Decimal("90000"), "Başka Satıcı", ROOT),
+                  OfferResult("Bilinmeyen", Decimal("91000"), None, ROOT),
+                  OfferResult("Amazon sıfır", Decimal("100000"), "Amazon.com.tr", ROOT),
+                  OfferResult("Depo", Decimal("89000"), "Amazon Depo", ROOT, True)]
+        self.assertEqual([offer.title for offer in offers if provider.keeps_offer(rule, offer)], ["Amazon sıfır", "Depo"])
+        rule.official_seller_only = False
+        self.assertEqual(len([offer for offer in offers if provider.keeps_offer(rule, offer)]), 4)
+
+    def test_search_results_without_matches_are_a_normal_empty_result(self):
+        with self.assertRaises(EmptySearchResultsHermesError):
+            amazon_reader.offers_from_search_results([SearchResultItem("Başka ürün", ROOT, Decimal("1"))], "iPhone")
+
+
+class OtherSiteTests(unittest.TestCase):
+    def test_nordbron_product_page_is_not_misread_as_a_challenge(self):
+        html = ('<div class="product-detail_price__hYyw9"><span>₺ 3,900.00</span></div>'
+                '<script>{"customerSettings":{"requireCaptchaValidation":true},"label":"robot"}</script>')
+        self.assertFalse(nordbron_challenge(html))
+        self.assertTrue(nordbron_challenge("captcha robot"))
+
+    def test_zara_product_page_is_not_misread_as_a_challenge(self):
+        html = ('<script type="application/ld+json">{"@type":"Product","name":"Zara ürün"}</script>'
+                '<script>{"customerSettings":{"requireCaptchaValidation":true},"label":"robot"}</script>')
+        self.assertFalse(zara_interstitial(html))
+        self.assertTrue(zara_interstitial("bm-verify _sec/verify"))
+
+    def test_hepsiburada_security_page_is_a_challenge(self):
+        self.assertTrue(hepsiburada_challenge("<html>HBBlockAndCaptcha</html>"))
+        self.assertFalse(hepsiburada_challenge("<html>Sepete ekle</html>"))
+
+    def test_hepsiburada_search_titles_are_completed_from_the_variant_page(self):
+        page = ("<html><body><h1>Samsung Galaxy Tab S10 FE+ 8GB 128GB SM-X620</h1><span>Kapasite:</span><strong>128 GB</strong>"
+                "<span>Renk:</span><strong>Mavi</strong><div>18.299,00 TL</div><section>Ürün Bilgileri</section></body></html>")
+        provider = HepsiburadaProvider()
+        offer = OfferResult("Samsung Galaxy Tab S10 FE+ 8GB 128GB SM-X620", Decimal("18049"), "Hepsiburada",
+                            "https://www.hepsiburada.com/samsung-tablet-p-HBCV00008E1SXR")
+        with patch.object(provider, "_page", return_value=page):
+            enriched = provider._with_variant_titles(context(), [offer])
+        self.assertEqual(enriched[0].title, "Samsung Galaxy Tab S10 FE+ 8GB 128GB SM-X620 / 128 GB / Mavi")
+
+    def test_bengurme_fetch_prefers_shopify_variant_json(self):
+        response = SimpleNamespace(status_code=200, headers={"content-type": "application/json"}, encoding="utf-8",
+                                   text='{"title":"Kilis Karası Kan Üzümü","variants":[]}', raise_for_status=lambda: None)
+        response.content = response.text.encode("utf-8")
+        session = Mock()
+        session.get.return_value = response
+        result = fetch_bengurme_page(session, "https://bengurme.com/products/kilis-karasi-kan-uzumu", 10)
+        self.assertIs(result, response)
+        session.get.assert_called_once()
+        self.assertEqual(session.get.call_args.args[0], "https://bengurme.com/products/kilis-karasi-kan-uzumu.js")
+        self.assertIn("Chrome/124", session.get.call_args.kwargs["headers"]["User-Agent"])
+
+    def test_beymenclub_fetch_uses_its_browser_shaped_headers(self):
+        response = SimpleNamespace(status_code=200, headers={"content-type": "text/html; charset=utf-8"},
+                                   text="<script>BEYMEN.productMain = {}</script>", raise_for_status=lambda: None)
+        response.content = response.text.encode("utf-8")
+        session = Mock()
+        session.get.return_value = response
+        self.assertIs(fetch_beymenclub_page(session, "https://www.beymenclub.com/tr/p_test", 10), response)
+        headers = session.get.call_args.kwargs["headers"]
+        self.assertIn("Chrome/124", headers["User-Agent"])
+        self.assertEqual(headers["Accept-Language"], "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7")
+
+    def test_beymenclub_size_summary_uses_browser_session_headers(self):
+        response = SimpleNamespace(status_code=200, raise_for_status=lambda: None,
+                                   json=lambda: {"result": {"sizes": [{"sizeName": "XL", "inStock": True}]}})
+        session = Mock()
+        session.post.return_value = response
+        payload = fetch_beymenclub_size_summary(session, "https://www.beymenclub.com/tr/p_test", 1941298, 10)
+        self.assertEqual(payload["result"]["sizes"][0]["sizeName"], "XL")
+        url, kwargs = session.post.call_args.args[0], session.post.call_args.kwargs
+        self.assertEqual(url, "https://www.beymenclub.com/sf-api/api/product/1941298/productsummary")
+        self.assertEqual(kwargs["headers"]["Origin"], "https://www.beymenclub.com")
+        self.assertEqual(kwargs["headers"]["Sec-Fetch-Site"], "same-origin")
+
+
+if __name__ == "__main__":
+    unittest.main()

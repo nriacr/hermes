@@ -1,8 +1,8 @@
 import re
 from typing import Any
 
-from ..errors import HermesError
-from ..utils import normalize_offer_text, parse_decimal
+from ...errors import HermesError
+from ...utils import normalize_offer_text, parse_decimal
 
 AMAZON_SECONDARY_OFFER_SELECTORS = [
     "[data-cy='secondary-offer-recipe']",

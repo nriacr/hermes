@@ -1,0 +1,268 @@
+"""Amazon transport: one canonical request, terminal protection, one browser fallback.
+
+The client lives for the whole process so anonymous cookies and connections
+survive between cycles. Page caches are passed in per cycle; a later cycle
+always reads prices from the server again.
+"""
+
+import time
+from html.parser import HTMLParser
+from typing import Dict, Optional, Tuple
+from urllib.parse import parse_qsl, urlencode, urlsplit
+
+import requests
+
+from ...constants import CHROME_CLIENT_HINTS, CHROME_USER_AGENT
+from ...errors import BotProtectionHermesError, HermesError, error_status
+from ...logging_utils import log
+from ...utils import canonical_amazon_product_url, normalize_offer_text, referer_for_url, repair_mojibake
+from ..http import cleaned_html, curl_requests, decode_response_text
+from .browser import AmazonBrowser
+
+PROTECTION_MESSAGE = "Amazon bot koruması nedeniyle doğrulama (captcha) sayfası döndü."
+STABLE_PRODUCT_PARAMS = {"smid", "psc", "th"}
+SEARCH_PAGE_MARKERS = (
+    'data-component-type="s-search-result"',
+    "data-component-type='s-search-result'",
+    "s-search-result",
+    'id="search"',
+    "id='search'",
+    'data-cy="title-recipe"',
+    "data-cy='title-recipe'",
+    "puis-card-container",
+    "/dp/",
+    "/gp/product/",
+)
+# A cycle's response cache, keyed by (expect_search, request URL).
+PageCache = Dict[Tuple[bool, str], str]
+
+
+def amazon_headers(url: str) -> Dict[str, str]:
+    return {
+        "User-Agent": CHROME_USER_AGENT,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+        "Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Cache-Control": "no-cache",
+        "Pragma": "no-cache",
+        "Connection": "keep-alive",
+        "Upgrade-Insecure-Requests": "1",
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "none",
+        "Sec-Fetch-User": "?1",
+        **CHROME_CLIENT_HINTS,
+        "Referer": referer_for_url(url),
+    }
+
+
+def is_product_url(url: str) -> bool:
+    parsed = urlsplit(url)
+    return "amazon." in parsed.netloc.lower() and any(part in parsed.path for part in ("/dp/", "/gp/product/"))
+
+
+def request_url(url: str) -> str:
+    """Canonical product address with only variant-selecting parameters kept."""
+    if not is_product_url(url):
+        return url
+    kept_params = [(key, value) for key, value in parse_qsl(urlsplit(url).query, keep_blank_values=True)
+                   if key in STABLE_PRODUCT_PARAMS]
+    clean_url = canonical_amazon_product_url(url)
+    return f"{clean_url}?{urlencode(kept_params)}" if kept_params else clean_url
+
+
+class _ChallengeParser(HTMLParser):
+    """Visible text and validation forms, ignoring scripts and templates."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.ignored_depth = 0
+        self.in_title = False
+        self.title = []
+        self.text = []
+        self.reason = ""
+
+    def handle_starttag(self, tag, attrs):
+        if tag in {"script", "style", "template", "noscript"}:
+            self.ignored_depth += 1
+        if self.ignored_depth:
+            return
+        attrs = dict(attrs)
+        if tag == "form" and "validatecaptcha" in str(attrs.get("action", "")).lower():
+            self.reason = "captcha_formu"
+        if tag == "input" and str(attrs.get("id", "")).lower() == "captchacharacters":
+            self.reason = "captcha_alani"
+        if tag == "title":
+            self.in_title = True
+
+    def handle_endtag(self, tag):
+        if tag in {"script", "style", "template", "noscript"}:
+            self.ignored_depth = max(0, self.ignored_depth - 1)
+        if tag == "title":
+            self.in_title = False
+
+    def handle_data(self, data):
+        if not self.ignored_depth:
+            self.text.append(data)
+            if self.in_title:
+                self.title.append(data)
+
+
+def protection_reason(html: str) -> str:
+    """Why a page is a real challenge; a raw `captcha` word in a script is not one."""
+    if not any(marker in html.lower() for marker in ("captcha", "robot", "automated access", "characters")):
+        return ""
+    parser = _ChallengeParser()
+    parser.feed(html)
+    if parser.reason:
+        return parser.reason
+    if "robot check" in normalize_offer_text(" ".join(parser.title)):
+        return "robot_check_basligi"
+    visible = normalize_offer_text(" ".join(parser.text))
+    for marker in ("enter the characters you see below", "type the characters you see",
+                   "robot olmadiginizi", "for automated access to amazon"):
+        if marker in visible:
+            return "gorunen_dogrulama_metni"
+    return ""
+
+
+def is_protection_page(html: str) -> bool:
+    return bool(protection_reason(html))
+
+
+def is_protection_error(exc: BaseException) -> bool:
+    """A challenge page or HTTP 429/503: terminal for this read, back off the watch."""
+    if isinstance(exc, BotProtectionHermesError) or error_status(exc) in {429, 503}:
+        return True
+    message = normalize_offer_text(str(exc))
+    return any(marker in message for marker in ("captcha", "robot", "bot korumasi", "koruma sayfasi"))
+
+
+def block_reason(exc: BaseException) -> str:
+    status_code = error_status(exc)
+    if status_code:
+        return f"http_{status_code}"
+    if is_protection_error(exc):
+        return "bot_korumasi"
+    return type(exc).__name__
+
+
+def _request_type(url: str, expect_search: bool) -> str:
+    if expect_search:
+        return "arama"
+    return "ürün" if is_product_url(url) else "sayfa"
+
+
+def _short_url(url: str) -> str:
+    parsed = urlsplit(str(url or ""))
+    return f"{parsed.netloc}{parsed.path}"[:120]
+
+
+def checked_html(response, expect_search: bool) -> str:
+    """Raise for a challenge page, a failed status or a page of the wrong kind."""
+    # A failed status wins: an HTTP 503 page is classified as 503 even when it
+    # also contains a challenge form.
+    response.raise_for_status()
+    html = decode_response_text(response)
+    reason = protection_reason(html)
+    if reason:
+        raise BotProtectionHermesError(PROTECTION_MESSAGE, challenge_reason=reason, http_status=response.status_code)
+    lowered = html.lower()
+    if "amazon" not in lowered or (expect_search and not any(marker in lowered for marker in SEARCH_PAGE_MARKERS)):
+        raise HermesError("Amazon beklenen arama/ürün sayfası yerine boş veya farklı bir sayfa döndürdü.")
+    return cleaned_html(response)
+
+
+def _seed_session(session) -> None:
+    session.cookies.set("i18n-prefs", "TRY", domain=".amazon.com.tr")
+    session.cookies.set("lc-acbtr", "tr_TR", domain=".amazon.com.tr")
+
+
+class AmazonClient:
+    """Process-lived anonymous transports; page/offer caches stay cycle-local."""
+
+    def __init__(self, transport: str = "http"):
+        # "http" reads with curl (Chrome TLS) and falls back to Chromium once;
+        # "browser" reads only through Chromium (used by the link test option).
+        self.transport = transport
+        self.requests_session = requests.Session()
+        _seed_session(self.requests_session)
+        self.curl_session = None
+        self.browser = AmazonBrowser()
+        # Only absent/unreadable offers, with discovery metadata, never successful prices.
+        self.unavailable_product_pages: dict = {}
+
+    def close(self) -> None:
+        try:
+            if self.curl_session is not None:
+                self.curl_session.close()
+            self.requests_session.close()
+        finally:
+            self.browser.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        self.close()
+
+    def fetch(self, url: str, timeout: int, expect_search: bool = False, cache: Optional[PageCache] = None) -> str:
+        """Return the cleaned HTML of one Amazon page.
+
+        A challenge or HTTP 429/503 is terminal. Never reset cookies or multiply
+        requests through URL/transport variants after the server rejects a read.
+        Another failure gets at most one Chromium read of the same address.
+        """
+        cache = {} if cache is None else cache
+        candidate = request_url(url)
+        key = (expect_search, candidate)
+        if key in cache:
+            return cache[key]
+        if self.transport == "browser":
+            html = self._timed("browser", candidate, expect_search, lambda: self._browser_read(candidate, timeout, expect_search))
+        else:
+            method = "curl" if curl_requests is not None else "requests"
+            try:
+                html = self._timed(method, candidate, expect_search, lambda: self._http_read(candidate, timeout, expect_search))
+            except Exception as exc:  # noqa: BLE001
+                if is_protection_error(exc):
+                    raise
+                log(f"Amazon {method} okuması başarısız, tarayıcıyla bir kez denenecek: {block_reason(exc)} | {_short_url(candidate)}")
+                html = self._timed("browser", candidate, expect_search, lambda: self._browser_read(candidate, timeout, expect_search))
+        cache[key] = html
+        return html
+
+    def _timed(self, method: str, url: str, expect_search: bool, read):
+        started_at = time.monotonic()
+        outcome = "ok"
+        try:
+            return read()
+        except Exception as exc:  # noqa: BLE001
+            outcome = block_reason(exc)
+            if is_protection_error(exc):
+                log(f"Amazon engeli: sebep={outcome} | yöntem={method} | adres={_short_url(url)}")
+            raise
+        finally:
+            elapsed_ms = round((time.monotonic() - started_at) * 1000)
+            log(f"Amazon isteği: yöntem={method} | tip={_request_type(url, expect_search)} | "
+                f"sonuç={outcome} | süre={elapsed_ms} ms | adres={_short_url(url)}")
+
+    def _http_read(self, url: str, timeout: int, expect_search: bool) -> str:
+        if curl_requests is not None:
+            if self.curl_session is None:
+                self.curl_session = curl_requests.Session()
+                _seed_session(self.curl_session)
+            response = self.curl_session.get(
+                url, headers=amazon_headers(url), timeout=timeout, allow_redirects=True, impersonate="chrome124"
+            )
+        else:
+            response = self.requests_session.get(url, headers=amazon_headers(url), timeout=timeout, allow_redirects=True)
+        return checked_html(response, expect_search)
+
+    def _browser_read(self, url: str, timeout: int, expect_search: bool) -> str:
+        return checked_html(self.browser.read(url, timeout), expect_search)
+
+
+def short_amazon_url(url: str) -> str:
+    clean = repair_mojibake(str(url or "")).strip()
+    return clean[:117] + "..." if len(clean) > 120 else clean

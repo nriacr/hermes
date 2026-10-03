@@ -1,26 +1,62 @@
-from ..constants import SITE_AMAZON, SITE_BENGURME, SITE_BEYMENCLUB, SITE_HEPSIBURADA, SITE_HM, SITE_NETWORK, SITE_NORDBRON, SITE_TRENDYOL, SITE_ZARA
+"""All supported sites. A new site gets its own provider module and one line here."""
+
+from typing import Dict, Iterable
+
 from ..errors import HermesError
-from ..models import OfferResult
-from . import amazon, bengurme, beymenclub, hepsiburada, hm, network, nordbron, trendyol, zara
+from .amazon import AmazonProvider
+from .base import Provider
+from .bengurme import BenGurmeProvider
+from .beymenclub import BeymenClubProvider
+from .hepsiburada import HepsiburadaProvider
+from .hm import HMProvider
+from .network import NetworkProvider
+from .nordbron import NordbronProvider
+from .trendyol import TrendyolProvider
+from .zara import ZaraProvider
 
-PROVIDERS = {
-    SITE_AMAZON: amazon.extract_offer,
-    SITE_HEPSIBURADA: hepsiburada.extract_offer,
-    SITE_TRENDYOL: trendyol.extract_offer,
-    SITE_NETWORK: network.extract_offer,
-    SITE_BEYMENCLUB: beymenclub.extract_offer,
-    SITE_BENGURME: bengurme.extract_offer,
-    SITE_NORDBRON: nordbron.extract_offer,
-    SITE_ZARA: zara.extract_offer,
-    SITE_HM: hm.extract_offer,
-}
+PROVIDER_TYPES = (
+    AmazonProvider,
+    HepsiburadaProvider,
+    TrendyolProvider,
+    NetworkProvider,
+    BeymenClubProvider,
+    BenGurmeProvider,
+    NordbronProvider,
+    ZaraProvider,
+    HMProvider,
+)
 
 
-def extract_offer(site: str, html: str, source_url: str = "") -> OfferResult:
-    site_key = str(site or "").strip().lower()
-    parser = PROVIDERS.get(site_key)
-    if parser is None:
-        raise HermesError(f"Desteklenmeyen site parserı: {site}")
-    if site_key in {SITE_AMAZON, SITE_HEPSIBURADA, SITE_ZARA, SITE_HM, SITE_NETWORK, SITE_BEYMENCLUB, SITE_BENGURME}:
-        return parser(html, source_url=source_url)
-    return parser(html)
+class ProviderSet:
+    """One provider instance per site, owned by the monitor or a link test."""
+
+    def __init__(self, overrides: Dict[str, Provider] | None = None) -> None:
+        self.providers: Dict[str, Provider] = {}
+        for provider_type in PROVIDER_TYPES:
+            self.providers[provider_type.site] = (overrides or {}).get(provider_type.site) or provider_type()
+
+    def __getitem__(self, site: str) -> Provider:
+        provider = self.providers.get(str(site or "").strip().lower())
+        if provider is None:
+            raise HermesError(f"Desteklenmeyen site okuyucusu: {site}")
+        return provider
+
+    def __iter__(self) -> Iterable[Provider]:
+        return iter(self.providers.values())
+
+    def begin_cycle(self) -> None:
+        for provider in self:
+            provider.begin_cycle()
+
+    def close(self) -> None:
+        for provider in self:
+            try:
+                provider.close()
+            except Exception:  # noqa: BLE001 - shutdown continues for the other sites
+                pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        self.close()

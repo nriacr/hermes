@@ -7,21 +7,7 @@ from html import unescape
 from typing import Any, Dict
 from urllib.parse import parse_qs, urlparse, urlunparse
 
-from .constants import (
-    AMAZON_BASE_URL,
-    DEFAULT_HEADERS,
-    SITE_AMAZON,
-    SITE_BENGURME,
-    SITE_BEYMENCLUB,
-    SITE_HEPSIBURADA,
-    SITE_HM,
-    SITE_LABELS,
-    SITE_NETWORK,
-    SITE_NORDBRON,
-    SITE_TRENDYOL,
-    SITE_ZARA,
-    USER_AGENTS,
-)
+from .constants import AMAZON_BASE_URL, DEFAULT_HEADERS, SITE_HOST_MARKERS, SITE_LABELS, USER_AGENTS
 from .errors import HermesError
 
 MOJIBAKE_MARKERS = ("Ã", "Ä", "Å", "Â", "�")
@@ -103,10 +89,6 @@ def repair_mojibake(value: Any) -> str:
     return text
 
 
-def normalize_text(value: str) -> str:
-    return re.sub(r"\s+", " ", str(value).casefold()).strip()
-
-
 def normalize_offer_text(value: str) -> str:
     normalized = unicodedata.normalize("NFKD", str(value).casefold())
     normalized = "".join(ch for ch in normalized if not unicodedata.combining(ch))
@@ -131,6 +113,16 @@ def format_tl(value: Decimal, with_currency: bool = False) -> str:
 def format_signed_tl(value: Decimal, with_currency: bool = False) -> str:
     sign = "+" if value >= 0 else "-"
     return f"{sign}{format_tl(abs(value), with_currency=with_currency)}"
+
+
+def format_duration(seconds: float | int | None) -> str:
+    if seconds is None:
+        return "-"
+    total_seconds = max(0, int(round(float(seconds))))
+    minutes, remaining_seconds = divmod(total_seconds, 60)
+    if minutes:
+        return f"{minutes} dk {remaining_seconds} sn"
+    return f"{remaining_seconds} sn"
 
 
 def shorten_log_text(value: str, max_length: int = 90) -> str:
@@ -183,8 +175,13 @@ def is_hepsiburada_search_url(url: str) -> bool:
     return not is_hepsiburada_product_url(url)
 
 
-def watch_name_required_for_url(url: str) -> bool:
+def is_search_url(url: str) -> bool:
+    """A search page lists many products; its card name is the match phrase."""
     return is_amazon_search_url(url) or is_hepsiburada_search_url(url)
+
+
+def watch_name_required_for_url(url: str) -> bool:
+    return is_search_url(url)
 
 
 def canonical_amazon_product_url(raw_url: str, fallback_asin: str = "") -> str:
@@ -251,24 +248,9 @@ def tracking_offer_title_identity(
 
 def detect_site_from_url(url: str) -> str:
     host = urlparse(url).netloc.casefold()
-    if "hepsiburada" in host:
-        return SITE_HEPSIBURADA
-    if "trendyol" in host:
-        return SITE_TRENDYOL
-    if "network" in host:
-        return SITE_NETWORK
-    if "beymenclub" in host:
-        return SITE_BEYMENCLUB
-    if "bengurme" in host:
-        return SITE_BENGURME
-    if "nordbron" in host:
-        return SITE_NORDBRON
-    if "zara" in host:
-        return SITE_ZARA
-    if "hm.com" in host:
-        return SITE_HM
-    if "amazon" in host:
-        return SITE_AMAZON
+    for marker, site in SITE_HOST_MARKERS:
+        if marker in host:
+            return site
     raise HermesError(f"Desteklenmeyen site alan adı: {host or url}")
 
 

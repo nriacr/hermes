@@ -6,13 +6,10 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from bs4 import BeautifulSoup, Comment
 
-from .errors import EmptySearchResultsHermesError, HermesError
-from .models import SearchResultItem
-from .providers.amazon_common import (
-    extract_verified_secondary_offer_price,
-    has_explicit_used_offer_evidence,
-)
-from .utils import canonical_amazon_product_url, make_amazon_absolute_url, normalize_offer_text, parse_decimal, repair_mojibake
+from ...errors import EmptySearchResultsHermesError, HermesError
+from ...models import SearchResultItem
+from ...utils import canonical_amazon_product_url, make_amazon_absolute_url, normalize_offer_text, parse_decimal, repair_mojibake
+from .common import extract_verified_secondary_offer_price, has_explicit_used_offer_evidence
 
 AMAZON_SEARCH_CARD_SELECTORS = [
     "div.s-main-slot div[data-component-type='s-search-result'][data-asin]",

@@ -5,6 +5,8 @@ from typing import List, Optional
 
 @dataclass
 class WatchRule:
+    """One configured URL of a tracking card."""
+
     name: str
     site: str
     url: str
@@ -76,18 +78,6 @@ class OfferResult:
 
 
 @dataclass
-class HermesConfig:
-    interval_seconds: int
-    request_timeout_seconds: int
-    request_delay_min_seconds: int
-    request_delay_max_seconds: int
-    pushover_user_key: str
-    pushover_api_token: str
-    watches: List[WatchRule]
-    telegram: "TelegramConfig"
-
-
-@dataclass
 class TelegramConfig:
     enabled: bool
     api_id: Optional[int]
@@ -99,3 +89,15 @@ class TelegramConfig:
     keywords: List[str]
     exclude_keywords: List[str]
     saved_messages_enabled: bool = True
+
+
+@dataclass
+class HermesConfig:
+    interval_seconds: int
+    request_timeout_seconds: int
+    request_delay_min_seconds: int
+    request_delay_max_seconds: int
+    pushover_user_key: str
+    pushover_api_token: str
+    watches: List[WatchRule]
+    telegram: TelegramConfig

@@ -1,3 +1,6 @@
+from typing import Optional
+
+
 class HermesError(Exception):
     pass
 
@@ -7,6 +10,8 @@ class PriceUnavailableHermesError(HermesError):
 
 
 class OutOfStockHermesError(HermesError):
+    """The site positively reported that the product or size is not available."""
+
     def __init__(self, message: str, product_title: str = "", product_url: str = "") -> None:
         self.product_title = product_title
         self.product_url = product_url
@@ -31,5 +36,23 @@ class HttpStatusHermesError(HermesError):
         self.status_code = status_code
         self.url = url
         super().__init__(
-            f"Site {status_code} dondurdu; bu kontrol atlandi, sonraki turda tekrar denenecek."
+            f"Site {status_code} döndürdü; bu kontrol atlandı, sonraki turda tekrar denenecek."
         )
+
+
+class BotProtectionHermesError(HermesError):
+    """A site answered with a verification/challenge page instead of content."""
+
+    def __init__(self, message: str, challenge_reason: str = "", http_status: Optional[int] = None) -> None:
+        self.challenge_reason = challenge_reason
+        self.http_status = http_status
+        super().__init__(message)
+
+
+def error_status(exc: BaseException) -> Optional[int]:
+    """HTTP status of an error, also for `requests.HTTPError` wrappers."""
+    status_code = getattr(exc, "status_code", None)
+    if isinstance(status_code, int):
+        return status_code
+    response_status = getattr(getattr(exc, "response", None), "status_code", None)
+    return response_status if isinstance(response_status, int) else None

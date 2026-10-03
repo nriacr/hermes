@@ -1,7 +1,11 @@
+import re
+
+from ..constants import SITE_TRENDYOL
 from ..errors import HermesError
 from ..models import OfferResult
 from ..utils import parse_decimal
 from .base import (
+    Provider,
     extract_jsonld_product,
     extract_price_from_meta,
     extract_price_from_scripts,
@@ -9,6 +13,7 @@ from .base import (
     extract_title,
     soup_from_html,
 )
+from .http import fetch_with_retries, read_site_html
 
 TRENDYOL_SELECTORS = [
     ".product-price-container .prc-dsc",
@@ -36,10 +41,16 @@ def extract_offer(html: str) -> OfferResult:
 
     plain = soup.get_text(" ", strip=True)
     if "TL" in plain:
-        import re
-
         match = re.search(r"(\d{1,3}(?:\.\d{3})*,\d{2})\s*TL", plain)
         if match:
             return OfferResult(title=title, price=parse_decimal(match.group(1)), seller=None)
 
     raise HermesError("Trendyol sayfasindan fiyat bulunamadi.")
+
+
+class TrendyolProvider(Provider):
+    site = SITE_TRENDYOL
+
+    def read(self, watch, ctx, outcome):
+        response = fetch_with_retries(ctx.session, watch.url, ctx.timeout)
+        return [extract_offer(read_site_html(response, "Trendyol"))]

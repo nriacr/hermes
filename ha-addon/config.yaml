@@ -1,5 +1,5 @@
 name: Hermes
-version: "2.5.48"
+version: "3.0.0"
 slug: hermes
 description: Takip edilen linkleri ve Telegram fırsat kanallarını Pushover bildirimiyle izler.
 url: https://github.com/nriacr/hermes
@@ -12,6 +12,10 @@ boot: auto
 init: false
 ingress: true
 ingress_port: 8099
+# Supervisor restarts Hermes when its monitor stops or a cycle hangs.
+watchdog: "http://[HOST]:[PORT:8099]/health"
+# Time for a clean shutdown (Chromium, state file) before the container is killed.
+timeout: 20
 hassio_api: true
 hassio_role: manager
 panel_title: Hermes

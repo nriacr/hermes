@@ -1,12 +1,18 @@
 import json
 import re
 from decimal import Decimal
-from typing import Any, Iterable, List
+from typing import Any, Dict, Iterable, List
+from urllib.parse import urlsplit
 
+import requests
+
+from ..constants import SITE_ZARA
 from ..errors import HermesError, OutOfStockHermesError
+from ..logging_utils import log
 from ..models import OfferResult
-from ..utils import normalize_offer_text, parse_decimal, repair_mojibake
-from .base import iter_json_objects, soup_from_html
+from ..utils import normalize_offer_text, parse_decimal, referer_for_url, repair_mojibake
+from .base import Provider, iter_json_objects, soup_from_html
+from .http import decode_response_text, read_site_html
 
 OUT_OF_STOCK_MARKERS = ("outofstock", "discontinued", "benzer urunler", "benzer ürünler")
 
@@ -232,3 +238,107 @@ def extract_offers(html: str, source_url: str = "", size: str = "") -> List[Offe
 
 def extract_offer(html: str, source_url: str = "") -> OfferResult:
     return extract_offers(html, source_url=source_url)[0]
+
+
+# ---------------------------------------------------------------------------
+# Fetching: Zara may answer with its own verification interstitial first.
+# ---------------------------------------------------------------------------
+
+
+def is_interstitial(html: str) -> bool:
+    normalized = normalize_offer_text(html)
+    return "bm-verify" in normalized and "_sec/verify" in normalized
+
+
+def _origin(url: str) -> str:
+    parsed = urlsplit(url)
+    return f"{parsed.scheme}://{parsed.netloc}" if parsed.scheme and parsed.netloc else "https://www.zara.com"
+
+
+def zara_headers(url: str) -> Dict[str, str]:
+    return {
+        "User-Agent": (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+        ),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7",
+        "Accept-Encoding": "gzip, deflate",
+        "Cache-Control": "no-cache",
+        "Pragma": "no-cache",
+        "Connection": "keep-alive",
+        "Referer": referer_for_url(url),
+        "Upgrade-Insecure-Requests": "1",
+    }
+
+
+def _verification_payload(html: str) -> Dict[str, Any]:
+    token_match = re.search(r'["\']bm-verify["\']\s*:\s*["\']([^"\']+)["\']', html)
+    number_match = re.search(r'Number\(\s*["\'](\d+)["\']\s*\+\s*["\'](\d+)["\']\s*\)', html)
+    base_match = re.search(r"var\s+i\s*=\s*(\d+)", html)
+    if not token_match or not number_match or not base_match:
+        raise HermesError("Zara doğrulama sayfası çözümlenemedi.")
+    return {
+        "bm-verify": token_match.group(1),
+        "pow": int(base_match.group(1)) + int(number_match.group(1) + number_match.group(2)),
+    }
+
+
+def _is_usable_page(html: str) -> bool:
+    normalized = normalize_offer_text(html)
+    return any(
+        marker in normalized
+        for marker in ("application/ld+json", "product-detail-info", "product-detail-size-selector", "hasvariant", "price__amount")
+    )
+
+
+def _get(session: requests.Session, url: str, timeout: int) -> requests.Response:
+    response = session.get(url, headers=zara_headers(url), timeout=timeout, allow_redirects=True)
+    response.raise_for_status()
+    return response
+
+
+def fetch_zara_page(session: requests.Session, url: str, timeout: int) -> requests.Response:
+    response = _get(session, url, timeout)
+    html = decode_response_text(response)
+    if not is_interstitial(html):
+        if _is_usable_page(html):
+            return response
+        fresh_session = requests.Session()
+        fresh_response = _get(fresh_session, url, timeout)
+        fresh_html = decode_response_text(fresh_response)
+        if is_interstitial(fresh_html):
+            session, response, html = fresh_session, fresh_response, fresh_html
+        elif _is_usable_page(fresh_html):
+            return fresh_response
+        else:
+            raise HermesError("Zara ürün verisi eksik döndü; sayfa fiyat/beden bilgisi içermiyor.")
+
+    headers = zara_headers(url)
+    headers.update({"Content-Type": "application/json", "Origin": _origin(url), "Referer": url})
+    verify_response = session.post(
+        f"{_origin(url)}/_sec/verify?provider=interstitial",
+        data=json.dumps(_verification_payload(html)),
+        headers=headers,
+        timeout=timeout,
+        allow_redirects=True,
+    )
+    verify_response.raise_for_status()
+    response = _get(session, url, timeout)
+    verified_html = decode_response_text(response)
+    if is_interstitial(verified_html):
+        raise HermesError("Zara bot koruması nedeniyle doğrulama sayfası döndü.")
+    if not _is_usable_page(verified_html):
+        raise HermesError("Zara doğrulama sonrası ürün verisi eksik döndü.")
+    return response
+
+
+class ZaraProvider(Provider):
+    site = SITE_ZARA
+
+    def read(self, watch, ctx, outcome):
+        html = read_site_html(fetch_zara_page(ctx.session, watch.url, ctx.timeout), "Zara", is_interstitial)
+        offers = extract_offers(html, source_url=watch.url, size=watch.size)
+        if watch.size:
+            log(f"Zara beden kontrol edildi: {watch.name or watch.url} | beden={watch.size} | adet={len(offers)}")
+        return offers

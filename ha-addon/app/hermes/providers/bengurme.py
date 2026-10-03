@@ -8,12 +8,18 @@ okur; her stoktaki gramaj ayri teklif olarak doner.
 import json
 import re
 from decimal import Decimal
-from typing import Any, Iterable, List
+from typing import Any, Dict, Iterable, List, Optional
+from urllib.parse import urlsplit, urlunsplit
 
-from ..errors import HermesError, OutOfStockHermesError
+import requests
+
+from ..constants import CHROME_USER_AGENT, SITE_BENGURME
+from ..errors import HermesError, HttpStatusHermesError, OutOfStockHermesError
+from ..logging_utils import log
 from ..models import OfferResult
-from ..utils import normalize_offer_text, parse_decimal, repair_mojibake
+from ..utils import build_headers, normalize_offer_text, parse_decimal, referer_for_url, repair_mojibake
 from .base import (
+    Provider,
     extract_jsonld_product,
     extract_price_from_meta,
     extract_price_from_scripts,
@@ -22,6 +28,7 @@ from .base import (
     iter_json_objects,
     soup_from_html,
 )
+from .http import curl_requests, decode_response_text, read_site_html
 from .size_availability import size_matches
 
 
@@ -234,3 +241,117 @@ def extract_offers(html: str, source_url: str = "", size: str = "") -> List[Offe
 def extract_offer(html: str, source_url: str = "") -> OfferResult:
     offers = extract_offers(html, source_url=source_url)
     return min(offers, key=lambda offer: offer.price)
+
+
+# ---------------------------------------------------------------------------
+# Fetching: Shopify's public product JSON first, the product page as fallback.
+# ---------------------------------------------------------------------------
+
+
+def bengurme_headers(url: str) -> Dict[str, str]:
+    """Return headers for Ben Gurme's public Shopify product endpoints."""
+    headers = build_headers(url)
+    headers.update(
+        {
+            "User-Agent": CHROME_USER_AGENT,
+            "Accept": "application/json,text/javascript,*/*;q=0.8",
+            "Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7",
+            "Referer": referer_for_url(url),
+            "X-Requested-With": "XMLHttpRequest",
+        }
+    )
+    return headers
+
+
+def bengurme_product_json_url(url: str) -> str:
+    """Build Shopify's public product JSON endpoint from a Ben Gurme link."""
+    parsed = urlsplit(url)
+    match = re.search(r"/products/([^/?#]+)", parsed.path, re.IGNORECASE)
+    if not match:
+        raise HermesError("Ben Gurme linkinden ürün kimliği okunamadı.")
+    return urlunsplit((parsed.scheme or "https", parsed.netloc, f"/products/{match.group(1)}.js", "", ""))
+
+
+def _is_usable_response(response) -> bool:
+    text = decode_response_text(response).lstrip()
+    normalized = normalize_offer_text(text)
+    return (
+        (text.startswith("{") and '"variants"' in text)
+        or "shopify" in normalized
+        or "product" in normalized and "variants" in normalized
+        or "sepete ekle" in normalized
+        or "tukendi" in normalized
+    )
+
+
+def _checked_response(response, url: str):
+    if response.status_code in {403, 429}:
+        raise HttpStatusHermesError(response.status_code, url)
+    response.raise_for_status()
+    if not _is_usable_response(response):
+        raise HermesError("Ben Gurme ürün sayfası beklenen stok veya fiyat verisini içermiyor.")
+    return response
+
+
+def fetch_bengurme_page(session: requests.Session, url: str, timeout: int, cache: Optional[dict] = None):
+    """Read Ben Gurme from Shopify JSON first, with the product page as fallback.
+
+    The JSON endpoint contains every variant's live availability and price, so it
+    is both faster and less brittle than reading storefront button text.
+    """
+    cache = {} if cache is None else cache
+    if url in cache:
+        return cache[url]
+    attempts: List[str] = []
+    last_error: Optional[Exception] = None
+    candidates = (bengurme_product_json_url(url), url)
+    for label, client in (("requests", session), ("requests_fresh", requests.Session())):
+        for candidate_url in candidates:
+            try:
+                response = _checked_response(
+                    client.get(candidate_url, headers=bengurme_headers(candidate_url), timeout=timeout, allow_redirects=True),
+                    candidate_url,
+                )
+                cache[url] = response
+                return response
+            except Exception as exc:  # noqa: BLE001
+                last_error = exc
+                attempts.append(f"{label}:{getattr(exc, 'status_code', None) or exc.__class__.__name__}")
+    if curl_requests is not None:
+        for candidate_url in candidates:
+            try:
+                response = _checked_response(
+                    curl_requests.get(
+                        candidate_url, headers=bengurme_headers(candidate_url), timeout=timeout,
+                        allow_redirects=True, impersonate="chrome124",
+                    ),
+                    candidate_url,
+                )
+                cache[url] = response
+                return response
+            except Exception as exc:  # noqa: BLE001
+                last_error = exc
+                attempts.append(f"curl:{getattr(exc, 'status_code', None) or exc.__class__.__name__}")
+    if attempts:
+        log(f"Ben Gurme teşhis: deneme={len(attempts)} | akis={' > '.join(attempts)} | url={url}")
+    if last_error is not None:
+        raise last_error
+    raise HttpStatusHermesError(0, url)
+
+
+class BenGurmeProvider(Provider):
+    site = SITE_BENGURME
+    notifies_stock_return = True
+
+    def __init__(self) -> None:
+        self.responses: dict = {}
+
+    def begin_cycle(self) -> None:
+        self.responses = {}
+
+    def read(self, watch, ctx, outcome):
+        response = fetch_bengurme_page(ctx.session, watch.url, ctx.timeout, self.responses)
+        offers = extract_offers(read_site_html(response, "Ben Gurme"), source_url=watch.url, size=watch.size)
+        if watch.size:
+            log(f"Ben Gurme beden kontrol edildi: {watch.name or watch.url} | beden={watch.size} | adet={len(offers)}")
+        return offers

@@ -1,0 +1,2230 @@
+import json
+import unittest
+from decimal import Decimal
+
+from support import APP_PATH  # noqa: F401 - puts the add-on on sys.path
+
+from hermes.config import prepare_watches
+from hermes.errors import HermesError, OutOfStockHermesError
+from hermes.models import OfferResult, SearchResultItem, WatchRule
+from hermes.providers.amazon import AmazonProvider, offers_from_search_results
+from hermes.providers.amazon import parser as amazon_parser
+from hermes.providers.amazon.parser import (
+    extract_low_stock_quantity,
+    extract_offer as extract_amazon_offer,
+    extract_offers as extract_amazon_offers,
+    extract_product_variations,
+    extract_used_offer_listing_url,
+    extract_verified_warehouse_offers_from_listing,
+    is_warehouse_search_url,
+    title_with_variation,
+)
+from hermes.providers.amazon.search import dedupe_results, extract_result_candidates
+from hermes.providers.base import soup_from_html
+from hermes.providers.bengurme import extract_offers as extract_bengurme_offers
+from hermes.providers.beymenclub import (
+    extract_offer as extract_beymenclub_offer,
+    extract_offers as extract_beymenclub_offers,
+    extract_product_id as extract_beymenclub_product_id,
+    requested_size_state_from_summary,
+)
+from hermes.providers.hepsiburada.parser import (
+    _embedded_detail_candidates,
+    clean_display_title,
+    extract_embedded_variant_label,
+    extract_embedded_variant_offer,
+    extract_offer as extract_hepsiburada_offer,
+    extract_search_offers as extract_hepsiburada_search_offers,
+    extract_selected_variant_label,
+    extract_selected_variant_labels,
+    extract_variant_urls,
+    title_with_variant_label,
+)
+from hermes.providers.hm import extract_offers as extract_hm_offers
+from hermes.providers.network import (
+    _network_requested_size_state,
+    extract_offer as extract_network_offer,
+    extract_offers as extract_network_offers,
+)
+from hermes.providers.nordbron import extract_offer as extract_nordbron_offer
+from hermes.providers.zara import extract_offers as extract_zara_offers
+from hermes.utils import detect_site_from_url, extract_asin_from_url, is_amazon_search_url
+
+
+def official_seller_filter(watch, offers):
+    provider = AmazonProvider.__new__(AmazonProvider)
+    return [offer for offer in offers if provider.keeps_offer(watch, offer)]
+
+
+
+class AmazonParserTests(unittest.TestCase):
+    def test_amazon_stock_absence_is_not_a_price_parser_failure(self):
+        html = '<span id="productTitle">iPhone Gümüş</span><div id="availability">Şu anda mevcut değil.</div>'
+        with self.assertRaises(OutOfStockHermesError) as caught:
+            extract_amazon_offers(html, "https://www.amazon.com.tr/dp/B000000001")
+        self.assertEqual(caught.exception.product_title, "iPhone Gümüş")
+        self.assertEqual(caught.exception.product_url, "https://www.amazon.com.tr/dp/B000000001")
+        # Unknown/broken markup and an active purchase with a missing price are errors.
+        for broken in ('<html>garbled</html>', '<span id="productTitle">iPhone</span><div id="availability">Stokta var</div>'):
+            with self.subTest(broken=broken), self.assertRaises(HermesError) as caught:
+                extract_amazon_offers(broken)
+            self.assertNotIsInstance(caught.exception, OutOfStockHermesError)
+        # Recommendation stock and disabled siblings are not the selected product.
+        priced = '<span id="productTitle">iPhone</span><div id="corePrice_feature_div"><span class="a-price"><span class="a-offscreen">100,00 TL</span></span></div>'
+        priced += '<div id="recommendations">Şu anda mevcut değil</div>'
+        self.assertEqual(extract_amazon_offers(priced)[0].price, Decimal("100.00"))
+
+    def test_amazon_unavailable_product_does_not_reuse_stale_metadata_price(self):
+        html = '<span id="productTitle">iPhone</span><div id="availability">Şu anda mevcut değil.</div><meta property="product:price:amount" content="1000">'
+        with self.assertRaises(OutOfStockHermesError):
+            extract_amazon_offers(html)
+
+    def test_no_featured_amazon_offer_does_not_mean_stock_is_absent(self):
+        html = '<span id="productTitle">Apple iPhone 17 Pro</span><div id="availability"></div><span id="buybox-see-all-buying-choices"><a href="/gp/offer-listing/B000000001/ref=dp_olp_unknown_mbc">Satın Alma Seçeneklerini Gör</a></span>'
+        with self.assertRaises(HermesError) as caught:
+            extract_amazon_offers(html)
+        self.assertNotIsInstance(caught.exception, OutOfStockHermesError)
+        self.assertIn("stok durumu doğrulanamadı", str(caught.exception))
+
+    def test_amazon_turkish_all_categories_heading_cuts_fallback_cards(self):
+        def card(asin):
+            return f'<div data-component-type="s-search-result" data-asin="{asin}"><h2><a href="/dp/{asin}"><span>Juo 240W</span></a></h2><span class="a-price"><span class="a-offscreen">100,00 TL</span></span></div>'
+        html = '<div class="s-main-slot">' + card('B000000001') + '<h2>Tüm Kategoriler içindeki sonuçlar gösteriliyor</h2>' + card('B000000002') + '</div>'
+        self.assertEqual([item.url for item in extract_result_candidates(html, 60)], ['https://www.amazon.com.tr/dp/B000000001'])
+
+    def test_amazon_no_results_notice_in_hidden_or_script_text_is_ignored(self):
+        card = '<div data-component-type="s-search-result" data-asin="B000000001"><h2><a href="/dp/B000000001"><span>Juo 240W</span></a></h2><span class="a-price"><span class="a-offscreen">100,00 TL</span></span></div>'
+        for extra in ('<script>"Amazon Depo içinde juo 240w için sonuç bulunamadı"</script>',
+                      '<div aria-hidden="true">Amazon Depo içinde juo 240w için sonuç bulunamadı</div>',
+                      '<!-- Amazon Depo içinde juo 240w için sonuç bulunamadı -->'):
+            with self.subTest(extra=extra):
+                self.assertEqual(len(extract_result_candidates(extra + card, 60)), 1)
+
+    def test_amazon_product_title_cannot_declare_the_search_empty(self):
+        html = '<div id="search"><h2>Sonuçlar</h2><div data-component-type="s-search-result" data-asin="B000000001"><h2><a href="/dp/B000000001"><span>Hata rehberi: sorgu için sonuç bulunamadı</span></a></h2><span class="a-price"><span class="a-offscreen">100,00 TL</span></span></div></div>'
+        self.assertEqual(len(extract_result_candidates(html, 60)), 1)
+
+    def test_amazon_primary_seller_is_separate_from_verified_depot_seller(self):
+        html = '''<span id="productTitle">iPhone</span>
+        <div id="corePriceDisplay_desktop_feature_div"><span class="a-price">
+          <span class="a-offscreen">123.058,99 TL</span></span></div>
+        <div id="merchantInfoFeature_feature_div">Gönderici: Amazon Satıcı:
+          <a id="sellerProfileTriggerId">Amazon.com.tr</a></div>
+        <div id="usedBuySection">Kullanılmış ve yeni gibi Satıcı: Amazon Depo
+          <span class="a-price"><span class="a-offscreen">89.040,87 TL</span></span></div>'''
+
+        offers = extract_amazon_offers(html, "https://www.amazon.com.tr/dp/B000000001")
+
+        self.assertEqual([(offer.seller, offer.is_warehouse) for offer in offers], [
+            ("Amazon.com.tr", False), ("Amazon Depo", True),
+        ])
+
+    def test_amazon_used_evidence_cannot_leak_across_offer_rows_or_asins(self):
+        html = '''<div data-cy="all-offers"><div id="corePrice_feature_div">
+        <span class="a-price"><span class="a-offscreen">123.058,99 TL</span></span></div>
+        <div data-csa-c-slot-id="usedAccordionRow" role="button" data-csa-c-asin="B000000002">
+        Kullanılmış ve yeni gibi Satıcı: Amazon Depo
+        <span class="a-price"><span class="a-offscreen">89.040,87 TL</span></span></div></div>'''
+        self.assertEqual(extract_verified_warehouse_offers_from_listing(
+            html, "https://www.amazon.com.tr/dp/B000000001"), [])
+        matched = extract_verified_warehouse_offers_from_listing(
+            html, "https://www.amazon.com.tr/dp/B000000002")
+        self.assertEqual([o.price for o in matched], [Decimal("89040.87")])
+
+    def test_amazon_live_used_accordion_does_not_contaminate_new_price(self):
+        # Minimized structure observed on B0FQF9XY3L on 2026-09-17.
+        html = '''<span id="productTitle">iPhone 17 Pro Max 2 TB Kozmik Turuncu</span>
+        <div data-csa-c-slot-id="usedAccordionRow" role="button">
+          <div id="usedAccordionCaption_feature_div">Kullanılmış ve yeni gibi</div>
+          <div id="corePrice_feature_div" data-csa-c-is-in-initial-active-row="true">
+            <input name="items[0.base][customerVisiblePrice][amount]" value="149742.75">
+            <span class="a-price"><span class="a-price-whole">149.742</span>
+            <span class="a-price-fraction">75</span></span>
+          </div><span>Gönderen: Amazon</span><span>Satıcı: Amazon Depo</span>
+        </div>
+        <div id="corePriceDisplay_desktop_feature_div">
+          <span class="a-price"><span class="a-offscreen">168.249,00 TL</span></span>
+        </div>'''
+        offers = extract_amazon_offers(html, "https://www.amazon.com.tr/dp/B0FQF9XY3L")
+        self.assertEqual([(o.price, o.is_warehouse) for o in offers], [
+            (Decimal("168249"), False), (Decimal("149742.75"), True)])
+
+    def test_amazon_depot_only_page_does_not_require_a_new_offer(self):
+        html = '''<span id="productTitle">iPhone</span><div id="usedBuySection">
+        Kullanılmış ve yeni gibi Satıcı: Amazon Depo
+        <span class="a-price"><span class="a-offscreen">89.040,87 TL</span></span></div>'''
+        offers = extract_amazon_offers(html, "https://www.amazon.com.tr/dp/B000000001")
+        self.assertEqual(len(offers), 1)
+        self.assertTrue(offers[0].is_warehouse)
+
+    def test_amazon_used_like_new_text_can_open_used_listing(self):
+        url = "https://www.amazon.com.tr/dp/B000000001"
+        html = '<div id="usedBuySection">Kullanılmış ve yeni gibi</div>'
+        self.assertIn("condition=used", extract_used_offer_listing_url(html, url))
+
+    def test_amazon_inline_depot_keeps_its_own_price_and_condition(self):
+        html = '''<span id="productTitle">iPhone 17 Pro Max Gümüş 256 GB</span>
+        <div id="corePriceDisplay_desktop_feature_div">
+          <span class="a-price"><span class="a-offscreen">123.058,99 TL</span></span>
+        </div>
+        <div id="usedBuySection">Kullanılmış ve yeni gibi
+          <span class="a-price"><span class="a-price-whole">89.040</span>
+          <span class="a-price-fraction">87</span></span>
+          Gönderen: Amazon Satıcı: Amazon Depo
+        </div>'''
+        offers = extract_amazon_offers(html, "https://www.amazon.com.tr/dp/B000000001")
+        self.assertEqual([(o.price, o.is_warehouse) for o in offers], [
+            (Decimal("123058.99"), False), (Decimal("89040.87"), True)])
+        self.assertFalse(any(o.is_warehouse for o in extract_amazon_offers(
+            html.replace("Satıcı: Amazon Depo", "Satıcı: Başka Satıcı"))))
+
+    def test_amazon_variations_are_opt_in_for_each_watch(self):
+        base_watch = {
+            "name": "Tablet",
+            "target_price": 20000,
+            "url_1": "https://www.amazon.com.tr/dp/B000000001",
+        }
+        default_watch = prepare_watches([base_watch])[0]
+        opted_in_watch = prepare_watches([{**base_watch, "include_variations": True}])[0]
+
+        self.assertFalse(default_watch.include_variations)
+        self.assertTrue(opted_in_watch.include_variations)
+
+    def test_amazon_product_color_variations_keep_concrete_urls_and_labels(self):
+        html = """
+        <div id="variation_color_name"><ul>
+          <li data-defaultasin="B000000001"><a href="/dp/B000000001?th=1"><img alt="Renk: Antrasit"></a></li>
+          <li data-defaultasin="B000000002"><a href="/dp/B000000002?psc=1"><img alt="Renk: Mavi"></a></li>
+          <li class="swatchUnavailable" data-defaultasin="B000000003"><a href="/dp/B000000003"><img alt="Renk: Pembe"></a></li>
+        </ul></div>
+        """
+        variations = extract_product_variations(html, "https://www.amazon.com.tr/dp/B000000001?th=1", 60)
+        self.assertEqual(
+            [(item.label, item.url) for item in variations],
+            [
+                ("Antrasit", "https://www.amazon.com.tr/dp/B000000001?th=1"),
+                ("Mavi", "https://www.amazon.com.tr/dp/B000000002?psc=1"),
+                ("Pembe", "https://www.amazon.com.tr/dp/B000000003"),
+            ],
+        )
+        self.assertEqual(title_with_variation("Örnek ürün", "Mavi"), "Örnek ürün / Mavi")
+        self.assertEqual(title_with_variation("Örnek ürün Mavi", "Mavi"), "Örnek ürün Mavi")
+
+    def test_amazon_product_color_variations_read_modern_twister_state(self):
+        html = '''
+        <script type="a-state" data-a-state='{"key":"desktop-twister-sort-filter-data"}'>
+        {"sortedDimValuesForAllDims":{"color_name":[
+          {"defaultAsin":"B000000001","dimensionValueState":"SELECTED","dimensionValueDisplayText":"ANTRASİT"},
+          {"defaultAsin":"B000000002","dimensionValueState":"AVAILABLE","dimensionValueDisplayText":"BEYAZ","pageLoadURL":"/dp/B000000002/ref=twister?psc=1"},
+          {"defaultAsin":"B000000003","dimensionValueState":"UNAVAILABLE","dimensionValueDisplayText":"PEMBE","pageLoadURL":"/dp/B000000003?psc=1"}
+        ]}}
+        </script>
+        '''
+        variations = extract_product_variations(
+            html,
+            "https://www.amazon.com.tr/dp/B000000001?smid=A1&th=1",
+            60,
+        )
+        self.assertEqual(
+            [(item.label, item.url) for item in variations],
+            [
+                ("ANTRASİT", "https://www.amazon.com.tr/dp/B000000001?smid=A1&th=1"),
+                ("BEYAZ", "https://www.amazon.com.tr/dp/B000000002?psc=1"),
+                ("PEMBE", "https://www.amazon.com.tr/dp/B000000003?psc=1"),
+            ],
+        )
+
+    def test_amazon_search_card_uses_structured_price(self):
+        html = """
+        <div class="s-main-slot">
+          <div data-component-type="s-search-result" data-asin="B000000001">
+            <h2><a href="/dp/B000000001"><span>Philips Hue Flare 2'li Paket</span></a></h2>
+            <span>Pesin fiyatina 9 x 3.210 TL</span>
+            <span class="a-price">
+              <span class="a-offscreen">10.448,99 TL</span>
+              <span class="a-price-whole">10.448</span>
+              <span class="a-price-fraction">99</span>
+            </span>
+          </div>
+        </div>
+        """
+        item = extract_result_candidates(html, 10)[0]
+        self.assertEqual(item.price, Decimal("10448.99"))
+        self.assertFalse(item.is_warehouse)
+
+    def test_amazon_search_secondary_used_offer_is_marked_as_warehouse(self):
+        html = """
+        <div class="s-main-slot">
+          <div data-component-type="s-search-result" data-asin="B000000001">
+            <h2><a href="/dp/B000000001"><span>İkinci el ürün</span></a></h2>
+            <div data-cy="secondary-offer-recipe">
+              Diğer satın alma seçenekleri 12.999,00 TL (1 İkinci El ürün)
+            </div>
+          </div>
+        </div>
+        """
+        item = extract_result_candidates(html, 10)[0]
+        self.assertEqual(item.price, Decimal("12999.00"))
+        self.assertTrue(item.is_warehouse)
+
+    def test_amazon_search_reads_plain_card_used_offer_wording(self):
+        """Used search cards may not include Amazon's secondary-offer wrapper."""
+        html = """
+        <div class="s-main-slot">
+          <div data-component-type="s-search-result" data-asin="B0D95QG8W4">
+            <h2><a href="/dp/B0D95QG8W4"><span>Edifier M60 Siyah</span></a></h2>
+            <span class="a-price"><span class="a-offscreen">8.899,00 TL</span></span>
+            <p>Diğer satın alma seçenekleri 8.787,77 TL (1 İkinci El ürün)</p>
+          </div>
+        </div>
+        """
+
+        items = extract_result_candidates(html, 10)
+
+        self.assertEqual([item.price for item in items], [Decimal("8899.00"), Decimal("8787.77")])
+        self.assertEqual([item.is_warehouse for item in items], [False, True])
+
+    def test_amazon_search_keeps_normal_and_used_prices_on_one_card(self):
+        html = """
+        <div class="s-main-slot">
+          <div data-component-type="s-search-result" data-asin="B0D95QG8W4">
+            <h2><a href="/dp/B0D95QG8W4?th=1"><span>Edifier M60 Siyah</span></a></h2>
+            <span class="a-price"><span class="a-offscreen">8.899,00 TL</span></span>
+            <div data-cy="secondary-offer-recipe">
+              Diğer satın alma seçenekleri 8.787,77 TL (1 İkinci El ürün)
+            </div>
+          </div>
+        </div>
+        """
+        items = extract_result_candidates(html, 10)
+        self.assertEqual([item.price for item in items], [Decimal("8899.00"), Decimal("8787.77")])
+        self.assertEqual([item.is_warehouse for item in items], [False, True])
+
+    def test_amazon_search_does_not_create_used_offer_when_price_is_identical(self):
+        html = """
+        <div class="s-main-slot">
+          <div data-component-type="s-search-result" data-asin="B0D95QG8W4">
+            <h2><a href="/dp/B0D95QG8W4?th=1"><span>Edifier M60 Siyah</span></a></h2>
+            <span class="a-price"><span class="a-offscreen">8.899,00 TL</span></span>
+            <div data-cy="secondary-offer-recipe">
+              Diğer satın alma seçenekleri 8.899,00 TL (1 İkinci El ürün)
+            </div>
+          </div>
+        </div>
+        """
+
+        items = extract_result_candidates(html, 10)
+
+        self.assertEqual(len(items), 1)
+        self.assertFalse(items[0].is_warehouse)
+
+    def test_amazon_normal_search_primary_offer_stays_normal_with_used_text(self):
+        """A normal search must not relabel its new price from card-wide used text."""
+        html = """
+        <div class="s-main-slot">
+          <div data-component-type="s-search-result" data-asin="B0D95QG8W4">
+            <h2><a href="/dp/B0D95QG8W4?th=1"><span>Edifier M60 Siyah</span></a></h2>
+            <span class="a-price"><span class="a-offscreen">8.899,00 TL</span></span>
+            <span>Amazon Depo 1 İkinci El ürün</span>
+            <div data-cy="secondary-offer-recipe">
+              Diğer satın alma seçenekleri 8.787,77 TL (1 İkinci El ürün)
+            </div>
+          </div>
+        </div>
+        """
+
+        items = extract_result_candidates(html, 10, primary_is_warehouse=False)
+
+        self.assertEqual([item.price for item in items], [Decimal("8899.00"), Decimal("8787.77")])
+        self.assertEqual([item.is_warehouse for item in items], [False, True])
+
+    def test_amazon_warehouse_search_primary_offer_is_warehouse(self):
+        html = """
+        <div class="s-main-slot">
+          <div data-component-type="s-search-result" data-asin="B0D95QG8W4">
+            <h2><a href="/dp/B0D95QG8W4?th=1"><span>Edifier M60 Siyah</span></a></h2>
+            <span class="a-price"><span class="a-offscreen">8.787,77 TL</span></span>
+            <span>Diğer satın alma seçenekleri 8.787,77 TL (1 İkinci El ürün)</span>
+          </div>
+        </div>
+        """
+
+        items = extract_result_candidates(html, 10, primary_is_warehouse=True)
+
+        self.assertEqual(len(items), 1)
+        self.assertTrue(items[0].is_warehouse)
+
+    def test_amazon_warehouse_search_does_not_relabel_plain_cards_as_warehouse(self):
+        """Fallback cards in a Depot search are not necessarily used offers."""
+        html = """
+        <div class="s-main-slot">
+          <div data-component-type="s-search-result" data-asin="B0D95QG8W4">
+            <h2><a href="/dp/B0D95QG8W4?th=1"><span>Edifier M60 Beyaz</span></a></h2>
+          </div>
+        </div>
+        """
+
+        items = extract_result_candidates(html, 10, primary_is_warehouse=True)
+
+        self.assertEqual(len(items), 1)
+        self.assertIsNone(items[0].price)
+        self.assertFalse(items[0].is_warehouse)
+
+    def test_amazon_search_deduplication_keeps_normal_and_used_conditions(self):
+        rows = dedupe_results(
+            [
+                SearchResultItem("Edifier M60", "https://www.amazon.com.tr/dp/B0D95QG8W4", Decimal("8899")),
+                SearchResultItem(
+                    "Edifier M60",
+                    "https://www.amazon.com.tr/dp/B0D95QG8W4",
+                    Decimal("8787.77"),
+                    is_warehouse=True,
+                ),
+            ]
+        )
+        self.assertEqual(len(rows), 2)
+        self.assertEqual([row.is_warehouse for row in rows], [False, True])
+
+    def test_amazon_primary_price_stays_normal_when_page_mentions_used_offer(self):
+        html = """
+        <html><head><title>Depo ürünü</title></head><body>
+          <div id="corePriceDisplay_desktop_feature_div">
+            <span class="a-price"><span class="a-offscreen">12.999,00 TL</span></span>
+          </div>
+          <div>Amazon Depo - 1 İkinci El ürün</div>
+        </body></html>
+        """
+        offer = extract_amazon_offer(html, "https://www.amazon.com.tr/dp/B000000001?condition=used")
+        self.assertEqual(offer.price, Decimal("12999.00"))
+        self.assertFalse(offer.is_warehouse)
+
+    def test_amazon_search_context_parameters_do_not_mark_a_product_as_warehouse(self):
+        html = """
+        <html><head><title>Normal ürün</title></head><body>
+          <div id="corePriceDisplay_desktop_feature_div">
+            <span class="a-price"><span class="a-offscreen">18.999,00 TL</span></span>
+          </div>
+          <div id="merchantInfo">Gürgençler Apple Premium Partner</div>
+        </body></html>
+        """
+        url = "https://www.amazon.com.tr/dp/B0GQVC369W?th=1&condition=used&srs=44219324031&bbn=44219324031"
+        offer = extract_amazon_offer(html, url)
+        self.assertFalse(offer.is_warehouse)
+
+    def test_amazon_warehouse_search_requires_explicit_category(self):
+        self.assertTrue(
+            is_warehouse_search_url("https://www.amazon.com.tr/s?k=edifier+m60&i=warehouse-deals")
+        )
+        self.assertTrue(
+            is_warehouse_search_url("https://www.amazon.com.tr/s?k=edifier+m60&s=warehouse-deals")
+        )
+        self.assertFalse(
+            is_warehouse_search_url("https://www.amazon.com.tr/dp/B0D95QG8W4?condition=used")
+        )
+
+    def test_amazon_reads_only_explicit_numeric_low_stock_message(self):
+        low_stock_html = """
+        <html><head><title>Amazon ürünü</title></head><body>
+          <div id="corePriceDisplay_desktop_feature_div">
+            <span class="a-price"><span class="a-offscreen">18.999,00 TL</span></span>
+          </div>
+          <div id="availability">Stokta sadece 20 adet kaldı.</div>
+        </body></html>
+        """
+        generic_stock_html = '<div id="availability">Stokta var.</div>'
+
+        self.assertEqual(extract_low_stock_quantity(low_stock_html), 20)
+        self.assertIsNone(extract_low_stock_quantity(generic_stock_html))
+        self.assertEqual(extract_amazon_offer(low_stock_html).stock_quantity, 20)
+
+    def test_amazon_search_deduplication_prefers_low_stock_metadata(self):
+        url = "https://www.amazon.com.tr/dp/B000000001"
+        rows = dedupe_results(
+            [
+                SearchResultItem("Amazon ürünü", url, Decimal("18999")),
+                SearchResultItem("Amazon ürünü", url, Decimal("18999"), stock_quantity=20),
+            ]
+        )
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].stock_quantity, 20)
+
+    def test_amazon_product_page_never_relabels_primary_price_as_warehouse(self):
+        html = """
+        <html><head><title>Çoklu teklif ürünü</title></head><body>
+          <div id="corePriceDisplay_desktop_feature_div">
+            <span class="a-price"><span class="a-offscreen">8.899,00 TL</span></span>
+          </div>
+          <div data-cy="secondary-offer-recipe">
+            Diğer satın alma seçenekleri 8.787,77 TL (1 İkinci El ürün)
+          </div>
+        </body></html>
+        """
+        offers = extract_amazon_offers(html, "https://www.amazon.com.tr/dp/B0D95QG8W4?th=1")
+        self.assertEqual([offer.price for offer in offers], [Decimal("8899.00")])
+        self.assertEqual([offer.is_warehouse for offer in offers], [False])
+
+    def test_amazon_used_offer_listing_requires_amazon_depo_and_distinct_price(self):
+        product_html = """
+        <a href="/gp/offer-listing/B0D95QG8W4?condition=used">Yeni & İkinci El Ürün</a>
+        """
+        listing_html = """
+        <html><head><title>Edifier M60 Compact Masa Hoparlörü - Siyah</title></head><body>
+          <div class="aod-offer"><span>İkinci El - Çok İyi</span><a>Amazon Depo</a>
+            <span class="a-price"><span class="a-offscreen">8.787,77 TL</span></span></div>
+          <div class="aod-offer"><span>İkinci El - Çok İyi</span><a>Başka Satıcı</a>
+            <span class="a-price"><span class="a-offscreen">8.600,00 TL</span></span></div>
+        </body></html>
+        """
+        source_url = "https://www.amazon.com.tr/dp/B0D95QG8W4?th=1"
+
+        self.assertIn("condition=used", extract_used_offer_listing_url(product_html, source_url))
+        offers = extract_verified_warehouse_offers_from_listing(listing_html, source_url)
+
+        self.assertEqual([offer.price for offer in offers], [Decimal("8787.77")])
+        self.assertEqual([offer.seller for offer in offers], ["Amazon Depo"])
+        self.assertTrue(offers[0].is_warehouse)
+
+    def test_amazon_product_page_omits_same_price_used_duplicate(self):
+        html = """
+        <html><head><title>Çoklu teklif ürünü</title></head><body>
+          <div id="corePriceDisplay_desktop_feature_div">
+            <span class="a-price"><span class="a-offscreen">8.899,00 TL</span></span>
+          </div>
+          <div data-cy="secondary-offer-recipe">
+            Diğer satın alma seçenekleri 8.899,00 TL (1 İkinci El ürün)
+          </div>
+        </body></html>
+        """
+
+        offers = extract_amazon_offers(html, "https://www.amazon.com.tr/dp/B0D95QG8W4?th=1")
+
+        self.assertEqual(len(offers), 1)
+        self.assertFalse(offers[0].is_warehouse)
+
+    def test_amazon_product_page_ignores_unscoped_used_text(self):
+        html = """
+        <html><head><title>Normal ürün</title></head><body>
+          <div id="corePriceDisplay_desktop_feature_div">
+            <span class="a-price"><span class="a-offscreen">18.999,00 TL</span></span>
+          </div>
+          <div id="merchantInfo">Gürgençler Apple Premium Partner</div>
+          <footer>Diğer satın alma seçenekleri 17.999,00 TL (1 İkinci El ürün)</footer>
+        </body></html>
+        """
+        offers = extract_amazon_offers(html, "https://www.amazon.com.tr/dp/B0GQVC369W?th=1")
+        self.assertEqual([offer.price for offer in offers], [Decimal("18999.00")])
+        self.assertEqual([offer.is_warehouse for offer in offers], [False])
+
+    def test_amazon_search_ignores_all_departments_fallback_section(self):
+        html = """
+        <div class="s-main-slot">
+          <div data-component-type="s-search-result" data-asin="B000000001">
+            <h2><a href="/dp/B000000001"><span>Depo sonucu iPad</span></a></h2>
+            <span class="a-price"><span class="a-offscreen">30.000,00 TL</span></span>
+          </div>
+          <div class="fallback-section"><span>All Departments içindeki sonuçlar gösteriliyor</span></div>
+          <div data-component-type="s-search-result" data-asin="B000000002">
+            <h2><a href="/dp/B000000002"><span>Alakasız stok dışı ürün</span></a></h2>
+            <span class="a-price"><span class="a-offscreen">1.000,00 TL</span></span>
+          </div>
+        </div>
+        """
+        items = extract_result_candidates(html, 10)
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0].title, "Depo sonucu iPad")
+
+    def test_amazon_search_keeps_distinct_variation_links(self):
+        html = """
+        <div class="s-main-slot">
+          <div data-component-type="s-search-result" data-asin="B000000001">
+            <h2><a href="/dp/B000000001?th=1"><span>Juo Q3 Yeşil</span></a></h2>
+            <span class="a-price"><span class="a-offscreen">2.037,00 TL</span></span>
+          </div>
+          <div data-component-type="s-search-result" data-asin="B000000001">
+            <h2><a href="/dp/B000000001?th=2"><span>Juo Q3 Kırmızı</span></a></h2>
+            <span class="a-price"><span class="a-offscreen">2.099,00 TL</span></span>
+          </div>
+        </div>
+        """
+        items = extract_result_candidates(html, 10)
+
+        self.assertEqual(len(items), 2)
+        self.assertEqual(
+            [item.url for item in items],
+            [
+                "https://www.amazon.com.tr/dp/B000000001?th=1",
+                "https://www.amazon.com.tr/dp/B000000001?th=2",
+            ],
+        )
+
+    def test_amazon_sender_is_not_mistaken_for_marketplace_seller(self):
+        html = '''<span id="productTitle">Apple iPhone 17 Pro Max 512 GB Gümüş</span>
+        <div id="corePriceDisplay_desktop_feature_div"><span class="a-price">
+          <span class="a-offscreen">131.624,00 TL</span></span></div>
+        <div id="merchantInfoFeature_feature_div">
+          <span>Gönderici</span><span>Amazon</span>
+          <span>Satıcı</span><a id="sellerProfileTriggerId">Gürgençler Apple Premium Partner</a>
+        </div>'''
+
+        offers = extract_amazon_offers(html, "https://www.amazon.com.tr/dp/B000000002")
+
+        self.assertEqual(len(offers), 1)
+        self.assertEqual(offers[0].seller, "Gürgençler Apple Premium Partner")
+        watch = WatchRule(
+            name="iPhone", site="amazon", url="https://www.amazon.com.tr/dp/B000000002",
+            target_price=Decimal("140000"), official_seller_only=True,
+        )
+        self.assertEqual(official_seller_filter(watch, offers), [])
+
+    def test_amazon_plain_text_official_seller_survives_extra_buybox_text(self):
+        html = '''<span id="productTitle">Apple iPhone 17 Pro Max 256 GB</span>
+        <div id="corePriceDisplay_desktop_feature_div"><span class="a-price">
+          <span class="a-offscreen">123.058,99 TL</span></span></div>
+        <div id="merchantInfoFeature_feature_div">
+          <span>Gönderici / Satıcı:</span><span>Amazon.com.tr</span>
+          <a href="/gp/help/customer/display.html">Satıcı bilgileri</a>
+        </div>'''
+
+        offers = extract_amazon_offers(html, "https://www.amazon.com.tr/dp/B000000003")
+
+        self.assertEqual(offers[0].seller, "Amazon.com.tr")
+        watch = WatchRule(
+            name="iPhone", site="amazon", url="https://www.amazon.com.tr/dp/B000000003",
+            target_price=Decimal("130000"), official_seller_only=True,
+        )
+        self.assertEqual(official_seller_filter(watch, offers), offers)
+
+    def test_official_seller_filter_excludes_other_new_sellers_but_always_keeps_depot(self):
+        watch = WatchRule(
+            name="iPhone", site="amazon", url="https://www.amazon.com.tr/dp/B000000001",
+            target_price=Decimal("100000"), official_seller_only=True,
+        )
+        offers = [
+            OfferResult("Üçüncü taraf sıfır", Decimal("90000"), "Başka Satıcı", watch.url),
+            OfferResult("Satıcısı okunmayan sıfır", Decimal("91000"), None, watch.url),
+            OfferResult("Amazon sıfır", Decimal("100000"), "Amazon.com.tr", watch.url),
+            OfferResult("Depo", Decimal("89000"), "Amazon Depo", watch.url, True),
+        ]
+
+        filtered = official_seller_filter(watch, offers)
+
+        self.assertEqual([offer.title for offer in filtered], ["Amazon sıfır", "Depo"])
+
+    def test_amazon_modern_family_asins_are_deduplicated_and_recommendations_ignored(self):
+        html = '''<script type="a-state" data-a-state='{"key":"twister-plus-desktop-inline-twister-collapse-view-asins-data"}'>
+        {"asinsInCollapsedView":["B000000001","B000000002","B000000002"]}</script>
+        <div id="inline-twister-row-color_name"><li data-asin="B000000002"><img alt="Abis"></li></div>
+        <div id="recommendations"><a href="/dp/B000000003">iPhone 18</a></div>'''
+        variants = extract_product_variations(html, "https://www.amazon.com.tr/dp/B000000001?th=1", 60)
+        self.assertEqual([extract_asin_from_url(v.url) for v in variants], ["B000000001", "B000000002"])
+
+    def test_amazon_variation_dimensions_include_capacity_and_unavailable_asins(self):
+        html = '''<script type="a-state" data-a-state='{"key":"desktop-twister-sort-filter-data"}'>
+        {"sortedDimValuesForAllDims":{
+          "color_name":[{"defaultAsin":"B000000002","dimensionValueState":"AVAILABLE",
+            "dimensionValueDisplayText":"Abis"}],
+          "size_name":[{"defaultAsin":"B000000003","dimensionValueState":"UNAVAILABLE",
+            "dimensionValueDisplayText":"512 GB"}]}}
+        </script>'''
+        variants = amazon_parser.extract_product_variations(
+            html, "https://www.amazon.com.tr/dp/B000000001", 60)
+        self.assertEqual({v.url for v in variants}, {
+            "https://www.amazon.com.tr/dp/B000000001",
+            "https://www.amazon.com.tr/dp/B000000002",
+            "https://www.amazon.com.tr/dp/B000000003"})
+
+    def test_amazon_search_url_can_be_used_as_product_url(self):
+        self.assertTrue(is_amazon_search_url("https://www.amazon.com.tr/s?k=juo+q3"))
+        self.assertFalse(is_amazon_search_url("https://www.amazon.com.tr/dp/B000000001"))
+
+    def test_product_amazon_search_returns_all_matching_offers(self):
+        results = [
+            SearchResultItem(
+                title="Juo Q3 Masa Lambası Siyah",
+                url="https://www.amazon.com.tr/dp/B000000001",
+                price=Decimal("2037.00"),
+            ),
+            SearchResultItem(
+                title="Juo Q3 Masa Lambası Beyaz",
+                url="https://www.amazon.com.tr/dp/B000000002",
+                price=Decimal("2099.00"),
+            ),
+            SearchResultItem(
+                title="Başka Marka Masa Lambası",
+                url="https://www.amazon.com.tr/dp/B000000003",
+                price=Decimal("999.00"),
+            ),
+        ]
+        offers = offers_from_search_results(results, "juo q3")
+        self.assertEqual([offer.price for offer in offers], [Decimal("2037.00"), Decimal("2099.00")])
+        self.assertEqual(
+            [offer.url for offer in offers],
+            [
+                "https://www.amazon.com.tr/dp/B000000001",
+                "https://www.amazon.com.tr/dp/B000000002",
+            ],
+        )
+
+    def test_amazon_search_assigns_overlapping_models_to_the_most_specific_card(self):
+        results = [
+            SearchResultItem(
+                title="Apple iPhone 17 Pro 256 GB",
+                url="https://www.amazon.com.tr/dp/B000000001",
+                price=Decimal("100000"),
+            ),
+            SearchResultItem(
+                title="Apple iPhone 17 Pro Max 256 GB",
+                url="https://www.amazon.com.tr/dp/B000000002",
+                price=Decimal("110000"),
+            ),
+        ]
+        configured_names = ["Apple iPhone 17 Pro", "Apple iPhone 17 Pro Max"]
+
+        pro_offers = offers_from_search_results(
+            results, "Apple iPhone 17 Pro", configured_names
+        )
+        pro_max_offers = offers_from_search_results(
+            results, "Apple iPhone 17 Pro Max", configured_names
+        )
+
+        self.assertEqual([offer.url for offer in pro_offers], ["https://www.amazon.com.tr/dp/B000000001"])
+        self.assertEqual([offer.url for offer in pro_max_offers], ["https://www.amazon.com.tr/dp/B000000002"])
+
+
+
+class HepsiburadaParserTests(unittest.TestCase):
+    def test_hepsiburada_detail_embedded_listings_use_lowest_offer(self):
+        html = """
+        <html><head><title>Govee Uplighter Köşe Lambası RGB Fiyatı</title></head>
+        <body>
+          <script>
+            window.__HB_STATE__ = {
+              "variantListing": [
+                {"aiBasedShipmentDay": null, "listingId": "listing-hb", "merchantName": "Hepsiburada",
+                 "finalPriceOnSale": 10499.25,
+                 "prices": [{"formattedPrice": "10.499,25", "value": 10499.25}]},
+                {"aiBasedShipmentDay": null, "listingId": "listing-jetklik", "merchantName": "JetKlik",
+                 "minimumPrice": 12358.43, "finalPriceOnSale": 12358.43,
+                 "prices": [{"formattedPrice": "12.358,43", "value": 12358.43}]}
+              ]
+            };
+          </script>
+        </body></html>
+        """
+        offer = extract_hepsiburada_offer(html)
+        self.assertEqual(offer.seller, "Hepsiburada")
+        self.assertEqual(offer.price, Decimal("10499.25"))
+
+    def test_hepsiburada_detail_ignores_hidden_minimum_price_when_final_price_exists(self):
+        html = """
+        <html><head><title>Samsung Galaxy Tab S10 FE+ Fiyatı</title></head>
+        <body>
+          <script>
+            window.__HB_STATE__ = {
+              "variantListing": [
+                {"aiBasedShipmentDay": null, "listingId": "listing-hb", "merchantName": "Hepsiburada",
+                 "minimumPrice": 14279, "finalPriceOnSale": 18999,
+                 "minimumPrices": [
+                   {"name": "10", "value": 14279},
+                   {"name": "30", "value": 14279},
+                   {"name": "non-segmented-price", "value": 18999}
+                 ]},
+                {"aiBasedShipmentDay": null, "listingId": "listing-vatan", "merchantName": "VATAN BİLGİSAYAR",
+                 "minimumPrice": 18999, "finalPriceOnSale": 18999}
+              ]
+            };
+          </script>
+        </body></html>
+        """
+        offer = extract_hepsiburada_offer(html)
+        self.assertEqual(offer.price, Decimal("18999"))
+
+    def test_hepsiburada_detail_prefers_visible_premium_price(self):
+        html = """
+        <html><head><title>Samsung Galaxy Tab S10 FE+ Fiyatı</title></head>
+        <body>
+          <h1>Samsung Galaxy Tab S10 FE+</h1>
+          <span>Satıcı: Hepsiburada</span>
+          <div data-test-id="price-current-price">18.199,00 TL</div>
+          <div>Premium ile 17.949,00 TL</div>
+          <button>Sepete ekle</button>
+          <section>Ürün Bilgileri</section>
+        </body></html>
+        """
+
+        offer = extract_hepsiburada_offer(html)
+
+        self.assertEqual(offer.price, Decimal("17949.00"))
+
+    def test_hepsiburada_detail_prefers_premium_special_price(self):
+        html = """
+        <html><head><title>Samsung Galaxy Tab S10 FE+ Fiyatı</title></head>
+        <body>
+          <h1>Samsung Galaxy Tab S10 FE+</h1>
+          <span>Satıcı: Hepsiburada</span>
+          <div data-test-id="price-current-price">18.199,00 TL</div>
+          <div>Premium'a özel fiyat</div>
+          <div>17.949 TL</div>
+          <button>Sepete ekle</button>
+          <section>Ürün Bilgileri</section>
+        </body></html>
+        """
+
+        offer = extract_hepsiburada_offer(html)
+
+        self.assertEqual(offer.price, Decimal("17949"))
+
+    def test_hepsiburada_product_url_compares_embedded_and_visible_premium_price(self):
+        html = """
+        <html><head><title>Samsung Galaxy Tab S10 FE+ Fiyatı</title></head>
+        <body>
+          <h1>Samsung Galaxy Tab S10 FE+</h1>
+          <span>Satıcı: Hepsiburada</span>
+          <div>Premium’a özel fiyat</div>
+          <div>17.949 TL</div>
+          <div data-test-id="price-current-price">18.199,00 TL</div>
+          <script>
+            window.__HB_STATE__ = {
+              "variants": [
+                {"sku": "HBCV00008E1SXR", "variantListing": [
+                  {"aiBasedShipmentDay": null, "listingId": "listing-hb", "merchantName": "Hepsiburada",
+                   "finalPriceOnSale": 18199,
+                   "minimumPrices": [{"name": "non-segmented-price", "value": 18199}]}
+                ]}
+              ]
+            };
+          </script>
+        </body></html>
+        """
+
+        offer = extract_hepsiburada_offer(
+            html,
+            source_url="https://www.hepsiburada.com/samsung-tablet-p-HBCV00008E1SXR",
+        )
+
+        self.assertEqual(offer.price, Decimal("17949"))
+
+    def test_hepsiburada_product_url_reads_public_premium_ile_price(self):
+        html = """
+        <html><head><title>Samsung Galaxy Tab S10 FE+ Fiyatı</title></head>
+        <body>
+          <h1>Samsung Galaxy Tab S10 FE+ 8GB 128GB SM-X620</h1>
+          <span>Satıcı: Hepsiburada</span>
+          <div data-test-id="price-current-price">18.299,00 TL</div>
+          <div class="premium-price">Premium ile <strong>18.049 TL</strong></div>
+          <div>Renk: Mavi</div>
+          <button>Sepete ekle</button>
+          <script>
+            window.__HB_STATE__ = {
+              "variants": [
+                {"sku": "HBCV00008E1SXR", "variantListing": [
+                  {"aiBasedShipmentDay": null, "listingId": "listing-hb", "merchantName": "Hepsiburada",
+                   "finalPriceOnSale": 18299,
+                   "minimumPrices": [{"name": "non-segmented-price", "value": 18299}]}
+                ]}
+              ]
+            };
+          </script>
+        </body></html>
+        """
+
+        offer = extract_hepsiburada_offer(
+            html,
+            source_url="https://www.hepsiburada.com/samsung-tablet-p-HBCV00008E1SXR",
+        )
+
+        self.assertEqual(offer.price, Decimal("18049"))
+
+    def test_hepsiburada_product_url_prefers_visible_cart_special_price(self):
+        html = """
+        <html><head><title>Magly Manyetik Yapı Blokları Fiyatı</title></head>
+        <body>
+          <h1>Magly Manyetik Yapı Blokları</h1>
+          <span>Satıcı: Hepsiburada</span>
+          <div data-test-id="price-current-price">2.745,00 TL</div>
+          <div class="cart-special-price">Sepete özel fiyat <strong>2.196 TL</strong></div>
+          <button>Sepete ekle</button>
+          <script>
+            window.__HB_STATE__ = {
+              "variants": [
+                {"sku": "HBCV00007BHN4Z", "variantListing": [
+                  {"aiBasedShipmentDay": null, "listingId": "listing-hb", "merchantName": "Hepsiburada",
+                   "finalPriceOnSale": 2745,
+                   "minimumPrices": [{"name": "non-segmented-price", "value": 2745}]}
+                ]}
+              ]
+            };
+          </script>
+        </body></html>
+        """
+
+        offer = extract_hepsiburada_offer(
+            html,
+            source_url="https://www.hepsiburada.com/magly-manyetik-yapi-bloklari-p-HBCV00007BHN4Z",
+        )
+
+        self.assertEqual(offer.price, Decimal("2196"))
+
+    def test_hepsiburada_product_url_reads_real_cart_special_mapping(self):
+        html = """
+        <html><head><title>Magly Manyetik Yapı Blokları Fiyatı</title></head>
+        <body>
+          <h1>Magly Manyetik Yapı Blokları</h1>
+          <script>
+            window.__HB_STATE__ = {
+              "variants": [
+                {"sku": "HBCV00007BHN4Z", "variantListing": [
+                  {"listingId": "listing-magly", "merchantName": "Magly",
+                   "finalPriceOnSale": 2745, "minimumPrice": 1921.5,
+                   "minimumPrices": [
+                     {"name": "10", "value": 1921.5},
+                     {"name": "30", "value": 1921.5},
+                     {"name": "non-segmented-price", "value": 2196}
+                   ]}
+                ]}
+              ]
+            };
+          </script>
+        </body></html>
+        """
+        source_url = (
+            "https://www.hepsiburada.com/magly-manyetik-yapi-bloklari-cocuklar-icin-renkli-"
+            "3-boyutlu-72-parca-manyetik-karo-oyun-seti-p-HBCV00007BHN4Z"
+        )
+
+        embedded_offer = extract_embedded_variant_offer(html, source_url)
+        offer = extract_hepsiburada_offer(html, source_url=source_url)
+
+        self.assertIsNotNone(embedded_offer)
+        self.assertEqual(embedded_offer.price, Decimal("2196"))
+        self.assertEqual(offer.price, Decimal("2196"))
+
+    def test_hepsiburada_detail_ignores_cart_special_discount_amount(self):
+        html = """
+        <html><head><title>Magly Manyetik Yapı Blokları Fiyatı</title></head>
+        <body>
+          <h1>Magly Manyetik Yapı Blokları</h1>
+          <span>Satıcı: Hepsiburada</span>
+          <div>Sepete özel 250 TL indirim</div>
+          <div data-test-id="price-current-price">2.745,00 TL</div>
+          <button>Sepete ekle</button>
+        </body></html>
+        """
+
+        offer = extract_hepsiburada_offer(html)
+
+        self.assertEqual(offer.price, Decimal("2745"))
+
+    def test_hepsiburada_product_url_reads_escaped_premium_ile_price(self):
+        html = r"""
+        <html><head><title>Samsung Galaxy Tab S10 FE+ Fiyatı</title></head>
+        <body>
+          <h1>Samsung Galaxy Tab S10 FE+ 8GB 128GB SM-X620</h1>
+          <span>Satıcı: Hepsiburada</span>
+          <div data-test-id="price-current-price">18.299,00 TL</div>
+          <script>
+            window.__HB_PAGE__ = "{\"campaign\":\"Premium ile 18.049 TL\"}";
+            window.__HB_STATE__ = {
+              "variants": [
+                {"sku": "HBCV00008E1SXR", "variantListing": [
+                  {"aiBasedShipmentDay": null, "listingId": "listing-hb", "merchantName": "Hepsiburada",
+                   "finalPriceOnSale": 18299,
+                   "minimumPrices": [{"name": "non-segmented-price", "value": 18299}]}
+                ]}
+              ]
+            };
+          </script>
+        </body></html>
+        """
+
+        offer = extract_hepsiburada_offer(
+            html,
+            source_url="https://www.hepsiburada.com/samsung-tablet-p-HBCV00008E1SXR",
+        )
+
+        self.assertEqual(offer.price, Decimal("18049"))
+
+    def test_hepsiburada_product_url_reads_plain_integer_premium_price(self):
+        html = """
+        <html><head><title>Samsung Galaxy Tab S10 FE+ Fiyatı</title></head>
+        <body>
+          <h1>Samsung Galaxy Tab S10 FE+ 8GB 128GB SM-X620</h1>
+          <span>Satıcı: Hepsiburada</span>
+          <div data-test-id="price-current-price">18.299,00 TL</div>
+          <script>
+            window.__HB_PAGE__ = {"campaign": "Premium ile 18049 TL"};
+            window.__HB_STATE__ = {
+              "variants": [
+                {"sku": "HBCV00008E1SXR", "variantListing": [
+                  {"aiBasedShipmentDay": null, "listingId": "listing-hb", "merchantName": "Hepsiburada",
+                   "finalPriceOnSale": 18299,
+                   "minimumPrices": [{"name": "non-segmented-price", "value": 18299}]}
+                ]}
+              ]
+            };
+          </script>
+        </body></html>
+        """
+
+        offer = extract_hepsiburada_offer(
+            html,
+            source_url="https://www.hepsiburada.com/samsung-tablet-p-HBCV00008E1SXR",
+        )
+
+        self.assertEqual(offer.price, Decimal("18049"))
+
+    def test_hepsiburada_product_url_reads_premium_price_without_tl_suffix(self):
+        html = """
+        <html><head><title>Samsung Galaxy Tab S10 FE+ Fiyatı</title></head>
+        <body>
+          <h1>Samsung Galaxy Tab S10 FE+ 8GB 128GB SM-X620</h1>
+          <span>Satıcı: Hepsiburada</span>
+          <div data-test-id="price-current-price">18.299,00 TL</div>
+          <div>Premium ile 18.049</div>
+          <script>
+            window.__HB_STATE__ = {
+              "variants": [
+                {"sku": "HBCV00008E1SXR", "variantListing": [
+                  {"aiBasedShipmentDay": null, "listingId": "listing-hb", "merchantName": "Hepsiburada",
+                   "finalPriceOnSale": 18299,
+                   "minimumPrices": [{"name": "non-segmented-price", "value": 18299}]}
+                ]}
+              ]
+            };
+          </script>
+        </body></html>
+        """
+
+        offer = extract_hepsiburada_offer(
+            html,
+            source_url="https://www.hepsiburada.com/samsung-tablet-p-HBCV00008E1SXR",
+        )
+
+        self.assertEqual(offer.price, Decimal("18049"))
+
+    def test_hepsiburada_embedded_variant_price_is_not_overridden_by_other_visible_variant(self):
+        html = """
+        <html><head><title>Samsung Galaxy Tab S10 FE+ Fiyatı</title></head>
+        <body>
+          <nav>Hepsiburada'da Satıcı Ol</nav>
+          <h1>Samsung Galaxy Tab S10 FE+ 8GB 128GB SM-X620</h1>
+          <div data-test-id="price-current-price">18.299,00 TL</div>
+          <div>Renk Mavi 18.299,00 TL</div>
+          <div>Renk Gümüş 18.349,00 TL</div>
+          <script>
+            window.__HB_STATE__ = {
+              "variants": [
+                {"sku": "HBCV00008E1QWF", "variantListing": [
+                  {"aiBasedShipmentDay": null, "listingId": "listing-hb", "merchantName": "Hepsiburada",
+                   "finalPriceOnSale": 18349,
+                   "minimumPrices": [{"name": "non-segmented-price", "value": 18349}]}
+                ]}
+              ]
+            };
+          </script>
+        </body></html>
+        """
+
+        offer = extract_hepsiburada_offer(
+            html,
+            source_url="https://www.hepsiburada.com/samsung-tablet-p-HBCV00008E1QWF",
+        )
+
+        self.assertEqual(offer.price, Decimal("18349"))
+        self.assertEqual(offer.seller, "Hepsiburada")
+
+    def test_hepsiburada_product_url_ignores_premium_campaign_discount_amount(self):
+        html = """
+        <html><head><title>Samsung Galaxy Tab S10 FE+ Fiyatı</title></head>
+        <body>
+          <h1>Samsung Galaxy Tab S10 FE+ 8GB 128GB SM-X620</h1>
+          <span>Satıcı: Hepsiburada</span>
+          <div data-test-id="price-current-price">18.299,00 TL</div>
+          <div>Seçili Tabletlerde Premium'a Özel Sepette 250 TL İndirim!</div>
+          <button>Sepete ekle</button>
+          <script>
+            window.__HB_STATE__ = {
+              "variants": [
+                {"sku": "HBCV00008E1SXR", "variantListing": [
+                  {"aiBasedShipmentDay": null, "listingId": "listing-hb", "merchantName": "Hepsiburada",
+                   "finalPriceOnSale": 18299,
+                   "minimumPrices": [{"name": "non-segmented-price", "value": 18299}]}
+                ]}
+              ]
+            };
+          </script>
+        </body></html>
+        """
+
+        offer = extract_hepsiburada_offer(
+            html,
+            source_url="https://www.hepsiburada.com/samsung-tablet-p-HBCV00008E1SXR",
+        )
+
+        self.assertEqual(offer.price, Decimal("18299"))
+
+    def test_hepsiburada_search_page_returns_each_card_as_offer(self):
+        html = """
+        <html><body>
+          <ul>
+            <li class="productCard">
+              <a href="/samsung-galaxy-tab-s10-fe-gumus-p-HBCV00008GUMUS">
+                Samsung Galaxy Tab S10 FE+ 8GB 128GB SM-X620 (Samsung Türkiye Garantili) Gümüş
+              </a>
+              <img alt="Samsung Galaxy Tab S10 FE+ 128 GB Gümüş">
+              <div>Premium ile 18.099 TL</div>
+            </li>
+            <li class="productCard">
+              <a href="/samsung-galaxy-tab-s10-fe-mavi-p-HBCV00008MAVI">
+                Samsung Galaxy Tab S10 FE+ 8GB 128GB SM-X620 (Samsung Türkiye Garantili) Mavi
+              </a>
+              <img alt="Samsung Galaxy Tab S10 FE+ 128 GB Mavi">
+              <div>Premium ile 18.049 TL</div>
+            </li>
+            <li class="productCard">
+              <a href="/samsung-galaxy-tab-s10-fe-gri-p-HBCV00008GRI">
+                Samsung Galaxy Tab S10 FE+ 8GB 128GB SM-X620 (Samsung Türkiye Garantili) Gri
+              </a>
+              <img alt="Samsung Galaxy Tab S10 FE+ 128 GB Gri">
+              <div>18.399 TL</div>
+            </li>
+            <li class="productCard">
+              <a href="/samsung-galaxy-tab-s10-fe-mavi-256gb-p-HBCV00008256GB">
+                Samsung Galaxy Tab S10FE+ 13.1 12/256GB Tam Dokunmatik Tablet
+              </a>
+              <img alt="Samsung Galaxy Tab S10 FE+ 256 GB Mavi">
+              <div>22.923,32 TL</div>
+            </li>
+          </ul>
+        </body></html>
+        """
+
+        offers = extract_hepsiburada_search_offers(
+            html,
+            source_url="https://www.hepsiburada.com/ara?q=sm-x620",
+            limit=10,
+        )
+
+        self.assertEqual(len(offers), 4)
+        self.assertEqual([offer.price for offer in offers], [
+            Decimal("18049"),
+            Decimal("18099"),
+            Decimal("18399"),
+            Decimal("22923.32"),
+        ])
+        self.assertTrue(all(offer.url and "/samsung-galaxy-tab" in offer.url for offer in offers))
+        title_by_url = {offer.url: offer.title for offer in offers}
+        self.assertTrue(title_by_url["https://www.hepsiburada.com/samsung-galaxy-tab-s10-fe-gumus-p-HBCV00008GUMUS"].endswith("/ 128 GB / Gümüş"))
+        self.assertTrue(title_by_url["https://www.hepsiburada.com/samsung-galaxy-tab-s10-fe-mavi-p-HBCV00008MAVI"].endswith("/ 128 GB / Mavi"))
+        self.assertTrue(title_by_url["https://www.hepsiburada.com/samsung-galaxy-tab-s10-fe-gri-p-HBCV00008GRI"].endswith("/ 128 GB / Gri"))
+        self.assertTrue(title_by_url["https://www.hepsiburada.com/samsung-galaxy-tab-s10-fe-mavi-256gb-p-HBCV00008256GB"].endswith("/ 256 GB / Mavi"))
+        self.assertFalse(any("/ Renk" in offer.title or "/ Kapasite" in offer.title for offer in offers))
+
+    def test_hepsiburada_embedded_prefers_premium_price(self):
+        html = """
+        <html><head><title>Samsung Galaxy Tab S10 FE+</title></head>
+        <body>
+          <script>
+            window.__HB_STATE__ = {
+              "variantListing": [
+                {"aiBasedShipmentDay": null, "listingId": "listing-hb", "merchantName": "Hepsiburada",
+                 "finalPriceOnSale": 18199,
+                 "minimumPrices": [
+                   {"name": "non-segmented-price", "value": 18199},
+                   {"name": "Premium ile", "value": 17949}
+                 ]}
+              ]
+            };
+          </script>
+        </body></html>
+        """
+
+        offer = extract_hepsiburada_offer(html)
+
+        self.assertEqual(offer.price, Decimal("17949"))
+
+    def test_hepsiburada_embedded_prefers_premium_special_price(self):
+        html = """
+        <html><head><title>Samsung Galaxy Tab S10 FE+</title></head>
+        <body>
+          <script>
+            window.__HB_STATE__ = {
+              "variantListing": [
+                {"aiBasedShipmentDay": null, "listingId": "listing-hb", "merchantName": "Hepsiburada",
+                 "finalPriceOnSale": 18199,
+                 "minimumPrices": [
+                   {"name": "non-segmented-price", "value": 18199},
+                   {"name": "Premium'a özel fiyat", "value": 17949}
+                 ]}
+              ]
+            };
+          </script>
+        </body></html>
+        """
+
+        offer = extract_hepsiburada_offer(html)
+
+        self.assertEqual(offer.price, Decimal("17949"))
+
+    def test_hepsiburada_embedded_prefers_nested_premium_price(self):
+        html = """
+        <html><head><title>Samsung Galaxy Tab S10 FE+</title></head>
+        <body>
+          <script>
+            window.__HB_STATE__ = {
+              "variantListing": [
+                {"aiBasedShipmentDay": null, "listingId": "listing-hb", "merchantName": "Hepsiburada",
+                 "finalPriceOnSale": 18199,
+                 "premiumCampaign": {
+                   "label": "Premium ile",
+                   "price": {"value": 17949}
+                 }}
+              ]
+            };
+          </script>
+        </body></html>
+        """
+
+        offer = extract_hepsiburada_offer(html)
+
+        self.assertEqual(offer.price, Decimal("17949"))
+
+    def test_hepsiburada_detail_offers_are_scoped_to_selected_variant(self):
+        html = """
+        <html><head><title>Samsung Galaxy Tab S10 FE+ Mavi Fiyatı</title></head>
+        <body>
+          <script>
+            window.__HB_STATE__ = {
+              "variants": [
+                {"sku": "HBCV00008E1SF6", "variantListing": [
+                  {"listingId": "selected-hb-1", "merchantName": "Hepsiburada",
+                   "finalPriceOnSale": 18999, "prices": [{"value": 18999}]},
+                  {"listingId": "selected-hb-2", "merchantName": "Hepsiburada",
+                   "finalPriceOnSale": 19999, "prices": [{"value": 19999}]},
+                  {"listingId": "selected-vatan", "merchantName": "VATAN BİLGİSAYAR",
+                   "finalPriceOnSale": 18999, "prices": [{"value": 18999}]}
+                ]},
+                {"sku": "HBCV00008E1QWF", "variantListing": [
+                  {"listingId": "other-color", "merchantName": "Başka Satıcı",
+                   "finalPriceOnSale": 1000, "prices": [{"value": 1000}]}
+                ]}
+              ]
+            };
+          </script>
+        </body></html>
+        """
+        source_url = "https://www.hepsiburada.com/samsung-tablet-p-HBCV00008E1SF6"
+        offer = extract_hepsiburada_offer(html, source_url=source_url)
+        candidates = _embedded_detail_candidates(soup_from_html(html), source_url=source_url)
+
+        self.assertEqual(offer.price, Decimal("18999"))
+        self.assertNotEqual(offer.seller, "Başka Satıcı")
+        self.assertEqual([item.seller for item in candidates].count("Hepsiburada"), 1)
+        self.assertFalse(any(item.price == Decimal("1000") for item in candidates))
+
+    def test_hepsiburada_variant_urls_are_discovered_without_listing_urls(self):
+        html = """
+        <html><body>
+          <div aria-label="Renk seçenekleri">
+            <a href="/samsung-galaxy-tab-s10-fe-mavi-p-HBCV00008E1SXR">Mavi</a>
+            <a href="/samsung-galaxy-tab-s10-fe-gri-p-HBCV00008E1ABC">Gri</a>
+            <a href="/samsung-galaxy-tab-s10-fe-gri-p-HBCV00008E1ABC?magaza=Teknosa">Gri kopya</a>
+            <a href="/samsung-galaxy-tab-s10-fe-gri-degerlendirmeleri-p-HBCV00008E1ABC">Yorumlar</a>
+            <a href="https://com.pozitron.hepsiburada/https/www.hepsiburada.com/samsung-galaxy-tab-s10-fe-gumus-p-HBCV00008E1BAD">Uygulama linki</a>
+          </div>
+          <script>
+            {"variantListing":[
+              {"merchantName":"Hepsiburada","url":"/satici-link-p-HBCV00008E1BAD","finalPriceOnSale":18999}
+            ]}
+          </script>
+        </body></html>
+        """
+        urls = extract_variant_urls(
+            html,
+            "https://www.hepsiburada.com/samsung-galaxy-tab-s10-fe-mavi-p-HBCV00008E1SXR",
+        )
+
+        self.assertEqual(len(urls), 2)
+        self.assertIn("https://www.hepsiburada.com/samsung-galaxy-tab-s10-fe-gri-p-HBCV00008E1ABC", urls)
+        self.assertFalse(any("BAD" in url for url in urls))
+
+    def test_hepsiburada_selected_variant_label_is_added_to_title(self):
+        html = """
+        <html><body>
+          <main>
+            <h1>Samsung Galaxy Tab S10 FE+ 8GB 128GB SM-X620</h1>
+            <span>Renk:</span><strong>Gümüş</strong>
+            <button>Sepete ekle</button>
+          </main>
+          <section>Ürün Bilgileri</section>
+        </body></html>
+        """
+        label = extract_selected_variant_label(html)
+        title = title_with_variant_label("Samsung Galaxy Tab S10 FE+ 8GB 128GB SM-X620", label)
+
+        self.assertEqual(label, "Gümüş")
+        self.assertTrue(title.endswith("/ Gümüş"))
+
+    def test_hepsiburada_selected_variant_label_combines_color_and_capacity(self):
+        html = """
+        <html><body>
+          <main>
+            <h1>Samsung Galaxy Tab S11 Ultra</h1>
+            <span>Renk:</span><strong>Gri</strong>
+            <span>Kapasite:</span><strong>512 GB</strong>
+            <button>Sepete ekle</button>
+          </main>
+          <section>Ürün Bilgileri</section>
+        </body></html>
+        """
+
+        self.assertEqual(extract_selected_variant_labels(html), ["Gri", "512 GB"])
+        self.assertEqual(extract_selected_variant_label(html), "Gri / 512 GB")
+
+    def test_hepsiburada_variant_label_strips_field_names(self):
+        title = title_with_variant_label(
+            "Nordbron Stark Deri Sırt Çantası",
+            "Renk / Antrasit",
+        )
+        tablet_title = title_with_variant_label(
+            "Samsung Galaxy Tab S10 FE+",
+            "Kapasite / 128 GB / Renk",
+        )
+
+        self.assertEqual(title, "Nordbron Stark Deri Sırt Çantası / Antrasit")
+        self.assertEqual(tablet_title, "Samsung Galaxy Tab S10 FE+ / 128 GB")
+
+    def test_hepsiburada_display_title_strips_legacy_field_names(self):
+        self.assertEqual(
+            clean_display_title(
+                "Nordbron Stark Deri Sırt Çantası Su İtici Özellikli Orta Boy Çok Gözlü Günlük Kullanım İçin / Renk / Antrasit"
+            ),
+            "Nordbron Stark Sırt Çantası / Antrasit",
+        )
+        self.assertEqual(
+            clean_display_title(
+                "Nordbron Stark Deri Sırt Çantası Su İtici Özellikli Orta Boy Çok Gözlü Günlük Kullanım İçin / Nordbron Stark Sırt Çantası / Renk / Lacivert"
+            ),
+            "Nordbron Stark Sırt Çantası / Lacivert",
+        )
+        self.assertEqual(
+            clean_display_title(
+                "Samsung Galaxy Tab S10 FE+ 8GB 128GB SM-X620 (Samsung Türkiye Garantili) / Kapasite / 128 GB / Renk"
+            ),
+            "Samsung Galaxy Tab S10 FE+ 8GB 128GB SM-X620 (Samsung Türkiye Garantili) / 128 GB",
+        )
+        self.assertEqual(
+            clean_display_title(
+                "Nordbron Stark Deri Sırt Çantası Su İtici Özellikli Orta Boy Çok Gözlü Günlük Kullanım İçin / Bej"
+            ),
+            "Nordbron Stark Sırt Çantası / Bej",
+        )
+
+    def test_hepsiburada_selected_variant_does_not_fall_back_to_other_variants(self):
+        html = """
+        <html><head><title>Samsung Galaxy Tab S11 Ultra Gri 512 GB</title></head>
+        <body>
+          <script>
+            window.__HB_STATE__ = {
+              "variants": [
+                {"sku": "HBCV_SELECTED_WITHOUT_LISTING", "name": "Gri 512 GB"},
+                {"sku": "HBCV_OTHER_VARIANT", "variantListing": [
+                  {"listingId": "other-cheap", "merchantName": "Hepsiburada",
+                   "finalPriceOnSale": 1000, "prices": [{"value": 1000}]}
+                ]}
+              ]
+            };
+          </script>
+          <span>Renk:</span><strong>Gri</strong>
+          <span>Kapasite:</span><strong>512 GB</strong>
+          <div data-test-id="price-current-price">43.809,00 TL</div>
+        </body></html>
+        """
+        offer = extract_hepsiburada_offer(
+            html,
+            source_url="https://www.hepsiburada.com/samsung-tablet-p-HBCV_SELECTED_WITHOUT_LISTING",
+        )
+
+        self.assertEqual(offer.price, Decimal("43809.00"))
+
+    def test_hepsiburada_embedded_variant_offer_reads_requested_capacity(self):
+        html = """
+        <html><head><title>Samsung Galaxy Tab S11 Ultra</title></head>
+        <body>
+          <script>
+            window.__HB_STATE__ = {
+              "variants": [
+                {"sku": "HBCV256GRI", "name": "Gri 256 GB", "variantListing": [
+                  {"listingId": "v256", "merchantName": "cemil shop",
+                   "finalPriceOnSale": 42499, "prices": [{"value": 42499}]}
+                ]},
+                {"sku": "HBCV512GRI", "name": "Gri 512 GB", "variantListing": [
+                  {"listingId": "v512", "merchantName": "Hepsiburada",
+                   "finalPriceOnSale": 54999, "prices": [{"value": 54999}],
+                   "minimumPrices": [{"name": "non-segmented-price", "value": 54999}]}
+                ]},
+                {"sku": "HBCV1TBGRI", "name": "Gri 1 TB", "variantListing": [
+                  {"listingId": "v1tb", "merchantName": "Hepsiburada",
+                   "finalPriceOnSale": 68999, "prices": [{"value": 68999}]}
+                ]}
+              ]
+            };
+          </script>
+        </body></html>
+        """
+        offer = extract_embedded_variant_offer(
+            html,
+            "https://www.hepsiburada.com/samsung-tablet-p-HBCV512GRI",
+        )
+
+        self.assertIsNotNone(offer)
+        self.assertEqual(offer.price, Decimal("54999"))
+        self.assertEqual(offer.seller, "Hepsiburada")
+        self.assertEqual(extract_embedded_variant_label(html, "https://www.hepsiburada.com/samsung-tablet-p-HBCV512GRI"), "Gri 512 GB")
+        self.assertNotIn(
+            "non-segmented-price",
+            extract_embedded_variant_label(html, "https://www.hepsiburada.com/samsung-tablet-p-HBCV512GRI"),
+        )
+
+    def test_hepsiburada_embedded_variant_label_uses_values_not_field_names(self):
+        html = """
+        <html><head><title>Nordbron Stark Deri Sırt Çantası</title></head>
+        <body>
+          <script>
+            window.__HB_STATE__ = {
+              "variants": [
+                {"sku": "HBCVSTARKANTRASIT", "attributes": [
+                  {"name": "Renk", "value": "Antrasit"}
+                ], "variantListing": [
+                  {"listingId": "v1", "merchantName": "Hepsiburada",
+                   "finalPriceOnSale": 4675, "prices": [{"value": 4675}]}
+                ]},
+                {"sku": "HBCVTABLET128", "attributes": [
+                  {"name": "Kapasite", "value": "128 GB"},
+                  {"name": "Renk"}
+                ], "variantListing": [
+                  {"listingId": "v2", "merchantName": "Hepsiburada",
+                   "finalPriceOnSale": 18199, "prices": [{"value": 18199}]}
+                ]}
+              ]
+            };
+          </script>
+        </body></html>
+        """
+
+        self.assertEqual(
+            extract_embedded_variant_label(html, "https://www.hepsiburada.com/nordbron-p-HBCVSTARKANTRASIT"),
+            "Antrasit",
+        )
+        self.assertEqual(
+            extract_embedded_variant_label(html, "https://www.hepsiburada.com/tablet-p-HBCVTABLET128"),
+            "128 GB",
+        )
+
+
+
+class OtherSiteParserTests(unittest.TestCase):
+    def test_bengurme_url_is_detected(self):
+        self.assertEqual(
+            detect_site_from_url("https://bengurme.com/products/kilis-karasi-kan-uzumu"),
+            "bengurme",
+        )
+
+    def test_bengurme_reads_each_available_gram_variant(self):
+        payload = {
+            "title": "Kilis Karası Kan Üzümü",
+            "variants": [
+                {"title": "250 gram", "price": 27500, "available": True},
+                {"title": "500 gram", "price": 45000, "available": True},
+                {"title": "1000 gram", "price": 95000, "available": True},
+                {"title": "2000 gram", "price": 180000, "available": False},
+            ],
+        }
+
+        offers = extract_bengurme_offers(json.dumps(payload), "https://bengurme.com/products/uzum")
+
+        self.assertEqual(
+            [(offer.title, offer.price) for offer in offers],
+            [
+                ("Kilis Karası Kan Üzümü / 250 gram", Decimal("275")),
+                ("Kilis Karası Kan Üzümü / 500 gram", Decimal("450")),
+                ("Kilis Karası Kan Üzümü / 1000 gram", Decimal("950")),
+            ],
+        )
+
+    def test_bengurme_unavailable_product_is_stock_state_not_page_error(self):
+        payload = {
+            "title": "Taş Kırma Çekirdeksiz Yeşil Zeytin",
+            "variants": [{"title": "1 kg", "price": 69500, "available": False}],
+        }
+
+        with self.assertRaisesRegex(OutOfStockHermesError, "Ben Gurme ürünü stokta değil"):
+            extract_bengurme_offers(json.dumps(payload), "https://bengurme.com/products/zeytin")
+
+    def test_bengurme_requested_variant_matching_is_case_insensitive(self):
+        payload = {
+            "title": "Kilis Karası Kan Üzümü",
+            "variants": [
+                {"title": "500 gram", "price": 45000, "available": True},
+                {"title": "1000 gram", "price": 95000, "available": True},
+            ],
+        }
+
+        offers = extract_bengurme_offers(json.dumps(payload), size="500 GRAM")
+
+        self.assertEqual(len(offers), 1)
+        self.assertEqual(offers[0].price, Decimal("450"))
+
+    def test_network_prefers_two_or_more_basket_price(self):
+        html = """
+        <html><head><title>Vizon Mini Elbise</title></head><body>
+          <h1>Vizon Mini Elbise</h1>
+          <div class="product-detail__price">8.499,00 TL</div>
+          <div class="basket-campaign">2 ve üzeri 4.999,50 TL</div>
+        </body></html>
+        """
+
+        offer = extract_network_offer(html)
+
+        self.assertEqual(offer.title, "Vizon Mini Elbise")
+        self.assertEqual(offer.price, Decimal("4999.50"))
+
+    def test_network_prefers_three_or_more_basket_price(self):
+        html = """
+        <html><head><title>Örnek Network Ürünü</title></head><body>
+          <h1>Örnek Network Ürünü</h1>
+          <div class="product-detail__price">8.499,00 TL</div>
+          <div class="basket-campaign">3 ve üzeri için 4.999,50 TL</div>
+        </body></html>
+        """
+
+        self.assertEqual(extract_network_offer(html).price, Decimal("4999.50"))
+
+    def test_beymenclub_prefers_sepette_price_without_decimal_cents(self):
+        html = """
+        <html><head><title>Beymen Club Bej Polo Yaka Triko</title></head><body>
+          <h1>Beymen Club Bej Polo Yaka Triko</h1>
+          <div class="product-price">5.495 TL</div>
+          <div class="basket-campaign">Sepette 3.475 TL</div>
+        </body></html>
+        """
+
+        offer = extract_beymenclub_offer(html)
+
+        self.assertEqual(offer.title, "Beymen Club Bej Polo Yaka Triko")
+        self.assertEqual(offer.price, Decimal("3475"))
+
+    def test_beymenclub_prefers_multi_item_basket_price(self):
+        html = """
+        <html><head><title>Beymen Club Kırık Beyaz Hırka</title></head><body>
+          <h1>Beymen Club Kırık Beyaz Hırka</h1>
+          <div class="product-price">5.995 TL</div>
+          <div class="basket-campaign">2 ve üzeri 4.475 TL</div>
+        </body></html>
+        """
+
+        self.assertEqual(extract_beymenclub_offer(html).price, Decimal("4475"))
+
+    def test_network_size_matching_is_case_insensitive(self):
+        html = """
+        <html><head><title>Network Gömlek</title></head><body>
+          <div class="product-price">2.500 TL</div>
+          <script>
+            var product = {"DisplayName":"Network Gömlek","Sizes":[
+              {"ValueText":"XS","NoStock":false},
+              {"ValueText":"XL","NoStock":false}
+            ]};
+            var productModel = {};
+          </script>
+        </body></html>
+        """
+
+        offers = extract_network_offers(html, source_url="https://network.com.tr/urun", size="xl")
+
+        self.assertEqual(len(offers), 1)
+        self.assertEqual(offers[0].price, Decimal("2500"))
+
+    def test_network_unavailable_size_is_not_a_page_error(self):
+        html = """
+        <html><head><title>Network Gömlek</title></head><body>
+          <div class="product-price">2.500 TL</div>
+          <script>
+            var product = {"Sizes":[{"ValueText":"XL","NoStock":true}]};
+            var productModel = {};
+          </script>
+        </body></html>
+        """
+
+        with self.assertRaisesRegex(OutOfStockHermesError, "Network beden stokta değil: xl"):
+            extract_network_offers(html, size="xl")
+
+    def test_network_reads_authoritative_sizes_payload(self):
+        html = """
+        <script>
+          var product = {
+            "Sizes": [
+              {"ValueText":"XS","NoStock":false},
+              {"ValueText":"S","NoStock":false},
+              {"ValueText":"M","NoStock":false},
+              {"ValueText":"L","NoStock":true},
+              {"ValueText":"XL","NoStock":true}
+            ]
+          };
+          var productModel = {};
+        </script>
+        """
+
+        self.assertEqual(_network_requested_size_state(html, "xs"), (True, True))
+        self.assertEqual(_network_requested_size_state(html, "M"), (True, True))
+        self.assertEqual(_network_requested_size_state(html, "l"), (True, False))
+        self.assertEqual(_network_requested_size_state(html, "XL"), (True, False))
+
+    def test_beymenclub_size_matching_ignores_parenthetical_size_labels(self):
+        html = """
+        <html><head><title>Beymen Club Hırka</title></head><body>
+          <div class="product-price">4.475 TL</div>
+          <select name="beden"><option value="XL (EU XL)">XL (EU XL)</option></select>
+        </body></html>
+        """
+
+        offers = extract_beymenclub_offers(html, size="xl")
+
+        self.assertEqual(len(offers), 1)
+        self.assertEqual(offers[0].price, Decimal("4475"))
+
+    def test_beymenclub_missing_size_is_not_a_page_error(self):
+        html = """
+        <html><head><title>Beymen Club Hırka</title></head><body>
+          <div class="product-price">4.475 TL</div>
+          <select name="beden"><option value="M">M</option></select>
+        </body></html>
+        """
+
+        with self.assertRaisesRegex(OutOfStockHermesError, "Beymen Club beden bulunamadı: XL"):
+            extract_beymenclub_offers(html, size="XL")
+
+    def test_beymenclub_reads_authoritative_size_summary(self):
+        summary = {
+            "result": {
+                "sizes": [
+                    {"sizeName": "S", "inStock": True, "stockQuantity": 27},
+                    {"sizeName": "XL", "inStock": True, "stockQuantity": 6},
+                    {"sizeName": "XXL", "inStock": False, "stockQuantity": 0},
+                ]
+            }
+        }
+
+        self.assertEqual(requested_size_state_from_summary(summary, "s"), (True, True))
+        self.assertEqual(requested_size_state_from_summary(summary, "XL"), (True, True))
+        self.assertEqual(requested_size_state_from_summary(summary, "xxl"), (True, False))
+
+    def test_beymenclub_extracts_product_id_from_page_payload(self):
+        html = '<script>BEYMEN.productMain = {"productId":1941303,"displayName":"Polo"};</script>'
+
+        self.assertEqual(extract_beymenclub_product_id(html), 1941303)
+
+    def test_nordbron_product_price(self):
+        html = """
+        <html>
+          <head><title>Stark Sırt Çantası</title></head>
+          <body>
+            <h1>Stark Sırt Çantası</h1>
+            <div class="product-detail_price__hYyw9"><span>₺ 4,850.00</span></div>
+          </body>
+        </html>
+        """
+        offer = extract_nordbron_offer(html)
+        self.assertEqual(offer.title, "Stark Sırt Çantası")
+        self.assertEqual(offer.price, Decimal("4850.00"))
+
+    def test_nordbron_site_detection(self):
+        url = "https://nordbron.com/stark-sirt-cantasi?Renk=Antrasit&Beden=Standart-Beden"
+        self.assertEqual(detect_site_from_url(url), "nordbron")
+
+    def test_zara_site_detection(self):
+        url = "https://www.zara.com/tr/tr/dokulu-regular-fit-polo-t-shirt-p03166301.html?v1=567184888"
+        self.assertEqual(detect_site_from_url(url), "zara")
+
+    def test_zara_size_filter_reads_only_available_size(self):
+        html = """
+        <html><body>
+          <script type="application/ld+json">
+          {
+            "@type": "Product",
+            "name": "DOKULU REGULAR FIT POLO T-SHIRT",
+            "color": "sarımsı kahverengi",
+            "hasVariant": [
+              {
+                "@type": "Product",
+                "size": "M (US M)",
+                "color": "sarımsı kahverengi",
+                "offers": {
+                  "@type": "Offer",
+                  "price": "1290",
+                  "priceCurrency": "TRY",
+                  "availability": "https://schema.org/LimitedAvailability",
+                  "url": "https://www.zara.com/tr/tr/m"
+                }
+              },
+              {
+                "@type": "Product",
+                "size": "L (US L)",
+                "color": "sarımsı kahverengi",
+                "offers": {
+                  "@type": "Offer",
+                  "price": "1290",
+                  "priceCurrency": "TRY",
+                  "availability": "https://schema.org/OutOfStock",
+                  "url": "https://www.zara.com/tr/tr/l"
+                }
+              }
+            ]
+          }
+          </script>
+        </body></html>
+        """
+
+        offers = extract_zara_offers(html, source_url="https://www.zara.com/tr/tr/product", size="M")
+
+        self.assertEqual(len(offers), 1)
+        self.assertEqual(offers[0].price, Decimal("1290"))
+        self.assertEqual(offers[0].seller, "Zara")
+        self.assertIn("M", offers[0].title)
+        self.assertNotIn("US M", offers[0].title)
+        self.assertIn("sarımsı kahverengi", offers[0].title)
+
+    def test_zara_size_filter_rejects_out_of_stock_size(self):
+        html = """
+        <html><body>
+          <script type="application/ld+json">
+          {
+            "@type": "Product",
+            "name": "DOKULU REGULAR FIT POLO T-SHIRT",
+            "hasVariant": [
+              {
+                "@type": "Product",
+                "size": "L (US L)",
+                "offers": {
+                  "@type": "Offer",
+                  "price": "1290",
+                  "availability": "https://schema.org/OutOfStock"
+                }
+              }
+            ]
+          }
+          </script>
+        </body></html>
+        """
+
+        with self.assertRaisesRegex(OutOfStockHermesError, "stokta") as caught:
+            extract_zara_offers(html, source_url="https://www.zara.com/tr/tr/product", size="L")
+        self.assertEqual(caught.exception.product_title, "DOKULU REGULAR FIT POLO T-SHIRT / L")
+        self.assertEqual(caught.exception.product_url, "https://www.zara.com/tr/tr/product")
+
+    def test_zara_blank_size_uses_lowest_available_offer(self):
+        html = """
+        <html><body>
+          <script type="application/ld+json">
+          {
+            "@type": "Product",
+            "name": "DOKULU REGULAR FIT POLO T-SHIRT",
+            "hasVariant": [
+              {
+                "@type": "Product",
+                "size": "M (US M)",
+                "offers": {
+                  "@type": "Offer",
+                  "price": "1290",
+                  "availability": "https://schema.org/LimitedAvailability"
+                }
+              },
+              {
+                "@type": "Product",
+                "size": "S (US S)",
+                "offers": {
+                  "@type": "Offer",
+                  "price": "990",
+                  "availability": "https://schema.org/InStock"
+                }
+              }
+            ]
+          }
+          </script>
+        </body></html>
+        """
+
+        offers = extract_zara_offers(html, source_url="https://www.zara.com/tr/tr/product")
+
+        self.assertEqual(len(offers), 1)
+        self.assertEqual(offers[0].price, Decimal("990"))
+
+    def test_zara_variant_only_jsonld_title_is_not_duplicated(self):
+        html = """
+        <html><body>
+          <script type="application/ld+json">
+          {
+            "@type": "Product",
+            "name": "DOKULU REGULAR FIT POLO T-SHIRT - sarımsı kahverengi - M (US M)",
+            "size": "M (US M)",
+            "color": "sarımsı kahverengi",
+            "offers": {
+              "@type": "Offer",
+              "price": "1290",
+              "availability": "https://schema.org/LimitedAvailability"
+            }
+          }
+          </script>
+        </body></html>
+        """
+
+        offers = extract_zara_offers(html, source_url="https://www.zara.com/tr/tr/product", size="M")
+
+        self.assertEqual(offers[0].title, "DOKULU REGULAR FIT POLO T-SHIRT / sarımsı kahverengi / M")
+
+    def test_zara_requested_size_returns_each_available_color(self):
+        html = """
+        <html><body>
+          <script type="application/ld+json">
+          [
+            {
+              "@type": "Product",
+              "name": "DOKULU REGULAR FIT POLO T-SHIRT - sarımsı kahverengi - M (US M)",
+              "sku": "567184888-707-3",
+              "size": "M (US M)",
+              "color": "sarımsı kahverengi",
+              "offers": {
+                "@type": "Offer",
+                "price": "1290",
+                "availability": "https://schema.org/InStock",
+                "url": "https://www.zara.com/tr/tr/product.html?v1=567184888"
+              }
+            },
+            {
+              "@type": "Product",
+              "name": "DOKULU REGULAR FIT POLO T-SHIRT - Koyu pembe - M (US M)",
+              "sku": "567184888-664-3",
+              "size": "M (US M)",
+              "color": "Koyu pembe",
+              "offers": {
+                "@type": "Offer",
+                "price": "1290",
+                "availability": "https://schema.org/InStock",
+                "url": "https://www.zara.com/tr/tr/product.html?v1=567184887"
+              }
+            }
+          ]
+          </script>
+        </body></html>
+        """
+
+        offers = extract_zara_offers(
+            html,
+            source_url="https://www.zara.com/tr/tr/product.html?v1=567184888",
+            size="M",
+        )
+
+        self.assertEqual(len(offers), 2)
+        self.assertEqual(
+            [offer.title for offer in offers],
+            [
+                "DOKULU REGULAR FIT POLO T-SHIRT / sarımsı kahverengi / M",
+                "DOKULU REGULAR FIT POLO T-SHIRT / Koyu pembe / M",
+            ],
+        )
+
+    def test_zara_numeric_size_ignores_parenthetical_values(self):
+        html = """
+        <html><body>
+          <script type="application/ld+json">
+          [
+            {
+              "@type": "Product",
+              "name": "REGULAR FIT DENIM BERMUDA - Kahverengi - EU 44 (US 34)",
+              "size": "EU 44 (US 34)",
+              "color": "Kahverengi",
+              "offers": {"@type": "Offer", "price": "1190", "availability": "https://schema.org/InStock"}
+            },
+            {
+              "@type": "Product",
+              "name": "REGULAR FIT DENIM BERMUDA - Kahverengi - EU 46 (US 36)",
+              "size": "EU 46 (US 36)",
+              "color": "Kahverengi",
+              "offers": {"@type": "Offer", "price": "1190", "availability": "https://schema.org/InStock"}
+            }
+          ]
+          </script>
+        </body></html>
+        """
+
+        offers = extract_zara_offers(html, source_url="https://www.zara.com/tr/tr/product", size="44")
+
+        self.assertEqual(len(offers), 1)
+        self.assertEqual(offers[0].title, "REGULAR FIT DENIM BERMUDA / Kahverengi / EU 44")
+        with self.assertRaisesRegex(Exception, "bulunamadı"):
+            extract_zara_offers(html, source_url="https://www.zara.com/tr/tr/product", size="34")
+
+    def test_zara_age_size_can_be_requested_as_number(self):
+        html = """
+        <html><body>
+          <script type="application/ld+json">
+          {
+            "@type": "Product",
+            "name": "ÇOCUK SWEATSHIRT - Lacivert - 6 yaş",
+            "size": "6 yaş",
+            "color": "Lacivert",
+            "offers": {"@type": "Offer", "price": "790", "availability": "https://schema.org/InStock"}
+          }
+          </script>
+        </body></html>
+        """
+
+        offers = extract_zara_offers(html, source_url="https://www.zara.com/tr/tr/product", size="6")
+
+        self.assertEqual(len(offers), 1)
+        self.assertEqual(offers[0].title, "ÇOCUK SWEATSHIRT / Lacivert / 6 yaş")
+
+    def test_hm_url_is_detected(self):
+        self.assertEqual(
+            detect_site_from_url("https://www2.hm.com/tr_tr/productpage.1285132002.html"),
+            "hm",
+        )
+
+    def test_hm_requested_size_returns_each_available_color(self):
+        html = """
+        <html><body>
+          <script type="application/json" id="hm-product-data">
+          {
+            "products": [
+              {
+                "name": "Lastik Örgülü Erkek Yaka Gömlek Loose Fit",
+                "colorName": "Turkuaz",
+                "url": "/tr_tr/productpage.1285132002.html",
+                "price": {"formattedValue": "799,99 TL"},
+                "sizes": [
+                  {"name": "XS", "available": true},
+                  {"name": "S", "available": true},
+                  {"name": "M", "available": false},
+                  {"name": "L", "availability": "Sold out"},
+                  {"name": "XL", "available": true},
+                  {"name": "XXL", "stock": 2}
+                ]
+              },
+              {
+                "name": "Lastik Örgülü Erkek Yaka Gömlek Loose Fit",
+                "colorName": "Kahverengi",
+                "url": "/tr_tr/productpage.1285132001.html",
+                "price": {"formattedValue": "799,99 TL"},
+                "sizes": [
+                  {"name": "XS", "available": true},
+                  {"name": "S", "available": true},
+                  {"name": "XL", "available": true},
+                  {"name": "XXL", "available": true}
+                ]
+              }
+            ]
+          }
+          </script>
+        </body></html>
+        """
+
+        xs_offers = extract_hm_offers(
+            html,
+            source_url="https://www2.hm.com/tr_tr/productpage.1285132002.html",
+            size="XS",
+        )
+        self.assertEqual(
+            [offer.title for offer in xs_offers],
+            [
+                "Lastik Örgülü Erkek Yaka Gömlek Loose Fit / Turkuaz / XS",
+                "Lastik Örgülü Erkek Yaka Gömlek Loose Fit / Kahverengi / XS",
+            ],
+        )
+        with self.assertRaisesRegex(OutOfStockHermesError, "stokta değil") as caught:
+            extract_hm_offers(
+                html,
+                source_url="https://www2.hm.com/tr_tr/productpage.1285132002.html",
+                size="M",
+            )
+        self.assertEqual(
+            caught.exception.product_title,
+            "Lastik Örgülü Erkek Yaka Gömlek Loose Fit / Turkuaz / M",
+        )
+
+    def test_hm_size_matrix_matches_expected_available_sizes(self):
+        html = """
+        <html><body>
+          <script type="application/json">
+          {
+            "name": "Lastik Örgülü Erkek Yaka Gömlek Loose Fit",
+            "colorName": "Turkuaz",
+            "price": "799,99 TL",
+            "sizes": [
+              {"name": "XS", "available": true},
+              {"name": "S", "available": true},
+              {"name": "M", "available": false},
+              {"name": "L", "available": false},
+              {"name": "XL", "available": true},
+              {"name": "XXL", "available": true}
+            ]
+          }
+          </script>
+        </body></html>
+        """
+
+        available_sizes = []
+        for size in ("XS", "S", "M", "L", "XL", "XXL"):
+            try:
+                offers = extract_hm_offers(
+                    html,
+                    source_url="https://www2.hm.com/tr_tr/productpage.1285132002.html",
+                    size=size,
+                )
+            except Exception:
+                offers = []
+            if offers:
+                available_sizes.append(size)
+
+        self.assertEqual(available_sizes, ["XS", "S", "XL", "XXL"])
+
+    def test_hm_byids_api_shape_returns_requested_size_for_each_color(self):
+        html = """
+        <html><body>
+          <script type="application/json" id="hm-product-data">
+          {
+            "products": [
+              {
+                "id": "1286182003",
+                "productName": "Keten Karışımlı Erkek Yaka Gömlek Regular Fit",
+                "colorName": "Koyu bej",
+                "url": "/tr_tr/productpage.1286182003.html",
+                "prices": [
+                  {"priceType": "redPrice", "price": 579.0, "formattedPrice": "579,00 TL"},
+                  {"priceType": "whitePrice", "price": 1999.0, "formattedPrice": "1.999,00 TL"}
+                ],
+                "sizes": [
+                  {"label": "M", "stock": 0},
+                  {"label": "S", "stock": 2},
+                  {"label": "XS", "stock": 2},
+                  {"label": "XXL", "stock": 0},
+                  {"label": "XL", "stock": 0}
+                ]
+              },
+              {
+                "id": "1286182002",
+                "productName": "Keten Karışımlı Erkek Yaka Gömlek Regular Fit",
+                "colorName": "Adaçayı yeşili",
+                "url": "/tr_tr/productpage.1286182002.html",
+                "prices": [{"priceType": "redPrice", "price": 489.0, "formattedPrice": "489,00 TL"}],
+                "sizes": [
+                  {"label": "XS", "stock": 1},
+                  {"label": "S", "stock": 1},
+                  {"label": "XL", "stock": 1},
+                  {"label": "XXL", "stock": 1}
+                ]
+              },
+              {
+                "id": "1286182001",
+                "productName": "Keten Karışımlı Erkek Yaka Gömlek Regular Fit",
+                "colorName": "Krem",
+                "url": "/tr_tr/productpage.1286182001.html",
+                "prices": [{"priceType": "redPrice", "price": 1049.0, "formattedPrice": "1.049,00 TL"}],
+                "sizes": [
+                  {"label": "XS", "stock": 1},
+                  {"label": "S", "stock": 1},
+                  {"label": "XL", "stock": 1},
+                  {"label": "XXL", "stock": 1}
+                ]
+              }
+            ]
+          }
+          </script>
+        </body></html>
+        """
+
+        offers = extract_hm_offers(
+            html,
+            source_url="https://www2.hm.com/tr_tr/productpage.1286182003.html",
+            size="XL",
+        )
+
+        self.assertEqual(
+            [(offer.title, offer.price, offer.url) for offer in offers],
+            [
+                (
+                    "Keten Karışımlı Erkek Yaka Gömlek Regular Fit / Adaçayı yeşili / XL",
+                    Decimal("489.0"),
+                    "https://www2.hm.com/tr_tr/productpage.1286182002.html",
+                ),
+                (
+                    "Keten Karışımlı Erkek Yaka Gömlek Regular Fit / Krem / XL",
+                    Decimal("1049.0"),
+                    "https://www2.hm.com/tr_tr/productpage.1286182001.html",
+                ),
+            ],
+        )
+
+    def test_hm_fallback_reads_visible_text_price(self):
+        html = """
+        <html><body>
+          <h1>Lastik Örgülü Erkek Yaka Gömlek Loose Fit</h1>
+          <span>Renk: Turkuaz</span>
+          <span>799,99 TL</span>
+        </body></html>
+        """
+
+        offers = extract_hm_offers(html, source_url="https://www2.hm.com/tr_tr/productpage.1285132002.html")
+
+        self.assertEqual(offers[0].seller, "H&M")
+        self.assertEqual(offers[0].price, Decimal("799.99"))
+
+    def test_zara_out_of_stock_is_typed_as_non_technical_state(self):
+        html = """
+        <html><body>
+          <script type="application/ld+json">
+          {
+            "@type": "Product",
+            "name": "DOKULU REGULAR FIT POLO T-SHIRT - sarımsı kahverengi - L",
+            "size": "L",
+            "color": "sarımsı kahverengi",
+            "offers": {"@type": "Offer", "price": "1290", "availability": "Benzer ürünler"}
+          }
+          </script>
+        </body></html>
+        """
+
+        with self.assertRaisesRegex(OutOfStockHermesError, "stokta değil"):
+            extract_zara_offers(html, source_url="https://www.zara.com/tr/tr/product", size="L")
+
+
+
+class WatchCardTests(unittest.TestCase):
+    def test_watches_always_use_the_fixed_search_scan_limit(self):
+        watches = prepare_watches(
+            [
+                {
+                    "name": "Juo Q3",
+                    "target_price": 2000,
+                    "url_1": "https://www.amazon.com.tr/s?k=juo+q3",
+                    "max_items_to_scan": 24,
+                }
+            ]
+        )
+
+        self.assertEqual(len(watches), 1)
+        self.assertEqual(watches[0].max_items_to_scan, 60)
+
+    def test_watch_card_can_expand_to_multiple_site_links(self):
+        watches = prepare_watches(
+            [
+                {
+                    "name": "Ortak ürün",
+                    "target_price": 1000,
+                    "url_1": "https://www.amazon.com.tr/dp/B000000001",
+                    "url_2": "https://www.hepsiburada.com/ornek-urun-p-HBCV000000000",
+                    "url_3": "https://nordbron.com/stark-sirt-cantasi",
+                    "group": "Moda",
+                    "size": "M",
+                    "notify_once_in_24H": True,
+                    "active": True,
+                }
+            ]
+        )
+        self.assertEqual(len(watches), 3)
+        self.assertEqual([item.site for item in watches], ["amazon", "hepsiburada", "nordbron"])
+        self.assertTrue(all(item.name == "Ortak ürün" for item in watches))
+        self.assertTrue(all(item.group == "Moda" for item in watches))
+        self.assertTrue(all(item.size == "M" for item in watches))
+
+    def test_tracking_card_id_is_shared_by_its_links_and_unique_per_card(self):
+        watches = prepare_watches(
+            [
+                {
+                    "name": "Apple iPhone 17 Pro",
+                    "target_price": 100000,
+                    "url_1": "https://www.amazon.com.tr/dp/B000000001",
+                    "url_2": "https://www.amazon.com.tr/dp/B000000002",
+                },
+                {
+                    "name": "Apple iPhone 17 Pro Max",
+                    "target_price": 110000,
+                    "url_1": "https://www.amazon.com.tr/dp/B000000001",
+                },
+            ]
+        )
+
+        self.assertEqual(watches[0].tracking_id, watches[1].tracking_id)
+        self.assertNotEqual(watches[0].tracking_id, watches[2].tracking_id)
+
+    def test_existing_zara_and_hm_watches_default_to_moda_group(self):
+        watches = prepare_watches(
+            [
+                {
+                    "target_price": 1000,
+                    "url_1": "https://www.zara.com/tr/tr/ornek-p03166301.html",
+                    "active": True,
+                },
+                {
+                    "target_price": 1000,
+                    "url_1": "https://www2.hm.com/tr_tr/productpage.1286182003.html",
+                    "active": True,
+                },
+                {
+                    "target_price": 1000,
+                    "url_1": "https://www.amazon.com.tr/dp/B000000001",
+                    "active": True,
+                },
+            ]
+        )
+
+        self.assertEqual([watch.group for watch in watches], ["Moda", "Moda", ""])
+
+    def test_watch_card_detects_site_from_url(self):
+        watches = prepare_watches(
+            [
+                {
+                    "name": "Yeni ürün",
+                    "target_price": 1000,
+                    "url_1": "https://www.trendyol.com/ornek/urun-p-1",
+                    "active": True,
+                }
+            ]
+        )
+        self.assertEqual(len(watches), 1)
+        self.assertEqual(watches[0].site, "trendyol")
+
+    def test_watch_name_is_optional_for_product_links(self):
+        watches = prepare_watches(
+            [
+                {
+                    "target_price": 1000,
+                    "url_1": "https://www.hepsiburada.com/ornek-urun-p-HBCV000000000",
+                    "url_2": "https://www2.hm.com/tr_tr/productpage.1286182003.html",
+                    "active": True,
+                }
+            ]
+        )
+        self.assertEqual(len(watches), 2)
+        self.assertTrue(all(item.name == "" for item in watches))
+
+    def test_watch_name_is_required_for_search_links(self):
+        for url in (
+            "https://www.amazon.com.tr/s?k=ipad",
+            "https://www.hepsiburada.com/ara?q=sm-x620",
+        ):
+            with self.subTest(url=url):
+                with self.assertRaisesRegex(HermesError, "Arama linkleri"):
+                    prepare_watches(
+                        [
+                            {
+                                "target_price": 1000,
+                                "url_1": url,
+                                "active": True,
+                            }
+                        ]
+                    )
+
+
+
+if __name__ == "__main__":
+    unittest.main()

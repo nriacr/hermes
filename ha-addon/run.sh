@@ -2,7 +2,6 @@
 set -eu
 
 cd /app
-
-/opt/venv/bin/python -m hermes.dashboard_with_settings &
-/opt/venv/bin/python -m hermes.public_dashboard &
-exec /opt/venv/bin/python -u /app/main.py
+# One process serves the monitor, the ingress (8099) and public (8100) panels
+# and Telegram; it handles SIGTERM itself to close Chromium cleanly.
+exec /opt/venv/bin/python -u -m hermes
