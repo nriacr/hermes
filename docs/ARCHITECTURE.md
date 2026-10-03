@@ -76,7 +76,8 @@ Hermes is a Home Assistant add-on running continuously on a Raspberry Pi. It:
   commands applied between cycles; "Bildirim Sıfırla" then starts a new cycle
   immediately. With the monitor off they apply directly to the file.
 - Every JSON write is atomic (unique temporary file, fsync, rename).
-- A cycle in which no watch was due logs nothing; the price table is logged
+- A cycle that reads no watch (nothing due, or every due watch paused by a
+  guard) logs nothing; the price table is logged
   when it changes and otherwise at most every 30 minutes.
 - `HERMES_DATA_DIR` overrides `/data` only for running Hermes outside Home
   Assistant.

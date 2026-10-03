@@ -117,7 +117,7 @@ class Monitor:
         self._lock = threading.RLock()
         # Minimum gaps between request starts per site; they span cycles.
         self._spacing: Dict[str, RequestSpacing] = {}
-        # False after a cycle in which no watch was due (an idle cycle logs nothing).
+        # False after a cycle that read no watch (nothing due or all paused); such a cycle logs nothing.
         self.last_cycle_read = False
         self.history = History.at(self.files.database)
         self.history.migrate_json(self.files.state, self.files.cycle_history)
@@ -168,16 +168,14 @@ class Monitor:
         for watch in self.config.watches:
             if self._plan(run, watch):
                 queues.setdefault(watch.site, []).append(watch)
-        self.last_cycle_read = bool(queues)
-        if queues:
-            log_cycle_banner(self.config)
+        self.last_cycle_read = False
         if self._run_site_queues(run, queues):
             # Shutting down: keep what was read, publish nothing partial.
             log("Hermes kapanıyor; çevrim yarıda bırakıldı, okunan sonuçlar kaydedildi.")
             self.save_state(run.state)
             return
 
-        if queues:
+        if self.last_cycle_read:
             log("Çevrim öncelik kapsamı: " + " | ".join(
                 f"{label}={run.priority_scope[key]['started']} başladı, {run.priority_scope[key]['due']} sırası geldi, "
                 f"{run.priority_scope[key]['deferred']} ertelendi"
@@ -289,6 +287,11 @@ class Monitor:
             if provider.backs_off_on_protection and self._guarded(run, watch, key, entry, seller):
                 return
             run.priority_scope[scheduling.watch_priority(watch)]["started"] += 1
+            if not self.last_cycle_read:
+                # Logged with the first watch that is read: cycles in which every
+                # due watch is paused or nothing is due stay out of the log.
+                self.last_cycle_read = True
+                log_cycle_banner(self.config)
         ctx.pace(f"{seller} | {(watch.name or watch.url)[:64]}")
         # Read duration includes the provider's own extra page delays.
         started_at = time.monotonic()

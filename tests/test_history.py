@@ -306,6 +306,27 @@ class QuietLogTests(HistoryCase):
         self.assertFalse(any("YENİ KONTROL TURU" in line or "öncelik kapsamı" in line or "Özet:" in line
                              for line in LOG_LINES))
 
+    def test_cycle_with_only_paused_watches_logs_no_banner(self):
+        rule = watch("iPhone", AMAZON, target="100")
+        cfg = config([rule])
+        hermes_monitor = monitor(cfg, self.data, notifier())
+
+        def blocked(_w, _ctx, _o):
+            raise BotProtectionHermesError("captcha")
+
+        hermes_monitor.providers["amazon"].read = blocked
+        try:
+            hermes_monitor.run_cycle()
+            LOG_LINES.clear()
+            later = datetime.now().astimezone() + timedelta(seconds=5)
+            with patch.object(scheduling, "local_now", return_value=later):
+                hermes_monitor.run_cycle()  # due again, but paused for 15 minutes
+        finally:
+            hermes_monitor.close()
+        self.assertFalse(hermes_monitor.last_cycle_read)
+        self.assertFalse(any("YENİ KONTROL TURU" in line or "öncelik kapsamı" in line for line in LOG_LINES))
+        self.assertTrue(any("atlandı (captcha)" in line for line in LOG_LINES))  # the pause itself stays visible
+
     def test_unchanged_table_is_logged_again_after_thirty_minutes(self):
         row = summary.PriceSummaryRow(seller="Amazon", product_title="iPhone", product_url=AMAZON, price=Decimal("90"),
                                       target_price=Decimal("100"), min_price=Decimal("90"), max_price=Decimal("90"))

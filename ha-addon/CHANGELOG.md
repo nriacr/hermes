@@ -1,5 +1,12 @@
 # Değişiklik günlüğü
 
+## 3.2.1
+
+- Amazon kartları koruma beklemesindeyken geçen kısa turlar da loga artık
+  başlık yazmıyor; başlık yalnız gerçekten bir kart okunduğunda çıkıyor.
+  Bekleme satırı ("... atlandı (captcha) | kalan=...") dakikada bir aynen
+  görünmeye devam ediyor.
+
 ## 3.2.0
 
 - Fiyat geçmişi ve çevrim istatistikleri artık bir SQLite veritabanında
