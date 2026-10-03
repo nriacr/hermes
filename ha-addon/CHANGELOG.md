@@ -1,5 +1,16 @@
 # Değişiklik günlüğü
 
+## 3.1.0
+
+- Özet ve İstatistik sayfaları artık her dakika baştan yüklenmiyor; veriler
+  15 saniyede bir yerinde güncelleniyor. Açtığın gruplar açık kalıyor, sayfa
+  kaydırdığın yerden oynamıyor. Sekme arka plandayken istek gitmiyor. Hem
+  Home Assistant içindeki panelde hem public adreste aynı şekilde çalışıyor;
+  JavaScript kapalıysa eskisi gibi dakikada bir yenileniyor.
+- Hepsiburada ayrıştırıcısı (tek dosyada 1.431 satır) konu başlıklarına göre
+  beş dosyaya bölündü: ortak parçalar, fiyatlar, varyantlar, arama ve ürün
+  sayfası. Davranış birebir aynı; bakım ve hata ayıklama kolaylaştı.
+
 ## 3.0.1
 
 - Home Assistant sensörleri yalnızca içerikleri değiştiğinde güncelleniyor;

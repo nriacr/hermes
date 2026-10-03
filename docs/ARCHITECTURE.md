@@ -50,7 +50,8 @@ Hermes is a Home Assistant add-on running continuously on a Raspberry Pi. It:
 │       │   ├── http.py               # Shared HTTP helpers
 │       │   ├── registry.py           # All sites
 │       │   ├── amazon/               # client, browser, parser, search, reader
-│       │   ├── hepsiburada/          # parser + fetching/variants
+│       │   ├── hepsiburada/          # fetching; parsing split into common,
+│       │   │                         # prices, variants, search, detail
 │       │   └── trendyol.py, network.py, beymenclub.py, bengurme.py,
 │       │       nordbron.py, zara.py, hm.py, size_availability.py
 │       ├── telegram/listener.py      # Channels + Saved Messages quick add
@@ -229,6 +230,13 @@ characters, `public_dashboard_enabled`, and is compared in constant time.
 Pages: summary (`/`), `statistics`, `link-test`, `settings`, `restarting`;
 actions: `test-pushover`, `reset-notifications`, `reset-price-history`,
 `settings/save`, `link-test`. Every page has the same navigation.
+
+The summary and statistics pages update in place: `live.js` fetches
+`live/dashboard` or `live/statistics` (JSON with the region's HTML) every 15
+seconds while the tab is visible and swaps only the live region, keeping open
+groups (`details[data-key]`) and the scroll position. Tools, notices and forms
+stay outside the live region. Without JavaScript the page falls back to a
+full reload every 60 seconds (`<noscript>` refresh).
 
 Visual rules: dark charcoal/gray, high-contrast text, muted provider accents,
 whole-lira prices (`1.500 TL`), product names 60 characters without ellipsis,

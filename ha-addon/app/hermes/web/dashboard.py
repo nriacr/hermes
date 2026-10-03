@@ -211,7 +211,8 @@ def split_result_groups(rows: List[Dict[str, Any]]):
 
 def render_group(label: str, rows: List[Dict[str, Any]]) -> str:
     visible, full = shortened_title(label, GROUP_TITLE_MAX_LENGTH)
-    return (f"<details class='search-result-group'><summary><strong title='{escape(full, quote=True)}'>{escape(visible)}</strong>"
+    return (f"<details class='search-result-group' data-key='group:{escape(full, quote=True)}'>"
+            f"<summary><strong title='{escape(full, quote=True)}'>{escape(visible)}</strong>"
             f"<span>{len(rows)} sonuç</span></summary>{render_rows_table(rows, '')}</details>")
 
 
@@ -251,7 +252,7 @@ def render_stock_section(rows: List[Dict[str, Any]]) -> str:
         for row in rows:
             by_site.setdefault(repair_mojibake(row.get("seller") or "Diğer"), []).append(row)
         body = "".join(
-            f"<details class='search-result-group stock-site-group'><summary><strong>{escape(seller)}</strong>"
+            f"<details class='search-result-group stock-site-group' data-key='stock:{escape(seller, quote=True)}'><summary><strong>{escape(seller)}</strong>"
             f"<span>{len(site_rows)} ürün</span></summary>{table(site_rows)}</details>"
             for seller, site_rows in sorted(by_site.items(), key=lambda item: item[0].casefold())
         )
@@ -399,9 +400,33 @@ document.querySelectorAll('form[data-confirm]').forEach((form) => {
 </script>"""
 
 
-def render_dashboard_page(base: str, params: Dict[str, List[str]], config_error: str = "") -> bytes:
+LIVE_REFRESH_NOTE = "Sayfa açıkken veriler kendiliğinden güncellenir."
+
+
+def live_region(base: str, endpoint: str, html: str) -> str:
+    """A block whose contents the browser refreshes in place (see assets.LIVE_SCRIPT)."""
+    return f"<div id='live-region' data-live-url='{escape(link(base, endpoint), quote=True)}'>{html}</div>"
+
+
+def dashboard_live_html(base: str) -> str:
+    """Everything on the summary page that changes while it is open."""
     payload = load_json(SUMMARY_PATH, {})
     payload = payload if isinstance(payload, dict) else {}
+    cycle = escape(duration_text(payload.get("cycle_duration_seconds"), payload.get("cycle_duration_minutes") or "-"))
+    pills = (
+        "<div class='public-cycle-row'>"
+        f"<section class='public-cycle-pill'><span>Çevrim süresi</span><strong>{cycle}</strong></section>"
+        f"<section class='public-cycle-pill'><span>Son güncelleme</span><strong>{escape(relative_time_text(payload.get('checked_at')))}</strong></section>"
+        "</div>"
+    )
+    telegram_status = load_json(TELEGRAM_STATUS_PATH, {})
+    state = load_json(STATE_PATH, {})
+    return (pills + render_summary(payload)
+            + render_telegram_recent(telegram_status if isinstance(telegram_status, dict) else {})
+            + render_error_card(collect_errors(state if isinstance(state, dict) else {})))
+
+
+def render_dashboard_page(base: str, params: Dict[str, List[str]], config_error: str = "") -> bytes:
     notice = ""
     for key in ("test", "reset", "history", "settings"):
         status = params.get(key, [""])[0]
@@ -422,19 +447,12 @@ def render_dashboard_page(base: str, params: Dict[str, List[str]], config_error:
         "data-confirm='Min/maks fiyat geçmişi temizlenecek ve güncel fiyattan yeniden başlayacak. Devam etmek istiyor musun?'>"
         "<button class='button secondary' type='submit'>Min/Maks Sıfırla</button></form></div>"
     )
-    cycle = escape(duration_text(payload.get("cycle_duration_seconds"), payload.get("cycle_duration_minutes") or "-"))
-    pills = (
-        "<div class='public-cycle-row'>"
-        f"<section class='public-cycle-pill'><span>Çevrim süresi</span><strong>{cycle}</strong></section>"
-        f"<section class='public-cycle-pill'><span>Son güncelleme</span><strong>{escape(relative_time_text(payload.get('checked_at')))}</strong></section>"
-        "</div>"
-    )
-    telegram_status = load_json(TELEGRAM_STATUS_PATH, {})
-    state = load_json(STATE_PATH, {})
-    body = (tools + pills + notice + render_summary(payload)
-            + render_telegram_recent(telegram_status if isinstance(telegram_status, dict) else {})
-            + render_error_card(collect_errors(state if isinstance(state, dict) else {})))
-    return render_page(base, "dashboard", "Hermes", body, refresh_seconds=60, scripts=CONFIRM_SCRIPT)
+    body = tools + notice + live_region(base, "live/dashboard", dashboard_live_html(base))
+    return render_page(base, "dashboard", "Hermes", body, refresh_seconds=60, scripts=CONFIRM_SCRIPT + live_script_tag(base))
+
+
+def live_script_tag(base: str) -> str:
+    return f"<script src='{escape(link(base, 'live.js'), quote=True)}' defer></script>"
 
 
 # -- statistics -------------------------------------------------------------------------
@@ -506,7 +524,7 @@ def render_cycle_days(points) -> str:
         rows = "".join(f'<tr><td>{escape(checked_at.strftime("%H:%M:%S"))}</td><td>{escape(duration_text(duration))}</td></tr>'
                        for checked_at, duration in reversed(day_entries))
         result.append(
-            f'<details class="statistics-day"><summary aria-label="{day.strftime("%d.%m.%Y")}: {count} çevrim; tipik {typical}; '
+            f'<details class="statistics-day" data-key="day:{day.isoformat()}"><summary aria-label="{day.strftime("%d.%m.%Y")}: {count} çevrim; tipik {typical}; '
             f'orta yüzde elli {_compact(lower)} ile {_compact(upper)}; on dakika ve üzeri {slow}">'
             '<span class="statistics-day-grid">'
             f'<span class="statistics-day-date"><strong><span class="full-date">{day.strftime("%d.%m.%Y")}</span>'
@@ -525,7 +543,7 @@ def render_cycle_days(points) -> str:
     return "".join(result)
 
 
-def render_statistics_page(base: str) -> bytes:
+def statistics_live_html(base: str) -> str:
     now = datetime.now().astimezone()
     points = recent_cycle_history(load_json(CYCLE_HISTORY_PATH, []), now)
     durations = [duration for _, duration in points]
@@ -533,7 +551,7 @@ def render_statistics_page(base: str) -> bytes:
     def metric(value) -> str:
         return escape(duration_text(value) if durations else "-")
 
-    body = (
+    return (
         f"<section class='summary-panel'><div class='summary-head'><h2>Günlük çevrim özeti</h2><span>Son 7 gün · {len(points)} çevrim</span></div>"
         "<p class='statistics-intro'>Süreler dakika:saniye biçiminde. Tipik, ortadaki çevrim; Orta %50, uç değerler yerine "
         "çevrimlerin ortadaki yarısını gösterir. Güne dokunarak tüm kayıtları açabilirsin.</p>"
@@ -547,4 +565,8 @@ def render_statistics_page(base: str) -> bytes:
         "<p class='statistics-intro'>Grafikte son yedi günün tamamlanan çevrimleri gösterilir. Süre, tarama ve çevrimler arası beklemeyi kapsar.</p>"
         f"{render_cycle_chart(points, now)}</section>"
     )
-    return render_page(base, "statistics", "Hermes İstatistik", body, refresh_seconds=60)
+
+
+def render_statistics_page(base: str) -> bytes:
+    body = live_region(base, "live/statistics", statistics_live_html(base))
+    return render_page(base, "statistics", "Hermes İstatistik", body, refresh_seconds=60, scripts=live_script_tag(base))

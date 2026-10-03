@@ -5,6 +5,7 @@ address differs: relative ("." / "..") behind ingress, `/public/<token>` publicl
 """
 
 import hmac
+import json
 import threading
 import urllib.parse
 from dataclasses import dataclass, field
@@ -17,7 +18,7 @@ from ..logging_utils import log
 from ..notifier import Pushover
 from ..utils import parse_bool
 from . import assets
-from .dashboard import render_dashboard_page, render_statistics_page
+from .dashboard import dashboard_live_html, render_dashboard_page, render_statistics_page, statistics_live_html
 from .icons import HERMES_ICON_PNG, HERMES_ICON_SVG, render_web_manifest
 from .link_test import render_link_test_page, render_link_test_result
 from .pages import link
@@ -109,10 +110,17 @@ ASSETS: Dict[str, Callable[[Request], Response]] = {
     "/app.css": lambda _r: Response(200, assets.APP_CSS.encode("utf-8"), "text/css; charset=utf-8"),
     "/settings.js": lambda _r: Response(200, assets.SETTINGS_SCRIPT.encode("utf-8"), "application/javascript; charset=utf-8"),
     "/restart.js": lambda _r: Response(200, assets.RESTART_SCRIPT.encode("utf-8"), "application/javascript; charset=utf-8"),
+    "/live.js": lambda _r: Response(200, assets.LIVE_SCRIPT.encode("utf-8"), "application/javascript; charset=utf-8"),
     "/settings/restart.js": lambda _r: Response(200, assets.RESTART_SCRIPT.encode("utf-8"), "application/javascript; charset=utf-8"),
     "/icon.png": lambda _r: Response(200, HERMES_ICON_PNG, "image/png"),
     "/icon.svg": lambda _r: Response(200, HERMES_ICON_SVG, "image/svg+xml"),
     "/manifest.webmanifest": lambda r: Response(200, render_web_manifest(r.base), "application/manifest+json; charset=utf-8"),
+}
+
+
+LIVE_PARTS = {
+    "/live/dashboard": dashboard_live_html,
+    "/live/statistics": statistics_live_html,
 }
 
 
@@ -132,6 +140,11 @@ class Router:
         if path == "/health":
             ok, detail = self.runtime.health()
             return Response(200 if ok else 503, f"{'ok' if ok else detail}\n".encode("utf-8"))
+        if path in LIVE_PARTS:
+            # The fragment is shown on a top-level page, so its ingress links are relative to ".".
+            page_base = request.base if request.base.startswith("/") else "."
+            html = LIVE_PARTS[path](page_base)
+            return Response(200, json.dumps({"html": html}, ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8")
         if path in ASSETS:
             response = ASSETS[path](request)
             response.headers["Cache-Control"] = "public, max-age=86400"

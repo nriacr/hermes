@@ -38,7 +38,10 @@ def render_notice(status: str, message: str) -> str:
 
 def render_page(base: str, current: str, title: str, body: str, *, body_class: str = "public",
                 refresh_seconds: Optional[int] = None, scripts: str = "", after_main: str = "") -> bytes:
-    refresh = f"<meta http-equiv='refresh' content='{int(refresh_seconds)}'>" if refresh_seconds else ""
+    # Pages with live data refresh in place; the full reload stays only as the
+    # fallback for a browser without JavaScript.
+    refresh = (f"<noscript><meta http-equiv='refresh' content='{int(refresh_seconds)}'></noscript>"
+               if refresh_seconds else "")
     html = (
         "<!doctype html><html lang='tr'><head><meta charset='utf-8'>"
         "<meta name='viewport' content='width=device-width, initial-scale=1, viewport-fit=cover'>"

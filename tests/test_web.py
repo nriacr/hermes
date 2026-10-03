@@ -143,6 +143,31 @@ class RouterTests(DataFilesMixin, unittest.TestCase):
         self.assertIn("data-health-path='./health'", ingress)
         self.assertIn("data-return-path='./'", ingress)
 
+    def test_live_data_refreshes_in_place_on_both_surfaces(self):
+        self.data.write_summary({"rows": [price_row(product_title="Canlı ürün")], "checked_at": "2026-10-03 20:00:00"})
+        page = self.request("/").payload.decode()
+        self.assertIn("data-live-url='./live/dashboard'", page)
+        self.assertIn("src='./live.js'", page)
+        self.assertIn("<noscript><meta http-equiv='refresh' content='60'></noscript>", page)
+        response = self.request("/live/dashboard")
+        self.assertEqual(response.content_type, "application/json; charset=utf-8")
+        live = json.loads(response.payload)["html"]
+        self.assertIn("Canlı ürün", live)
+        self.assertNotIn("Bildirim Sıfırla", live)  # actions stay outside the refreshed block
+        self.assertIn("Günlük çevrim özeti", json.loads(self.request("/live/statistics").payload)["html"])
+        self.write_options({"public_dashboard_enabled": True, "public_dashboard_token": TOKEN})
+        public_page = self.request(f"/public/{TOKEN}/", public_only=True).payload.decode()
+        self.assertIn(f"data-live-url='/public/{TOKEN}/live/dashboard'", public_page)
+        public_live = self.request(f"/public/{TOKEN}/live/dashboard", public_only=True)
+        self.assertEqual(public_live.status, 200)
+        self.assertIn("Canlı ürün", json.loads(public_live.payload)["html"])
+        self.assertEqual(self.request("/public/" + "x" * 32 + "/live/dashboard", public_only=True).status, 404)
+
+    def test_live_script_keeps_open_groups_and_scroll(self):
+        script = self.request("/live.js").payload.decode()
+        for text in ("details[data-key][open]", "window.scrollTo", "document.hidden", "data.html === last"):
+            self.assertIn(text, script)
+
     def test_unhealthy_monitor_answers_503(self):
         self.runtime.health = lambda: (False, "izleyici çalışmıyor")
         response = self.request("/health")
@@ -218,7 +243,7 @@ class DashboardTests(DataFilesMixin, unittest.TestCase):
                 price_row(product_title="Juo Q3 Kırmızı", product_url="https://example.test/red", difference="+99,00",
                           search_group="g", search_group_label="Juo Q3")]
         rendered = dashboard.render_table_section("Hedefin Üstünde Kalan Ürünler", rows, "Boş", collapse=True)
-        self.assertIn("<details class='search-result-group'>", rendered)
+        self.assertIn("<details class='search-result-group' data-key='group:Juo Q3'>", rendered)
         self.assertIn("2 sonuç", rendered)
 
     def test_open_rows_are_ordered_by_seller_then_difference(self):
@@ -268,6 +293,7 @@ class DashboardTests(DataFilesMixin, unittest.TestCase):
         self.assertEqual(len(visible), 70)
         self.assertTrue(visible.endswith("..."))
         self.assertIn(f"title='{tooltip}'", dashboard.render_group(group_title, []))
+        self.assertIn(f"data-key='group:{tooltip}'", dashboard.render_group(group_title, []))
 
     def test_prices_are_whole_lira(self):
         self.assertEqual(parse_decimal("1.500"), Decimal("1500"))
@@ -290,7 +316,7 @@ class DashboardTests(DataFilesMixin, unittest.TestCase):
         html = dashboard.render_statistics_page(".").decode()
         self.assertIn("Son 7 gün · 5 çevrim", html)
         self.assertIn('class="cycle-line"', html)
-        self.assertEqual(html.count('<details class="statistics-day">'), 1)
+        self.assertEqual(html.count('<details class="statistics-day"'), 1)
         self.assertIn('<span class="statistics-day-typical"><strong>4:00</strong></span>', html)
         self.assertIn("<span><strong>3:50–4:10</strong></span>", html)
         self.assertIn('<span class="statistics-day-slow"><strong>1</strong></span>', html)

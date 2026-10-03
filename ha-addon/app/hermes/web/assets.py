@@ -320,3 +320,37 @@ RESTART_SCRIPT = """
   window.setTimeout(waitForHermes, 6000);
 })();
 """.strip()
+
+# Refreshes #live-region in place: keeps open groups and the scroll position,
+# pauses while the tab is hidden and skips identical content.
+LIVE_SCRIPT = """
+(() => {
+  const region = document.getElementById('live-region');
+  if (!region || !window.fetch) return;
+  const url = region.dataset.liveUrl;
+  let busy = false;
+  let last = '';
+  const refresh = async () => {
+    if (busy || document.hidden) return;
+    busy = true;
+    try {
+      const response = await fetch(`${url}${url.includes('?') ? '&' : '?'}ts=${Date.now()}`, { cache: 'no-store' });
+      if (!response.ok) return;
+      const data = await response.json();
+      if (typeof data.html !== 'string' || data.html === last) return;
+      const open = new Set([...region.querySelectorAll('details[data-key][open]')].map((item) => item.dataset.key));
+      const scroll = window.scrollY;
+      region.innerHTML = data.html;
+      region.querySelectorAll('details[data-key]').forEach((item) => { if (open.has(item.dataset.key)) item.open = true; });
+      window.scrollTo(0, scroll);
+      last = data.html;
+    } catch (_error) {
+      // Hermes may be restarting; the next attempt retries.
+    } finally {
+      busy = false;
+    }
+  };
+  window.setInterval(refresh, 15000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
+})();
+""".strip()
