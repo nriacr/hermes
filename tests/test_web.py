@@ -1,5 +1,6 @@
 """Panel pages, settings forms and the shared ingress/public router."""
 
+import gzip
 import json
 import unittest
 import urllib.error
@@ -165,8 +166,15 @@ class RouterTests(DataFilesMixin, unittest.TestCase):
 
     def test_live_script_keeps_open_groups_and_scroll(self):
         script = self.request("/live.js").payload.decode()
-        for text in ("details[data-key][open]", "window.scrollTo", "document.hidden", "data.html === last"):
+        for text in ("details[data-key][open]", "window.scrollTo", "document.hidden", "data.same", "&v="):
             self.assertIn(text, script)
+
+    def test_unchanged_live_block_is_not_sent_again(self):
+        first = json.loads(self.request("/live/statistics").payload)
+        self.assertIn("html", first)
+        again = json.loads(self.request(f"/live/statistics?v={first['v']}").payload)
+        self.assertEqual(again, {"v": first["v"], "same": True})
+        self.assertIn("html", json.loads(self.request("/live/statistics?v=eski").payload))
 
     def test_unhealthy_monitor_answers_503(self):
         self.runtime.health = lambda: (False, "izleyici çalışmıyor")
@@ -193,6 +201,11 @@ class LiveServerTests(DataFilesMixin, unittest.TestCase):
             with urllib.request.urlopen(f"{base}/", timeout=5) as response:
                 self.assertIn("Özet Tablo", response.read().decode())
                 self.assertEqual(response.headers["Cache-Control"], "no-store")
+                self.assertIsNone(response.headers["Content-Encoding"])
+            request = urllib.request.Request(f"{base}/", headers={"Accept-Encoding": "gzip"})
+            with urllib.request.urlopen(request, timeout=5) as response:
+                self.assertEqual(response.headers["Content-Encoding"], "gzip")
+                self.assertIn("Özet Tablo", gzip.decompress(response.read()).decode())
 
             class NoRedirect(urllib.request.HTTPRedirectHandler):
                 def redirect_request(self, *args, **kwargs):

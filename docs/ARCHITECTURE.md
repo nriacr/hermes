@@ -234,7 +234,9 @@ actions: `test-pushover`, `reset-notifications`, `reset-price-history`,
 The summary and statistics pages update in place: `live.js` fetches
 `live/dashboard` or `live/statistics` (JSON with the region's HTML) every 15
 seconds while the tab is visible and swaps only the live region, keeping open
-groups (`details[data-key]`) and the scroll position. Tools, notices and forms
+groups (`details[data-key]`) and the scroll position. The browser sends the
+version it shows (`v`); an unchanged block is answered with `{"same": true}`.
+Text responses of 1 KB or more are gzip-compressed when accepted. Tools, notices and forms
 stay outside the live region. Without JavaScript the page falls back to a
 full reload every 60 seconds (`<noscript>` refresh).
 

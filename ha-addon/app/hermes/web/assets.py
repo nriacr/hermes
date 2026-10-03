@@ -322,28 +322,29 @@ RESTART_SCRIPT = """
 """.strip()
 
 # Refreshes #live-region in place: keeps open groups and the scroll position,
-# pauses while the tab is hidden and skips identical content.
+# pauses while the tab is hidden; the server skips a block the page already shows.
 LIVE_SCRIPT = """
 (() => {
   const region = document.getElementById('live-region');
   if (!region || !window.fetch) return;
   const url = region.dataset.liveUrl;
   let busy = false;
-  let last = '';
+  let version = '';
   const refresh = async () => {
     if (busy || document.hidden) return;
     busy = true;
     try {
-      const response = await fetch(`${url}${url.includes('?') ? '&' : '?'}ts=${Date.now()}`, { cache: 'no-store' });
+      const query = `ts=${Date.now()}&v=${encodeURIComponent(version)}`;
+      const response = await fetch(`${url}${url.includes('?') ? '&' : '?'}${query}`, { cache: 'no-store' });
       if (!response.ok) return;
       const data = await response.json();
-      if (typeof data.html !== 'string' || data.html === last) return;
+      if (data.same || typeof data.html !== 'string') return;
       const open = new Set([...region.querySelectorAll('details[data-key][open]')].map((item) => item.dataset.key));
       const scroll = window.scrollY;
       region.innerHTML = data.html;
       region.querySelectorAll('details[data-key]').forEach((item) => { if (open.has(item.dataset.key)) item.open = true; });
       window.scrollTo(0, scroll);
-      last = data.html;
+      version = data.v || '';
     } catch (_error) {
       // Hermes may be restarting; the next attempt retries.
     } finally {

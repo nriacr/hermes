@@ -4,6 +4,8 @@ Both surfaces render the same pages and run the same actions; only the base
 address differs: relative ("." / "..") behind ingress, `/public/<token>` publicly.
 """
 
+import gzip
+import hashlib
 import hmac
 import json
 import threading
@@ -25,6 +27,8 @@ from .pages import link
 from .settings import handle_settings_save, render_restart_page, render_settings_page, should_return_to_main
 
 PUBLIC_TOKEN_MIN_LENGTH = 24
+# Text responses above this size are gzip-compressed when the browser accepts it.
+GZIP_MIN_BYTES = 1024
 HTML = "text/html; charset=utf-8"
 TEXT = "text/plain; charset=utf-8"
 
@@ -144,7 +148,11 @@ class Router:
             # The fragment is shown on a top-level page, so its ingress links are relative to ".".
             page_base = request.base if request.base.startswith("/") else "."
             html = LIVE_PARTS[path](page_base)
-            return Response(200, json.dumps({"html": html}, ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8")
+            # The browser sends the version it shows; an unchanged block is not sent again
+            # (the statistics block is several megabytes).
+            version = hashlib.sha256(html.encode("utf-8")).hexdigest()[:16]
+            data = {"v": version, "same": True} if request.params.get("v", [""])[0] == version else {"v": version, "html": html}
+            return Response(200, json.dumps(data, ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8")
         if path in ASSETS:
             response = ASSETS[path](request)
             response.headers["Cache-Control"] = "public, max-age=86400"
@@ -196,16 +204,21 @@ def make_handler(router: Router, public_only: bool):
             except Exception as exc:  # noqa: BLE001 - a broken page must not end the server
                 log(f"Panel isteği işlenemedi: {method} {urllib.parse.urlparse(self.path).path[:40]} | {exc}")
                 response = Response(500, "Hermes bu sayfayı şu an hazırlayamadı.\n".encode("utf-8"))
+            payload, headers = response.payload, dict(response.headers)
+            if (len(payload) >= GZIP_MIN_BYTES and not response.content_type.startswith("image/png")
+                    and "gzip" in self.headers.get("Accept-Encoding", "")):
+                payload = gzip.compress(payload, compresslevel=6)
+                headers.update({"Content-Encoding": "gzip", "Vary": "Accept-Encoding"})
             self.send_response(response.status)
-            if response.payload or response.status != 303:
+            if payload or response.status != 303:
                 self.send_header("Content-Type", response.content_type)
-                self.send_header("Content-Length", str(len(response.payload)))
-            self.send_header("Cache-Control", response.headers.pop("Cache-Control", "no-store"))
-            for name, value in response.headers.items():
+                self.send_header("Content-Length", str(len(payload)))
+            self.send_header("Cache-Control", headers.pop("Cache-Control", "no-store"))
+            for name, value in headers.items():
                 self.send_header(name, value)
             self.end_headers()
-            if response.payload:
-                self.wfile.write(response.payload)
+            if payload:
+                self.wfile.write(payload)
 
         def do_GET(self) -> None:  # noqa: N802
             self._respond("GET")

@@ -1,5 +1,11 @@
 # Değişiklik günlüğü
 
+## 3.1.1
+
+- Canlı güncelleme veri değişmediyse sayfayı yeniden göndermiyor; İstatistik
+  sayfası birkaç MB olduğu için bu önemli. Büyük sayfalar sıkıştırılarak
+  gönderiliyor, telefonda daha az veri harcanıyor.
+
 ## 3.1.0
 
 - Özet ve İstatistik sayfaları artık her dakika baştan yüklenmiyor; veriler
