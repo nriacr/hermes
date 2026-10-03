@@ -12,10 +12,11 @@ from urllib.parse import parse_qsl, urlencode, urlsplit
 
 import requests
 
-from ...constants import CHROME_CLIENT_HINTS, CHROME_USER_AGENT
+from ...constants import CHROME_CLIENT_HINTS, CHROME_USER_AGENT, SITE_AMAZON, SITE_MIN_REQUEST_GAP_SECONDS
 from ...errors import BotProtectionHermesError, HermesError, error_status
 from ...logging_utils import log
 from ...utils import canonical_amazon_product_url, normalize_offer_text, referer_for_url, repair_mojibake
+from ..base import RequestSpacing
 from ..http import cleaned_html, curl_requests, decode_response_text
 from .browser import AmazonBrowser
 
@@ -181,7 +182,7 @@ def _seed_session(session) -> None:
 class AmazonClient:
     """Process-lived anonymous transports; page/offer caches stay cycle-local."""
 
-    def __init__(self, transport: str = "http"):
+    def __init__(self, transport: str = "http", spacing: Optional[RequestSpacing] = None):
         # "http" reads with curl (Chrome TLS) and falls back to Chromium once;
         # "browser" reads only through Chromium (used by the link test option).
         self.transport = transport
@@ -189,6 +190,9 @@ class AmazonClient:
         _seed_session(self.requests_session)
         self.curl_session = None
         self.browser = AmazonBrowser()
+        # Every network request (product, variant, listing, search detail,
+        # browser fallback) waits for this gap; cached pages never do.
+        self.spacing = spacing or RequestSpacing(SITE_MIN_REQUEST_GAP_SECONDS[SITE_AMAZON])
         # Only absent/unreadable offers, with discovery metadata, never successful prices.
         self.unavailable_product_pages: dict = {}
 
@@ -233,6 +237,9 @@ class AmazonClient:
         return html
 
     def _timed(self, method: str, url: str, expect_search: bool, read):
+        waited = self.spacing.wait()
+        if waited >= 0.05:
+            log(f"Amazon istek aralığı için {waited:.1f} sn ek bekleme.")
         started_at = time.monotonic()
         outcome = "ok"
         try:

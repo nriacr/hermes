@@ -1,5 +1,7 @@
 import json
 import re
+import threading
+import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
@@ -165,6 +167,33 @@ def excluded_term_in_title(watch, title: str) -> str:
 # ---------------------------------------------------------------------------
 
 
+class RequestSpacing:
+    """A minimum time between request starts to one site.
+
+    Applied on top of the normal random delay; the first request and pages
+    served from a cycle cache never wait.
+    """
+
+    def __init__(self, min_gap_seconds: float, sleep: Callable[[float], None] = time.sleep,
+                 clock: Callable[[], float] = time.monotonic) -> None:
+        self.min_gap_seconds = float(min_gap_seconds)
+        self.sleep = sleep
+        self.clock = clock
+        self.last_start: Optional[float] = None
+        self._lock = threading.Lock()
+
+    def wait(self) -> float:
+        """Wait until the gap has passed, then mark a request start; returns the wait."""
+        with self._lock:
+            waited = 0.0
+            if self.last_start is not None and self.min_gap_seconds > 0:
+                waited = max(0.0, self.last_start + self.min_gap_seconds - self.clock())
+                if waited:
+                    self.sleep(waited)
+            self.last_start = self.clock()
+            return waited
+
+
 @dataclass
 class ReadContext:
     """What a provider may use while reading one watch in a monitoring cycle."""
@@ -199,6 +228,9 @@ class Provider:
     alert_shows_seller = False
     # Pause a watch with growing back-off after a protection page.
     backs_off_on_protection = False
+    # The provider spaces every network request itself (Amazon's client);
+    # otherwise the monitor spaces the start of each watch read.
+    spaces_own_requests = False
 
     def begin_cycle(self) -> None:
         """Forget per-cycle caches; prices are always read again next cycle."""

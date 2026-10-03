@@ -11,13 +11,13 @@ from typing import Any, Callable, Dict, List, Optional
 
 import requests
 
-from ..constants import CYCLE_HISTORY_PATH, PRIORITIES, STATE_PATH, SUMMARY_PATH
+from ..constants import CYCLE_HISTORY_PATH, PRIORITIES, SITE_MIN_REQUEST_GAP_SECONDS, STATE_PATH, SUMMARY_PATH
 from ..errors import EmptySearchResultsHermesError, OutOfStockHermesError, error_status
 from ..homeassistant import HomeAssistantBridge
 from ..logging_utils import log
 from ..models import HermesConfig, OfferResult, PriceSummaryRow, StockSummaryRow, WatchRule
 from ..notifier import Pushover
-from ..providers.base import Provider, ReadContext, WatchRead, excluded_term_in_title
+from ..providers.base import Provider, ReadContext, RequestSpacing, WatchRead, excluded_term_in_title
 from ..providers.registry import ProviderSet
 from ..storage import load_json, save_json
 from ..utils import canonical_tracking_url, format_tl, local_now, parse_iso_datetime, site_label, utc_now
@@ -87,6 +87,8 @@ class Monitor:
         # Site queues run in parallel; every change to the cycle's shared
         # state, summary and files happens under this lock.
         self._lock = threading.RLock()
+        # Minimum gaps between request starts per site; they span cycles.
+        self._spacing: Dict[str, RequestSpacing] = {}
 
     def close(self) -> None:
         self.providers.close()
@@ -166,6 +168,20 @@ class Monitor:
         if self.home_assistant is not None and self.home_assistant.enabled:
             self.home_assistant.publish_opportunity(watch, offer, display_name, url)
 
+    def _site_pace(self, site: str) -> Callable[[str], None]:
+        """The random delay, then the site's minimum gap since its previous request start."""
+        if self.providers[site].spaces_own_requests:
+            return self.pace
+        spacing = self._spacing.setdefault(site, RequestSpacing(SITE_MIN_REQUEST_GAP_SECONDS.get(site, 0), sleep=self.sleep))
+
+        def pace(label: str) -> None:
+            self.pace(label)
+            waited = spacing.wait()
+            if waited >= 0.05:
+                log(f"{site_label(site)} istek aralığı için {waited:.1f} sn ek bekleme.")
+
+        return pace
+
     def _run_site_queues(self, run: "CycleRun", queues: Dict[str, List[WatchRule]]) -> bool:
         """Read every site's due watches in its own queue; True when stopped early.
 
@@ -179,8 +195,8 @@ class Monitor:
         def work(site_watches: List[WatchRule]) -> None:
             try:
                 with requests.Session() as session:
-                    ctx = ReadContext(timeout=self.config.request_timeout_seconds, session=session, pace=self.pace,
-                                      watch_names=watch_names)
+                    ctx = ReadContext(timeout=self.config.request_timeout_seconds, session=session,
+                                      pace=self._site_pace(site_watches[0].site), watch_names=watch_names)
                     for watch in scheduling.priority_order(site_watches):
                         if self.should_stop():
                             stopped.set()

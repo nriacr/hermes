@@ -18,6 +18,12 @@ from hermes.monitor.cycle import DataFiles, Monitor  # noqa: E402
 from hermes.monitor.state import watch_key  # noqa: E402
 from hermes.providers.registry import ProviderSet  # noqa: E402
 
+# Request gaps are tested on their own; elsewhere tests must not sleep.
+from hermes import constants  # noqa: E402
+
+for _site in list(constants.SITE_MIN_REQUEST_GAP_SECONDS):
+    constants.SITE_MIN_REQUEST_GAP_SECONDS[_site] = 0
+
 # Tests assert on behavior, not on log lines; keep the run output readable.
 LOG_LINES: List[str] = []
 logging_utils.set_output(LOG_LINES.append)

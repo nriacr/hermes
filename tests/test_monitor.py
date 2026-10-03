@@ -473,6 +473,63 @@ class SiteQueueTests(CycleTestCase):
         hermes_monitor.close()
 
 
+class RequestSpacingTests(CycleTestCase):
+    def test_spacing_waits_only_for_the_rest_of_the_gap(self):
+        from hermes.providers.base import RequestSpacing
+
+        clock, sleeps = [100.0], []
+
+        def sleep(seconds):
+            sleeps.append(round(seconds, 2))
+            clock[0] += seconds
+
+        spacing = RequestSpacing(5, sleep=sleep, clock=lambda: clock[0])
+        self.assertEqual(spacing.wait(), 0)  # first request never waits
+        clock[0] += 2
+        spacing.wait()
+        clock[0] += 7
+        self.assertEqual(spacing.wait(), 0)  # gap already passed
+        self.assertEqual(sleeps, [3.0])
+
+    def test_amazon_client_spaces_every_network_request_but_not_cached_pages(self):
+        from hermes.providers.amazon import client as amazon_client
+        from hermes.providers.amazon.client import AmazonClient
+        from hermes.providers.base import RequestSpacing
+
+        spacing = RequestSpacing(5)
+        with AmazonClient(spacing=spacing) as amazon, \
+                patch.object(amazon_client, "curl_requests", None), \
+                patch.object(amazon, "_http_read", return_value="<html>Amazon</html>"), \
+                patch.object(spacing, "wait", return_value=0) as wait:
+            cache = {}
+            amazon.fetch(AMAZON, 10, cache=cache)
+            amazon.fetch(AMAZON, 10, cache=cache)  # cached: no request, no wait
+            amazon.fetch("https://www.amazon.com.tr/gp/offer-listing/B000000001?condition=used", 10, cache=cache)
+        self.assertEqual(wait.call_count, 2)
+
+    def test_amazon_gap_matches_the_measured_2_5_48_pace(self):
+        import importlib
+
+        import hermes.constants as constants_module
+
+        fresh = importlib.reload(constants_module)
+        self.assertEqual(fresh.SITE_MIN_REQUEST_GAP_SECONDS["amazon"], 5.0)
+        for site in list(constants_module.SITE_MIN_REQUEST_GAP_SECONDS):
+            constants_module.SITE_MIN_REQUEST_GAP_SECONDS[site] = 0
+
+    def test_other_sites_wait_their_gap_between_watch_reads(self):
+        rules = [watch(f"Çanta {i}", f"https://nordbron.com/{i}") for i in range(3)]
+        sleeps = []
+        hermes_monitor = monitor(config(rules), self.data, self.notify)
+        hermes_monitor.sleep = sleeps.append
+        with (patch.dict("hermes.monitor.cycle.SITE_MIN_REQUEST_GAP_SECONDS", {"nordbron": 30}),
+              patch.object(NordbronProvider, "read", side_effect=lambda rule, *_a: [OfferResult(rule.name, Decimal("1"), url=rule.url)])):
+            hermes_monitor.run_cycle()
+        hermes_monitor.close()
+        self.assertEqual(len(sleeps), 2)  # second and third read wait for the gap
+        self.assertTrue(all(25 < seconds <= 30 for seconds in sleeps))
+
+
 class HomeAssistantTests(CycleTestCase):
     def test_cycle_publishes_sensors_and_an_event_per_opportunity(self):
         bridge = Mock(enabled=True)

@@ -72,6 +72,16 @@ SEARCH_ERROR_NOTIFICATION_HOUR = 11
 TELEGRAM_STATUS_HEARTBEAT_SECONDS = 60 * 60
 TELEGRAM_QUICK_ADD_GROUP = "Paylaşılanlar"
 PRIORITIES = ("high", "medium", "low")
+# Minimum time between two request starts to one site, on top of the random
+# request delay. Measured from ~17 hours of 2.5.48 Pi logs (2026-10-03), where
+# all sites shared one queue, so per-site queues are not faster than before:
+# Amazon median 5.1 s over 4,992 requests (lower quartile 4.5 s); Network
+# median 1.0 s over 10 reads. Other sites had no reads in that window and keep
+# only the configured delay.
+SITE_MIN_REQUEST_GAP_SECONDS = {
+    SITE_AMAZON: 5.0,
+    SITE_NETWORK: 1.0,
+}
 PRIORITY_INTERVAL_SECONDS = {"medium": 2 * 60 * 60, "low": 6 * 60 * 60}
 
 DEFAULT_HEADERS = {

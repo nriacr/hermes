@@ -74,6 +74,7 @@ class AmazonProvider(Provider):
     site = SITE_AMAZON
     alert_shows_seller = False
     backs_off_on_protection = True
+    spaces_own_requests = True
 
     def __init__(self, client: Optional[AmazonClient] = None) -> None:
         self.client = client or AmazonClient()

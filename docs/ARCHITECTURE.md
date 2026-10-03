@@ -123,7 +123,11 @@ card due immediately after the restart.
    requests. A slow or protected site never delays another; each site, Amazon
    included, still has exactly one sequential queue. All changes to the
    cycle's state, table and files are serialized under one lock; network reads
-   and notifications happen outside it. The cycle ends when the slowest queue
+   and notifications happen outside it. On top of the delay, a minimum gap
+   between request starts per site (`SITE_MIN_REQUEST_GAP_SECONDS`, measured
+   from the 2.5.48 logs: Amazon 5 s, Network 1 s) keeps every site at or below
+   its old pace. Amazon's client applies it to every network request; cached
+   pages never wait. The cycle ends when the slowest queue
    has finished.
 4. The provider returns offers (Amazon product families stream them). Apply
    the own-seller filter, the minimum price and exclusions, then record each
