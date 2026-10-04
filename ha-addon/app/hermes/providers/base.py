@@ -241,6 +241,9 @@ class Provider:
     # (the monitor then runs two lanes for the site).
     has_depo_lane = False
 
+    def restore_requests(self, requests) -> None:
+        """Network requests of the last hour from the database, (finished at, ms, outcome); most sites ignore them."""
+
     def next_read_is_main(self, watch) -> bool:
         """True when the watch's next read is a quick main-page read for the Depo lane."""
         return False

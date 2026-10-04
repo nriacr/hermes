@@ -335,8 +335,15 @@ class AmazonProvider(Provider):
 
     # -- pages ---------------------------------------------------------------
 
+    def restore_requests(self, requests) -> None:
+        self.client.access.restore(requests)
+
     def fetch(self, url: str, ctx: ReadContext, expect_search: bool = False) -> str:
-        html = self.client.fetch(url, ctx.timeout, expect_search=expect_search, cache=self.responses, on_request=ctx.measure)
+        try:
+            html = self.client.fetch(url, ctx.timeout, expect_search=expect_search, cache=self.responses, on_request=ctx.measure)
+        finally:
+            # Every ten minutes, also in the middle of a long variant sweep (not only at a cycle start).
+            self._log_measurements()
         raise_if_age_verification(html)
         return html
 

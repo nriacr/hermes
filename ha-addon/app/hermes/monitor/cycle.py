@@ -22,7 +22,7 @@ from ..constants import (
     SUMMARY_PATH,
 )
 from ..errors import BotProtectionHermesError, EmptySearchResultsHermesError, HermesError, OutOfStockHermesError, error_status
-from ..history import History
+from ..history import History, read_requests
 from ..homeassistant import HomeAssistantBridge
 from ..logging_utils import log
 from ..models import HermesConfig, OfferResult, PriceSummaryRow, StockSummaryRow, WatchRule
@@ -135,6 +135,10 @@ class Monitor:
         self.history = History.at(self.files.database)
         self.history.migrate_json(self.files.state, self.files.cycle_history)
         self.history.drop_idle_cycles(self.config.interval_seconds)
+        # A restart must not forget the last hour of requests (Amazon's window and block counts).
+        since = datetime.now(timezone.utc) - timedelta(hours=1)
+        for provider in self.providers:
+            provider.restore_requests(read_requests(self.files.database, provider.site, since))
 
     def close(self) -> None:
         self.providers.close()

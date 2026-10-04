@@ -334,6 +334,23 @@ class IdleCycleTests(HistoryCase):
         self.assertTrue(any("kısa çevrimler çıkarıldı: 2" in line for line in LOG_LINES))
 
 
+class RequestRestoreTests(HistoryCase):
+    def test_monitor_start_restores_amazon_requests_of_the_last_hour(self):
+        now = datetime.now(timezone.utc)
+        for minutes, outcome in ((10, "ok"), (20, "bot_korumasi"), (50, "ok"), (90, "ok")):
+            with patch.object(history_module, "_at", lambda value=None, m=minutes:
+                              (now - timedelta(minutes=m)).isoformat(timespec="seconds")):
+                self.history.record_request("amazon", "curl", "ürün", outcome, 1500)
+        self.history.record_request("hepsiburada", "curl", "ürün", "ok", 1500)  # other sites ignore it
+        hermes_monitor = monitor(config([watch("iPhone", AMAZON)]), self.data, notifier())
+        try:
+            access = hermes_monitor.providers["amazon"].client.access
+            self.assertEqual(access.window_count(), 2)  # 10 and 20 minutes ago
+            self.assertIn("son 60 dk: istek=3, engel=1", access.stats_line())
+        finally:
+            hermes_monitor.close()
+
+
 class QuietLogTests(HistoryCase):
     def test_idle_cycle_logs_no_banner_and_unchanged_table_is_logged_rarely(self):
         rule = watch("iPhone", AMAZON, target="100")

@@ -52,6 +52,8 @@ SCHEMA = 2
 RATE_LOOKBACK_SECONDS = 300
 WINDOW_WAIT_STEP_SECONDS = 5.0
 MAIN_LANE = "main"
+# Request outcomes (client.block_reason) that count as a block: a challenge page, HTTP 429 or 503.
+PROTECTION_OUTCOMES = ("bot_korumasi", "http_429", "http_503")
 
 
 class AmazonAccess:
@@ -182,6 +184,30 @@ class AmazonAccess:
                 with self._lock:
                     self._main_waiting -= 1
 
+    def restore(self, requests) -> None:
+        """Rebuild the window and the last hour from the database after a restart.
+
+        `requests` are (finished at, duration ms, outcome) of Amazon's network
+        requests. Without this a restart starts the window at zero, and the first
+        block would record only the requests since the start as its threshold.
+        The Depo lane's own share is not stored, so it starts unused.
+        """
+        with self._lock:
+            now_wall, now_clock = self.wall(), self.clock()
+            starts, events = [], []
+            for finished_at, duration_ms, outcome in requests:
+                finished = finished_at.timestamp()
+                started = finished - max(0, duration_ms) / 1000
+                if 0 <= now_wall - started < AMAZON_WINDOW_SECONDS:
+                    starts.append(now_clock - (now_wall - started))
+                if 0 <= now_wall - finished <= 3600:
+                    events.append((finished, outcome in PROTECTION_OUTCOMES))
+            self.starts = deque(sorted(starts) + list(self.starts))
+            self.events = deque(sorted(events) + list(self.events))
+            self.peak_since_raise = max(self.peak_since_raise, len(self.starts))
+        log(f"Amazon istek penceresi veritabanından geri yüklendi: son {AMAZON_WINDOW_SECONDS // 60} dk={len(starts)} istek | "
+            f"son 60 dk={len(events)} istek, {sum(blocked for _at, blocked in events)} engel")
+
     def request_started(self, lane: str = "") -> None:
         with self._lock:
             now = self.clock()
@@ -271,8 +297,10 @@ class AmazonAccess:
                 f"son artıştan beri={(now_wall - self.last_raise_at) / 60:.0f} dk | yarım hız kalan={slow} dk")
 
     def stats_due(self) -> bool:
-        now = self.clock()
-        if now - self._last_stats_log < AMAZON_STATS_LOG_SECONDS:
-            return False
-        self._last_stats_log = now
-        return True
+        # Both lane threads ask; only one of them may write the line.
+        with self._lock:
+            now = self.clock()
+            if now - self._last_stats_log < AMAZON_STATS_LOG_SECONDS:
+                return False
+            self._last_stats_log = now
+            return True

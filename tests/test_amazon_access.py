@@ -1,6 +1,7 @@
 """Amazon's request budget: rolling window, adaptive limit, slow start and the cookie jar."""
 
 import json
+from datetime import datetime, timezone
 import tempfile
 import unittest
 from pathlib import Path
@@ -409,3 +410,53 @@ class LaneClientTests(unittest.TestCase):
             worker.join()
         self.assertEqual(overlaps[0], 1)
         self.assertEqual((client.access.counters["istek_depo"], client.access.counters["istek_tarama"]), (5, 5))
+
+
+class RestoreTests(unittest.TestCase):
+    """After a restart the window and the last hour come back from the database."""
+
+    def setUp(self):
+        self.fake = FakeTime()
+        self.access = access_with(self.fake)
+        LOG_LINES.clear()
+
+    def finished(self, seconds_ago, outcome="ok", ms=2000):
+        return (datetime.fromtimestamp(self.fake.wall() - seconds_ago, timezone.utc), ms, outcome)
+
+    def test_window_and_last_hour_are_rebuilt(self):
+        rows = [self.finished(30 * 60 + seconds) for seconds in range(0, 240)]  # 30–34 min ago: in the window
+        rows += [self.finished(40 * 60), self.finished(50 * 60, "bot_korumasi"), self.finished(55 * 60, "http_503")]
+        rows += [self.finished(2 * HOUR)]  # too old for both
+        rows += [self.finished(60, "ReadTimeout")]  # a failure that is not a block
+        self.access.restore(rows)
+        self.assertEqual(self.access.window_count(), 241)
+        line = self.access.stats_line()
+        self.assertIn("son 60 dk: istek=244, engel=2", line)
+        self.assertIn("pencere=241/", line)
+        self.assertTrue(any("geri yüklendi: son 35 dk=241 istek | son 60 dk=244 istek, 2 engel" in item for item in LOG_LINES))
+        # Restored starts leave the window when their 35 minutes are over.
+        self.fake.advance(5 * 60 + 1)
+        self.assertEqual(self.access.window_count(), 1)
+
+    def test_first_block_after_a_restart_uses_the_real_window(self):
+        self.access.restore([self.finished(seconds * 12) for seconds in range(150)])  # 150 requests, 30 minutes
+        make_requests(self.access, self.fake, 1, blocked=True)
+        self.access.request_finished(True, "B000000002")
+        self.assertEqual(self.access.threshold, 151)  # not 1: the requests before the restart count
+
+    def test_a_restored_full_window_makes_the_sweep_wait_as_without_a_restart(self):
+        self.access.restore([self.finished(seconds * 8) for seconds in range(240)])
+        before = self.fake.now
+        self.access.wait_for_window()
+        self.assertGreater(self.fake.now, before)
+        self.assertLess(self.access.window_count(), self.access.limit_for(""))
+
+    def test_nothing_to_restore_changes_nothing(self):
+        self.access.restore([])
+        self.assertEqual(self.access.window_count(), 0)
+        self.assertEqual(self.access.limit, AMAZON_WINDOW_START_LIMIT)
+
+    def test_only_one_thread_writes_the_measurement_line(self):
+        self.fake.advance(10 * 60)
+        self.assertEqual([self.access.stats_due() for _ in range(3)], [True, False, False])
+

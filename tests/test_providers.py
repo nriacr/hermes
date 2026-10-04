@@ -272,6 +272,26 @@ class AmazonRhythmTests(AmazonTestCase):
             self.assertIn(expected, lines[0])
 
 
+    def test_measurement_line_is_written_during_a_long_sweep(self):
+        """Not only at a cycle start: every fetch may write it once ten minutes have passed."""
+        LOG_LINES.clear()
+        with patch.object(self.client, "fetch", return_value=priced()):
+            self.provider.fetch(ROOT, context())
+            self.assertEqual(sum("Amazon ölçüm:" in line for line in LOG_LINES), 0)
+            self.client.access._last_stats_log -= 601
+            self.provider.fetch(ROOT, context())
+            self.provider.fetch(ROOT, context())
+        self.assertEqual(sum("Amazon ölçüm:" in line for line in LOG_LINES), 1)
+
+    def test_a_failed_fetch_still_writes_the_measurement_line(self):
+        LOG_LINES.clear()
+        self.client.access._last_stats_log -= 601
+        with patch.object(self.client, "fetch", side_effect=BotProtectionHermesError("captcha")):
+            with self.assertRaises(BotProtectionHermesError):
+                self.provider.fetch(ROOT, context())
+        self.assertEqual(sum("Amazon ölçüm:" in line for line in LOG_LINES), 1)
+
+
 class AmazonBlockScopeTests(AmazonTestCase):
     """A page that fails on its own rests alone; two different pages failing pause the site."""
 

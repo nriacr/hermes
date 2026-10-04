@@ -221,9 +221,13 @@ results" search notice is a normal stock row read again after five minutes.
   3.3.0 night showed blocks do not follow the request count). The main-page lane
   (Depo reads) may exceed the limit by 20 %. After a site-wide block the minimum
   request gap doubles for an hour, and for ten minutes after every start. Limit,
-  threshold and slow start survive restarts in `amazon_access.json` (schema 2; a
+  threshold and slow start survive restarts in `amazon_access.json`; since
+  3.5.1 the window itself and the last hour's requests and blocks are rebuilt
+  at start from the `requests` table of `hermes.db` (`AmazonAccess.restore`;
+  the Depo lane's share starts unused) (schema 2; a
   3.3.0 file is ignored and the limit starts at 300); cookies in
-  `amazon_cookies.json`. Every ten minutes the log gets one `Amazon ölçüm:`
+  `amazon_cookies.json`. Every ten minutes (checked at every fetch
+  since 3.5.1, so also during a long sweep) the log gets one `Amazon ölçüm:`
   line (window, limit, threshold, requests/min, last-hour requests and blocks,
   Depo checks and verified offers, skipped excluded pages).
 - Two rhythms per product watch (since 3.3, `WatchRhythm`): the configured page

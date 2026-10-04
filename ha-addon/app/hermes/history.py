@@ -295,6 +295,13 @@ def read_prices(path: Path, offer_key: str) -> List[Tuple[datetime, Decimal]]:
     return [(parse_iso_datetime(checked_at).astimezone(), Decimal(price)) for checked_at, price in rows]
 
 
+def read_requests(path: Path, site: str, since: datetime) -> List[Tuple[datetime, int, str]]:
+    """(finished at, duration ms, outcome) of one site's network requests since a moment, oldest first."""
+    rows = _read(path, "SELECT at, duration_ms, outcome FROM requests WHERE site = ? AND at >= ? ORDER BY at, rowid",
+                 (site, _at(since)))
+    return [(parse_iso_datetime(at), int(ms), outcome) for at, ms, outcome in rows]
+
+
 @dataclass
 class Read:
     at: datetime

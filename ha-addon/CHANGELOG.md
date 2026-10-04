@@ -1,5 +1,17 @@
 # Değişiklik günlüğü
 
+## 3.5.1
+
+- Yeniden başlatma Amazon'un istek sayımını sıfırlamıyor: açılışta son 35
+  dakikanın istekleri (ve son 1 saatin istek/engel sayısı) veritabanından geri
+  yükleniyor. Önceden açılıştan hemen sonra gelen bir engel, yalnız açılıştan
+  beri sayılan istekleri (ör. 240 yerine 47) eşik olarak kaydediyordu.
+- "Amazon ölçüm" satırı artık uzun bir varyant turu sürerken de 10 dakikada bir
+  yazılıyor; önceden yalnız tur başında yazıldığı için 20 dakikayı aşan
+  boşluklar oluyordu.
+- Bekleme süreleri, engel kuralları, istek sınırının kuralları ve fiyat okuma
+  değişmedi.
+
 ## 3.5.0
 
 - Amazon'da Depo şeridi ayrıldı. Ürün sayfası ve ikinci el listesi okumaları artık
