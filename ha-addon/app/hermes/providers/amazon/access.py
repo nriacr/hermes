@@ -7,9 +7,11 @@ place that decides how fast requests may start:
   begins at 300 and rises by 5 % after every clean hour in which the window was
   really used (never above 500). The first block records the window count as the
   *threshold* and lowers the limit once to 85 % of it (never below 200); later
-  blocks only record the threshold. The main-page lane may exceed the limit by
-  20 %, so a full window never slows the Depo reads. The limit, threshold and
-  last raise survive restarts in `amazon_access.json`.
+  blocks only record the threshold. Two lanes share the window: the Depo lane
+  (main pages) may use all of it; the variant sweep may use all of it except the
+  part of the Depo lane's 28 % share that the Depo lane has not used yet, and it
+  steps aside while the Depo lane waits for a free slot. The limit, threshold
+  and last raise survive restarts in `amazon_access.json`.
 * After a site-wide block, and for a few minutes after every start, requests run
   at half speed (the minimum gap doubles).
 * A block is *site-wide* only when two different pages failed one after the
@@ -21,13 +23,14 @@ The pause itself (3 → 6 → 12 → 20 minutes) is the site-wide guard kept in
 """
 
 import math
+import threading
 import time
 from collections import deque
 from pathlib import Path
 from typing import Callable, Deque, Dict, List, Optional
 
 from ...constants import (
-    AMAZON_MAIN_LANE_RESERVE,
+    AMAZON_MAIN_LANE_SHARE,
     AMAZON_RECOVERY_SLOW_FACTOR,
     AMAZON_RECOVERY_SLOW_SECONDS,
     AMAZON_START_SLOW_SECONDS,
@@ -59,6 +62,9 @@ class AmazonAccess:
         self.wall = wall
         self.sleep = sleep
         self.starts: Deque[float] = deque()
+        # The starts of the Depo lane (a subset of `starts`) and how many of its threads wait for a slot.
+        self.main_starts: Deque[float] = deque()
+        self._main_waiting = 0
         self.limit = AMAZON_WINDOW_START_LIMIT
         self.threshold: Optional[int] = None
         # True once a block has lowered the limit; a later block never lowers it again.
@@ -78,6 +84,8 @@ class AmazonAccess:
         # Pages that failed one after the other since the last success.
         self.failed_run: List[str] = []
         self.last_block_scope: Optional[str] = None
+        # Two lane threads (Depo and sweep) share the window and the counters.
+        self._lock = threading.RLock()
         self._load()
 
     # -- persistence -----------------------------------------------------------
@@ -123,45 +131,65 @@ class AmazonAccess:
     def _prune(self, now: float) -> None:
         while self.starts and now - self.starts[0] >= AMAZON_WINDOW_SECONDS:
             self.starts.popleft()
+        while self.main_starts and now - self.main_starts[0] >= AMAZON_WINDOW_SECONDS:
+            self.main_starts.popleft()
 
     def window_count(self) -> int:
-        self._prune(self.clock())
-        return len(self.starts)
+        with self._lock:
+            self._prune(self.clock())
+            return len(self.starts)
 
     def limit_for(self, lane: str = "") -> int:
-        """The main-page lane (Depo reads) may exceed the limit by 20 %."""
+        """The Depo lane may use the whole window; the sweep all but the Depo share the Depo lane has not used."""
         if lane == MAIN_LANE:
-            return self.limit + math.ceil(self.limit * AMAZON_MAIN_LANE_RESERVE)
-        return self.limit
+            return self.limit
+        unused_share = max(0, math.ceil(round(self.limit * AMAZON_MAIN_LANE_SHARE, 6)) - len(self.main_starts))
+        return max(1, self.limit - unused_share)
 
     def rate_per_minute(self) -> float:
         now = self.clock()
-        recent = sum(1 for started in self.starts if now - started <= RATE_LOOKBACK_SECONDS)
+        with self._lock:
+            recent = sum(1 for started in self.starts if now - started <= RATE_LOOKBACK_SECONDS)
         return recent * 60.0 / RATE_LOOKBACK_SECONDS
 
     def wait_for_window(self, lane: str = "") -> float:
         """Wait until a request of this lane may start inside the window; returns the seconds waited."""
         waited = 0.0
-        while True:
-            now = self.clock()
-            self._prune(now)
-            limit = self.limit_for(lane)
-            if len(self.starts) < limit:
-                break
-            step = min(WINDOW_WAIT_STEP_SECONDS, max(0.05, self.starts[0] + AMAZON_WINDOW_SECONDS - now))
-            if now - self._last_wait_log >= 60:
-                self._last_wait_log = now
-                log(f"Amazon istek penceresi dolu ({len(self.starts)}/{limit}, son {AMAZON_WINDOW_SECONDS // 60} dk); "
-                    "yeni istek bekliyor.")
-            self.sleep(step)
-            waited += step
-        return waited
+        main = lane == MAIN_LANE
+        counted = False
+        try:
+            while True:
+                with self._lock:
+                    now = self.clock()
+                    self._prune(now)
+                    limit = self.limit_for(lane)
+                    # A sweep steps aside while the Depo lane waits, so freed slots go to the Depo lane first.
+                    if len(self.starts) < limit and (main or not self._main_waiting):
+                        return waited
+                    if main and not counted:
+                        self._main_waiting += 1
+                        counted = True
+                    step = min(WINDOW_WAIT_STEP_SECONDS,
+                               max(0.05, self.starts[0] + AMAZON_WINDOW_SECONDS - now) if self.starts else 0.05)
+                    if now - self._last_wait_log >= 60:
+                        self._last_wait_log = now
+                        log(f"Amazon istek penceresi dolu ({lane or 'tarama'} şeridi {len(self.starts)}/{limit}, "
+                            f"son {AMAZON_WINDOW_SECONDS // 60} dk); yeni istek bekliyor.")
+                self.sleep(step)
+                waited += step
+        finally:
+            if counted:
+                with self._lock:
+                    self._main_waiting -= 1
 
-    def request_started(self) -> None:
-        now = self.clock()
-        self.starts.append(now)
-        self.peak_since_raise = max(self.peak_since_raise, len(self.starts))
-        self._maybe_raise()
+    def request_started(self, lane: str = "") -> None:
+        with self._lock:
+            now = self.clock()
+            self.starts.append(now)
+            if lane == MAIN_LANE:
+                self.main_starts.append(now)
+            self.peak_since_raise = max(self.peak_since_raise, len(self.starts))
+            self._maybe_raise()
 
     def _maybe_raise(self) -> None:
         if self.limit >= AMAZON_WINDOW_MAX_LIMIT:
@@ -183,9 +211,14 @@ class AmazonAccess:
         return AMAZON_RECOVERY_SLOW_FACTOR if self.wall() < self.slow_until else 1.0
 
     def count(self, name: str, amount: int = 1) -> None:
-        self.counters[name] = self.counters.get(name, 0) + amount
+        with self._lock:
+            self.counters[name] = self.counters.get(name, 0) + amount
 
     def request_finished(self, blocked: bool, page: str = "") -> None:
+        with self._lock:
+            self._request_finished(blocked, page)
+
+    def _request_finished(self, blocked: bool, page: str = "") -> None:
         self.count("istek")
         now = self.wall()
         self.events.append((now, blocked))

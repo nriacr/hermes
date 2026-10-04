@@ -1,5 +1,20 @@
 # Değişiklik günlüğü
 
+## 3.5.0
+
+- Amazon'da Depo şeridi ayrıldı. Ürün sayfası ve ikinci el listesi okumaları artık
+  varyant taramasından bağımsız, kendi iş parçacığında dönüyor: uzun bir varyant
+  taraması sürerken bile her ürünün ana sayfası ~100 saniyede bir yeniden okunuyor.
+  Tarama kendi şeridinde kendi hızında sürüyor. Aynı kart aynı anda yalnız bir
+  şeritte okunur.
+- İki şerit tek istek bütçesini paylaşır: istekler tek tek ve Depo önce gider, kayan
+  pencere ortaktır (Depo hepsini kullanabilir, tarama Depo'nun henüz kullanmadığı
+  %28'lik payı hariç tutar ve Depo yer beklerken kenara çekilir), bir engel iki
+  şeridi de durdurur, karantina ve iki farklı sayfa kuralı aynen geçerlidir.
+- Depo şeridi her okumada sayfayı yeniden indirir; aynı turda taramanın daha önce
+  indirdiği sayfa ona asla önbellekten verilmez.
+- Ölçüm satırına ana sayfa aralığı (medyan/p90) ve şerit başına istek sayısı eklendi.
+
 ## 3.4.0
 
 İstatistik sayfası baştan tasarlandı.

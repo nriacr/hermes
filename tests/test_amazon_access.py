@@ -66,7 +66,7 @@ class WindowTests(unittest.TestCase):
         for _ in range(3):
             self.access.request_started()
             self.fake.advance(10)
-        waited = self.access.wait_for_window()
+        waited = self.access.wait_for_window(MAIN_LANE)
         # The oldest request started 30 s ago and leaves the 35-minute window after the rest.
         self.assertAlmostEqual(waited, AMAZON_WINDOW_SECONDS - 30, delta=5)
         self.assertLess(self.access.window_count(), 3)
@@ -203,16 +203,45 @@ class AdaptiveLimitTests(unittest.TestCase):
         self.fake.advance(2)
         self.assertEqual(self.access.gap_multiplier(), 1.0)
 
-    def test_the_main_lane_may_exceed_the_limit_by_20_percent(self):
-        self.access.limit = 10
-        self.assertEqual(self.access.limit_for(""), 10)
-        self.assertEqual(self.access.limit_for(MAIN_LANE), 12)
-        self.use_window(10)
-        self.assertEqual(self.access.wait_for_window(MAIN_LANE), 0.0)
-        self.access.request_started()
-        self.access.request_started()
-        waited = self.access.wait_for_window(MAIN_LANE)
-        self.assertGreater(waited, 0)  # 12 started: even the main lane waits now
+    def test_the_sweep_leaves_the_depo_lane_its_unused_share_of_the_window(self):
+        self.access.limit = 100
+        self.assertEqual(self.access.limit_for(MAIN_LANE), 100)
+        self.assertEqual(self.access.limit_for(""), 72)  # 28 % of the window is the Depo lane's, still unused
+        self.use_window(72)
+        self.assertEqual(self.access.wait_for_window(MAIN_LANE), 0.0)  # the Depo lane still has room
+        self.assertGreater(self.access.wait_for_window(""), 0)  # the sweep lane waits for the window to move
+
+    def test_a_depo_lane_that_used_its_share_leaves_the_rest_to_the_sweep(self):
+        self.access.limit = 100
+        for _ in range(28):
+            self.access.request_started(MAIN_LANE)
+        self.assertEqual(self.access.limit_for(""), 100)
+        self.use_window(50)
+        self.assertEqual(self.access.wait_for_window(""), 0.0)  # 78 of 100 started, no reserve left to keep back
+        # Part of the share used: only the rest is held back.
+        fresh = access_with(FakeTime())
+        fresh.limit = 100
+        for _ in range(10):
+            fresh.request_started(MAIN_LANE)
+        self.assertEqual(fresh.limit_for(""), 100 - 18)
+
+    def test_the_sweep_steps_aside_while_the_depo_lane_waits_for_a_slot(self):
+        waits = []
+        self.access.limit_for = lambda lane="": 100
+        self.access._main_waiting = 1
+
+        def sleep(seconds):
+            waits.append(seconds)
+            self.access._main_waiting = 0  # the Depo lane got its slot
+
+        self.access.sleep = sleep
+        self.assertGreater(self.access.wait_for_window(""), 0)
+        self.assertEqual(len(waits), 1)
+
+    def test_a_full_window_makes_the_depo_lane_wait_too(self):
+        self.access.limit = 100
+        self.use_window(100)
+        self.assertGreater(self.access.wait_for_window(MAIN_LANE), 0)
 
     def test_limit_threshold_and_slow_start_survive_a_restart(self):
         self.use_window(300)
@@ -326,3 +355,57 @@ class CookieJarTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LaneClientTests(unittest.TestCase):
+    def make_client(self):
+        fake = FakeTime()
+        spacing = RequestSpacing(0, sleep=fake.sleep, clock=fake.clock)
+        return AmazonClient(spacing=spacing, access=access_with(fake))
+
+    def test_the_lane_is_per_thread(self):
+        import threading
+
+        client = self.make_client()
+        seen = {}
+
+        def other():
+            seen["start"] = client.lane
+            client.lane = MAIN_LANE
+            seen["other"] = client.lane
+
+        client.lane = ""
+        worker = threading.Thread(target=other)
+        worker.start()
+        worker.join()
+        self.assertEqual((seen["start"], seen["other"], client.lane), ("", MAIN_LANE, ""))
+
+    def test_requests_of_two_lanes_never_overlap_and_are_counted_per_lane(self):
+        import threading
+        import time as real_time
+
+        client = self.make_client()
+        running, overlaps = [0], [0]
+        lock = threading.Lock()
+
+        def slow_read():
+            with lock:
+                running[0] += 1
+                overlaps[0] = max(overlaps[0], running[0])
+            real_time.sleep(0.02)
+            with lock:
+                running[0] -= 1
+            return "ok"
+
+        def lane_worker(lane):
+            client.lane = lane
+            for _ in range(5):
+                client._timed("curl", "https://www.amazon.com.tr/dp/B000000001", False, slow_read)
+
+        workers = [threading.Thread(target=lane_worker, args=(lane,)) for lane in (MAIN_LANE, "")]
+        for worker in workers:
+            worker.start()
+        for worker in workers:
+            worker.join()
+        self.assertEqual(overlaps[0], 1)
+        self.assertEqual((client.access.counters["istek_depo"], client.access.counters["istek_tarama"]), (5, 5))

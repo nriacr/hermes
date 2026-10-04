@@ -2,6 +2,7 @@
 
 import math
 import re
+import threading
 import time
 import zlib
 from collections import deque
@@ -13,6 +14,7 @@ from ...constants import (
     AMAZON_ACCESS_PATH,
     AMAZON_COOKIES_PATH,
     AMAZON_EXCLUDED_PAGE_REFRESH_SECONDS,
+    AMAZON_MAIN_GAPS_KEPT,
     AMAZON_MAIN_INTERVAL_SECONDS,
     AMAZON_PAGE_REPEAT_WINDOW_SECONDS,
     AMAZON_QUARANTINE_COUNT_RESET_SECONDS,
@@ -106,6 +108,7 @@ class AmazonProvider(Provider):
     alert_shows_seller = False
     backs_off_on_protection = True
     spaces_own_requests = True
+    has_depo_lane = True
 
     def __init__(self, client: Optional[AmazonClient] = None) -> None:
         self.client = client or AmazonClient(access=AmazonAccess(AMAZON_ACCESS_PATH), cookies_path=AMAZON_COOKIES_PATH)
@@ -114,15 +117,32 @@ class AmazonProvider(Provider):
         self.block_history: Dict[Tuple, Tuple[float, int]] = {}
         self.quarantined_until: Dict[Tuple, float] = {}
         self.read_seconds: Dict[str, Deque[float]] = {"ana": deque(maxlen=20), "tarama": deque(maxlen=20)}
+        # Watches being read right now (by either lane thread) and the gaps between main-page reads.
+        self._lane_local = threading.local()
+        self.busy: Dict[Tuple, float] = {}
+        self._busy_lock = threading.Lock()
+        self.main_gaps: Deque[Tuple[float, float]] = deque(maxlen=AMAZON_MAIN_GAPS_KEPT)
         self.begin_cycle()
 
     def begin_cycle(self) -> None:
         # Cycle-local caches: responses, parsed product pages and search detail
         # pages. Prices are never carried into the next cycle.
-        self.responses: Dict = {}
-        self.pages: Dict[str, dict] = {}
-        self.details: Dict[str, List[SearchResultItem]] = {}
+        self._cycle_caches = {"responses": {}, "pages": {}, "details": {}}
         self._log_measurements()
+
+    # The Depo lane reads the same main pages again and again inside one (long) cycle; each of its
+    # reads uses caches of its own, so it never gets a page the sweep fetched earlier.
+    @property
+    def responses(self) -> Dict:
+        return getattr(self._lane_local, "caches", None) or self._cycle_caches["responses"]
+
+    @property
+    def pages(self) -> Dict[str, dict]:
+        return (getattr(self._lane_local, "caches", None) or self._cycle_caches)["pages"]
+
+    @property
+    def details(self) -> Dict[str, List[SearchResultItem]]:
+        return (getattr(self._lane_local, "caches", None) or self._cycle_caches)["details"]
 
     def _log_measurements(self) -> None:
         access = self.client.access
@@ -134,7 +154,12 @@ class AmazonProvider(Provider):
             return f"{sum(values) / len(values):.0f} sn" if values else "-"
 
         counters = access.counters
-        log(f"Amazon ölçüm: {access.stats_line()} | ana sayfa okuması ort={mean('ana')} | "
+        recent = sorted(gap for at, gap in self.main_gaps if time.monotonic() - at < 30 * 60)
+        gaps = (f"{recent[len(recent) // 2]:.0f}/{recent[min(len(recent), math.ceil(len(recent) * 0.9)) - 1]:.0f} sn (n={len(recent)})"
+                if recent else "-")
+        log(f"Amazon ölçüm: {access.stats_line()} | ana sayfa aralığı medyan/p90={gaps} | "
+            f"istek: depo şeridi={counters.get('istek_depo', 0)}, tarama şeridi={counters.get('istek_tarama', 0)} | "
+            f"ana sayfa okuması ort={mean('ana')} | "
             f"varyant taraması ort={mean('tarama')} | depo: sayfa kontrolü={counters.get('depo_sayfa', 0)}, "
             f"ikinci el listesi={counters.get('depo_liste', 0)}, doğrulanan={counters.get('depo_dogrulanan', 0)} | "
             f"hariç nedeniyle atlanan istek={counters.get('hariç_atlanan', 0)}")
@@ -144,6 +169,26 @@ class AmazonProvider(Provider):
     @staticmethod
     def _rhythm_key(watch: WatchRule) -> Tuple:
         return (watch.url, watch.include_variations, watch.official_seller_only, tuple(watch.excluded_terms))
+
+    def next_read_is_main(self, watch: WatchRule) -> bool:
+        """A product watch whose variant family was swept recently needs only its main page now."""
+        rhythm = self.rhythms.get(self._rhythm_key(watch))
+        return (not self.is_search_url(watch.url) and watch.include_variations and rhythm is not None
+                and rhythm.sweep_at is not None and time.monotonic() - rhythm.sweep_at < AMAZON_SWEEP_INTERVAL_SECONDS)
+
+    def _is_busy(self, key: Tuple) -> bool:
+        with self._busy_lock:
+            started = self.busy.get(key)
+        # A read that never finished (an abandoned generator) stops counting after ten minutes.
+        return started is not None and time.monotonic() - started < 10 * 60
+
+    def _exclusive(self, key: Tuple, reads):
+        """A watch is read by one lane at a time: busy from the start of its read to its end."""
+        try:
+            yield from reads
+        finally:
+            with self._busy_lock:
+                self.busy.pop(key, None)
 
     def read_rank(self, watch: WatchRule) -> int:
         """Main-page reads (one request) go before variant sweeps (many requests)."""
@@ -179,7 +224,7 @@ class AmazonProvider(Provider):
     def read_due(self, watch: WatchRule) -> bool:
         """A product page is due again after the main interval, a search page after the sweep interval."""
         key = self._rhythm_key(watch)
-        if time.monotonic() < self.quarantined_until.get(key, 0):
+        if time.monotonic() < self.quarantined_until.get(key, 0) or self._is_busy(key):
             return False
         rhythm = self.rhythms.get(key)
         if rhythm is None or rhythm.main_at is None:
@@ -205,23 +250,37 @@ class AmazonProvider(Provider):
         return False
 
     def read(self, watch: WatchRule, ctx: ReadContext, outcome: WatchRead):
-        rhythm = self.rhythms.setdefault(self._rhythm_key(watch), WatchRhythm())
+        key = self._rhythm_key(watch)
+        rhythm = self.rhythms.setdefault(key, WatchRhythm())
         now = time.monotonic()
+        if rhythm.main_at is not None and now - rhythm.main_at < 15 * 60:
+            self.main_gaps.append((now, now - rhythm.main_at))
         rhythm.main_at = now
+        with self._busy_lock:
+            self.busy[key] = now
         if self.is_search_url(watch.url):
-            return self.read_search(watch, ctx, outcome)
+            try:
+                found = self.read_search(watch, ctx, outcome)
+            except BaseException:
+                with self._busy_lock:
+                    self.busy.pop(key, None)
+                raise
+            return self._exclusive(key, found)
         if (watch.include_variations and rhythm.sweep_at is not None
                 and now - rhythm.sweep_at < AMAZON_SWEEP_INTERVAL_SECONDS):
-            return self._in_lane(MAIN_LANE, self._read_main(watch, ctx, outcome, rhythm))
-        return self._read_sweep(watch, ctx, outcome, rhythm)
+            return self._exclusive(key, self._in_lane(MAIN_LANE, self._read_main(watch, ctx, outcome, rhythm)))
+        return self._exclusive(key, self._read_sweep(watch, ctx, outcome, rhythm))
 
     def _in_lane(self, lane: str, reads):
-        """Run a generator with the client's lane set (the Depo lane may exceed the window limit a little)."""
+        """Run a generator in a lane: the client counts its requests for that lane, and the Depo lane reads fresh pages."""
         self.client.lane = lane
+        if lane == MAIN_LANE:
+            self._lane_local.caches = {"responses": {}, "pages": {}, "details": {}}
         try:
             yield from reads
         finally:
             self.client.lane = ""
+            self._lane_local.caches = None
 
     def _read_sweep(self, watch: WatchRule, ctx: ReadContext, outcome: WatchRead, rhythm: WatchRhythm) -> Iterator[OfferResult]:
         """The whole variant family; what it finds becomes the memory the main reads replay."""

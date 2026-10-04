@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 
-APP_VERSION = "3.4.0"
+APP_VERSION = "3.5.0"
 
 # Persistent add-on data. File names are a public interface: 2.x releases read
 # the same files, so a rollback never loses history or notification state.
@@ -113,9 +113,14 @@ AMAZON_WINDOW_THRESHOLD_FACTOR = 0.85
 # 3.3.1: a block lowers the limit only once (never below 200) and the limit may rise again
 # after every clean hour. The first 3.3.0 night showed that blocks do not follow the request
 # count (one came at 0.2 requests/min), so a limit that fell with every block only starved
-# the site (300 -> 119). The main-page lane (Depo) may exceed the limit by 20 % so that a
-# full window never slows it down.
-AMAZON_MAIN_LANE_RESERVE = 0.2
+# the site (300 -> 119).
+# 3.5.0: the Depo lane (main pages with their used listings) reads on its own thread, apart
+# from the variant sweep, and shares the window and the pause with it. It may use the whole
+# window limit; the sweep lane may use all of it except the part of the Depo lane's 28 % share
+# that the Depo lane has not used yet.
+AMAZON_MAIN_LANE_SHARE = 0.28
+# How many gaps between two main-page reads the measurement line looks at.
+AMAZON_MAIN_GAPS_KEPT = 200
 # The whole site pauses only when two different pages fail one after the other. One page
 # that is blocked again and again rests alone: the first block only ends its read; from
 # the second block within 2 hours it rests 30 minutes, from the third 60 minutes.

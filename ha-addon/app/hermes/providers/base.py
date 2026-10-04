@@ -237,6 +237,14 @@ class Provider:
     def begin_cycle(self) -> None:
         """Forget per-cycle caches; prices are always read again next cycle."""
 
+    # The provider reads quick main-page reads on their own thread beside its long sweeps
+    # (the monitor then runs two lanes for the site).
+    has_depo_lane = False
+
+    def next_read_is_main(self, watch) -> bool:
+        """True when the watch's next read is a quick main-page read for the Depo lane."""
+        return False
+
     def absorb_block(self, watch) -> bool:
         """Called once per read of `watch` that ended in a block.
 

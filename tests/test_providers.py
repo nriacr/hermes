@@ -96,6 +96,69 @@ class AmazonRhythmTests(AmazonTestCase):
             with patch.object(amazon_reader.time, "monotonic", return_value=1000 + seconds):
                 self.assertEqual(self.provider.read_due(search), due)
 
+    def test_the_depo_lane_fetches_the_main_page_again_inside_the_same_cycle(self):
+        rule = watch(url=ROOT, target="100000", include_variations=True)
+        fetched = []
+
+        def http_read(url, _timeout, _expect_search):
+            fetched.append(url)
+            return priced("100,00", "iPhone Gümüş")
+
+        with patch.object(self.client, "_http_read", side_effect=http_read), \
+                patch.object(amazon_reader.time, "monotonic", return_value=1000):
+            list(self.provider.read(rule, context(), WatchRead()))  # the sweep
+            first = len(fetched)
+        with patch.object(self.client, "_http_read", side_effect=http_read), \
+                patch.object(amazon_reader.time, "monotonic", return_value=1100):
+            # The same cycle (no begin_cycle): a cached page of the sweep must not answer the Depo lane.
+            list(self.provider.read(rule, context(), WatchRead()))
+        self.assertEqual(len(fetched) - first, 1)
+        self.assertEqual(self.client.lane, "")
+        self.assertIsNone(getattr(self.provider._lane_local, "caches", None))
+
+    def test_a_watch_is_not_due_for_the_other_lane_while_it_is_being_read(self):
+        rule = watch(url=ROOT, include_variations=True)
+        with self.serve({ROOT: priced()}), patch.object(amazon_reader.time, "monotonic", return_value=1000):
+            reads = self.provider.read(rule, context(), WatchRead())
+            # Marked busy from the moment the read starts until it ends.
+            self.assertTrue(self.provider._is_busy(self.provider._rhythm_key(rule)))
+            self.assertFalse(self.provider.read_due(rule))
+            list(reads)
+            self.assertFalse(self.provider._is_busy(self.provider._rhythm_key(rule)))
+
+    def test_a_failed_search_read_does_not_leave_the_watch_busy(self):
+        rule = watch("Hue", "https://www.amazon.com.tr/s?k=hue")
+        with patch.object(self.provider, "read_search", side_effect=HermesError("x")):
+            with self.assertRaises(HermesError):
+                self.provider.read(rule, context(), WatchRead())
+        self.assertFalse(self.provider._is_busy(self.provider._rhythm_key(rule)))
+
+    def test_next_read_is_main_only_between_two_sweeps_of_a_family(self):
+        rule = watch(url=ROOT, include_variations=True)
+        self.assertFalse(self.provider.next_read_is_main(rule))
+        with self.serve({ROOT: priced()}), patch.object(amazon_reader.time, "monotonic", return_value=1000):
+            self.read(rule)
+            self.assertTrue(self.provider.next_read_is_main(rule))
+        with patch.object(amazon_reader.time, "monotonic", return_value=1270):
+            self.assertFalse(self.provider.next_read_is_main(rule))
+        self.assertFalse(self.provider.next_read_is_main(watch("Hue", "https://www.amazon.com.tr/s?k=hue")))
+        self.assertTrue(amazon_reader.AmazonProvider.has_depo_lane)
+
+    def test_the_gap_between_main_page_reads_goes_to_the_measurement_line(self):
+        rule = watch(url=ROOT, include_variations=True)
+        with self.serve({ROOT: priced()}):
+            for moment in (1000, 1100, 1210):
+                with patch.object(amazon_reader.time, "monotonic", return_value=moment):
+                    self.read(rule, fresh=False)
+        self.assertEqual([round(gap) for _at, gap in self.provider.main_gaps], [100, 110])
+        LOG_LINES.clear()
+        self.client.access._last_stats_log -= 601
+        with patch.object(amazon_reader.time, "monotonic", return_value=1300):
+            self.provider.begin_cycle()
+        line = next(line for line in LOG_LINES if "Amazon ölçüm:" in line)
+        self.assertIn("ana sayfa aralığı medyan/p90=110/110 sn (n=2)", line)
+        self.assertIn("istek: depo şeridi=", line)
+
     def test_main_reads_rank_before_sweeps(self):
         rule = watch(url=ROOT, include_variations=True)
         self.assertEqual(self.provider.read_rank(rule), 1)  # nothing remembered: a sweep is coming

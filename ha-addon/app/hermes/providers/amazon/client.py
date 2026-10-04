@@ -6,7 +6,9 @@ always reads prices from the server again.
 """
 
 import os
+import threading
 import time
+from contextlib import contextmanager
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Callable, Dict, Optional, Tuple
@@ -27,7 +29,7 @@ from ...storage import load_json, save_json
 from ...utils import canonical_amazon_product_url, extract_asin_from_url, normalize_offer_text, referer_for_url, repair_mojibake
 from ..base import RequestSpacing
 from ..http import cleaned_html, curl_requests, decode_response_text
-from .access import AmazonAccess
+from .access import MAIN_LANE, AmazonAccess
 from .browser import AmazonBrowser
 
 PROTECTION_MESSAGE = "Amazon bot koruması nedeniyle doğrulama (captcha) sayfası döndü."
@@ -250,8 +252,12 @@ class AmazonClient:
         self.browser = AmazonBrowser()
         # Request budget (window, slow start) and the cookie jar that survives restarts.
         self.access = access or AmazonAccess()
-        # "main" while the Depo lane (main page reads) is reading; it may exceed the window limit a little.
-        self.lane = ""
+        # Two lane threads read through this client: the Depo lane ("main") and the variant sweep ("").
+        # Requests go one at a time; the Depo lane goes first when both wait.
+        self._local = threading.local()
+        self._request_lock = threading.Lock()
+        self._main_waiting = 0
+        self._main_waiting_lock = threading.Lock()
         self.cookies_path = cookies_path
         self._cookies_saved_at = 0.0
         # Every network request (product, variant, listing, search detail,
@@ -263,6 +269,14 @@ class AmazonClient:
         # Variant pages a watch excludes by title: their neighbours (edges) are kept for a while
         # so the page itself is not requested every sweep. Process-wide, bounded.
         self.excluded_pages: dict = {}
+
+    @property
+    def lane(self) -> str:
+        return getattr(self._local, "lane", "")
+
+    @lane.setter
+    def lane(self, value: str) -> None:
+        self._local.lane = value
 
     def close(self) -> None:
         try:
@@ -308,13 +322,42 @@ class AmazonClient:
         return html
 
     def _timed(self, method: str, url: str, expect_search: bool, read, on_request=None):
-        self.access.wait_for_window(self.lane)
+        lane = self.lane
+        # The window is waited for before the request lock, so a full lane never holds the other one back.
+        self.access.wait_for_window(lane)
+        with self._turn(lane):
+            return self._timed_locked(method, url, expect_search, read, on_request, lane)
+
+    @contextmanager
+    def _turn(self, lane: str):
+        """One request at a time; the Depo lane goes before a waiting sweep."""
+        if lane == MAIN_LANE:
+            with self._main_waiting_lock:
+                self._main_waiting += 1
+            try:
+                self._request_lock.acquire()
+            finally:
+                with self._main_waiting_lock:
+                    self._main_waiting -= 1
+        else:
+            waited = 0.0
+            while self._main_waiting and waited < 10:
+                time.sleep(0.05)
+                waited += 0.05
+            self._request_lock.acquire()
+        try:
+            yield
+        finally:
+            self._request_lock.release()
+
+    def _timed_locked(self, method: str, url: str, expect_search: bool, read, on_request, lane: str):
         # Half speed after a block and right after a start: the gap doubles.
         self.spacing.min_gap_seconds = self.base_gap_seconds * self.access.gap_multiplier()
         waited = self.spacing.wait()
         if waited >= 0.05:
             log(f"Amazon istek aralığı için {waited:.1f} sn ek bekleme.")
-        self.access.request_started()
+        self.access.request_started(lane)
+        self.access.count("istek_depo" if lane == MAIN_LANE else "istek_tarama")
         started_at = time.monotonic()
         outcome = "ok"
         blocked = False
@@ -332,7 +375,8 @@ class AmazonClient:
                 self._save_cookies_soon()
             elapsed_ms = round((time.monotonic() - started_at) * 1000)
             kind = _request_type(url, expect_search)
-            log(f"Amazon isteği: yöntem={method} | tip={kind} | sonuç={outcome} | süre={elapsed_ms} ms | adres={_short_url(url)}")
+            log(f"Amazon isteği: yöntem={method} | tip={kind} | şerit={'depo' if lane == MAIN_LANE else 'tarama'} | "
+                f"sonuç={outcome} | süre={elapsed_ms} ms | adres={_short_url(url)}")
             if on_request is not None:
                 on_request(method, kind, outcome, elapsed_ms)
 

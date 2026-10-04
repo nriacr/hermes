@@ -144,8 +144,12 @@ card due immediately after the restart.
 3. Every site reads its due watches in its own queue (one thread per site),
    high → medium → low (inside a tier the provider's `read_rank` puts quick
    reads before long ones), with the configured random delay before each of its
-   requests. A slow or protected site never delays another; each site, Amazon
-   included, still has exactly one sequential queue. All changes to the
+   requests. A slow or protected site never delays another; each site has one
+   sequential queue, except Amazon (since 3.5): `Provider.has_depo_lane` gives it
+   a second thread, the Depo lane, beside its sweep queue. The lane repeats the
+   quick main-page reads (`next_read_is_main`) of the watches whose family was
+   swept recently, for as long as the sweep queue is busy, so a long variant
+   sweep never holds them back. A watch is read by one lane at a time (`busy`). All changes to the
    cycle's state, table and files are serialized under one lock; network reads
    and notifications happen outside it. On top of the delay, a minimum gap
    between request starts per site (`SITE_MIN_REQUEST_GAP_SECONDS`, measured
@@ -224,7 +228,14 @@ results" search notice is a normal stock row read again after five minutes.
   Depo checks and verified offers, skipped excluded pages).
 - Two rhythms per product watch (since 3.3, `WatchRhythm`): the configured page
   with its used listing (where Depo offers show) every 100 s, the variant
-  family every 270 s. Between sweeps the other variants' offers are replayed
+  family every 270 s. The two rhythms run in two lanes (since 3.5): the Depo
+  lane thread repeats the main reads, the sweep thread works through the due
+  families. Both go through one request lock (one request at a time, the Depo
+  lane first), one rolling window (the Depo lane may use all of it, the sweep
+  all but the Depo lane's still unused 28 % share, and the sweep steps aside
+  while the Depo lane waits for a slot) and one pause: a block on either lane
+  stops both. The Depo lane's reads use caches of their own, so they never get a
+  page the sweep fetched earlier in the same cycle. Between sweeps the other variants' offers are replayed
   from memory with `OfferResult.checked_at` (the time they were really read);
   the cycle shows them but adds no price point and no alert for them. Search
   watches follow the sweep interval.

@@ -37,6 +37,9 @@ from .state import offer_key as make_offer_key, watch_key as make_watch_key
 # An explicit "no results" notice is a normal answer; read it again at most every five minutes.
 NO_RESULTS_RECHECK_SECONDS = 5 * 60
 
+# How often the Depo lane looks for a main-page read that has become due.
+DEPO_LANE_POLL_SECONDS = 1.0
+
 
 @dataclass
 class DataFiles:
@@ -239,20 +242,29 @@ class Monitor:
         """Read every site's due watches in its own queue; True when stopped early.
 
         Each site keeps one sequential queue with its own request pacing, so a
-        slow or protected site never delays the others.
+        slow or protected site never delays the others. A provider with a Depo
+        lane (Amazon) gets a second thread beside its sweep queue: the lane
+        repeats the quick main-page reads of the watches whose next read is
+        one, for as long as the sweep queue is busy, so a long variant sweep
+        never holds them back. Both threads share the site's budget and pause.
         """
         watch_names = self._watch_names()
         stopped = threading.Event()
         failures: List[BaseException] = []
 
-        def work(site_watches: List[WatchRule]) -> None:
+        def context(session, site: str) -> ReadContext:
+            return ReadContext(timeout=self.config.request_timeout_seconds, session=session,
+                               pace=self._site_pace(site), watch_names=watch_names,
+                               measure=lambda method, kind, result, ms, site=site:
+                               self.history.record_request(site, method, kind, result, ms))
+
+        def work(site_watches: List[WatchRule], sweep_done: Optional[threading.Event] = None) -> None:
             try:
+                if not site_watches:
+                    return
+                site = site_watches[0].site
                 with requests.Session() as session:
-                    site = site_watches[0].site
-                    ctx = ReadContext(timeout=self.config.request_timeout_seconds, session=session,
-                                      pace=self._site_pace(site), watch_names=watch_names,
-                                      measure=lambda method, kind, result, ms, site=site:
-                                      self.history.record_request(site, method, kind, result, ms))
+                    ctx = context(session, site)
                     for watch in scheduling.priority_order(site_watches, self.providers[site].read_rank):
                         if self.should_stop():
                             stopped.set()
@@ -260,9 +272,44 @@ class Monitor:
                         self.check_watch(run, ctx, watch)
             except BaseException as exc:  # noqa: BLE001 - re-raised in the cycle's own thread
                 failures.append(exc)
+            finally:
+                if sweep_done is not None:
+                    sweep_done.set()
 
-        workers = [threading.Thread(target=work, args=(site_watches,), name=f"hermes-{site}", daemon=True)
-                   for site, site_watches in queues.items()]
+        def work_depo(site: str, site_watches: List[WatchRule], sweep_done: threading.Event) -> None:
+            provider = self.providers[site]
+            try:
+                with requests.Session() as session:
+                    ctx = context(session, site)
+                    while True:
+                        progressed = False
+                        for watch in scheduling.priority_order(site_watches, provider.read_rank):
+                            if self.should_stop():
+                                stopped.set()
+                                return
+                            if self._depo_lane_due(run, provider, watch):
+                                self.check_watch(run, ctx, watch)
+                                progressed = True
+                        if sweep_done.is_set():
+                            return
+                        if not progressed:
+                            sweep_done.wait(DEPO_LANE_POLL_SECONDS)
+            except BaseException as exc:  # noqa: BLE001 - re-raised in the cycle's own thread
+                failures.append(exc)
+
+        workers = []
+        for site, site_watches in queues.items():
+            provider = self.providers[site]
+            if provider.has_depo_lane:
+                quick = [watch for watch in site_watches if provider.next_read_is_main(watch)]
+                sweeps = [watch for watch in site_watches if watch not in quick]
+                sweep_done = threading.Event()
+                workers.append(threading.Thread(target=work, args=(sweeps, sweep_done), name=f"hermes-{site}-tarama", daemon=True))
+                workers.append(threading.Thread(target=work_depo, args=(site, site_watches, sweep_done), name=f"hermes-{site}-depo", daemon=True))
+                if not sweeps:
+                    sweep_done.set()
+            else:
+                workers.append(threading.Thread(target=work, args=(site_watches,), name=f"hermes-{site}", daemon=True))
         for worker in workers:
             worker.start()
         for worker in workers:
@@ -330,6 +377,16 @@ class Monitor:
         finally:
             self.history.record_read(watch.site, result, round((time.monotonic() - started_at) * 1000), key,
                                      scheduling.watch_priority(watch))
+
+    def _depo_lane_due(self, run: CycleRun, provider: Provider, watch: WatchRule) -> bool:
+        """True for a watch whose next read is a quick main-page read and whose rhythm and schedule say it is due."""
+        with self._lock:
+            if state_ops.guard_remaining_seconds(run.state, state_ops.site_guard_key(watch.site)) > 0:
+                return False
+            entry = run.state.get(make_watch_key(watch), {})
+            entry = entry if isinstance(entry, dict) else {}
+            due = scheduling.watch_check_due(watch, entry, self.config.interval_seconds)
+        return due and provider.next_read_is_main(watch) and provider.read_due(watch)
 
     def _guarded(self, run: CycleRun, watch: WatchRule, key: str, entry: Dict[str, Any], seller: str) -> bool:
         """True while the site is paused after a protection page; the watch keeps its last result."""
