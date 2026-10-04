@@ -262,14 +262,6 @@ class Provider:
         """True while one lane is reading the watch; the other lane waits."""
         return False
 
-    def absorb_block(self, watch) -> bool:
-        """Called once per read of `watch` that ended in a block.
-
-        True when the provider dealt with it itself (one stubborn page rests alone);
-        False when it is a site-wide block and the monitor pauses the whole site.
-        """
-        return False
-
     def read_rank(self, watch) -> int:
         """Order inside a priority tier: lower ranks are read first (quick reads before long ones)."""
         return 0

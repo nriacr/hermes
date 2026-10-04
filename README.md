@@ -11,10 +11,12 @@ takip add-on'udur.
   kontrol edilir. Tablodaki renkli daire önceliği gösterir.
 - Amazon: varyasyonlar (renk × kapasite/ölçü, en fazla 60), doğrulanmış Amazon
   Depo teklifleri ayrı satırlarda, "yalnızca platformun kendi satıcısı" filtresi,
-  iki farklı sayfa art arda engellenirse tüm Amazon 3 → 6 → 12 → 20 dakika mola
-  (tek yoklamayla), tek sayfa tek başına engellenirse yalnız o kart 30–60 dk
-  dinlenir; kayan pencere istek sınırı ve engelden sonra ilk saat yarım hız. Ürün sayfası ve ikinci el
-  listesi (Depo şeridi) her ~100 sn'de, varyant taraması kendi şeridinde ~270 sn'de bir okunur.
+  ilk engelde tüm Amazon 15 → 30 → 60 dakika mola verir (tek yoklamayla) ve
+  moladan sonra yeni bir anonim ziyaretçi olarak devam eder; kayan pencere istek
+  sınırı ve engelden sonra ilk saat yarım hız. Hedefe %15 yakın ya da Depo
+  teklifi olan kartların ürün sayfası ve ikinci el listesi (Depo şeridi) her
+  ~100 sn'de, diğerlerininki 10 dakikada bir; varyant taraması kendi şeridinde
+  ~270 sn'de bir okunur.
 - Bildirimler Pushover ile gelir; CAPTCHA ve HTTP 503 hataları bildirim
   göndermez, panelde görünür.
 - Telegram kanallarında keyword takibi ve Kayıtlı Mesajlar'dan hızlı takip

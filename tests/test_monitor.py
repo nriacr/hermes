@@ -275,7 +275,7 @@ class EmptyAndStockTests(CycleTestCase):
 class ProtectionGuardTests(CycleTestCase):
     SITE = state_ops.site_guard_key("amazon")
 
-    def test_guard_pauses_3_6_12_then_20_minutes_and_clears(self):
+    def test_guard_pauses_15_30_then_60_minutes_and_clears(self):
         state = {}
         error = BotProtectionHermesError("Amazon captcha")
         now = datetime(2026, 10, 1, 12, tzinfo=timezone.utc)
@@ -286,7 +286,7 @@ class ProtectionGuardTests(CycleTestCase):
                 waited.append(state_ops.guard_remaining_seconds(state, self.SITE))
                 self.assertEqual(state_ops.guard_remaining_seconds(state, "site:other"), 0)
             now += timedelta(seconds=waited[-1] + 1)
-        self.assertEqual(waited, [3 * 60, 6 * 60, 12 * 60, 20 * 60, 20 * 60])
+        self.assertEqual(waited, [15 * 60, 30 * 60, 60 * 60, 60 * 60, 60 * 60])
         state_ops.clear_guard(state, self.SITE)
         self.assertNotIn(self.SITE, state["_meta"]["amazon_protection"])
 
@@ -308,7 +308,7 @@ class ProtectionGuardTests(CycleTestCase):
             self.run_later(config([rule]), seconds=120)
         read.assert_called_once()
 
-    def test_a_page_that_fails_on_its_own_pauses_nobody_and_keeps_its_last_rows(self):
+    def test_one_blocked_page_pauses_the_whole_site_and_keeps_its_last_rows(self):
         first = watch("Bir", "https://www.amazon.com.tr/dp/B000000001", target="100000")
         second = watch("İki", "https://www.amazon.com.tr/dp/B000000002", target="100000")
         good = [OfferResult("Apple iPhone 17", Decimal("90000"), "Amazon.com.tr", first.url)]
@@ -320,20 +320,32 @@ class ProtectionGuardTests(CycleTestCase):
         with patch.object(AmazonProvider, "read", side_effect=amazon_read):
             self.run_cycle(config([first, second]))
         self.assertEqual(len(self.published_rows()), 2)
+        reads = []
 
         def amazon_read_blocked(rule, ctx, outcome):
+            reads.append(rule.name)
             if rule is first:
                 raise BotProtectionHermesError("Amazon captcha")
             return other
 
-        with (patch.object(AmazonProvider, "read", side_effect=amazon_read_blocked),
-              patch.object(AmazonProvider, "absorb_block", return_value=True)):
+        with patch.object(AmazonProvider, "read", side_effect=amazon_read_blocked):
             state = self.run_later(config([first, second]))
-        # No site pause; the blocked watch keeps its last price and the other one was read.
-        self.assertNotIn(self.SITE, state["_meta"].get("amazon_protection", {}))
+        # 3.6.0: a block marks the visitor, so the first block pauses all of Amazon; both keep their last rows.
+        self.assertEqual(reads, ["Bir"])
+        self.assertEqual(state_ops.guard_remaining_seconds(state, self.SITE) > 0, True)
         self.assertEqual(len(self.published_rows()), 2)
         self.assertIn("captcha", state[key(first)]["last_error"])
         self.assertTrue(state[key(first)]["offer_keys"])
+
+    def test_a_read_that_answers_during_the_pause_does_not_end_it(self):
+        state = {}
+        state_ops.note_guard(state, self.SITE, "Bir", BotProtectionHermesError("captcha"))
+        state_ops.clear_guard(state, self.SITE)
+        self.assertGreater(state_ops.guard_remaining_seconds(state, self.SITE), 0)
+        # Another block during the pause neither extends it nor climbs the ladder.
+        before = dict(state["_meta"]["amazon_protection"][self.SITE])
+        state_ops.note_guard(state, self.SITE, "İki", BotProtectionHermesError("captcha"))
+        self.assertEqual(state["_meta"]["amazon_protection"][self.SITE], before)
 
     def test_a_site_wide_block_keeps_the_blocked_watchs_last_rows_too(self):
         rule = watch("Bir", "https://www.amazon.com.tr/dp/B000000001", target="100000")
@@ -424,15 +436,18 @@ class DepoLaneTests(CycleTestCase):
 
     def setUp(self):
         super().setUp()
-        self.sweep_rule = watch("Tarama", "https://www.amazon.com.tr/dp/B000000002", target="100000", include_variations=True)
-        self.quick_rule = watch("Hızlı", "https://www.amazon.com.tr/dp/B000000003", target="100000", include_variations=True)
+        # Targets close to the pages' prices: both watches are hot and keep the quick main-page rhythm.
+        self.sweep_rule = watch("Tarama", "https://www.amazon.com.tr/dp/B000000002", target="110000", include_variations=True)
+        self.quick_rule = watch("Hızlı", "https://www.amazon.com.tr/dp/B000000003", target="110000", include_variations=True)
 
     def prepared_monitor(self):
         hermes_monitor = monitor(config([self.sweep_rule, self.quick_rule], interval_seconds=0), self.data, self.notify)
         provider = hermes_monitor.providers["amazon"]
         now = time.monotonic()
         # The quick watch was swept a moment ago and its main page is due again; the sweep watch was never swept.
-        provider.rhythms[provider._rhythm_key(self.quick_rule)] = WatchRhythm(main_at=now - 500, sweep_at=now - 10)
+        provider.rhythms[provider._rhythm_key(self.quick_rule)] = WatchRhythm(
+            main_at=now - 500, sweep_at=now - 10,
+            offers={self.quick_rule.url: [OfferResult("Hızlı", Decimal("110000"), url=self.quick_rule.url)]})
         return hermes_monitor, provider
 
     def test_main_pages_are_read_again_and_again_while_a_sweep_is_still_running(self):
@@ -512,7 +527,9 @@ class DepoLaneTests(CycleTestCase):
         hermes_monitor, provider = self.prepared_monitor()
         now = time.monotonic()
         # Read a moment ago: not due at the start of the cycle, due again 0.3 s later.
-        provider.rhythms[provider._rhythm_key(self.quick_rule)] = WatchRhythm(main_at=now - 0.1, sweep_at=now - 10)
+        provider.rhythms[provider._rhythm_key(self.quick_rule)] = WatchRhythm(
+            main_at=now - 0.1, sweep_at=now - 10,
+            offers={self.quick_rule.url: [OfferResult("Hızlı", Decimal("110000"), url=self.quick_rule.url)]})
         release = threading.Event()
         quick_reads = []
 

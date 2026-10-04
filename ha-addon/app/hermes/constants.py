@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 
-APP_VERSION = "3.5.2"
+APP_VERSION = "3.6.0"
 
 # Persistent add-on data. File names are a public interface: 2.x releases read
 # the same files, so a rollback never loses history or notification state.
@@ -93,7 +93,10 @@ PRIORITY_INTERVAL_SECONDS = {"medium": 2 * 60 * 60, "low": 6 * 60 * 60}
 # Measured 2026-10-03 (Pi logs, 1,147 requests): three unbroken runs at ~10.8
 # requests/min ran 32-36 minutes (347-395 requests) before the first block.
 # After a block the whole site pauses; each failed single probe climbs one step.
-PROTECTION_PAUSE_LADDER_SECONDS = (3 * 60, 6 * 60, 12 * 60, 20 * 60)
+# 3.6.0: the 2026-10-04 Pi log (3,130 requests, 60 blocks) showed that a block marks the
+# visitor, not the page: 43 of the 60 requests right after a block were blocked too. The
+# first block pauses all of Amazon, and the pause is long enough for the mark to cool down.
+PROTECTION_PAUSE_LADDER_SECONDS = (15 * 60, 30 * 60, 60 * 60)
 # After a block requests run at half speed (the minimum gap doubles) for an hour,
 # and for ten minutes after every start.
 AMAZON_RECOVERY_SLOW_SECONDS = 60 * 60
@@ -124,17 +127,18 @@ AMAZON_MAIN_LANE_SHARE = 0.28
 AMAZON_MAIN_LANE_FLOOR = 12
 # How many gaps between two main-page reads the measurement line looks at.
 AMAZON_MAIN_GAPS_KEPT = 200
-# The whole site pauses only when two different pages fail one after the other. One page
-# that is blocked again and again rests alone: the first block only ends its read; from
-# the second block within 2 hours it rests 30 minutes, from the third 60 minutes.
-AMAZON_PAGE_REPEAT_WINDOW_SECONDS = 2 * 60 * 60
-AMAZON_QUARANTINE_SECONDS = (30 * 60, 60 * 60)
-AMAZON_QUARANTINE_COUNT_RESET_SECONDS = 6 * 60 * 60
+# After a block the client itself sends nothing for this long, so a read already under way
+# in the other lane stops at its next request instead of collecting more blocks.
+AMAZON_BLOCK_HOLD_SECONDS = PROTECTION_PAUSE_LADDER_SECONDS[0]
 # Two reading rhythms per product watch: the configured page (with its used
 # listing, where Amazon Depo offers show up) every 100 s, and the variant
 # sweep every 270 s. A variant page that a watch excludes by title is read once
 # for its neighbours and then taken from memory for 30 minutes.
 AMAZON_MAIN_INTERVAL_SECONDS = 100
+# 3.6.0: only a watch with an offer close to its target (or a Depo offer) keeps the 100 s
+# rhythm; the others read their main page every 10 minutes.
+AMAZON_CALM_MAIN_INTERVAL_SECONDS = 10 * 60
+AMAZON_HOT_TARGET_FACTOR = 1.15
 AMAZON_SWEEP_INTERVAL_SECONDS = 270
 AMAZON_EXCLUDED_PAGE_REFRESH_SECONDS = 30 * 60
 AMAZON_STATS_LOG_SECONDS = 10 * 60

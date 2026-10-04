@@ -11,6 +11,7 @@ import requests
 from support import LOG_LINES, watch
 
 from hermes.errors import BotProtectionHermesError, EmptySearchResultsHermesError, HermesError, OutOfStockHermesError
+from hermes.constants import AMAZON_CALM_MAIN_INTERVAL_SECONDS, AMAZON_MAIN_INTERVAL_SECONDS
 from hermes.models import OfferResult, SearchResultItem
 from hermes.providers import amazon as amazon_reader
 from hermes.providers.amazon import AmazonProvider
@@ -339,67 +340,41 @@ class AmazonRhythmTests(AmazonTestCase):
         self.assertEqual(sum("Amazon ölçüm:" in line for line in LOG_LINES), 1)
 
 
-class AmazonBlockScopeTests(AmazonTestCase):
-    """A page that fails on its own rests alone; two different pages failing pause the site."""
+class AmazonMainRhythmTests(AmazonTestCase):
+    """3.6.0: only a watch close to its target (or with a Depo offer) keeps the quick main-page rhythm."""
 
-    def block(self, page, scope):
-        access = self.client.access
-        access.last_block_scope = scope
-        return self.provider.absorb_block(watch(url=page))
+    def due_after(self, rule, seconds):
+        with patch.object(amazon_reader.time, "monotonic", return_value=1000 + seconds):
+            return self.provider.read_due(rule)
 
-    def test_the_first_block_of_a_page_only_ends_its_read(self):
-        rule = watch(url=ROOT)
-        self.assertTrue(self.block(ROOT, "watch"))
-        self.assertTrue(self.provider.read_due(rule))
-        self.assertTrue(any("yalnız bu kart bu turda atlandı" in line for line in LOG_LINES))
+    def first_read(self, rule, price):
+        with self.serve({ROOT: priced(price)}), patch.object(amazon_reader.time, "monotonic", return_value=1000):
+            self.read(rule)
 
-    def test_repeated_blocks_of_one_page_rest_it_30_then_60_minutes(self):
-        rule = watch(url=ROOT)
-        with patch.object(amazon_reader.time, "monotonic", return_value=1000):
-            self.block(ROOT, "watch")
-            self.assertTrue(self.provider.read_due(rule))
-            self.block(ROOT, "watch")
-            self.assertFalse(self.provider.read_due(rule))
-        with patch.object(amazon_reader.time, "monotonic", return_value=1000 + 30 * 60 - 1):
-            self.assertFalse(self.provider.read_due(rule))
-        with patch.object(amazon_reader.time, "monotonic", return_value=1000 + 30 * 60):
-            self.assertTrue(self.provider.read_due(rule))
-            self.block(ROOT, "watch")
-            self.assertFalse(self.provider.read_due(rule))
-        with patch.object(amazon_reader.time, "monotonic", return_value=1000 + 30 * 60 + 60 * 60 - 1):
-            self.assertFalse(self.provider.read_due(rule))
-        with patch.object(amazon_reader.time, "monotonic", return_value=1000 + 30 * 60 + 60 * 60):
-            self.assertTrue(self.provider.read_due(rule))
+    def test_a_watch_near_its_target_is_read_again_after_100_seconds(self):
+        rule = watch(url=ROOT, target="1000")
+        self.first_read(rule, "1.100,00")  # 10 % above the target
+        self.assertFalse(self.due_after(rule, AMAZON_MAIN_INTERVAL_SECONDS - 1))
+        self.assertTrue(self.due_after(rule, AMAZON_MAIN_INTERVAL_SECONDS))
 
-    def test_other_pages_keep_reading_while_one_rests(self):
-        with patch.object(amazon_reader.time, "monotonic", return_value=1000):
-            self.block(ROOT, "watch")
-            self.block(ROOT, "watch")
-            self.assertTrue(self.provider.read_due(watch(url=CHILD)))
+    def test_a_watch_far_above_its_target_is_read_every_10_minutes(self):
+        rule = watch(url=ROOT, target="1000")
+        self.first_read(rule, "1.200,00")  # 20 % above the target
+        self.assertFalse(self.due_after(rule, AMAZON_MAIN_INTERVAL_SECONDS))
+        self.assertFalse(self.due_after(rule, AMAZON_CALM_MAIN_INTERVAL_SECONDS - 1))
+        self.assertTrue(self.due_after(rule, AMAZON_CALM_MAIN_INTERVAL_SECONDS))
 
-    def test_a_site_wide_block_is_left_to_the_monitor_and_quarantines_nobody(self):
-        rule = watch(url=ROOT)
-        self.assertFalse(self.block(ROOT, "site"))
-        self.assertFalse(self.block(ROOT, "site"))
-        self.assertTrue(self.provider.read_due(rule))
+    def test_a_depo_offer_keeps_the_quick_rhythm_whatever_its_price(self):
+        rule = watch(url=ROOT, target="10")
+        rhythm = amazon_reader.WatchRhythm(offers={ROOT: [OfferResult("iPhone", Decimal("900"), "Amazon Depo", ROOT, True)]})
+        self.assertTrue(self.provider.is_hot(rule, rhythm))
+        rhythm.offers[ROOT][0].is_warehouse = False
+        self.assertFalse(self.provider.is_hot(rule, rhythm))
 
-    def test_the_block_count_starts_over_after_six_hours(self):
-        rule = watch(url=ROOT)
-        with patch.object(amazon_reader.time, "monotonic", return_value=1000):
-            self.block(ROOT, "watch")
-        with patch.object(amazon_reader.time, "monotonic", return_value=1000 + 6 * 60 * 60 + 1):
-            self.block(ROOT, "watch")
-            self.assertTrue(self.provider.read_due(rule))
+    def test_a_watch_never_read_is_due_at_once(self):
+        self.assertTrue(self.provider.read_due(watch(url=ROOT)))
 
-    def test_a_recently_blocked_watch_is_read_after_the_others(self):
-        stubborn, fine = watch(url=ROOT, include_variations=True), watch(url=CHILD, include_variations=True)
-        self.client.access.last_block_scope = "watch"
-        with patch.object(amazon_reader.time, "monotonic", return_value=1000):
-            self.provider.absorb_block(stubborn)
-            self.assertGreater(self.provider.read_rank(stubborn), self.provider.read_rank(fine))
-        with patch.object(amazon_reader.time, "monotonic", return_value=1000 + 2 * 60 * 60 + 1):
-            self.assertEqual(self.provider.read_rank(stubborn), self.provider.read_rank(fine))
-
+class AmazonLaneTests(AmazonTestCase):
     def test_the_main_page_lane_is_set_only_while_it_reads(self):
         rule = watch(url=ROOT, target="100000", include_variations=True)
         lanes = []

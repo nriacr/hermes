@@ -13,6 +13,7 @@ import requests
 from support import LOG_LINES
 
 from hermes.constants import (
+    AMAZON_BLOCK_HOLD_SECONDS,
     AMAZON_RECOVERY_SLOW_SECONDS,
     AMAZON_START_SLOW_SECONDS,
     AMAZON_WINDOW_MAX_LIMIT,
@@ -20,6 +21,7 @@ from hermes.constants import (
     AMAZON_WINDOW_SECONDS,
     AMAZON_WINDOW_START_LIMIT,
 )
+from hermes.errors import BotProtectionHermesError
 from hermes.providers.amazon import client as amazon_client
 from hermes.providers.amazon.access import MAIN_LANE, AmazonAccess
 from hermes.providers.amazon.client import AmazonClient, load_cookies, save_cookies
@@ -91,7 +93,7 @@ class WindowTests(unittest.TestCase):
 
 
 def site_block(access):
-    """Two different pages failing one after the other: a site-wide block."""
+    """Since 3.6.0 every block is site-wide; a second page failing in the same wave changes nothing more."""
     access.request_finished(True, "B000000001")
     access.request_finished(True, "B000000002")
 
@@ -172,27 +174,37 @@ class AdaptiveLimitTests(unittest.TestCase):
         self.access.request_started()
         self.assertEqual(self.access.limit, 233)
 
-    def test_a_single_failing_page_is_a_watch_block_and_changes_nothing(self):
+    def test_a_single_failing_page_is_already_a_site_block(self):
+        # 2026-10-04: 43 of 60 requests right after a block were blocked too; the block marks the visitor.
         self.use_window(280)
         self.access.request_finished(True, "B000000001")
-        self.assertEqual(self.access.last_block_scope, "watch")
-        self.access.request_finished(True, "B000000001")  # the same page again, still on its own
-        self.assertEqual(self.access.last_block_scope, "watch")
-        self.assertEqual((self.access.limit, self.access.threshold, self.access.lowered), (300, None, False))
-        self.assertEqual(self.access.counters["sayfa_engeli"], 2)
-        self.assertEqual(self.access.gap_multiplier(), 2.0 if self.fake.now < self.access.slow_until else 1.0)
+        self.assertEqual((self.access.limit, self.access.threshold, self.access.lowered), (238, 280, True))
+        self.assertEqual(self.access.gap_multiplier(), 2.0)
+        self.assertEqual(self.access.last_block_at, self.fake.now)
 
-    def test_two_different_pages_failing_in_a_row_are_a_site_block(self):
+    def test_after_a_block_requests_are_held_back_for_the_first_pause_step(self):
+        self.assertEqual(self.access.hold_remaining(), 0)
         self.access.request_finished(True, "B000000001")
-        self.assertEqual(self.access.last_block_scope, "watch")
-        self.access.request_finished(True, "B000000002")
-        self.assertEqual(self.access.last_block_scope, "site")
+        self.assertEqual(self.access.hold_remaining(), AMAZON_BLOCK_HOLD_SECONDS)
+        self.fake.advance(AMAZON_BLOCK_HOLD_SECONDS)
+        self.assertEqual(self.access.hold_remaining(), 0)
 
-    def test_a_success_in_between_makes_the_next_failure_a_watch_block_again(self):
-        self.access.request_finished(True, "B000000001")
-        self.access.request_finished(False, "B000000002")
-        self.access.request_finished(True, "B000000003")
-        self.assertEqual(self.access.last_block_scope, "watch")
+    def test_each_wave_is_logged_once_with_its_cause_and_counted_for_the_day(self):
+        make_requests(self.access, self.fake, 5)
+        LOG_LINES.clear()
+        self.access.request_finished(True, "B000000001", "captcha_formu/http_200")
+        self.access.request_finished(True, "B000000002", "captcha_formu/http_200")  # the same wave
+        waves = [line for line in LOG_LINES if "engel dalgası" in line]
+        self.assertEqual(len(waves), 1)
+        self.assertIn("bugün #1 | sebep=captcha_formu/http_200 | sayfa=B000000001 | son 60 dk istek=5", waves[0])
+        self.access.request_finished(False, "B000000003")
+        self.fake.advance(90 * 60)
+        self.access.request_finished(True, "B000000004", "http_503")
+        self.assertEqual(self.access.waves_today(), 2)
+        last_wave = [line for line in LOG_LINES if "engel dalgası" in line][-1]
+        self.assertIn("bugün #2 | sebep=http_503", last_wave)
+        self.assertIn("önceki engelden beri=90 dk", last_wave)
+        self.assertIn("bugünkü engel dalgası=2", self.access.stats_line())
 
     def test_a_site_block_starts_an_hour_of_half_speed(self):
         self.fake.advance(AMAZON_START_SLOW_SECONDS + 1)
@@ -328,9 +340,70 @@ class ClientBudgetTests(unittest.TestCase):
             with AmazonClient(spacing=spacing, access=access) as client:
                 with self.assertRaises(Exception):
                     client.fetch("https://www.amazon.com.tr/dp/B000000001", 10)
-        # One page that fails on its own is a watch block; budget and pause are not touched.
-        self.assertEqual((access.counters["engel"], access.last_block_scope), (1, "watch"))
-        self.assertFalse(access.lowered)
+        # Every block is site-wide: the limit is lowered once and the wave is counted.
+        self.assertEqual((access.counters["engel"], access.waves_today()), (1, 1))
+        self.assertTrue(access.lowered)
+
+    def test_after_a_block_nothing_is_sent_until_the_hold_ends_then_a_new_visitor_starts(self):
+        fake = FakeTime()
+        access = access_with(fake)
+        spacing = RequestSpacing(0, sleep=fake.sleep, clock=fake.clock)
+        challenge = requests.Response()
+        challenge.status_code = 200
+        challenge._content = '<form action="/errors/validateCaptcha">Amazon</form>'.encode()
+        challenge.encoding = "utf-8"
+        product = requests.Response()
+        product.status_code = 200
+        product._content = b"<html>Amazon product</html>"
+        product.encoding = "utf-8"
+        answers = [challenge, product]
+        sessions = []
+
+        def new_session():
+            session = SimpleNamespace(cookies=requests.cookies.RequestsCookieJar(), sent=[], closed=False)
+            session.get = lambda url, **kwargs: (session.sent.append(url), answers.pop(0))[1]
+            session.close = lambda: setattr(session, "closed", True)
+            sessions.append(session)
+            return session
+
+        with patch.object(amazon_client, "curl_requests", SimpleNamespace(Session=new_session)):
+            with AmazonClient(spacing=spacing, access=access) as client:
+                with self.assertRaises(BotProtectionHermesError):
+                    client.fetch("https://www.amazon.com.tr/dp/B000000001", 10)
+                fake.advance(60)
+                with self.assertRaises(BotProtectionHermesError) as held:
+                    client.fetch("https://www.amazon.com.tr/dp/B000000002", 10)
+                self.assertEqual(held.exception.challenge_reason, "mola")
+                self.assertEqual((len(sessions), len(sessions[0].sent), access.counters["istek"]), (1, 1, 1))
+                fake.advance(AMAZON_BLOCK_HOLD_SECONDS)
+                client.fetch("https://www.amazon.com.tr/dp/B000000002", 10)
+        self.assertEqual(len(sessions), 2)
+        self.assertTrue(sessions[0].closed)
+        self.assertEqual(sessions[1].sent, ["https://www.amazon.com.tr/dp/B000000002"])
+
+    def test_headers_name_one_consistent_chrome_and_never_force_a_reload(self):
+        sent = {}
+
+        def get(url, **kwargs):
+            sent.update(kwargs)
+            page = requests.Response()
+            page.status_code = 200
+            page._content = b"<html>Amazon product</html>"
+            page.encoding = "utf-8"
+            return page
+
+        session = SimpleNamespace(cookies=requests.cookies.RequestsCookieJar(), get=get, close=lambda: None)
+        with patch.object(amazon_client, "curl_requests", SimpleNamespace(Session=lambda: session)):
+            with AmazonClient(spacing=RequestSpacing(0), access=access_with(FakeTime())) as client:
+                client.fetch("https://www.amazon.com.tr/dp/B000000001", 10)
+        headers = sent["headers"]
+        self.assertEqual(sent["impersonate"], f"chrome{amazon_client.CHROME_MAJOR}")
+        self.assertIn(f"Chrome/{amazon_client.CHROME_MAJOR}.0.0.0", headers["User-Agent"])
+        self.assertIn(f'v="{amazon_client.CHROME_MAJOR}"', headers["sec-ch-ua"])
+        self.assertIn("Linux", headers["User-Agent"])
+        self.assertEqual(headers["sec-ch-ua-platform"], '"Linux"')
+        for forbidden in ("Referer", "Cache-Control", "Pragma", "Accept-Encoding", "Sec-Fetch-Site", "Connection"):
+            self.assertNotIn(forbidden, headers)
 
 
 class CookieJarTests(unittest.TestCase):
@@ -361,6 +434,14 @@ class CookieJarTests(unittest.TestCase):
         self.path.write_text(json.dumps([{"name": "a", "value": "b", "domain": ".amazon.com.tr", "path": "/", "expires": 1}]),
                              encoding="utf-8")
         self.assertEqual(load_cookies(requests.Session(), self.path), 0)
+
+    def test_cookies_saved_before_the_last_block_are_left_behind(self):
+        session = requests.Session()
+        session.cookies.set("session-id", "marked", domain=".amazon.com.tr", path="/")
+        save_cookies(session, self.path)
+        saved_at = self.path.stat().st_mtime
+        self.assertEqual(load_cookies(requests.Session(), self.path, blocked_at=saved_at + 1), 0)
+        self.assertEqual(load_cookies(requests.Session(), self.path, blocked_at=saved_at - 60), 1)
 
     def test_missing_or_broken_file_restores_nothing(self):
         self.assertEqual(load_cookies(requests.Session(), self.path), 0)

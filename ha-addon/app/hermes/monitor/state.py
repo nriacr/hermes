@@ -210,7 +210,7 @@ def drop_watch_guards(state: Dict[str, Any]) -> None:
 
 
 def guard_cooldown_seconds(consecutive_blocks: int = 1) -> int:
-    """3 → 6 → 12 → 20 minutes; each failed probe climbs one step, a success starts over."""
+    """15 → 30 → 60 minutes; each failed probe climbs one step, a success starts over."""
     steps = PROTECTION_PAUSE_LADDER_SECONDS
     return steps[min(max(consecutive_blocks - 1, 0), len(steps) - 1)]
 
@@ -238,10 +238,16 @@ GUARD_LABELS = {
 
 
 def note_guard(state: Dict[str, Any], key: str, source: str, exc: BaseException, site_label: str = "Amazon") -> None:
-    """Pause the whole site after a protection page; repeated blocks climb the ladder."""
+    """Pause the whole site after a protection page; repeated blocks climb the ladder.
+
+    A block reported while the pause already runs (the other lane's read that was under way)
+    belongs to the same pause and neither extends it nor climbs the ladder.
+    """
     store = guard_store(state)
     now = local_now().astimezone(timezone.utc)
     previous = store.get(key)
+    if guard_remaining_seconds(state, key) > 0:
+        return
     previous_at = parse_iso_datetime(previous.get("blocked_at")) if isinstance(previous, dict) else None
     try:
         previous_count = int(previous.get("consecutive_blocks") or 1) if isinstance(previous, dict) else 1
@@ -262,5 +268,9 @@ def note_guard(state: Dict[str, Any], key: str, source: str, exc: BaseException,
 
 
 def clear_guard(state: Dict[str, Any], key: str, site_label: str = "Amazon") -> None:
+    """A success after the pause ends it. A read that began before the block and answered during
+    the pause (the other lane's) proves nothing about the visitor now and leaves the pause running."""
+    if guard_remaining_seconds(state, key) > 0:
+        return
     if guard_store(state).pop(key, None):
         log(f"{site_label} koruması sona erdi; normal tarama yeniden başladı.")

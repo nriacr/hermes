@@ -598,11 +598,9 @@ class Monitor:
         if not provider.backs_off_on_protection:
             return
         if outcome.blocked:
-            # A page that fails on its own rests alone (the provider quarantines it); only two
-            # different pages failing one after the other pause the whole site.
-            if not provider.absorb_block(watch):
-                state_ops.note_guard(run.state, state_ops.site_guard_key(watch.site), watch.name or watch.url,
-                                     outcome.blocked, seller)
+            # A block marks the visitor, not the page: the whole site pauses.
+            state_ops.note_guard(run.state, state_ops.site_guard_key(watch.site), watch.name or watch.url,
+                                 outcome.blocked, seller)
             run.state[key]["last_error"] = str(outcome.blocked)
             run.state[key]["amazon_partial_result"] = True
         else:
@@ -648,9 +646,8 @@ class Monitor:
         kept_after_block = provider.backs_off_on_protection and bool(outcome.blocked or provider.is_protection_error(exc))
         if provider.backs_off_on_protection:
             if outcome.blocked or provider.is_protection_error(exc):
-                if not provider.absorb_block(watch):
-                    state_ops.note_guard(run.state, state_ops.site_guard_key(watch.site), watch.name or watch.url,
-                                         access_error, seller)
+                state_ops.note_guard(run.state, state_ops.site_guard_key(watch.site), watch.name or watch.url,
+                                     access_error, seller)
             else:
                 # A recovery probe is consumed once even when access worked but found
                 # nothing; an old guard cannot keep bypassing the priority schedule.

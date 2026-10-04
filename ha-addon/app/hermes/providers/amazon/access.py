@@ -14,12 +14,14 @@ place that decides how fast requests may start:
   and last raise survive restarts in `amazon_access.json`.
 * After a site-wide block, and for a few minutes after every start, requests run
   at half speed (the minimum gap doubles).
-* A block is *site-wide* only when two different pages failed one after the
-  other; a single page that fails on its own is a *watch* block and leaves the
-  budget, the pause and the slow start alone.
+* Every block is site-wide (3.6.0): a block marks the visitor, not the page.
+  For `AMAZON_BLOCK_HOLD_SECONDS` after it the client sends nothing at all, so
+  a read already under way in the other lane does not collect more blocks.
+* Each block wave (the first block after a success) is logged with its cause
+  and the requests of the hour before it, and counted per day.
 
-The pause itself (3 → 6 → 12 → 20 minutes) is the site-wide guard kept in
-`state.json`; this module only measures, limits and classifies.
+The pause itself (15 → 30 → 60 minutes) is the site-wide guard kept in
+`state.json`; this module only measures, limits and holds requests back.
 """
 
 import math
@@ -27,9 +29,10 @@ import threading
 import time
 from collections import deque
 from pathlib import Path
-from typing import Callable, Deque, Dict, List, Optional
+from typing import Callable, Deque, Dict, Optional
 
 from ...constants import (
+    AMAZON_BLOCK_HOLD_SECONDS,
     AMAZON_MAIN_LANE_FLOOR,
     AMAZON_MAIN_LANE_SHARE,
     AMAZON_RECOVERY_SLOW_FACTOR,
@@ -47,7 +50,7 @@ from ...constants import (
 )
 from ...logging_utils import log
 from ...storage import load_json, save_json
-from ...utils import utc_now
+from ...utils import local_now, utc_now
 
 SCHEMA = 2
 RATE_LOOKBACK_SECONDS = 300
@@ -84,9 +87,9 @@ class AmazonAccess:
         self.counters: Dict[str, int] = {}
         # (wall time, blocked) of finished requests of the last hour, for the measurement line.
         self.events: Deque[tuple] = deque()
-        # Pages that failed one after the other since the last success.
-        self.failed_run: List[str] = []
-        self.last_block_scope: Optional[str] = None
+        # Block waves of the current local day: (date, count); survives restarts.
+        self.waves_day = ""
+        self.waves_count = 0
         # Two lane threads (Depo and sweep) share the window and the counters.
         self._lock = threading.RLock()
         self._load()
@@ -114,6 +117,8 @@ class AmazonAccess:
             last_block = stored.get("last_block_at")
             self.last_block_at = float(last_block) if last_block is not None else None
             self.slow_until = max(self.slow_until, float(stored.get("slow_until", 0)))
+            self.waves_day = str(stored.get("waves_day") or "")
+            self.waves_count = int(stored.get("waves_count") or 0)
         except (TypeError, ValueError):
             log(f"Amazon erişim bütçesi dosyası okunamadı, varsayılanlar kullanılacak: {self.path}")
 
@@ -124,7 +129,8 @@ class AmazonAccess:
             save_json(self.path, {
                 "schema": SCHEMA, "limit": self.limit, "threshold": self.threshold, "lowered": self.lowered,
                 "last_raise_at": self.last_raise_at, "last_block_at": self.last_block_at,
-                "slow_until": self.slow_until, "saved_at": utc_now(),
+                "slow_until": self.slow_until, "waves_day": self.waves_day, "waves_count": self.waves_count,
+                "saved_at": utc_now(),
             })
         except OSError as exc:
             log(f"Amazon erişim bütçesi kaydedilemedi: {exc}")
@@ -246,11 +252,21 @@ class AmazonAccess:
         with self._lock:
             self.counters[name] = self.counters.get(name, 0) + amount
 
-    def request_finished(self, blocked: bool, page: str = "") -> None:
+    def hold_remaining(self) -> float:
+        """Seconds the client still sends nothing after the last block."""
         with self._lock:
-            self._request_finished(blocked, page)
+            if self.last_block_at is None:
+                return 0.0
+            return max(0.0, self.last_block_at + AMAZON_BLOCK_HOLD_SECONDS - self.wall())
 
-    def _request_finished(self, blocked: bool, page: str = "") -> None:
+    def waves_today(self) -> int:
+        return self.waves_count if self.waves_day == local_now().date().isoformat() else 0
+
+    def request_finished(self, blocked: bool, page: str = "", cause: str = "") -> None:
+        with self._lock:
+            self._request_finished(blocked, page, cause)
+
+    def _request_finished(self, blocked: bool, page: str = "", cause: str = "") -> None:
         self.count("istek")
         now = self.wall()
         self.events.append((now, blocked))
@@ -258,17 +274,9 @@ class AmazonAccess:
             self.events.popleft()
         if not blocked:
             self.episode_open = False
-            self.failed_run.clear()
             return
         self.count("engel")
-        self.failed_run.append(page or "?")
-        if len(set(self.failed_run)) < 2:
-            # One page failed on its own: a watch block. Budget, pause and slow start stay as they are.
-            self.last_block_scope = "watch"
-            self.count("sayfa_engeli")
-            return
-        self.last_block_scope = "site"
-        self.failed_run.clear()
+        previous_block_at = self.last_block_at
         self.slow_until = max(self.slow_until, now + AMAZON_RECOVERY_SLOW_SECONDS)
         self.last_block_at = now
         # A clean hour is counted from the last site-wide block.
@@ -276,6 +284,7 @@ class AmazonAccess:
         self.peak_since_raise = 0
         if not self.episode_open:
             self.episode_open = True
+            self._log_wave(now, previous_block_at, page, cause)
             count = self.window_count()
             self.threshold = count
             rate = self.rate_per_minute()
@@ -290,6 +299,17 @@ class AmazonAccess:
                     f"eşik={count}; sınır {self.limit} olarak kalıyor (yalnız bir kez düşer).")
         self._save()
 
+    def _log_wave(self, now: float, previous_block_at: Optional[float], page: str, cause: str) -> None:
+        """One line per block wave: its cause, the hour before it and the calm time since the previous wave."""
+        today = local_now().date().isoformat()
+        if self.waves_day != today:
+            self.waves_day, self.waves_count = today, 0
+        self.waves_count += 1
+        last_hour = len(self.events) - 1
+        calm = f"{(now - previous_block_at) / 60:.0f} dk" if previous_block_at is not None else "-"
+        log(f"Amazon engel dalgası: bugün #{self.waves_count} | sebep={cause or '-'} | sayfa={page or '-'} | "
+            f"son 60 dk istek={last_hour} | önceki engelden beri={calm}")
+
     # -- measurement ---------------------------------------------------------------
 
     def stats_line(self) -> str:
@@ -297,7 +317,7 @@ class AmazonAccess:
         slow = max(0, round((self.slow_until - now_wall) / 60))
         last_hour = len(self.events)
         last_hour_blocks = sum(1 for _at, blocked in self.events if blocked)
-        return (f"son 60 dk: istek={last_hour}, engel={last_hour_blocks} | "
+        return (f"son 60 dk: istek={last_hour}, engel={last_hour_blocks} | bugünkü engel dalgası={self.waves_today()} | "
                 f"pencere={self.window_count()}/{self.limit} (tarama şeridi sınırı={self.limit_for('')}, "
                 f"depo şeridi son 35 dk={len(self.main_starts)}) | eşik={self.threshold if self.threshold is not None else '-'} | "
                 f"anlık={self.rate_per_minute():.1f} istek/dk | sınır={'bir kez düşürüldü' if self.lowered else 'hiç düşmedi'} | "

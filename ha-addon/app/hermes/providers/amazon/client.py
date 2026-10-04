@@ -3,6 +3,11 @@
 The client lives for the whole process so anonymous cookies and connections
 survive between cycles. Page caches are passed in per cycle; a later cycle
 always reads prices from the server again.
+
+It presents itself as one consistent browser (3.6.0): curl_cffi's own Chrome
+profile sets the TLS handshake and every header in Chrome's order; Hermes only
+says which language and platform it has. After a block it sends nothing for a
+while, and the first request after that starts a new anonymous visitor.
 """
 
 import os
@@ -18,21 +23,24 @@ import requests
 
 from ...constants import (
     AMAZON_COOKIE_MAX_AGE_SECONDS,
-    CHROME_CLIENT_HINTS,
-    CHROME_USER_AGENT,
     SITE_AMAZON,
     SITE_MIN_REQUEST_GAP_SECONDS,
 )
 from ...errors import BotProtectionHermesError, HermesError, error_status
 from ...logging_utils import log
 from ...storage import load_json, save_json
-from ...utils import canonical_amazon_product_url, extract_asin_from_url, normalize_offer_text, referer_for_url, repair_mojibake
+from ...utils import canonical_amazon_product_url, extract_asin_from_url, normalize_offer_text, repair_mojibake
 from ..base import RequestSpacing
 from ..http import cleaned_html, curl_requests, decode_response_text
 from .access import MAIN_LANE, AmazonAccess
 from .browser import AmazonBrowser
 
 PROTECTION_MESSAGE = "Amazon bot koruması nedeniyle doğrulama (captcha) sayfası döndü."
+HOLD_MESSAGE = "Amazon engelden sonra molada; istek gönderilmedi."
+# The Chrome release curl_cffi imitates (TLS, HTTP/2 and header order). The user agent and the
+# client hints below must name the same release; Linux matches the Pi's own network stack.
+IMPERSONATE = "chrome146"
+CHROME_MAJOR = "146"
 STABLE_PRODUCT_PARAMS = {"smid", "psc", "th"}
 SEARCH_PAGE_MARKERS = (
     'data-component-type="s-search-result"',
@@ -50,22 +58,18 @@ SEARCH_PAGE_MARKERS = (
 PageCache = Dict[Tuple[bool, str], str]
 
 
-def amazon_headers(url: str) -> Dict[str, str]:
+def amazon_headers() -> Dict[str, str]:
+    """Only what differs from curl_cffi's Chrome profile; it keeps each header in its Chrome position.
+
+    A page opened from a bookmark: no Referer, `Sec-Fetch-Site: none` (the profile's default),
+    and no forced reload (`Cache-Control`/`Pragma`), as a normal visit sends.
+    """
     return {
-        "User-Agent": CHROME_USER_AGENT,
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+        "sec-ch-ua": f'"Chromium";v="{CHROME_MAJOR}", "Not-A.Brand";v="24", "Google Chrome";v="{CHROME_MAJOR}"',
+        "sec-ch-ua-platform": '"Linux"',
+        "User-Agent": (f"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
+                       f"Chrome/{CHROME_MAJOR}.0.0.0 Safari/537.36"),
         "Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7",
-        "Accept-Encoding": "gzip, deflate, br",
-        "Cache-Control": "no-cache",
-        "Pragma": "no-cache",
-        "Connection": "keep-alive",
-        "Upgrade-Insecure-Requests": "1",
-        "Sec-Fetch-Dest": "document",
-        "Sec-Fetch-Mode": "navigate",
-        "Sec-Fetch-Site": "none",
-        "Sec-Fetch-User": "?1",
-        **CHROME_CLIENT_HINTS,
-        "Referer": referer_for_url(url),
     }
 
 
@@ -151,6 +155,13 @@ def is_protection_error(exc: BaseException) -> bool:
     return any(marker in message for marker in ("captcha", "robot", "bot korumasi", "koruma sayfasi"))
 
 
+def block_cause(exc: BaseException) -> str:
+    """What the block looked like, for the wave line: the challenge's marker or the HTTP status."""
+    status_code = error_status(exc) or getattr(exc, "http_status", None)
+    reason = getattr(exc, "challenge_reason", "") or ""
+    return "/".join(part for part in (reason, f"http_{status_code}" if status_code else "") if part) or "bot_korumasi"
+
+
 def block_reason(exc: BaseException) -> str:
     status_code = error_status(exc)
     if status_code:
@@ -199,12 +210,18 @@ def _cookie_jar(session):
     return getattr(cookies, "jar", cookies)
 
 
-def load_cookies(session, path: Optional[Path]) -> int:
-    """Put the saved anonymous cookies back, so a restart does not look like a new visitor."""
+def load_cookies(session, path: Optional[Path], blocked_at: Optional[float] = None) -> int:
+    """Put the saved anonymous cookies back, so a restart does not look like a new visitor.
+
+    Cookies saved before the last block belong to the visitor Amazon marked; they are left behind.
+    """
     if path is None:
         return 0
     try:
-        if time.time() - path.stat().st_mtime > AMAZON_COOKIE_MAX_AGE_SECONDS:
+        saved_at = path.stat().st_mtime
+        if time.time() - saved_at > AMAZON_COOKIE_MAX_AGE_SECONDS:
+            return 0
+        if blocked_at is not None and saved_at <= blocked_at:
             return 0
     except OSError:
         return 0
@@ -249,6 +266,8 @@ class AmazonClient:
         self.requests_session = requests.Session()
         _seed_session(self.requests_session)
         self.curl_session = None
+        # When the current anonymous visitor (curl session) began; a later block retires it.
+        self.identity_started_at = 0.0
         self.browser = AmazonBrowser()
         # Request budget (window, slow start) and the cookie jar that survives restarts.
         self.access = access or AmazonAccess()
@@ -297,9 +316,10 @@ class AmazonClient:
               on_request: Optional[Callable[[str, str, str, int], None]] = None) -> str:
         """Return the cleaned HTML of one Amazon page.
 
-        A challenge or HTTP 429/503 is terminal. Never reset cookies or multiply
-        requests through URL/transport variants after the server rejects a read.
-        Another failure gets at most one Chromium read of the same address.
+        A challenge or HTTP 429/503 is terminal, and for a while after it nothing
+        is sent at all. Never multiply requests through URL/transport variants
+        after the server rejects a read. Another failure gets at most one
+        Chromium read of the same address.
         `on_request` receives every network request: (method, kind, outcome, ms).
         """
         cache = {} if cache is None else cache
@@ -356,21 +376,28 @@ class AmazonClient:
         waited = self.spacing.wait()
         if waited >= 0.05:
             log(f"Amazon istek aralığı için {waited:.1f} sn ek bekleme.")
+        # Checked last, right before sending: a block may have come while this request waited its turn.
+        held = self.access.hold_remaining()
+        if held > 0:
+            log(f"Amazon engelden sonra molada ({held / 60:.0f} dk kaldı); istek gönderilmedi: {_short_url(url)}")
+            raise BotProtectionHermesError(HOLD_MESSAGE, challenge_reason="mola")
         self.access.request_started(lane)
         self.access.count("istek_depo" if lane == MAIN_LANE else "istek_tarama")
         started_at = time.monotonic()
         outcome = "ok"
         blocked = False
+        cause = ""
         try:
             return read()
         except Exception as exc:  # noqa: BLE001
             outcome = block_reason(exc)
             blocked = is_protection_error(exc)
             if blocked:
-                log(f"Amazon engeli: sebep={outcome} | yöntem={method} | adres={_short_url(url)}")
+                cause = block_cause(exc)
+                log(f"Amazon engeli: sebep={outcome} | tür={cause} | yöntem={method} | adres={_short_url(url)}")
             raise
         finally:
-            self.access.request_finished(blocked, extract_asin_from_url(url) or url)
+            self.access.request_finished(blocked, extract_asin_from_url(url) or url, cause)
             if outcome == "ok":
                 self._save_cookies_soon()
             elapsed_ms = round((time.monotonic() - started_at) * 1000)
@@ -382,17 +409,24 @@ class AmazonClient:
 
     def _http_read(self, url: str, timeout: int, expect_search: bool) -> str:
         if curl_requests is not None:
+            blocked_at = self.access.last_block_at
+            if self.curl_session is not None and blocked_at is not None and blocked_at >= self.identity_started_at:
+                # The visitor Amazon marked is retired once the hold is over; the next one starts clean.
+                self.curl_session.close()
+                self.curl_session = None
+                log("Amazon moladan sonra yeni bir anonim ziyaretçi olarak devam ediyor (eski çerezler bırakıldı).")
             if self.curl_session is None:
                 self.curl_session = curl_requests.Session()
+                self.identity_started_at = self.access.wall()
                 _seed_session(self.curl_session)
-                restored = load_cookies(self.curl_session, self.cookies_path)
+                restored = load_cookies(self.curl_session, self.cookies_path, blocked_at)
                 if restored:
                     log(f"Amazon çerezleri geri yüklendi: adet={restored}")
             response = self.curl_session.get(
-                url, headers=amazon_headers(url), timeout=timeout, allow_redirects=True, impersonate="chrome124"
+                url, headers=amazon_headers(), timeout=timeout, allow_redirects=True, impersonate=IMPERSONATE
             )
         else:
-            response = self.requests_session.get(url, headers=amazon_headers(url), timeout=timeout, allow_redirects=True)
+            response = self.requests_session.get(url, headers=amazon_headers(), timeout=timeout, allow_redirects=True)
         return checked_html(response, expect_search)
 
     def _save_cookies_soon(self) -> None:

@@ -8,17 +8,17 @@ import zlib
 from collections import deque
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from typing import Deque, Dict, Iterator, List, Optional, Tuple
 
 from ...constants import (
     AMAZON_ACCESS_PATH,
+    AMAZON_CALM_MAIN_INTERVAL_SECONDS,
     AMAZON_COOKIES_PATH,
     AMAZON_EXCLUDED_PAGE_REFRESH_SECONDS,
+    AMAZON_HOT_TARGET_FACTOR,
     AMAZON_MAIN_GAPS_KEPT,
     AMAZON_MAIN_INTERVAL_SECONDS,
-    AMAZON_PAGE_REPEAT_WINDOW_SECONDS,
-    AMAZON_QUARANTINE_COUNT_RESET_SECONDS,
-    AMAZON_QUARANTINE_SECONDS,
     AMAZON_SWEEP_INTERVAL_SECONDS,
     SITE_AMAZON,
 )
@@ -47,7 +47,9 @@ class WatchRhythm:
     """What the provider remembers of one product watch between cycles.
 
     The configured page (with its used listing, where Amazon Depo offers show
-    up) is read every AMAZON_MAIN_INTERVAL_SECONDS; the whole variant family
+    up) is read every AMAZON_MAIN_INTERVAL_SECONDS while the watch is *hot*
+    (an offer within AMAZON_HOT_TARGET_FACTOR of its target, or a Depo offer),
+    otherwise every AMAZON_CALM_MAIN_INTERVAL_SECONDS; the whole variant family
     every AMAZON_SWEEP_INTERVAL_SECONDS. Between sweeps the other variants'
     offers are replayed with the time they were really read.
     """
@@ -113,9 +115,6 @@ class AmazonProvider(Provider):
     def __init__(self, client: Optional[AmazonClient] = None) -> None:
         self.client = client or AmazonClient(access=AmazonAccess(AMAZON_ACCESS_PATH), cookies_path=AMAZON_COOKIES_PATH)
         self.rhythms: Dict[Tuple, WatchRhythm] = {}
-        # Per watch: when it was last blocked and how often within the last hours; and where it rests until.
-        self.block_history: Dict[Tuple, Tuple[float, int]] = {}
-        self.quarantined_until: Dict[Tuple, float] = {}
         self.read_seconds: Dict[str, Deque[float]] = {"ana": deque(maxlen=20), "tarama": deque(maxlen=20)}
         # Watches being read right now (by either lane thread) and the gaps between main-page reads.
         self._lane_local = threading.local()
@@ -215,41 +214,32 @@ class AmazonProvider(Provider):
 
     def read_rank(self, watch: WatchRule) -> int:
         """Quick reads go before variant sweeps (many requests)."""
-        key = self._rhythm_key(watch)
-        sweeping = self.needs_sweep(watch)
-        # A page that was blocked recently is read last, so after a pause the probe goes to a page that answers.
-        blocked_at = self.block_history.get(key, (None, 0))[0]
-        recently_blocked = blocked_at is not None and time.monotonic() - blocked_at < AMAZON_PAGE_REPEAT_WINDOW_SECONDS
-        return (1 if sweeping else 0) + (2 if recently_blocked else 0)
+        return 1 if self.needs_sweep(watch) else 0
 
-    def absorb_block(self, watch: WatchRule) -> bool:
-        """One stubborn page rests alone: its first block only ends its read, later ones quarantine it."""
-        key = self._rhythm_key(watch)
-        now = time.monotonic()
-        previous_at, count = self.block_history.get(key, (None, 0))
-        if previous_at is None or now - previous_at > AMAZON_QUARANTINE_COUNT_RESET_SECONDS:
-            count = 0
-        self.block_history[key] = (now, count + 1)
-        if self.client.access.last_block_scope != "watch":
-            return False
-        if count >= 1:
-            seconds = AMAZON_QUARANTINE_SECONDS[min(count - 1, len(AMAZON_QUARANTINE_SECONDS) - 1)]
-            self.quarantined_until[key] = now + seconds
-            log(f"Amazon kartı tek başına engelleniyor, {seconds // 60} dk dinlendirilecek: {log_cell(watch.name or watch.url, 80)}")
-        else:
-            log(f"Amazon kartı engellendi, diğer sayfalar yanıt veriyor; yalnız bu kart bu turda atlandı: "
-                f"{log_cell(watch.name or watch.url, 80)}")
-        return True
+    @staticmethod
+    def is_hot(watch: WatchRule, rhythm: WatchRhythm) -> bool:
+        """A watch worth the quick rhythm: a remembered offer is a Depo offer or close to the target.
+
+        A watch whose last read found no offer at all (sold out, no price) stays calm until one appears.
+        """
+        limit = watch.target_price * Decimal(str(AMAZON_HOT_TARGET_FACTOR))
+        return any(offer.is_warehouse or offer.price <= limit for offers in rhythm.offers.values() for offer in offers)
+
+    def main_interval(self, watch: WatchRule) -> int:
+        rhythm = self.rhythms.get(self._rhythm_key(watch))
+        if rhythm is None or self.is_hot(watch, rhythm):
+            return AMAZON_MAIN_INTERVAL_SECONDS
+        return AMAZON_CALM_MAIN_INTERVAL_SECONDS
 
     def read_due(self, watch: WatchRule) -> bool:
-        """A product page is due again after the main interval, a search page after the sweep interval."""
+        """A product page is due again after its main interval (quick or calm), a search page after the sweep interval."""
         key = self._rhythm_key(watch)
-        if time.monotonic() < self.quarantined_until.get(key, 0) or self._is_busy(key):
+        if self._is_busy(key):
             return False
         rhythm = self.rhythms.get(key)
         if rhythm is None or rhythm.main_at is None:
             return True
-        interval = AMAZON_SWEEP_INTERVAL_SECONDS if self.is_search_url(watch.url) else AMAZON_MAIN_INTERVAL_SECONDS
+        interval = AMAZON_SWEEP_INTERVAL_SECONDS if self.is_search_url(watch.url) else self.main_interval(watch)
         return time.monotonic() - rhythm.main_at >= interval
 
     def close(self) -> None:

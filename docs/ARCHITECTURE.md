@@ -195,28 +195,34 @@ results" search notice is a normal stock row read again after five minutes.
 ### Amazon (`providers/amazon/`)
 
 - `client.py`: one canonical request (curl with Chrome TLS, or requests). A
-  challenge page or HTTP 429/503 is terminal: no retry, no cookie reset, no
-  other transport. Any other failure gets exactly one Chromium read of the
-  same address. Sessions and cookies live for the whole process; pages are
-  cached only within a cycle.
+  challenge page or HTTP 429/503 is terminal: no retry, no other transport.
+  Any other failure gets exactly one Chromium read of the same address.
+  Sessions and cookies live for the whole process; pages are cached only
+  within a cycle. One consistent browser (since 3.6): curl_cffi's `chrome146`
+  profile sets TLS, HTTP/2 and every header in Chrome's order; Hermes only
+  overrides the language, the Linux platform and the matching Chrome 146 user
+  agent and client hints. No Referer (a bookmark visit, `Sec-Fetch-Site: none`)
+  and no forced reload. After a block the client sends nothing for
+  `AMAZON_BLOCK_HOLD_SECONDS` (15 minutes; a refused request raises a
+  `mola` protection error without touching the network), and the first request
+  after that closes the old session and starts a new anonymous visitor; cookies
+  saved before the last block are not restored after a restart.
 - `browser.py`: headless Chromium with the cache disabled, complete page load,
   the main document's own network status, and rejection of cached documents,
   late navigations and redirects to another ASIN.
 - Challenge detection looks at validation forms/inputs, a Robot Check title
   or explicit instructions; script text alone is not a challenge.
-- Protection back-off (since 3.3, scope since 3.3.1): the site pauses only when
-  two *different* pages fail one after the other (`AmazonAccess.failed_run`).
-  A page that fails on its own is a watch block: its read ends, the provider
-  notes it (`absorb_block`), the first block changes nothing else, from the second
-  block within 6 hours that watch rests 30 minutes and from the third 60 minutes
-  (`read_due` is false meanwhile) while every other watch keeps reading. A
-  recently blocked watch is ranked last (`read_rank`), so after a pause the
-  probe goes to a page that answers. A site-wide block pauses every Amazon
-  watch (3 → 6 → 12 → 20 minutes, `PROTECTION_PAUSE_LADDER_SECONDS`); the first
-  read after the pause is the single probe. A failed probe climbs one step, any
-  successful read clears the guard. The pause survives restarts (`state.json`).
-  A blocked watch keeps its last rows on the table (they carry their read
-  time). Guards of older versions (one per watch) are dropped at the first cycle.
+- Protection back-off (since 3.3; every block is site-wide since 3.6): the
+  2026-10-04 log showed that a block marks the visitor, not the page (43 of
+  the 60 requests right after a block were blocked too), so the first block
+  pauses every Amazon watch (15 → 30 → 60 minutes,
+  `PROTECTION_PAUSE_LADDER_SECONDS`); the first read after the pause is the
+  single probe. A failed probe climbs one step; a successful read after the
+  pause clears the guard. During the pause neither a further block (the other
+  lane's read that was under way) nor a success of a read that began before it
+  changes the guard. The pause survives restarts (`state.json`). A blocked
+  watch keeps its last rows on the table (they carry their read time). Guards
+  of older versions (one per watch) are dropped at the first cycle.
 - Request budget (`access.py`, since 3.3): a rolling 35-minute window caps how
   many requests may start. The limit begins at 300 and rises 5 % after every
   clean hour in which the window reached 80 % of it (never above 500). The first
@@ -233,10 +239,16 @@ results" search notice is a normal stock row read again after five minutes.
   `amazon_cookies.json`. Every ten minutes (checked at every fetch
   since 3.5.1, so also during a long sweep) the log gets one `Amazon ölçüm:`
   line (window, limit, threshold, requests/min, last-hour requests and blocks,
-  Depo checks and verified offers, skipped excluded pages).
+  the day's block waves, Depo checks and verified offers, skipped excluded
+  pages). Each block wave (the first block after a success) gets one
+  `Amazon engel dalgası:` line with its number of the day, its cause (challenge
+  marker and/or HTTP status), the page, the requests of the hour before it and
+  the calm time since the previous block; the day's count survives restarts.
 - Two rhythms per product watch (since 3.3, `WatchRhythm`): the configured page
-  with its used listing (where Depo offers show) every 100 s, the variant
-  family every 270 s. The two rhythms run in two lanes (since 3.5): the Depo
+  with its used listing (where Depo offers show) every 100 s while the watch is
+  hot (since 3.6: a remembered offer within 15 % of the target, or a Depo
+  offer; a watch never read counts as hot) and every 10 minutes otherwise
+  (`AmazonProvider.main_interval`), the variant family every 270 s. The two rhythms run in two lanes (since 3.5): the Depo
   lane thread repeats the main reads, the sweep thread works through the due
   families. Both go through one request lock (one request at a time, the Depo
   lane first), one rolling window (the Depo lane may use all of it; the sweep

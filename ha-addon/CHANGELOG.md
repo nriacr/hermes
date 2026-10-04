@@ -1,5 +1,27 @@
 # Değişiklik günlüğü
 
+## 3.6.0
+
+4 Ekim günlüğündeki 3.130 Amazon isteği ve 60 engel incelendi. Engel sayfaya değil
+ziyaretçiye konuyor: engelden hemen sonraki 60 isteğin 43'ü de engellendi. Bu sürüm
+bunun için Amazon'a daha az ve daha tutarlı gidiyor.
+
+- İlk engelde tüm Amazon mola veriyor (15 → 30 → 60 dakika). Önceden yalnız engellenen
+  kart dinleniyor, diğer kartlar okunmaya devam ettiği için bir dalgada 5–8 engel
+  toplanıyordu. Engelden sonra 15 dakika hiç istek gönderilmiyor; diğer şeritte süren
+  okuma da bir sonraki isteğinde duruyor. Mola sürerken gelen ikinci bir engel molayı
+  uzatmıyor, mola öncesi başlayıp mola sırasında yanıt alan bir okuma da molayı bitirmiyor.
+- Hermes kendini tek ve tutarlı bir tarayıcı olarak tanıtıyor: güncel Chrome 146 profili
+  (TLS ve başlık sırası), Linux, Türkçe. "Sayfayı zorla yenile" başlıkları ve çelişkili
+  "nereden geldim" bilgisi kaldırıldı.
+- Moladan sonra Amazon'a yeni bir anonim ziyaretçi olarak dönülüyor; işaretlenen
+  ziyaretçinin çerezleri bırakılıyor (yeniden başlatmada da geri yüklenmiyor).
+- Yalnız hedefe %15 yakın ya da Depo teklifi olan kartların ana sayfası ~100 saniyede bir
+  okunuyor; diğerlerininki 10 dakikada bir. Varyant taraması değişmedi (~270 sn).
+- Her engel dalgası için günlükte tek satır: günün kaçıncı dalgası, engel türü (captcha
+  formu, HTTP durumu), son 1 saatteki istek sayısı ve önceki engelden beri geçen süre.
+  Ölçüm satırı günün engel dalgası sayısını da gösteriyor.
+
 ## 3.5.2
 
 - Depo şeridi artık varyant taramasından gerçekten bağımsız. Taraması 270 saniyeden
