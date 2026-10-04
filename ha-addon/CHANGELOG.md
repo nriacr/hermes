@@ -1,5 +1,26 @@
 # Değişiklik günlüğü
 
+## 3.4.0
+
+İstatistik sayfası baştan tasarlandı.
+
+- Merkezdeki ölçü artık "kontrol sıklığı": yüksek öncelikli bir ürün tipik
+  olarak kaç dakikada bir okunuyor. Eski "çevrim süresi", site sıraları ve
+  öncelikler yüzünden 1 saniye ile 19 dakika arasında oynadığı için
+  kaldırıldı.
+- Üstte dört kutu: kontrol sıklığı, son tur, başarı oranı, engel ve hata.
+- Tek bir "Son 24 saat / Son 7 gün" düğmesi tüm sayfayı değiştiriyor.
+- Grafik: saat ya da gün başına bir çubuk; çubuğun üstünde o dilimdeki engel
+  ve hata sayısı.
+- Her site için bir kart: başarılı / engel / hata renk çubuğu, kontrol
+  sıklığı, okuma süresi, son okuma; Amazon'da ağ isteği dökümü.
+- Engel ve hata türleri tablosu: captcha, 503, 429, zaman aşımı, bağlantı
+  hatası, sayfa okunamadı, diğer; site başına sayı ve en son ne zaman
+  görüldüğü. Bunun için her okumada hata türü ve hangi kartın okunduğu da
+  kaydediliyor (önceki kayıtlarda bu bilgi boş).
+- Günlük geçmiş en altta, kapalı duruyor. Tek tek tur listesi kaldırıldı.
+- Telefonda kutular ikişerli, grafik yana kaydırılabiliyor.
+
 ## 3.3.1
 
 - Tek bir sayfanın engeli artık tüm Amazon'u durdurmuyor. Tüm Amazon yalnızca iki

@@ -9,10 +9,12 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from unittest.mock import patch
 
+import requests
+
 from support import LOG_LINES, TempData, config, key, monitor, notifier, watch
 
 from hermes import history as history_module
-from hermes.errors import BotProtectionHermesError, HttpStatusHermesError, OutOfStockHermesError
+from hermes.errors import BotProtectionHermesError, HttpStatusHermesError, OutOfStockHermesError, PriceUnavailableHermesError
 from hermes.history import History, read_cycles, read_prices, read_site_reads, read_site_requests
 from hermes.models import OfferResult
 from hermes.monitor import runner, scheduling, state as state_ops, summary
@@ -158,6 +160,19 @@ class MigrationTests(HistoryCase):
             self.history._lock.release()
 
 
+class SchemaUpgradeTests(HistoryCase):
+    def test_a_3_2_database_gains_watch_and_priority_columns(self):
+        with sqlite3.connect(self.data.files.database) as db:
+            db.execute("CREATE TABLE reads (at TEXT NOT NULL, site TEXT NOT NULL, outcome TEXT NOT NULL, duration_ms INTEGER NOT NULL)")
+            db.execute("INSERT INTO reads VALUES ('2026-10-03T20:00:00+00:00', 'amazon', 'ok', 1000)")
+        self.history.record_read("amazon", "timeout", 2000, "watch_x", "high")
+        rows = history_module.read_reads(self.data.files.database, datetime(2026, 1, 1, tzinfo=timezone.utc))
+        self.assertEqual([(row.outcome, row.watch_key, row.priority) for row in rows],
+                         [("ok", "", ""), ("timeout", "watch_x", "high")])
+        with sqlite3.connect(self.data.files.database) as db:
+            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], history_module.SCHEMA_VERSION)
+
+
 class WriteTests(HistoryCase):
     def test_price_points_are_recorded_only_on_change(self):
         for price in ("100", "100", "90", "90", "100"):
@@ -260,13 +275,16 @@ class MonitorHistoryTests(HistoryCase):
         rule = watch("iPhone", AMAZON, target="100")
         cfg = config([rule])
         outcomes = [BotProtectionHermesError("captcha"), HttpStatusHermesError(503, AMAZON),
-                    OutOfStockHermesError("Stokta yok"), RuntimeError("bozuk sayfa")]
+                    OutOfStockHermesError("Stokta yok"), RuntimeError("bozuk sayfa"), requests.ReadTimeout("yavaş"),
+                    requests.ConnectionError("bağlantı"), PriceUnavailableHermesError("fiyat yok")]
         for minutes, exc in enumerate(outcomes):
             def fail(_w, _ctx, _o, exc=exc):
                 raise exc
             # Each read starts after the previous guard (up to 60 min) has passed.
             self.run_later(cfg, fail, minutes * 70)
-        self.assertEqual(self.reads(), ["captcha", "http_503", "stock", "error"])
+        self.assertEqual(self.reads(), ["captcha", "http_503", "stock", "error", "timeout", "connection", "unreadable"])
+        with sqlite3.connect(self.data.files.database) as db:
+            self.assertEqual({row for row in db.execute("SELECT watch_key, priority FROM reads")}, {(key(rule), "high")})
 
     def test_amazon_requests_reach_the_database(self):
         rule = watch("iPhone", AMAZON, target="100")

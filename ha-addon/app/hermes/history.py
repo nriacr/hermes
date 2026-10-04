@@ -24,7 +24,7 @@ from .logging_utils import log
 from .storage import load_json
 from .utils import parse_iso_datetime
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS cycles (checked_at TEXT NOT NULL, duration_seconds REAL NOT NULL);
@@ -33,7 +33,10 @@ CREATE TABLE IF NOT EXISTS prices (
     offer_key TEXT NOT NULL, site TEXT NOT NULL, title TEXT NOT NULL, price TEXT NOT NULL, checked_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS prices_offer ON prices (offer_key, checked_at);
-CREATE TABLE IF NOT EXISTS reads (at TEXT NOT NULL, site TEXT NOT NULL, outcome TEXT NOT NULL, duration_ms INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS reads (
+    at TEXT NOT NULL, site TEXT NOT NULL, outcome TEXT NOT NULL, duration_ms INTEGER NOT NULL,
+    watch_key TEXT NOT NULL DEFAULT '', priority TEXT NOT NULL DEFAULT ''
+);
 CREATE INDEX IF NOT EXISTS reads_at ON reads (at);
 CREATE TABLE IF NOT EXISTS requests (
     at TEXT NOT NULL, site TEXT NOT NULL, method TEXT NOT NULL, kind TEXT NOT NULL, outcome TEXT NOT NULL,
@@ -94,6 +97,12 @@ class History:
             # last few rows but never corrupts the file.
             connection.execute("PRAGMA synchronous=NORMAL")
             connection.executescript(SCHEMA)
+            # Version 2 (3.4): which watch was read and its priority. Older rows
+            # keep empty values.
+            columns = {row[1] for row in connection.execute("PRAGMA table_info(reads)")}
+            for column in ("watch_key", "priority"):
+                if column not in columns:
+                    connection.execute(f"ALTER TABLE reads ADD COLUMN {column} TEXT NOT NULL DEFAULT ''")
             connection.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
             self._connection = connection
         return self._connection
@@ -145,9 +154,10 @@ class History:
             self._last_prune = time.monotonic()
         self._write("çevrim", statements)
 
-    def record_read(self, site: str, outcome: str, duration_ms: int) -> None:
-        """One watch read by the monitor: ok, empty, stock, captcha, http_<status> or error."""
-        self._write("okuma", [("INSERT INTO reads VALUES (?, ?, ?, ?)", (_at(), site, outcome, max(0, int(duration_ms))))])
+    def record_read(self, site: str, outcome: str, duration_ms: int, watch_key: str = "", priority: str = "") -> None:
+        """One watch read: ok, empty, stock, captcha, http_<status>, timeout, connection, unreadable or error."""
+        self._write("okuma", [("INSERT INTO reads (at, site, outcome, duration_ms, watch_key, priority) VALUES (?, ?, ?, ?, ?, ?)",
+                               (_at(), site, outcome, max(0, int(duration_ms)), watch_key, priority))])
 
     def record_request(self, site: str, method: str, kind: str, outcome: str, duration_ms: int) -> None:
         """One network request of a site that reports them (Amazon)."""
@@ -283,6 +293,23 @@ def read_cycles(path: Path, since: datetime, until: Optional[datetime] = None) -
 def read_prices(path: Path, offer_key: str) -> List[Tuple[datetime, Decimal]]:
     rows = _read(path, "SELECT checked_at, price FROM prices WHERE offer_key = ? ORDER BY checked_at, rowid", (offer_key,))
     return [(parse_iso_datetime(checked_at).astimezone(), Decimal(price)) for checked_at, price in rows]
+
+
+@dataclass
+class Read:
+    at: datetime
+    site: str
+    outcome: str
+    duration_ms: int
+    watch_key: str
+    priority: str
+
+
+def read_reads(path: Path, since: datetime) -> List[Read]:
+    rows = _read(path, "SELECT at, site, outcome, duration_ms, watch_key, priority FROM reads WHERE at >= ? ORDER BY at, rowid",
+                 (_at(since),))
+    return [Read(parse_iso_datetime(at).astimezone(), site, outcome, int(ms), key, priority)
+            for at, site, outcome, ms, key, priority in rows]
 
 
 @dataclass

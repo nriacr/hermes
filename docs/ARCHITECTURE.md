@@ -56,7 +56,7 @@ Hermes is a Home Assistant add-on running continuously on a Raspberry Pi. It:
 │       │   └── trendyol.py, network.py, beymenclub.py, bengurme.py,
 │       │       nordbron.py, zara.py, hm.py, size_availability.py
 │       ├── telegram/listener.py      # Channels + Saved Messages quick add
-│       └── web/                      # Router, pages, settings, link test, assets
+│       └── web/                      # Router, pages, statistics, settings, link test, assets
 ├── tests/                            # unittest suite (python -m unittest)
 └── tools/check.sh, tools/install_rpi.sh
 ```
@@ -107,8 +107,9 @@ actions. Never commit them.
 connection behind a lock, shared by the site queues; the panel reads through
 separate read-only connections. Tables: `cycles` (kept 90 days), `prices`
 (a point whenever an offer's price changes; kept, cleared by "Fiyat geçmişini
-sıfırla"), `reads` (each watch read: ok, empty, stock, captcha, http_<status>,
-error and its duration) and `requests` (each Amazon network request with
+sıfırla"), `reads` (each watch read: outcome ok, empty, stock, captcha,
+http_<status>, timeout, connection, unreadable or error, its duration, and
+since 3.4 the watch key and priority; older rows keep these two empty) and `requests` (each Amazon network request with
 method and outcome); measurements are kept 30 days. On first start the cycle
 durations of `cycle_history.json` and the min/max/last prices in `state.json`
 are copied in once (`meta.json_migrated_at`); the JSON files are not changed.
@@ -285,16 +286,22 @@ characters, `public_dashboard_enabled`, and is compared in constant time.
 Pages: summary (`/`), `statistics`, `link-test`, `settings`, `restarting`;
 actions: `test-pushover`, `reset-notifications`, `reset-price-history`,
 `settings/save`, `link-test`. Every page has the same navigation. The
-statistics page sends day summaries only; a day's cycles come from
-`statistics/day?d=YYYY-MM-DD` (`&part=1` for the JSON fragment `live.js`
-loads when the day is opened; the plain page is the no-JS fallback). Cycles
-that read no watch are not recorded, and such rows from before 3.2.2 were
-removed once (`meta.idle_cycles_dropped_at`). The page also shows per-site reads and Amazon requests (last 24 hours
-and 7 days) from `hermes.db`.
+statistics page (`web/statistics.py`, since 3.4) is built from the `reads`
+table around one number, the check frequency: the median time between two
+reads of the same high-priority watch (gaps over 6 hours are pauses, not the
+rhythm). One switch, `statistics?p=24h|7d`, drives the whole page: four tiles
+(check frequency, last cycle from the published summary, success rate,
+blocks and errors), a bar chart of the check frequency per hour or day with
+that slot's block/error count above the bar, one card per site (health bar
+ok/blocked/error, check frequency, typical read time, blocks, errors, last
+read, Amazon network requests), a table of block and error types per site
+with when each was last seen, and a collapsed 7-day daily history. Cycles
+that read no watch are not recorded (rows from before 3.2.2 were removed once,
+`meta.idle_cycles_dropped_at`); the `cycles` table is kept but not shown.
 
 The summary and statistics pages update in place: `live.js` fetches
-`live/dashboard` (every 15 seconds) or `live/statistics` (every 5 minutes;
-its chart is anchored to the minute) as JSON with the region's HTML while the
+`live/dashboard` (every 15 seconds) or `live/statistics?p=…` (every minute;
+anchored to the minute) as JSON with the region's HTML while the
 tab is visible and swaps only the live region, keeping open
 groups (`details[data-key]`) and the scroll position. The browser sends the
 version it shows (`v`); an unchanged block is answered with `{"same": true}`.

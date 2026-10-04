@@ -21,7 +21,7 @@ from ..constants import (
     STATE_PATH,
     SUMMARY_PATH,
 )
-from ..errors import BotProtectionHermesError, EmptySearchResultsHermesError, OutOfStockHermesError, error_status
+from ..errors import BotProtectionHermesError, EmptySearchResultsHermesError, HermesError, OutOfStockHermesError, error_status
 from ..history import History
 from ..homeassistant import HomeAssistantBridge
 from ..logging_utils import log
@@ -63,12 +63,20 @@ def skipped_offer_reason(watch: WatchRule, offer: OfferResult, display_name: str
 
 
 def read_outcome(provider: Provider, exc: BaseException) -> str:
-    """Measurement label of a failed read: captcha, http_<status> or error."""
+    """Measurement label of a failed read: captcha, http_<status>, timeout, connection, unreadable or error."""
     status = error_status(exc)
     if status:
         return f"http_{status}"
     if isinstance(exc, BotProtectionHermesError) or provider.is_protection_error(exc):
         return "captcha"
+    name = type(exc).__name__.lower()
+    if isinstance(exc, requests.Timeout) or "timeout" in name:
+        return "timeout"
+    if isinstance(exc, requests.ConnectionError) or "connection" in name:
+        return "connection"
+    if isinstance(exc, HermesError):
+        # Hermes reached the page but could not find a product or price on it.
+        return "unreadable"
     return "error"
 
 
@@ -320,7 +328,8 @@ class Monitor:
             with self._lock:
                 self._record_failure(run, provider, watch, key, entry, seller, outcome, exc)
         finally:
-            self.history.record_read(watch.site, result, round((time.monotonic() - started_at) * 1000))
+            self.history.record_read(watch.site, result, round((time.monotonic() - started_at) * 1000), key,
+                                     scheduling.watch_priority(watch))
 
     def _guarded(self, run: CycleRun, watch: WatchRule, key: str, entry: Dict[str, Any], seller: str) -> bool:
         """True while the site is paused after a protection page; the watch keeps its last result."""

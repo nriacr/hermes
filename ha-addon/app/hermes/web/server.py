@@ -20,18 +20,11 @@ from ..logging_utils import log
 from ..notifier import Pushover
 from ..utils import parse_bool
 from . import assets
-from .dashboard import (
-    cycle_day,
-    dashboard_live_html,
-    render_dashboard_page,
-    render_statistics_day_page,
-    render_statistics_page,
-    statistics_day_rows_html,
-    statistics_live_html,
-)
+from .dashboard import dashboard_live_html, render_dashboard_page
 from .icons import HERMES_ICON_PNG, HERMES_ICON_SVG, render_web_manifest
 from .link_test import render_link_test_page, render_link_test_result
 from .pages import link
+from .statistics import render_statistics_page, statistics_live_html
 from .settings import handle_settings_save, render_restart_page, render_settings_page, should_return_to_main
 
 PUBLIC_TOKEN_MIN_LENGTH = 24
@@ -131,7 +124,7 @@ ASSETS: Dict[str, Callable[[Request], Response]] = {
 
 
 LIVE_PARTS = {
-    "/live/dashboard": dashboard_live_html,
+    "/live/dashboard": lambda base, _params: dashboard_live_html(base),
     "/live/statistics": statistics_live_html,
 }
 
@@ -155,26 +148,19 @@ class Router:
         if path in LIVE_PARTS:
             # The fragment is shown on a top-level page, so its ingress links are relative to ".".
             page_base = request.base if request.base.startswith("/") else "."
-            html = LIVE_PARTS[path](page_base)
+            html = LIVE_PARTS[path](page_base, request.params)
             # The browser sends the version it shows; an unchanged block is not sent again
-            # (the statistics block is several megabytes).
+            # (keeps refreshes small while nothing changed).
             version = hashlib.sha256(html.encode("utf-8")).hexdigest()[:16]
             data = {"v": version, "same": True} if request.params.get("v", [""])[0] == version else {"v": version, "html": html}
             return Response(200, json.dumps(data, ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8")
-        if path == "/statistics/day":
-            day = cycle_day(request.params.get("d", [""])[0])
-            if request.params.get("part", [""])[0] == "1":
-                html = statistics_day_rows_html(day) if day else ""
-                return Response(200 if day else 404, json.dumps({"html": html}, ensure_ascii=False).encode("utf-8"),
-                                "application/json; charset=utf-8")
-            return Response(200 if day else 404, render_statistics_day_page(request.base, day), HTML)
         if path in ASSETS:
             response = ASSETS[path](request)
             response.headers["Cache-Control"] = "public, max-age=86400"
             return response
         pages = {
             "/": lambda: render_dashboard_page(request.base, request.params, self.runtime.config_error),
-            "/statistics": lambda: render_statistics_page(request.base),
+            "/statistics": lambda: render_statistics_page(request.base, request.params),
             "/settings": lambda: render_settings_page(request.base, request.params),
             "/link-test": lambda: render_link_test_page(request.base),
             "/restarting": lambda: render_restart_page(request.base, request.params),

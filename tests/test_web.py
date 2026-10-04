@@ -13,10 +13,12 @@ from support import TempData
 
 from hermes.config import prepare_watches
 from hermes.errors import EmptySearchResultsHermesError
+from hermes import history as history_module
 from hermes.history import History
 from hermes.models import OfferResult
 from hermes.utils import parse_decimal, utc_now
 from hermes.web import assets, dashboard, link_test, server, settings
+from hermes.web import statistics as statistics_page
 
 TOKEN = "t" * 32
 
@@ -51,7 +53,8 @@ class DataFilesMixin:
             patch("hermes.config.OPTIONS_PATH", self.options_path),
             patch.object(dashboard, "SUMMARY_PATH", self.data.files.summary),
             patch.object(dashboard, "STATE_PATH", self.data.files.state),
-            patch.object(dashboard, "DATABASE_PATH", self.data.files.database),
+            patch.object(statistics_page, "DATABASE_PATH", self.data.files.database),
+            patch.object(statistics_page, "SUMMARY_PATH", self.data.files.summary),
             patch.object(dashboard, "TELEGRAM_STATUS_PATH", root / "status.json"),
             patch.object(dashboard, "TELEGRAM_ERROR_EVENTS_PATH", root / "error_events.json"),
             patch.object(settings, "SUMMARY_PATH", self.data.files.summary),
@@ -149,7 +152,7 @@ class RouterTests(DataFilesMixin, unittest.TestCase):
         self.data.write_summary({"rows": [price_row(product_title="Canlı ürün")], "checked_at": "2026-10-03 20:00:00"})
         page = self.request("/").payload.decode()
         self.assertIn("data-live-url='./live/dashboard' data-live-interval='15'", page)
-        self.assertIn("data-live-interval='300'", self.request("/statistics").payload.decode())
+        self.assertIn("data-live-url='./live/statistics?p=24h' data-live-interval='60'", self.request("/statistics").payload.decode())
         self.assertIn("src='./live.js?v=", page)  # versioned, so a new release is never served from cache
         self.assertIn("<noscript><meta http-equiv='refresh' content='60'></noscript>", page)
         response = self.request("/live/dashboard")
@@ -157,7 +160,7 @@ class RouterTests(DataFilesMixin, unittest.TestCase):
         live = json.loads(response.payload)["html"]
         self.assertIn("Canlı ürün", live)
         self.assertNotIn("Bildirim Sıfırla", live)  # actions stay outside the refreshed block
-        self.assertIn("Günlük çevrim özeti", json.loads(self.request("/live/statistics").payload)["html"])
+        self.assertIn("Kontrol sıklığı", json.loads(self.request("/live/statistics").payload)["html"])
         self.write_options({"public_dashboard_enabled": True, "public_dashboard_token": TOKEN})
         public_page = self.request(f"/public/{TOKEN}/", public_only=True).payload.decode()
         self.assertIn(f"data-live-url='/public/{TOKEN}/live/dashboard'", public_page)
@@ -323,68 +326,6 @@ class DashboardTests(DataFilesMixin, unittest.TestCase):
         self.assertIn("125 dk önce", html)
         self.assertIn('data-label="Son güncelleme"', html)
 
-    def test_statistics_show_a_compact_daily_range_without_outliers(self):
-        same_day = datetime.now(timezone.utc).replace(hour=12, minute=0, second=0, microsecond=0)
-        cycles = History.at(self.data.files.database)
-        for m, d in ((0, 120), (1, 230), (2, 240), (3, 250), (4, 900)):
-            cycles.record_cycle(d, same_day - timedelta(days=1, minutes=m))
-        html = dashboard.render_statistics_page(".").decode()
-        self.assertIn("Son 7 gün · 5 çevrim", html)
-        self.assertIn('class="cycle-line"', html)
-        self.assertEqual(html.count('<details class="statistics-day"'), 1)
-        self.assertIn('<span class="statistics-day-typical"><strong>4:00</strong></span>', html)
-        self.assertIn("<span><strong>3:50–4:10</strong></span>", html)
-        self.assertIn('<span class="statistics-day-slow"><strong>1</strong></span>', html)
-        self.assertIn("En uzun <strong>15 dk 0 sn</strong>", html)
-
-    def test_statistics_list_days_and_load_cycles_on_demand(self):
-        router = server.Router(FakeRuntime())
-        self.request = lambda path: router.handle(server.split_request(path, "GET", b"", False))
-        store = History.at(self.data.files.database)
-        day = datetime.now().astimezone().replace(hour=12, minute=0, second=0, microsecond=0) - timedelta(days=1)
-        for minute, duration in ((0, 120), (1, 240)):
-            store.record_cycle(duration, day + timedelta(minutes=minute))
-        html = dashboard.render_statistics_page(".").decode()
-        self.assertNotIn("<td>12:01:00</td>", html)  # rows are not part of the page
-        day_url = f"./statistics/day?d={day.date().isoformat()}"
-        self.assertIn(f'data-day-url="{day_url}"', html)
-        self.assertIn(f'<a href="{day_url}">Tüm çevrimler</a>', html)
-
-        part = self.request(f"/statistics/day?d={day.date().isoformat()}&part=1")
-        rows = json.loads(part.payload)["html"]
-        self.assertLess(rows.index("<td>12:01:00</td><td>4 dk 0 sn</td>"), rows.index("<td>12:00:00</td>"))
-        page = self.request(f"/statistics/day?d={day.date().isoformat()}").payload.decode()
-        self.assertIn("<td>12:00:00</td><td>2 dk 0 sn</td>", page)
-        self.assertIn("İstatistiğe dön", page)
-        self.assertEqual(self.request("/statistics/day?d=bozuk").status, 404)
-        self.assertEqual(self.request("/statistics/day?d=bozuk&part=1").status, 404)
-        script = self.request("/live.js").payload.decode()
-        self.assertIn("data-day-url", script)
-        self.assertIn("part=1", script)
-
-    def test_cycle_chart_keeps_one_point_per_column(self):
-        now = datetime.now().astimezone()
-        points = [(now - timedelta(seconds=10 * i), 3.0 if i % 100 else 600.0) for i in range(5000)][::-1]
-        svg = dashboard.render_cycle_chart(points, now)
-        coordinates = svg.split('points="')[1].split('"')[0].split()
-        self.assertLessEqual(len(coordinates), 843)
-        # The slowest cycle of a column is the one drawn.
-        self.assertIn("40.0", {xy.split(",")[1] for xy in coordinates})
-
-    def test_statistics_show_site_measurements(self):
-        store = History.at(self.data.files.database)
-        self.assertIn("Henüz ölçüm yok.", dashboard.render_statistics_page(".").decode())
-        for outcome in ("ok", "ok", "captcha"):
-            store.record_read("amazon", outcome, 2000)
-        store.record_read("hepsiburada", "ok", 1500)
-        store.record_request("amazon", "curl", "ürün", "http_503", 300)
-        html = dashboard.render_statistics_page(".").decode()
-        self.assertIn("Site ölçümleri", html)
-        self.assertEqual(html.count("<td>Amazon</td><td>3</td><td>2</td><td class='measure-alert'>1</td>"), 2)
-        self.assertIn("<td>Hepsiburada</td><td>1</td><td>1</td><td class='zero'>0</td>", html)
-        self.assertIn("<td>2,0 sn</td>", html)
-        self.assertIn("<th>Captcha</th><th>503</th>", html)
-
     def test_telegram_notifications_are_listed(self):
         (self.data.root / "status.json").write_text(json.dumps({"recent_notifications": [
             {"keyword": "airpods", "channel": "@firsatz", "created_at": "2026-10-03 12:00:00", "message": "AirPods indirim",
@@ -392,6 +333,84 @@ class DashboardTests(DataFilesMixin, unittest.TestCase):
         html = dashboard.render_dashboard_page(".", {}).decode()
         self.assertIn("https://t.me/firsatz/1", html)
         self.assertIn("AirPods indirim", html)
+
+
+class StatisticsPageTests(DataFilesMixin, unittest.TestCase):
+    def setUp(self):
+        super().setUp()
+        self.store = History.at(self.data.files.database)
+        self.now = datetime.now().astimezone()
+        router = server.Router(FakeRuntime())
+        self.request = lambda path, public_only=False: router.handle(server.split_request(path, "GET", b"", public_only))
+
+    def read(self, minutes_ago, site="amazon", outcome="ok", key="w1", priority="high", ms=2000):
+        moment = self.now - timedelta(minutes=minutes_ago)
+        with patch.object(history_module, "_at", lambda value=None: moment.astimezone(timezone.utc).isoformat(timespec="seconds")):
+            self.store.record_read(site, outcome, ms, key, priority)
+
+    def page(self, period="24h"):
+        return self.request(f"/statistics?p={period}").payload.decode()
+
+    def test_empty_database_explains_itself(self):
+        html = self.page()
+        self.assertIn("henüz kontrol sıklığı ölçümü yok", html)
+        self.assertIn("Bu dönemde okuma yok.", html)
+        self.assertIn("Bu dönemde engel veya hata yok.", html)
+
+    def test_check_frequency_comes_from_gaps_between_reads_of_one_high_priority_watch(self):
+        for minutes in (30, 26, 22):  # every 4 minutes
+            self.read(minutes, key="iphone")
+        for minutes in (30, 10):  # a medium card does not count
+            self.read(minutes, key="kahve", priority="medium")
+        self.read(29, key="")  # rows from 3.3 and older have no watch
+        self.read(500, key="iphone")  # a 7-hour pause is not the rhythm
+        html = self.page()
+        tile = html.split("Kontrol sıklığı</span><strong>")[1].split("<")[0]
+        self.assertEqual(tile, "4 dk")
+        self.assertIn("class='check-bar'", html)
+
+    def test_sites_show_health_bar_and_error_types(self):
+        self.read(50)
+        self.read(40, outcome="captcha")
+        self.read(30, outcome="http_503")
+        self.read(20, outcome="timeout")
+        self.read(10, site="hepsiburada", outcome="unreadable", key="zeytin")
+        self.read(5, site="hepsiburada", key="zeytin", ms=30000)
+        self.store.record_request("amazon", "curl", "ürün", "bot_korumasi", 300)
+        html = self.page()
+        self.assertIn("<span>Başarı</span><strong>%33</strong>", html)
+        self.assertIn("<strong>4</strong><small>2 engel · 2 hata</small>", html)
+        amazon = html.split("<strong>Amazon</strong>")[1].split("</article>")[0]
+        self.assertIn("4 okuma · %25 başarılı", amazon)
+        self.assertIn("class='health-ok' style='flex-grow:1'", amazon)
+        self.assertIn("class='health-blocked' style='flex-grow:2'", amazon)
+        self.assertIn("1 ağ isteği · 1 captcha", amazon)
+        errors = html.split("Engel ve hata türleri")[1].split("</table>")[0]
+        for label in ("Captcha (bot koruması)", "503 · site meşgul", "Zaman aşımı", "Sayfa okunamadı"):
+            self.assertIn(f"<td>{label}</td>", errors)
+        self.assertLess(errors.index("Captcha"), errors.index("Zaman aşımı"))
+        self.assertIn("<th>Tür</th><th>Amazon</th><th>Hepsiburada</th><th>En son</th>", errors)
+
+    def test_period_switch_drives_the_whole_page(self):
+        self.read(3 * 24 * 60, outcome="captcha")
+        day = self.page("24h")
+        week = self.page("7d")
+        self.assertIn("Bu dönemde engel veya hata yok.", day)
+        self.assertIn("Captcha (bot koruması)", week)
+        self.assertIn("href='./statistics?p=7d' aria-current='page'", week)
+        self.assertIn("data-live-url='./live/statistics?p=7d'", week)
+        self.assertEqual(week.count("<rect class='check-bar'"), 0)
+        self.assertIn("Günlük geçmiş", day)
+        self.assertEqual(self.page("bozuk"), day)  # unknown periods fall back to 24 hours
+        self.write_options({"public_dashboard_enabled": True, "public_dashboard_token": TOKEN})
+        public = self.request(f"/public/{TOKEN}/statistics?p=7d", public_only=True).payload.decode()
+        self.assertIn(f"href='/public/{TOKEN}/statistics?p=24h'", public)
+        self.assertIn(f"data-live-url='/public/{TOKEN}/live/statistics?p=7d'", public)
+
+    def test_last_cycle_tile_uses_the_published_summary(self):
+        self.data.write_summary({"checked_at": (self.now - timedelta(minutes=3)).strftime("%Y-%m-%d %H:%M:%S"),
+                                 "cycle_duration_seconds": 270})
+        self.assertIn("<small>süresi 4 dk 30 sn</small>", self.page())
 
 
 class SettingsTests(DataFilesMixin, unittest.TestCase):
