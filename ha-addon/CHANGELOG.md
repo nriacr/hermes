@@ -1,5 +1,24 @@
 # Değişiklik günlüğü
 
+## 3.5.2
+
+- Depo şeridi artık varyant taramasından gerçekten bağımsız. Taraması 270 saniyeden
+  eski olan (tarama şeridi pencere sınırında bekliyor olsa bile) bir kartın ana
+  sayfasını da okuyor; eski varyantların fiyatlarını kendi hafızasından, gerçek okunma
+  zamanıyla gösteriyor. Varyantsız ürünlerin tüm sayfası da Depo şeridinde okunuyor.
+  Şerit, turun başında sırası gelmemiş kartlara da bakıyor; böylece uzun bir tur
+  boyunca da her kartın ana sayfası ~100 saniyede bir okunuyor (3.5.1'de 39 dakikada
+  yalnız 14 depo isteği vardı).
+- Depo payı artık boşuna ayrılmıyor: tarama şeridi, Depo'ya son 35 dakikada kullandığı
+  kadarını (en az 12 istek, en çok sınırın %28'i) bırakıyor. Eskiden Depo kullanmasa da
+  sınırın %28'i boş tutuluyor ve tarama şeridi 151/151'de bekliyordu.
+- Aynı turda yeniden okunan bir kart tablodaki eski satırlarının yerine geçiyor; eski,
+  daha düşük bir fiyat yeni okunan yüksek fiyatın önüne geçmiyor.
+- Erişim molasında yalnız Depo şeridinin okuduğu kartlar tablodan kaybolmuyor ve mola
+  satırı dakikada bir yazılmaya devam ediyor.
+- Ölçüm satırı tarama şeridinin sınırını ve Depo şeridinin son 35 dakikadaki istek
+  sayısını gösteriyor.
+
 ## 3.5.1
 
 - Yeniden başlatma Amazon'un istek sayımını sıfırlamıyor: açılışta son 35

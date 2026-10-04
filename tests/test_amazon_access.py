@@ -204,27 +204,42 @@ class AdaptiveLimitTests(unittest.TestCase):
         self.fake.advance(2)
         self.assertEqual(self.access.gap_multiplier(), 1.0)
 
-    def test_the_sweep_leaves_the_depo_lane_its_unused_share_of_the_window(self):
+    def test_the_sweep_leaves_the_depo_lane_only_the_floor_it_has_not_used_yet(self):
         self.access.limit = 100
         self.assertEqual(self.access.limit_for(MAIN_LANE), 100)
-        self.assertEqual(self.access.limit_for(""), 72)  # 28 % of the window is the Depo lane's, still unused
-        self.use_window(72)
+        # An idle Depo lane keeps only the floor (12 requests) back, not its whole 28 % share.
+        self.assertEqual(self.access.depo_reserve(), 12)
+        self.assertEqual(self.access.limit_for(""), 88)
+        self.use_window(88)
         self.assertEqual(self.access.wait_for_window(MAIN_LANE), 0.0)  # the Depo lane still has room
         self.assertGreater(self.access.wait_for_window(""), 0)  # the sweep lane waits for the window to move
 
-    def test_a_depo_lane_that_used_its_share_leaves_the_rest_to_the_sweep(self):
+    def test_the_depo_reserve_follows_its_real_use_up_to_the_share(self):
         self.access.limit = 100
-        for _ in range(28):
+        for used, reserve in ((5, 12), (12, 12), (20, 20), (28, 28), (60, 28)):
+            fresh = access_with(FakeTime())
+            fresh.limit = 100
+            for _ in range(used):
+                fresh.request_started(MAIN_LANE)
+            self.assertEqual(fresh.depo_reserve(), reserve, used)
+            # What the sweep may still use: the window minus the part of the reserve not used yet.
+            self.assertEqual(fresh.limit_for(""), 100 - max(0, reserve - used), used)
+
+    def test_a_depo_lane_that_used_more_than_the_floor_leaves_the_sweep_the_rest(self):
+        self.access.limit = 100
+        for _ in range(20):
             self.access.request_started(MAIN_LANE)
         self.assertEqual(self.access.limit_for(""), 100)
         self.use_window(50)
-        self.assertEqual(self.access.wait_for_window(""), 0.0)  # 78 of 100 started, no reserve left to keep back
-        # Part of the share used: only the rest is held back.
-        fresh = access_with(FakeTime())
-        fresh.limit = 100
-        for _ in range(10):
-            fresh.request_started(MAIN_LANE)
-        self.assertEqual(fresh.limit_for(""), 100 - 18)
+        self.assertEqual(self.access.wait_for_window(""), 0.0)  # 70 of 100 started
+
+    def test_the_measurement_line_names_the_sweep_limit_and_the_depo_use(self):
+        self.access.limit = 210
+        for _ in range(5):
+            self.access.request_started(MAIN_LANE)
+        line = self.access.stats_line()
+        self.assertIn("tarama şeridi sınırı=203", line)
+        self.assertIn("depo şeridi son 35 dk=5", line)
 
     def test_the_sweep_steps_aside_while_the_depo_lane_waits_for_a_slot(self):
         waits = []
@@ -445,11 +460,12 @@ class RestoreTests(unittest.TestCase):
         self.assertEqual(self.access.threshold, 151)  # not 1: the requests before the restart count
 
     def test_a_restored_full_window_makes_the_sweep_wait_as_without_a_restart(self):
-        self.access.restore([self.finished(seconds * 8) for seconds in range(240)])
+        self.access.restore([self.finished(seconds * 6) for seconds in range(300)])
         before = self.fake.now
         self.access.wait_for_window()
         self.assertGreater(self.fake.now, before)
         self.assertLess(self.access.window_count(), self.access.limit_for(""))
+        self.assertEqual(self.access.limit_for(""), self.access.limit - self.access.depo_reserve())
 
     def test_nothing_to_restore_changes_nothing(self):
         self.access.restore([])

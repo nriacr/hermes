@@ -18,7 +18,7 @@ from hermes.providers.amazon import parser as amazon_parser
 from hermes.providers.amazon.access import MAIN_LANE
 from hermes.providers.amazon.client import AmazonClient
 from hermes.providers.amazon.search import AmazonSearchCandidate
-from hermes.providers.base import ReadContext, WatchRead
+from hermes.providers.base import DEPO_LANE, ReadContext, WatchRead
 from hermes.providers.bengurme import fetch_bengurme_page
 from hermes.providers.beymenclub import fetch_beymenclub_page, fetch_beymenclub_size_summary
 from hermes.providers.hepsiburada import HepsiburadaProvider, is_challenge_page as hepsiburada_challenge
@@ -36,8 +36,8 @@ def priced(price: str = "100,00", title: str = "iPhone") -> str:
             f'<span class="a-offscreen">{price} TL</span></span></div>')
 
 
-def context(watch_names=None) -> ReadContext:
-    return ReadContext(timeout=10, session=requests.Session(), pace=Mock(), watch_names=watch_names or {})
+def context(watch_names=None, lane: str = "") -> ReadContext:
+    return ReadContext(timeout=10, session=requests.Session(), pace=Mock(), watch_names=watch_names or {}, lane=lane)
 
 
 class AmazonTestCase(unittest.TestCase):
@@ -61,7 +61,7 @@ class AmazonTestCase(unittest.TestCase):
 
         return patch.object(self.provider, "fetch", side_effect=fetch)
 
-    def read(self, rule, outcome=None, ctx=None, fresh=True):
+    def read(self, rule, outcome=None, ctx=None, fresh=True, lane=""):
         """One read; by default as the first read of a watch (a full sweep, nothing remembered).
 
         `fresh=False` is the next cycle: page caches are dropped, the rhythm memory stays.
@@ -70,7 +70,7 @@ class AmazonTestCase(unittest.TestCase):
             self.provider.rhythms.clear()
         else:
             self.provider.begin_cycle()
-        return list(self.provider.read(rule, ctx or context(), outcome or WatchRead()))
+        return list(self.provider.read(rule, ctx or context(lane=lane), outcome or WatchRead()))
 
 
 class AmazonRhythmTests(AmazonTestCase):
@@ -111,7 +111,7 @@ class AmazonRhythmTests(AmazonTestCase):
         with patch.object(self.client, "_http_read", side_effect=http_read), \
                 patch.object(amazon_reader.time, "monotonic", return_value=1100):
             # The same cycle (no begin_cycle): a cached page of the sweep must not answer the Depo lane.
-            list(self.provider.read(rule, context(), WatchRead()))
+            list(self.provider.read(rule, context(lane=DEPO_LANE), WatchRead()))
         self.assertEqual(len(fetched) - first, 1)
         self.assertEqual(self.client.lane, "")
         self.assertIsNone(getattr(self.provider._lane_local, "caches", None))
@@ -133,16 +133,63 @@ class AmazonRhythmTests(AmazonTestCase):
                 self.provider.read(rule, context(), WatchRead())
         self.assertFalse(self.provider._is_busy(self.provider._rhythm_key(rule)))
 
-    def test_next_read_is_main_only_between_two_sweeps_of_a_family(self):
-        rule = watch(url=ROOT, include_variations=True)
-        self.assertFalse(self.provider.next_read_is_main(rule))
+    def test_the_depo_lane_may_read_any_remembered_family_and_every_product_without_variants(self):
+        family = watch(url=ROOT, include_variations=True)
+        single = watch("Tek", url=CHILD)
+        search = watch("Hue", "https://www.amazon.com.tr/s?k=hue")
+        self.assertFalse(self.provider.next_read_is_main(family))  # nothing remembered yet
+        self.assertTrue(self.provider.needs_sweep(family))
         with self.serve({ROOT: priced()}), patch.object(amazon_reader.time, "monotonic", return_value=1000):
-            self.read(rule)
-            self.assertTrue(self.provider.next_read_is_main(rule))
+            self.read(family)
+            self.assertTrue(self.provider.next_read_is_main(family))
+            self.assertFalse(self.provider.needs_sweep(family))
         with patch.object(amazon_reader.time, "monotonic", return_value=1270):
-            self.assertFalse(self.provider.next_read_is_main(rule))
-        self.assertFalse(self.provider.next_read_is_main(watch("Hue", "https://www.amazon.com.tr/s?k=hue")))
+            # The sweep is due, but the Depo lane may still read the main page.
+            self.assertTrue(self.provider.next_read_is_main(family))
+            self.assertTrue(self.provider.needs_sweep(family))
+        with patch.object(amazon_reader.time, "monotonic", return_value=99999):
+            self.assertTrue(self.provider.next_read_is_main(family))
+        self.assertTrue(self.provider.next_read_is_main(single))
+        self.assertFalse(self.provider.needs_sweep(single))  # nothing to sweep: the Depo lane reads its whole page
+        self.assertFalse(self.provider.next_read_is_main(search))
+        self.assertTrue(self.provider.needs_sweep(search))
         self.assertTrue(amazon_reader.AmazonProvider.has_depo_lane)
+
+    def test_the_depo_lane_reads_only_the_main_page_even_when_the_sweep_is_overdue(self):
+        rule = watch(url=ROOT, target="100000", include_variations=True)
+        pages = {ROOT: priced("100,00", "iPhone Gümüş"), CHILD: priced("200,00", "iPhone Turuncu")}
+        serving, variations = self.family(pages)
+        with serving, variations:
+            with patch.object(amazon_reader.time, "monotonic", return_value=1000):
+                self.read(rule)
+            self.assertEqual(self.fetched, [ROOT, CHILD])
+            pages[ROOT] = priced("90,00", "iPhone Gümüş")
+            pages[CHILD] = priced("150,00", "iPhone Turuncu")
+            # 30 minutes later (the sweep queue has not got to this family): the Depo lane still reads one page.
+            with patch.object(amazon_reader.time, "monotonic", return_value=1000 + 1800):
+                offers = self.read(rule, fresh=False, lane=DEPO_LANE)
+            self.assertEqual(self.fetched, [ROOT, CHILD, ROOT])
+            by_url = {offer.url: offer for offer in offers}
+            self.assertEqual(by_url[ROOT].price, Decimal("90"))
+            self.assertEqual(by_url[CHILD].price, Decimal("200"))  # the remembered sweep price
+            self.assertIsNotNone(by_url[CHILD].checked_at)
+            # The sweep queue (no lane) reads the whole family once its sweep is due.
+            with patch.object(amazon_reader.time, "monotonic", return_value=1000 + 1900):
+                offers = self.read(rule, fresh=False)
+            self.assertEqual({offer.price for offer in offers}, {Decimal("90"), Decimal("150")})
+
+    def test_the_depo_lane_reads_a_product_without_variants_in_full_in_its_lane(self):
+        rule = watch("Tek", url=ROOT, target="100000")
+        lanes = []
+
+        def fetch(url, _ctx, expect_search=False):
+            lanes.append(self.client.lane)
+            return priced("100,00")
+
+        with patch.object(self.provider, "fetch", side_effect=fetch):
+            offers = self.read(rule, lane=DEPO_LANE)
+        self.assertEqual(len(offers), 1)
+        self.assertEqual(lanes, [MAIN_LANE])
 
     def test_the_gap_between_main_page_reads_goes_to_the_measurement_line(self):
         rule = watch(url=ROOT, include_variations=True)
@@ -367,7 +414,7 @@ class AmazonBlockScopeTests(AmazonTestCase):
               patch.object(amazon_parser, "extract_product_variations", return_value=variations),
               patch.object(amazon_reader.time, "monotonic", return_value=1000)):
             self.read(rule)
-            self.read(rule, fresh=False)
+            self.read(rule, fresh=False, lane=DEPO_LANE)
         self.assertEqual(lanes, ["", "", MAIN_LANE])
         self.assertEqual(self.client.lane, "")
 

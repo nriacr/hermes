@@ -27,7 +27,7 @@ from ..homeassistant import HomeAssistantBridge
 from ..logging_utils import log
 from ..models import HermesConfig, OfferResult, PriceSummaryRow, StockSummaryRow, WatchRule
 from ..notifier import Pushover
-from ..providers.base import Provider, ReadContext, RequestSpacing, WatchRead, excluded_term_in_title
+from ..providers.base import DEPO_LANE, Provider, ReadContext, RequestSpacing, WatchRead, excluded_term_in_title
 from ..providers.registry import ProviderSet
 from ..storage import load_json, save_json
 from ..utils import canonical_tracking_url, format_tl, local_now, parse_iso_datetime, site_label, utc_now
@@ -105,6 +105,8 @@ class CycleRun:
     state: Dict[str, Any]
     summary_rows: List[PriceSummaryRow] = field(default_factory=list)
     stock_rows: List[StockSummaryRow] = field(default_factory=list)
+    # The rows each watch put on the table this cycle: a watch that is read again replaces its own rows.
+    rows_of: Dict[str, tuple] = field(default_factory=dict)
     search_failures: List[Dict[str, Any]] = field(default_factory=list)
     priority_scope: Dict[str, Dict[str, int]] = field(
         default_factory=lambda: {priority: {"due": 0, "deferred": 0, "started": 0} for priority in PRIORITIES}
@@ -256,9 +258,9 @@ class Monitor:
         stopped = threading.Event()
         failures: List[BaseException] = []
 
-        def context(session, site: str) -> ReadContext:
+        def context(session, site: str, lane: str = "") -> ReadContext:
             return ReadContext(timeout=self.config.request_timeout_seconds, session=session,
-                               pace=self._site_pace(site), watch_names=watch_names,
+                               pace=self._site_pace(site), watch_names=watch_names, lane=lane,
                                measure=lambda method, kind, result, ms, site=site:
                                self.history.record_request(site, method, kind, result, ms))
 
@@ -269,7 +271,11 @@ class Monitor:
                 site = site_watches[0].site
                 with requests.Session() as session:
                     ctx = context(session, site)
-                    for watch in scheduling.priority_order(site_watches, self.providers[site].read_rank):
+                    provider = self.providers[site]
+                    for watch in scheduling.priority_order(site_watches, provider.read_rank):
+                        # The Depo lane may be reading this watch's main page right now: wait for it.
+                        while provider.is_watch_busy(watch) and not self.should_stop():
+                            self.sleep(0.5)
                         if self.should_stop():
                             stopped.set()
                             return
@@ -284,7 +290,7 @@ class Monitor:
             provider = self.providers[site]
             try:
                 with requests.Session() as session:
-                    ctx = context(session, site)
+                    ctx = context(session, site, DEPO_LANE)
                     while True:
                         progressed = False
                         for watch in scheduling.priority_order(site_watches, provider.read_rank):
@@ -305,11 +311,23 @@ class Monitor:
         for site, site_watches in queues.items():
             provider = self.providers[site]
             if provider.has_depo_lane:
-                quick = [watch for watch in site_watches if provider.next_read_is_main(watch)]
-                sweeps = [watch for watch in site_watches if watch not in quick]
+                # The sweep queue gets the watches whose family is due for a sweep; the Depo lane looks after the
+                # main page of every active watch of the site, also those not due when the cycle began.
+                sweeps = [watch for watch in site_watches if provider.needs_sweep(watch)]
+                # Planned watches only the Depo lane reads keep their last rows on the table until it has read them.
+                with self._lock:
+                    for watch in site_watches:
+                        if watch not in sweeps:
+                            key = make_watch_key(watch)
+                            entry = run.state.get(key, {})
+                            entry = entry if isinstance(entry, dict) else {}
+                            self._begin_rows(run, key)
+                            self._add_rows(run, key, summary.cached_summary_rows(watch, key, run.state, site_label(watch.site)),
+                                           summary.cached_stock_rows(watch, entry, site_label(watch.site)))
+                depo_watches = [watch for watch in self.config.watches if watch.site == site and watch.active]
                 sweep_done = threading.Event()
                 workers.append(threading.Thread(target=work, args=(sweeps, sweep_done), name=f"hermes-{site}-tarama", daemon=True))
-                workers.append(threading.Thread(target=work_depo, args=(site, site_watches, sweep_done), name=f"hermes-{site}-depo", daemon=True))
+                workers.append(threading.Thread(target=work_depo, args=(site, depo_watches, sweep_done), name=f"hermes-{site}-depo", daemon=True))
                 if not sweeps:
                     sweep_done.set()
             else:
@@ -321,6 +339,23 @@ class Monitor:
         if failures:
             raise failures[0]
         return stopped.is_set()
+
+    @staticmethod
+    def _begin_rows(run: CycleRun, key: str) -> None:
+        """Forget the rows this watch put on the table earlier in the cycle (it is read or planned again)."""
+        mine = run.rows_of.pop(key, None)
+        if mine:
+            gone = {id(row) for row in mine[0] + mine[1]}
+            run.summary_rows[:] = [row for row in run.summary_rows if id(row) not in gone]
+            run.stock_rows[:] = [row for row in run.stock_rows if id(row) not in gone]
+
+    @staticmethod
+    def _add_rows(run: CycleRun, key: str, summary_rows=(), stock_rows=()) -> None:
+        mine = run.rows_of.setdefault(key, ([], []))
+        mine[0].extend(summary_rows)
+        mine[1].extend(stock_rows)
+        run.summary_rows.extend(summary_rows)
+        run.stock_rows.extend(stock_rows)
 
     def _plan(self, run: CycleRun, watch: WatchRule) -> bool:
         """True for a due watch; a deferred one keeps its last result."""
@@ -337,8 +372,9 @@ class Monitor:
                 or not scheduling.watch_check_due(watch, entry, self.config.interval_seconds)):
             if not scheduling.manually_due(watch, entry) or absence_deferred:
                 run.priority_scope[priority]["deferred"] += 1
-                run.summary_rows.extend(summary.cached_summary_rows(watch, key, run.state, seller))
-                run.stock_rows.extend(summary.cached_stock_rows(watch, entry, seller))
+                self._begin_rows(run, key)
+                self._add_rows(run, key, summary.cached_summary_rows(watch, key, run.state, seller),
+                               summary.cached_stock_rows(watch, entry, seller))
                 return False
         run.priority_scope[priority]["due"] += 1
         return True
@@ -353,6 +389,7 @@ class Monitor:
             entry = entry if isinstance(entry, dict) else {}
             if provider.backs_off_on_protection and self._guarded(run, watch, key, entry, seller):
                 return
+            self._begin_rows(run, key)
             run.priority_scope[scheduling.watch_priority(watch)]["started"] += 1
             if not self.last_cycle_read:
                 # Logged with the first watch that is read: cycles in which every
@@ -385,7 +422,10 @@ class Monitor:
     def _depo_lane_due(self, run: CycleRun, provider: Provider, watch: WatchRule) -> bool:
         """True for a watch whose next read is a quick main-page read and whose rhythm and schedule say it is due."""
         with self._lock:
-            if state_ops.guard_remaining_seconds(run.state, state_ops.site_guard_key(watch.site)) > 0:
+            guard_key = state_ops.site_guard_key(watch.site)
+            remaining = state_ops.guard_remaining_seconds(run.state, guard_key)
+            if remaining > 0:
+                self._log_pause(run, guard_key, site_label(watch.site), remaining)
                 return False
             entry = run.state.get(make_watch_key(watch), {})
             entry = entry if isinstance(entry, dict) else {}
@@ -398,15 +438,21 @@ class Monitor:
         remaining = state_ops.guard_remaining_seconds(run.state, guard_key)
         if remaining <= 0:
             return False
-        run.summary_rows.extend(summary.cached_summary_rows(watch, key, run.state, seller))
-        run.stock_rows.extend(summary.cached_stock_rows(watch, entry, seller))
+        self._begin_rows(run, key)
+        self._add_rows(run, key, summary.cached_summary_rows(watch, key, run.state, seller),
+                       summary.cached_stock_rows(watch, entry, seller))
+        self._log_pause(run, guard_key, seller, remaining)
+        return True
+
+    @staticmethod
+    def _log_pause(run: CycleRun, guard_key: str, seller: str, remaining: int) -> None:
+        """One line a minute while a site is paused."""
         guard = state_ops.guard_store(run.state).get(guard_key, {})
         last_logged = parse_iso_datetime(guard.get("last_skip_logged_at"))
         if not last_logged or (local_now().astimezone(timezone.utc) - last_logged).total_seconds() >= 60:
             guard["last_skip_logged_at"] = utc_now()
             log(f"{seller} erişim molasında ({guard.get('kind', 'captcha')}): tüm {seller} kartları bekliyor | "
                 f"kalan={max(1, math.ceil(remaining / 60))} dk")
-        return True
 
     def _stock_return(self, provider: Provider, watch: WatchRule, entry: Dict[str, Any], seller: str, offers):
         """Notify once when a product that was out of stock is available again."""
@@ -429,6 +475,7 @@ class Monitor:
                        seller: str, offers) -> "RecordedOffers":
         """Record streamed offers; network reads and notifications stay outside the lock."""
         state = run.state
+        key = make_watch_key(watch)
         offers, entry, stock_return_sent = self._stock_return(provider, watch, entry, seller, offers)
         offer_iterator = iter(offers)
         first_offer = next(offer_iterator, None)
@@ -456,13 +503,13 @@ class Monitor:
                 min_price, max_price = state_ops.sanitized_price_bounds(offer_entry, offer.price, watch.target_price, context)
                 if not replayed and not state_ops.is_absurd_price(offer_entry, offer.price, watch.target_price):
                     self.history.record_price(item_key, watch.site, display_name, offer.price)
-                run.summary_rows.append(PriceSummaryRow(
+                self._add_rows(run, key, [PriceSummaryRow(
                     seller=seller, product_title=display_name, product_url=matched_url, price=offer.price,
                     target_price=watch.target_price, min_price=min_price, max_price=max_price,
                     search_group=recorded.search_group, search_group_label=recorded.search_group_label,
                     is_warehouse=offer.is_warehouse, tracking_id=watch.tracking_id, priority=watch.priority,
                     price_checked_at=price_checked_at,
-                ))
+                )])
                 wants_alert = not replayed and not stock_return_sent and state_ops.should_alert(
                     offer_entry, offer.price, watch.target_price, watch.notify_once_in_24h)
             if replayed:
@@ -547,7 +594,7 @@ class Monitor:
             "amazon_no_offer_retry_after": None,
             "unavailable_variants": list(outcome.unavailable),
         }
-        run.stock_rows.extend(summary.cached_stock_rows(watch, run.state[key], seller))
+        self._add_rows(run, key, (), summary.cached_stock_rows(watch, run.state[key], seller))
         if not provider.backs_off_on_protection:
             return
         if outcome.blocked:
@@ -581,7 +628,7 @@ class Monitor:
         })
         run.state[key] = failed
         stock_rows = summary.cached_stock_rows(watch, failed, seller)
-        run.stock_rows.extend(stock_rows)
+        self._add_rows(run, key, (), stock_rows)
         if provider.backs_off_on_protection:
             state_ops.clear_guard(run.state, state_ops.site_guard_key(watch.site), seller)
         # A missing item must not keep its previous price visible until the cycle ends.
@@ -639,9 +686,9 @@ class Monitor:
             ).isoformat()
         run.state[key] = failed
         stock_rows = summary.cached_stock_rows(watch, failed, seller)
-        run.stock_rows.extend(stock_rows)
+        self._add_rows(run, key, (), stock_rows)
         if kept_after_block:
-            run.summary_rows.extend(summary.cached_summary_rows(watch, key, run.state, seller))
+            self._add_rows(run, key, summary.cached_summary_rows(watch, key, run.state, seller))
             return
         # The dashboard may still show the last successful cycle; remove only this watch's stale rows now.
         summary.save_incremental_summary(self.files.summary, [], stock_rows, removed_price_ids=stale_ids)

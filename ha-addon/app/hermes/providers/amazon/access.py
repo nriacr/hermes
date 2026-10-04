@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Callable, Deque, Dict, List, Optional
 
 from ...constants import (
+    AMAZON_MAIN_LANE_FLOOR,
     AMAZON_MAIN_LANE_SHARE,
     AMAZON_RECOVERY_SLOW_FACTOR,
     AMAZON_RECOVERY_SLOW_SECONDS,
@@ -141,12 +142,17 @@ class AmazonAccess:
             self._prune(self.clock())
             return len(self.starts)
 
+    def depo_reserve(self) -> int:
+        """What the sweep leaves the Depo lane: what it used in the last 35 minutes, a floor, at most its share."""
+        cap = math.ceil(round(self.limit * AMAZON_MAIN_LANE_SHARE, 6))
+        return min(cap, max(AMAZON_MAIN_LANE_FLOOR, len(self.main_starts)))
+
     def limit_for(self, lane: str = "") -> int:
-        """The Depo lane may use the whole window; the sweep all but the Depo share the Depo lane has not used."""
+        """The Depo lane may use the whole window; the sweep all but the part of the Depo reserve not used yet."""
         if lane == MAIN_LANE:
             return self.limit
-        unused_share = max(0, math.ceil(round(self.limit * AMAZON_MAIN_LANE_SHARE, 6)) - len(self.main_starts))
-        return max(1, self.limit - unused_share)
+        unused = max(0, self.depo_reserve() - len(self.main_starts))
+        return max(1, self.limit - unused)
 
     def rate_per_minute(self) -> float:
         now = self.clock()
@@ -292,7 +298,8 @@ class AmazonAccess:
         last_hour = len(self.events)
         last_hour_blocks = sum(1 for _at, blocked in self.events if blocked)
         return (f"son 60 dk: istek={last_hour}, engel={last_hour_blocks} | "
-                f"pencere={self.window_count()}/{self.limit} | eşik={self.threshold if self.threshold is not None else '-'} | "
+                f"pencere={self.window_count()}/{self.limit} (tarama şeridi sınırı={self.limit_for('')}, "
+                f"depo şeridi son 35 dk={len(self.main_starts)}) | eşik={self.threshold if self.threshold is not None else '-'} | "
                 f"anlık={self.rate_per_minute():.1f} istek/dk | sınır={'bir kez düşürüldü' if self.lowered else 'hiç düşmedi'} | "
                 f"son artıştan beri={(now_wall - self.last_raise_at) / 60:.0f} dk | yarım hız kalan={slow} dk")
 

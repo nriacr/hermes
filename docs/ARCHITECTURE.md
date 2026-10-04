@@ -146,10 +146,14 @@ card due immediately after the restart.
    reads before long ones), with the configured random delay before each of its
    requests. A slow or protected site never delays another; each site has one
    sequential queue, except Amazon (since 3.5): `Provider.has_depo_lane` gives it
-   a second thread, the Depo lane, beside its sweep queue. The lane repeats the
-   quick main-page reads (`next_read_is_main`) of the watches whose family was
-   swept recently, for as long as the sweep queue is busy, so a long variant
-   sweep never holds them back. A watch is read by one lane at a time (`busy`). All changes to the
+   a second thread, the Depo lane, beside its sweep queue. The sweep queue gets
+   the watches whose family is due for a sweep (`needs_sweep`); the Depo lane
+   looks after the main page of every active watch of the site (`next_read_is_main`:
+   any remembered family, however old its sweep is, and every product without
+   variants), also those not due when the cycle began, for as long as the sweep
+   queue is busy. A watch is read by one lane at a time (`busy`; the sweep queue
+   waits while the Depo lane reads its watch). A watch read again in the same
+   cycle replaces its own rows on the table (`CycleRun.rows_of`). All changes to the
    cycle's state, table and files are serialized under one lock; network reads
    and notifications happen outside it. On top of the delay, a minimum gap
    between request starts per site (`SITE_MIN_REQUEST_GAP_SECONDS`, measured
@@ -235,9 +239,10 @@ results" search notice is a normal stock row read again after five minutes.
   family every 270 s. The two rhythms run in two lanes (since 3.5): the Depo
   lane thread repeats the main reads, the sweep thread works through the due
   families. Both go through one request lock (one request at a time, the Depo
-  lane first), one rolling window (the Depo lane may use all of it, the sweep
-  all but the Depo lane's still unused 28 % share, and the sweep steps aside
-  while the Depo lane waits for a slot) and one pause: a block on either lane
+  lane first), one rolling window (the Depo lane may use all of it; the sweep
+  all but the part of the Depo reserve not used yet, the reserve being what the
+  Depo lane used in the last 35 minutes, at least 12 requests, at most 28 % of
+  the limit; and the sweep steps aside while the Depo lane waits for a slot) and one pause: a block on either lane
   stops both. The Depo lane's reads use caches of their own, so they never get a
   page the sweep fetched earlier in the same cycle. Between sweeps the other variants' offers are replayed
   from memory with `OfferResult.checked_at` (the time they were really read);

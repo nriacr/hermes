@@ -194,6 +194,10 @@ class RequestSpacing:
             return waited
 
 
+# The ReadContext lane of a provider's quick main-page reads (see Provider.has_depo_lane).
+DEPO_LANE = "depo"
+
+
 @dataclass
 class ReadContext:
     """What a provider may use while reading one watch in a monitoring cycle."""
@@ -206,6 +210,8 @@ class ReadContext:
     watch_names: Dict[str, List[str]] = field(default_factory=dict)
     # Reports one network request: (method, kind, outcome, duration_ms).
     measure: Callable[[str, str, str, int], None] = lambda _method, _kind, _outcome, _ms: None
+    # "" for the ordinary queue, DEPO_LANE for the quick main-page reads of a site with a Depo lane.
+    lane: str = ""
 
 
 @dataclass
@@ -245,7 +251,15 @@ class Provider:
         """Network requests of the last hour from the database, (finished at, ms, outcome); most sites ignore them."""
 
     def next_read_is_main(self, watch) -> bool:
-        """True when the watch's next read is a quick main-page read for the Depo lane."""
+        """True when the Depo lane may read the watch's main page now (its family is remembered)."""
+        return False
+
+    def needs_sweep(self, watch) -> bool:
+        """True when the watch's variant family is due for a full sweep (the sweep queue reads it)."""
+        return True
+
+    def is_watch_busy(self, watch) -> bool:
+        """True while one lane is reading the watch; the other lane waits."""
         return False
 
     def absorb_block(self, watch) -> bool:

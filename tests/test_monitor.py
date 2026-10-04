@@ -18,6 +18,7 @@ from hermes.errors import BotProtectionHermesError, EmptySearchResultsHermesErro
 from hermes.models import OfferResult, PriceSummaryRow, StockSummaryRow
 from hermes.monitor import alerts, runner, scheduling, state as state_ops, summary
 from hermes.monitor.cycle import skipped_offer_reason
+from hermes.providers import amazon as amazon_reader
 from hermes.providers.amazon import AmazonProvider, WatchRhythm
 from hermes.providers.bengurme import BenGurmeProvider
 from hermes.providers.hepsiburada import HepsiburadaProvider
@@ -94,10 +95,14 @@ class NotificationTests(CycleTestCase):
         cfg = config([depot] + searches)
         self.data.write_state({"_meta": {"summary_config_signature": alerts.summary_config_signature(cfg),
                                          "summary_expected_row_count": 20, "summary_drop_consecutive_cycles": 4}})
+        depot_started = threading.Event()
 
         def amazon_read(rule, ctx, outcome):
             if rule is depot:
+                depot_started.set()
                 return [OfferResult("Depo ürünü", Decimal("500"), seller="Amazon Depo", url=depot.url, is_warehouse=True)]
+            # The block comes after the Depo lane has begun its read (it runs beside the search queue).
+            depot_started.wait(5)
             raise BotProtectionHermesError("Amazon bot koruması nedeniyle doğrulama (captcha) sayfası döndü.")
 
         now = datetime(2026, 10, 2, SEARCH_ERROR_NOTIFICATION_HOUR, tzinfo=timezone.utc)
@@ -502,6 +507,86 @@ class DepoLaneTests(CycleTestCase):
         finally:
             hermes_monitor.close()
         self.assertIn(state_ops.site_guard_key("amazon"), state["_meta"]["amazon_protection"])
+
+    def test_the_depo_lane_also_reads_watches_that_were_not_due_when_the_cycle_began(self):
+        hermes_monitor, provider = self.prepared_monitor()
+        now = time.monotonic()
+        # Read a moment ago: not due at the start of the cycle, due again 0.3 s later.
+        provider.rhythms[provider._rhythm_key(self.quick_rule)] = WatchRhythm(main_at=now - 0.1, sweep_at=now - 10)
+        release = threading.Event()
+        quick_reads = []
+
+        def amazon_read(rule, ctx, outcome):
+            if rule is self.sweep_rule:
+                release.wait(10)
+                return [OfferResult("Apple Watch Ultra", Decimal("80000"), "Amazon.com.tr", rule.url)]
+            quick_reads.append(rule.name)
+            release.set()
+            return [OfferResult("Apple iPhone 17", Decimal("90000"), "Amazon.com.tr", rule.url)]
+
+        try:
+            with (patch.object(amazon_reader, "AMAZON_MAIN_INTERVAL_SECONDS", 0.3),
+                  patch.object(AmazonProvider, "read", side_effect=amazon_read)):
+                hermes_monitor.run_cycle()
+        finally:
+            hermes_monitor.close()
+        self.assertEqual(quick_reads[:1], ["Hızlı"])
+
+    def test_a_watch_read_again_in_the_same_cycle_replaces_its_rows_instead_of_adding_to_them(self):
+        hermes_monitor, _provider = self.prepared_monitor()
+        release = threading.Event()
+        prices = [Decimal("90000"), Decimal("120000"), Decimal("120000")]
+        reads = []
+
+        def amazon_read(rule, ctx, outcome):
+            if rule is self.sweep_rule:
+                release.wait(10)
+                return [OfferResult("Apple Watch Ultra", Decimal("80000"), "Amazon.com.tr", rule.url)]
+            reads.append(1)
+            if len(reads) >= 2:
+                release.set()
+            return [OfferResult("Apple iPhone 17", prices[min(len(reads), 3) - 1], "Amazon.com.tr", rule.url)]
+
+        try:
+            with patch.object(AmazonProvider, "read", side_effect=amazon_read):
+                hermes_monitor.run_cycle()
+        finally:
+            hermes_monitor.close()
+        rows = {row["product_url"]: row for row in self.published_rows()}
+        # The later reading (120.000 TL) wins over the earlier, lower one of the same cycle.
+        self.assertEqual(rows[self.quick_rule.url]["price"], "120.000 TL")
+
+    def test_a_paused_site_keeps_the_rows_of_the_watches_only_the_depo_lane_reads(self):
+        rule = watch("Tek", "https://www.amazon.com.tr/dp/B000000004", target="100000")
+        offer = [OfferResult("Apple iPhone 17", Decimal("90000"), "Amazon.com.tr", rule.url)]
+        with patch.object(AmazonProvider, "read", side_effect=reader(offer)):
+            self.run_cycle(config([rule], interval_seconds=0))
+        self.assertEqual(len(self.published_rows()), 1)
+        state = self.data.state()
+        state_ops.note_guard(state, state_ops.site_guard_key("amazon"), "x", BotProtectionHermesError("Amazon captcha"))
+        self.data.write_state(state)
+        with patch.object(AmazonProvider, "read", side_effect=reader([])) as read:
+            self.run_cycle(config([rule], interval_seconds=0))
+        read.assert_not_called()
+        self.assertEqual(len(self.published_rows()), 1)
+
+    def test_the_sweep_lane_waits_while_the_depo_lane_is_reading_the_same_watch(self):
+        hermes_monitor, _provider = self.prepared_monitor()
+        asked = []
+
+        def busy_twice(_self, watch):
+            asked.append(watch.name)
+            return len(asked) <= 2
+
+        try:
+            with (patch.object(AmazonProvider, "is_watch_busy", busy_twice),
+                  patch.object(AmazonProvider, "read", side_effect=reader([OfferResult("A", Decimal("1"), None, self.sweep_rule.url)])) as read):
+                hermes_monitor.run_cycle()
+        finally:
+            hermes_monitor.close()
+        # Asked twice (busy), then a third time (free) before the read began.
+        self.assertEqual(asked[:3], ["Tarama"] * 3)
+        self.assertTrue(read.called)
 
     def test_a_site_without_a_depo_lane_keeps_its_single_queue(self):
         rule = watch("Çanta", "https://nordbron.com/canta")

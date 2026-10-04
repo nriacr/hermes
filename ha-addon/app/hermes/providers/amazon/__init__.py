@@ -26,7 +26,7 @@ from ...errors import EmptySearchResultsHermesError, HermesError, OutOfStockHerm
 from ...logging_utils import log
 from ...models import OfferResult, SearchResultItem, WatchRule
 from ...utils import extract_asin_from_url, is_amazon_search_url, log_cell, normalize_offer_text
-from ..base import Provider, ReadContext, WatchRead, excluded_term_in_title
+from ..base import DEPO_LANE, Provider, ReadContext, WatchRead, excluded_term_in_title
 from ..http import raise_if_age_verification
 from . import parser
 from .access import MAIN_LANE, AmazonAccess
@@ -170,11 +170,34 @@ class AmazonProvider(Provider):
     def _rhythm_key(watch: WatchRule) -> Tuple:
         return (watch.url, watch.include_variations, watch.official_seller_only, tuple(watch.excluded_terms))
 
-    def next_read_is_main(self, watch: WatchRule) -> bool:
-        """A product watch whose variant family was swept recently needs only its main page now."""
+    def _remembers_family(self, watch: WatchRule) -> bool:
+        """A product watch with variants whose family was swept at least once (its offers are remembered)."""
         rhythm = self.rhythms.get(self._rhythm_key(watch))
-        return (not self.is_search_url(watch.url) and watch.include_variations and rhythm is not None
-                and rhythm.sweep_at is not None and time.monotonic() - rhythm.sweep_at < AMAZON_SWEEP_INTERVAL_SECONDS)
+        return (not self.is_search_url(watch.url) and watch.include_variations
+                and rhythm is not None and rhythm.sweep_at is not None)
+
+    def next_read_is_main(self, watch: WatchRule) -> bool:
+        """The Depo lane may read a product page now: a remembered family's main page (however old its
+        last sweep is) or the whole page of a product without variants."""
+        if self.is_search_url(watch.url):
+            return False
+        return not watch.include_variations or self._remembers_family(watch)
+
+    def needs_sweep(self, watch: WatchRule) -> bool:
+        """Searches, unknown families and families swept more than the sweep interval ago.
+
+        A product without variants has nothing to sweep: the Depo lane reads its whole page.
+        """
+        if self.is_search_url(watch.url):
+            return True
+        if not watch.include_variations:
+            return False
+        if not self._remembers_family(watch):
+            return True
+        return time.monotonic() - self.rhythms[self._rhythm_key(watch)].sweep_at >= AMAZON_SWEEP_INTERVAL_SECONDS
+
+    def is_watch_busy(self, watch: WatchRule) -> bool:
+        return self._is_busy(self._rhythm_key(watch))
 
     def _is_busy(self, key: Tuple) -> bool:
         with self._busy_lock:
@@ -191,12 +214,9 @@ class AmazonProvider(Provider):
                 self.busy.pop(key, None)
 
     def read_rank(self, watch: WatchRule) -> int:
-        """Main-page reads (one request) go before variant sweeps (many requests)."""
+        """Quick reads go before variant sweeps (many requests)."""
         key = self._rhythm_key(watch)
-        rhythm = self.rhythms.get(key)
-        sweeping = (self.is_search_url(watch.url) or rhythm is None or rhythm.sweep_at is None
-                    or not watch.include_variations
-                    or time.monotonic() - rhythm.sweep_at >= AMAZON_SWEEP_INTERVAL_SECONDS)
+        sweeping = self.needs_sweep(watch)
         # A page that was blocked recently is read last, so after a pause the probe goes to a page that answers.
         blocked_at = self.block_history.get(key, (None, 0))[0]
         recently_blocked = blocked_at is not None and time.monotonic() - blocked_at < AMAZON_PAGE_REPEAT_WINDOW_SECONDS
@@ -266,10 +286,15 @@ class AmazonProvider(Provider):
                     self.busy.pop(key, None)
                 raise
             return self._exclusive(key, found)
-        if (watch.include_variations and rhythm.sweep_at is not None
-                and now - rhythm.sweep_at < AMAZON_SWEEP_INTERVAL_SECONDS):
-            return self._exclusive(key, self._in_lane(MAIN_LANE, self._read_main(watch, ctx, outcome, rhythm)))
-        return self._exclusive(key, self._read_sweep(watch, ctx, outcome, rhythm))
+        depo = ctx.lane == DEPO_LANE
+        remembered = watch.include_variations and rhythm.sweep_at is not None
+        # The Depo lane always reads only the main page of a remembered family, however old its sweep is;
+        # the sweep queue reads a family in full once its sweep is due.
+        if remembered and (depo or now - rhythm.sweep_at < AMAZON_SWEEP_INTERVAL_SECONDS):
+            reads = self._read_main(watch, ctx, outcome, rhythm)
+        else:
+            reads = self._read_sweep(watch, ctx, outcome, rhythm)
+        return self._exclusive(key, self._in_lane(MAIN_LANE, reads) if depo else reads)
 
     def _in_lane(self, lane: str, reads):
         """Run a generator in a lane: the client counts its requests for that lane, and the Depo lane reads fresh pages."""

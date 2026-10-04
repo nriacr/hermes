@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 
-APP_VERSION = "3.5.1"
+APP_VERSION = "3.5.2"
 
 # Persistent add-on data. File names are a public interface: 2.x releases read
 # the same files, so a rollback never loses history or notification state.
@@ -119,6 +119,9 @@ AMAZON_WINDOW_THRESHOLD_FACTOR = 0.85
 # window limit; the sweep lane may use all of it except the part of the Depo lane's 28 % share
 # that the Depo lane has not used yet.
 AMAZON_MAIN_LANE_SHARE = 0.28
+# 3.5.2: the share is not held back idle. The sweep leaves the Depo lane only what it still
+# needs: as much as it used in the last 35 minutes, at least this many requests, at most the share.
+AMAZON_MAIN_LANE_FLOOR = 12
 # How many gaps between two main-page reads the measurement line looks at.
 AMAZON_MAIN_GAPS_KEPT = 200
 # The whole site pauses only when two different pages fail one after the other. One page
