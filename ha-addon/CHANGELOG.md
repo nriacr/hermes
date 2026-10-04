@@ -1,5 +1,20 @@
 # Değişiklik günlüğü
 
+## 3.3.1
+
+- Tek bir sayfanın engeli artık tüm Amazon'u durdurmuyor. Tüm Amazon yalnızca iki
+  FARKLI sayfa art arda engellenirse mola veriyor (3 → 6 → 12 → 20 dk). Bir sayfa
+  tek başına engellenirse ilk engelde yalnız o turdaki okuması bitiyor, 6 saat içinde
+  ikinci engelde 30 dk, üçüncüde 60 dk yalnız o kart dinleniyor; diğer kartlar
+  okumaya devam ediyor. Engellenen kart tablodan kaybolmuyor, son fiyatı okunma
+  zamanıyla kalıyor. Yakın zamanda engellenmiş kart turda en sona sıralanıyor; böylece
+  moladan sonraki yoklama cevap veren bir sayfaya gidiyor.
+- Pencere sınırı engel başına düşmüyor: yalnız ilk engelde bir kez %85'e iner (en az
+  200), sonraki engeller yalnız eşiği kaydeder; engelsiz her saatte %5 yeniden
+  yükselir (en çok 500). 3.3.0'ın gece düşürdüğü sınır (119) açılışta 300'e sıfırlandı.
+- Depo şeridi (ürün sayfası okumaları) pencere sınırının %20 üstüne kadar okuyabilir;
+  varyant taramaları yüzünden pencere dolsa da Depo okumaları yavaşlamaz.
+
 ## 3.3.0
 
 - Amazon engeli azaltıldı. İlk CAPTCHA/503'te artık tüm Amazon kartları durur

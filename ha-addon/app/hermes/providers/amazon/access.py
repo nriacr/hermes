@@ -1,27 +1,33 @@
-"""Amazon's request budget: a rolling window, its adaptive limit and the slow start.
+"""Amazon's request budget: a rolling window, its adaptive limit, block scope and the slow start.
 
 One `AmazonAccess` lives with the client for the whole process and is the only
 place that decides how fast requests may start:
 
 * A rolling window (35 minutes) caps how many requests may start. The limit
   begins at 300 and rises by 5 % after every clean hour in which the window was
-  really used. A block records the window count as the *threshold*, lowers the
-  limit to 85 % of it and freezes it there. The limit, threshold and last raise
-  survive restarts in `amazon_access.json`.
-* After a block, and for a few minutes after every start, requests run at half
-  speed (the minimum gap doubles).
+  really used (never above 500). The first block records the window count as the
+  *threshold* and lowers the limit once to 85 % of it (never below 200); later
+  blocks only record the threshold. The main-page lane may exceed the limit by
+  20 %, so a full window never slows the Depo reads. The limit, threshold and
+  last raise survive restarts in `amazon_access.json`.
+* After a site-wide block, and for a few minutes after every start, requests run
+  at half speed (the minimum gap doubles).
+* A block is *site-wide* only when two different pages failed one after the
+  other; a single page that fails on its own is a *watch* block and leaves the
+  budget, the pause and the slow start alone.
 
 The pause itself (3 → 6 → 12 → 20 minutes) is the site-wide guard kept in
-`state.json`; this module only measures and limits.
+`state.json`; this module only measures, limits and classifies.
 """
 
 import math
 import time
 from collections import deque
 from pathlib import Path
-from typing import Callable, Deque, Dict, Optional
+from typing import Callable, Deque, Dict, List, Optional
 
 from ...constants import (
+    AMAZON_MAIN_LANE_RESERVE,
     AMAZON_RECOVERY_SLOW_FACTOR,
     AMAZON_RECOVERY_SLOW_SECONDS,
     AMAZON_START_SLOW_SECONDS,
@@ -39,8 +45,10 @@ from ...logging_utils import log
 from ...storage import load_json, save_json
 from ...utils import utc_now
 
+SCHEMA = 2
 RATE_LOOKBACK_SECONDS = 300
 WINDOW_WAIT_STEP_SECONDS = 5.0
+MAIN_LANE = "main"
 
 
 class AmazonAccess:
@@ -53,12 +61,13 @@ class AmazonAccess:
         self.starts: Deque[float] = deque()
         self.limit = AMAZON_WINDOW_START_LIMIT
         self.threshold: Optional[int] = None
-        self.frozen = False
+        # True once a block has lowered the limit; a later block never lowers it again.
+        self.lowered = False
         self.last_raise_at = self.wall()
         self.last_block_at: Optional[float] = None
         self.peak_since_raise = 0
-        # A block that no success has followed yet: later blocks continue the
-        # same episode and must not lower the limit again.
+        # A site-wide block that no success has followed yet: later blocks continue the
+        # same episode and must not touch the threshold again.
         self.episode_open = False
         self.slow_until = self.wall() + AMAZON_START_SLOW_SECONDS
         self._last_wait_log = 0.0
@@ -66,6 +75,9 @@ class AmazonAccess:
         self.counters: Dict[str, int] = {}
         # (wall time, blocked) of finished requests of the last hour, for the measurement line.
         self.events: Deque[tuple] = deque()
+        # Pages that failed one after the other since the last success.
+        self.failed_run: List[str] = []
+        self.last_block_scope: Optional[str] = None
         self._load()
 
     # -- persistence -----------------------------------------------------------
@@ -74,14 +86,19 @@ class AmazonAccess:
         if self.path is None:
             return
         stored = load_json(self.path, {})
-        if not isinstance(stored, dict):
+        if not isinstance(stored, dict) or not stored:
+            return
+        if stored.get("schema") != SCHEMA:
+            # 3.3.0 lowered the limit with every block (down to 119 in one night); start over.
+            log("Amazon erişim bütçesi dosyası eski sürümden; pencere sınırı "
+                f"{AMAZON_WINDOW_START_LIMIT}'den yeniden başlıyor.")
             return
         try:
             limit = int(stored.get("limit", self.limit))
             self.limit = min(AMAZON_WINDOW_MAX_LIMIT, max(AMAZON_WINDOW_MIN_LIMIT, limit))
             threshold = stored.get("threshold")
             self.threshold = int(threshold) if threshold is not None else None
-            self.frozen = bool(stored.get("frozen", False))
+            self.lowered = bool(stored.get("lowered", False))
             self.last_raise_at = float(stored.get("last_raise_at", self.last_raise_at))
             last_block = stored.get("last_block_at")
             self.last_block_at = float(last_block) if last_block is not None else None
@@ -94,7 +111,7 @@ class AmazonAccess:
             return
         try:
             save_json(self.path, {
-                "limit": self.limit, "threshold": self.threshold, "frozen": self.frozen,
+                "schema": SCHEMA, "limit": self.limit, "threshold": self.threshold, "lowered": self.lowered,
                 "last_raise_at": self.last_raise_at, "last_block_at": self.last_block_at,
                 "slow_until": self.slow_until, "saved_at": utc_now(),
             })
@@ -111,23 +128,30 @@ class AmazonAccess:
         self._prune(self.clock())
         return len(self.starts)
 
+    def limit_for(self, lane: str = "") -> int:
+        """The main-page lane (Depo reads) may exceed the limit by 20 %."""
+        if lane == MAIN_LANE:
+            return self.limit + math.ceil(self.limit * AMAZON_MAIN_LANE_RESERVE)
+        return self.limit
+
     def rate_per_minute(self) -> float:
         now = self.clock()
         recent = sum(1 for started in self.starts if now - started <= RATE_LOOKBACK_SECONDS)
         return recent * 60.0 / RATE_LOOKBACK_SECONDS
 
-    def wait_for_window(self) -> float:
-        """Wait until a request may start inside the window; returns the seconds waited."""
+    def wait_for_window(self, lane: str = "") -> float:
+        """Wait until a request of this lane may start inside the window; returns the seconds waited."""
         waited = 0.0
         while True:
             now = self.clock()
             self._prune(now)
-            if len(self.starts) < self.limit:
+            limit = self.limit_for(lane)
+            if len(self.starts) < limit:
                 break
             step = min(WINDOW_WAIT_STEP_SECONDS, max(0.05, self.starts[0] + AMAZON_WINDOW_SECONDS - now))
             if now - self._last_wait_log >= 60:
                 self._last_wait_log = now
-                log(f"Amazon istek penceresi dolu ({len(self.starts)}/{self.limit}, son {AMAZON_WINDOW_SECONDS // 60} dk); "
+                log(f"Amazon istek penceresi dolu ({len(self.starts)}/{limit}, son {AMAZON_WINDOW_SECONDS // 60} dk); "
                     "yeni istek bekliyor.")
             self.sleep(step)
             waited += step
@@ -136,12 +160,11 @@ class AmazonAccess:
     def request_started(self) -> None:
         now = self.clock()
         self.starts.append(now)
-        count = len(self.starts)
-        self.peak_since_raise = max(self.peak_since_raise, count)
+        self.peak_since_raise = max(self.peak_since_raise, len(self.starts))
         self._maybe_raise()
 
     def _maybe_raise(self) -> None:
-        if self.frozen or self.limit >= AMAZON_WINDOW_MAX_LIMIT:
+        if self.limit >= AMAZON_WINDOW_MAX_LIMIT:
             return
         if self.wall() - self.last_raise_at < AMAZON_WINDOW_RAISE_EVERY_SECONDS:
             return
@@ -162,45 +185,57 @@ class AmazonAccess:
     def count(self, name: str, amount: int = 1) -> None:
         self.counters[name] = self.counters.get(name, 0) + amount
 
-    def request_finished(self, blocked: bool) -> None:
+    def request_finished(self, blocked: bool, page: str = "") -> None:
         self.count("istek")
-        now_event = self.wall()
-        self.events.append((now_event, blocked))
-        while self.events and now_event - self.events[0][0] > 3600:
+        now = self.wall()
+        self.events.append((now, blocked))
+        while self.events and now - self.events[0][0] > 3600:
             self.events.popleft()
         if not blocked:
             self.episode_open = False
+            self.failed_run.clear()
             return
         self.count("engel")
-        now_wall = self.wall()
-        self.slow_until = max(self.slow_until, now_wall + AMAZON_RECOVERY_SLOW_SECONDS)
-        self.last_block_at = now_wall
-        # A clean hour is counted from the last block.
-        self.last_raise_at = now_wall
+        self.failed_run.append(page or "?")
+        if len(set(self.failed_run)) < 2:
+            # One page failed on its own: a watch block. Budget, pause and slow start stay as they are.
+            self.last_block_scope = "watch"
+            self.count("sayfa_engeli")
+            return
+        self.last_block_scope = "site"
+        self.failed_run.clear()
+        self.slow_until = max(self.slow_until, now + AMAZON_RECOVERY_SLOW_SECONDS)
+        self.last_block_at = now
+        # A clean hour is counted from the last site-wide block.
+        self.last_raise_at = now
         self.peak_since_raise = 0
         if not self.episode_open:
             self.episode_open = True
             count = self.window_count()
             self.threshold = count
-            before = self.limit
-            self.limit = min(self.limit, max(AMAZON_WINDOW_MIN_LIMIT, int(count * AMAZON_WINDOW_THRESHOLD_FACTOR)))
-            self.frozen = True
-            log(f"Amazon engeli: pencerede {count} istek, anlık {self.rate_per_minute():.1f} istek/dk; "
-                f"eşik={count}, pencere sınırı {before} → {self.limit} (sabitlendi).")
+            rate = self.rate_per_minute()
+            if not self.lowered:
+                before = self.limit
+                self.limit = min(self.limit, max(AMAZON_WINDOW_MIN_LIMIT, int(count * AMAZON_WINDOW_THRESHOLD_FACTOR)))
+                self.lowered = True
+                log(f"Amazon engeli: pencerede {count} istek, anlık {rate:.1f} istek/dk; "
+                    f"eşik={count}, pencere sınırı {before} → {self.limit} (bir kez düşürüldü).")
+            else:
+                log(f"Amazon engeli: pencerede {count} istek, anlık {rate:.1f} istek/dk; "
+                    f"eşik={count}; sınır {self.limit} olarak kalıyor (yalnız bir kez düşer).")
         self._save()
 
     # -- measurement ---------------------------------------------------------------
 
     def stats_line(self) -> str:
         now_wall = self.wall()
-        raised = "-" if self.frozen else f"{(now_wall - self.last_raise_at) / 60:.0f} dk önce"
         slow = max(0, round((self.slow_until - now_wall) / 60))
         last_hour = len(self.events)
         last_hour_blocks = sum(1 for _at, blocked in self.events if blocked)
         return (f"son 60 dk: istek={last_hour}, engel={last_hour_blocks} | "
                 f"pencere={self.window_count()}/{self.limit} | eşik={self.threshold if self.threshold is not None else '-'} | "
-                f"anlık={self.rate_per_minute():.1f} istek/dk | sınır={'sabit' if self.frozen else 'uyarlanıyor'} | "
-                f"son artış sayacı={raised} | yarım hız kalan={slow} dk")
+                f"anlık={self.rate_per_minute():.1f} istek/dk | sınır={'bir kez düşürüldü' if self.lowered else 'hiç düşmedi'} | "
+                f"son artıştan beri={(now_wall - self.last_raise_at) / 60:.0f} dk | yarım hız kalan={slow} dk")
 
     def stats_due(self) -> bool:
         now = self.clock()

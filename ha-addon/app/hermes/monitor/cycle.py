@@ -481,8 +481,11 @@ class Monitor:
         if not provider.backs_off_on_protection:
             return
         if outcome.blocked:
-            state_ops.note_guard(run.state, state_ops.site_guard_key(watch.site), watch.name or watch.url,
-                                 outcome.blocked, seller)
+            # A page that fails on its own rests alone (the provider quarantines it); only two
+            # different pages failing one after the other pause the whole site.
+            if not provider.absorb_block(watch):
+                state_ops.note_guard(run.state, state_ops.site_guard_key(watch.site), watch.name or watch.url,
+                                     outcome.blocked, seller)
             run.state[key]["last_error"] = str(outcome.blocked)
             run.state[key]["amazon_partial_result"] = True
         else:
@@ -524,10 +527,13 @@ class Monitor:
         else:
             log(f"Hata: {seller} | {watch.url} | {exc}")
         access_error = outcome.blocked or exc
+        # A protection page keeps the watch's last rows on the table; they carry their read time.
+        kept_after_block = provider.backs_off_on_protection and bool(outcome.blocked or provider.is_protection_error(exc))
         if provider.backs_off_on_protection:
             if outcome.blocked or provider.is_protection_error(exc):
-                state_ops.note_guard(run.state, state_ops.site_guard_key(watch.site), watch.name or watch.url,
-                                     access_error, seller)
+                if not provider.absorb_block(watch):
+                    state_ops.note_guard(run.state, state_ops.site_guard_key(watch.site), watch.name or watch.url,
+                                         access_error, seller)
             else:
                 # A recovery probe is consumed once even when access worked but found
                 # nothing; an old guard cannot keep bypassing the priority schedule.
@@ -547,8 +553,8 @@ class Monitor:
                 log(f"Arama hata bildirimi gönderildi: {seller} | {watch.name}")
         failed.update({
             **self._watch_fields(watch),
-            "offer_keys": [],
-            "unavailable_variants": [],
+            "offer_keys": list(entry.get("offer_keys") or []) if kept_after_block else [],
+            "unavailable_variants": list(entry.get("unavailable_variants") or []) if kept_after_block else [],
             "amazon_no_offer_retry_after": outcome.retry_after,
             "last_error": None if normal_empty else str(exc),
             "last_error_status": None if normal_empty else error_status(access_error),
@@ -564,5 +570,8 @@ class Monitor:
         run.state[key] = failed
         stock_rows = summary.cached_stock_rows(watch, failed, seller)
         run.stock_rows.extend(stock_rows)
+        if kept_after_block:
+            run.summary_rows.extend(summary.cached_summary_rows(watch, key, run.state, seller))
+            return
         # The dashboard may still show the last successful cycle; remove only this watch's stale rows now.
         summary.save_incremental_summary(self.files.summary, [], stock_rows, removed_price_ids=stale_ids)

@@ -24,7 +24,7 @@ from ...constants import (
 from ...errors import BotProtectionHermesError, HermesError, error_status
 from ...logging_utils import log
 from ...storage import load_json, save_json
-from ...utils import canonical_amazon_product_url, normalize_offer_text, referer_for_url, repair_mojibake
+from ...utils import canonical_amazon_product_url, extract_asin_from_url, normalize_offer_text, referer_for_url, repair_mojibake
 from ..base import RequestSpacing
 from ..http import cleaned_html, curl_requests, decode_response_text
 from .access import AmazonAccess
@@ -250,6 +250,8 @@ class AmazonClient:
         self.browser = AmazonBrowser()
         # Request budget (window, slow start) and the cookie jar that survives restarts.
         self.access = access or AmazonAccess()
+        # "main" while the Depo lane (main page reads) is reading; it may exceed the window limit a little.
+        self.lane = ""
         self.cookies_path = cookies_path
         self._cookies_saved_at = 0.0
         # Every network request (product, variant, listing, search detail,
@@ -306,7 +308,7 @@ class AmazonClient:
         return html
 
     def _timed(self, method: str, url: str, expect_search: bool, read, on_request=None):
-        self.access.wait_for_window()
+        self.access.wait_for_window(self.lane)
         # Half speed after a block and right after a start: the gap doubles.
         self.spacing.min_gap_seconds = self.base_gap_seconds * self.access.gap_multiplier()
         waited = self.spacing.wait()
@@ -325,7 +327,7 @@ class AmazonClient:
                 log(f"Amazon engeli: sebep={outcome} | yöntem={method} | adres={_short_url(url)}")
             raise
         finally:
-            self.access.request_finished(blocked)
+            self.access.request_finished(blocked, extract_asin_from_url(url) or url)
             if outcome == "ok":
                 self._save_cookies_soon()
             elapsed_ms = round((time.monotonic() - started_at) * 1000)

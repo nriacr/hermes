@@ -14,6 +14,9 @@ from ...constants import (
     AMAZON_COOKIES_PATH,
     AMAZON_EXCLUDED_PAGE_REFRESH_SECONDS,
     AMAZON_MAIN_INTERVAL_SECONDS,
+    AMAZON_PAGE_REPEAT_WINDOW_SECONDS,
+    AMAZON_QUARANTINE_COUNT_RESET_SECONDS,
+    AMAZON_QUARANTINE_SECONDS,
     AMAZON_SWEEP_INTERVAL_SECONDS,
     SITE_AMAZON,
 )
@@ -24,7 +27,7 @@ from ...utils import extract_asin_from_url, is_amazon_search_url, log_cell, norm
 from ..base import Provider, ReadContext, WatchRead, excluded_term_in_title
 from ..http import raise_if_age_verification
 from . import parser
-from .access import AmazonAccess
+from .access import MAIN_LANE, AmazonAccess
 from .client import AmazonClient, is_protection_error
 from .search import dedupe_results, extract_result_candidates, filter_matching_results, title_matches_any_keyword, title_matches_keyword
 
@@ -107,6 +110,9 @@ class AmazonProvider(Provider):
     def __init__(self, client: Optional[AmazonClient] = None) -> None:
         self.client = client or AmazonClient(access=AmazonAccess(AMAZON_ACCESS_PATH), cookies_path=AMAZON_COOKIES_PATH)
         self.rhythms: Dict[Tuple, WatchRhythm] = {}
+        # Per watch: when it was last blocked and how often within the last hours; and where it rests until.
+        self.block_history: Dict[Tuple, Tuple[float, int]] = {}
+        self.quarantined_until: Dict[Tuple, float] = {}
         self.read_seconds: Dict[str, Deque[float]] = {"ana": deque(maxlen=20), "tarama": deque(maxlen=20)}
         self.begin_cycle()
 
@@ -141,15 +147,41 @@ class AmazonProvider(Provider):
 
     def read_rank(self, watch: WatchRule) -> int:
         """Main-page reads (one request) go before variant sweeps (many requests)."""
-        rhythm = self.rhythms.get(self._rhythm_key(watch))
+        key = self._rhythm_key(watch)
+        rhythm = self.rhythms.get(key)
         sweeping = (self.is_search_url(watch.url) or rhythm is None or rhythm.sweep_at is None
                     or not watch.include_variations
                     or time.monotonic() - rhythm.sweep_at >= AMAZON_SWEEP_INTERVAL_SECONDS)
-        return 1 if sweeping else 0
+        # A page that was blocked recently is read last, so after a pause the probe goes to a page that answers.
+        blocked_at = self.block_history.get(key, (None, 0))[0]
+        recently_blocked = blocked_at is not None and time.monotonic() - blocked_at < AMAZON_PAGE_REPEAT_WINDOW_SECONDS
+        return (1 if sweeping else 0) + (2 if recently_blocked else 0)
+
+    def absorb_block(self, watch: WatchRule) -> bool:
+        """One stubborn page rests alone: its first block only ends its read, later ones quarantine it."""
+        key = self._rhythm_key(watch)
+        now = time.monotonic()
+        previous_at, count = self.block_history.get(key, (None, 0))
+        if previous_at is None or now - previous_at > AMAZON_QUARANTINE_COUNT_RESET_SECONDS:
+            count = 0
+        self.block_history[key] = (now, count + 1)
+        if self.client.access.last_block_scope != "watch":
+            return False
+        if count >= 1:
+            seconds = AMAZON_QUARANTINE_SECONDS[min(count - 1, len(AMAZON_QUARANTINE_SECONDS) - 1)]
+            self.quarantined_until[key] = now + seconds
+            log(f"Amazon kartı tek başına engelleniyor, {seconds // 60} dk dinlendirilecek: {log_cell(watch.name or watch.url, 80)}")
+        else:
+            log(f"Amazon kartı engellendi, diğer sayfalar yanıt veriyor; yalnız bu kart bu turda atlandı: "
+                f"{log_cell(watch.name or watch.url, 80)}")
+        return True
 
     def read_due(self, watch: WatchRule) -> bool:
         """A product page is due again after the main interval, a search page after the sweep interval."""
-        rhythm = self.rhythms.get(self._rhythm_key(watch))
+        key = self._rhythm_key(watch)
+        if time.monotonic() < self.quarantined_until.get(key, 0):
+            return False
+        rhythm = self.rhythms.get(key)
         if rhythm is None or rhythm.main_at is None:
             return True
         interval = AMAZON_SWEEP_INTERVAL_SECONDS if self.is_search_url(watch.url) else AMAZON_MAIN_INTERVAL_SECONDS
@@ -180,8 +212,16 @@ class AmazonProvider(Provider):
             return self.read_search(watch, ctx, outcome)
         if (watch.include_variations and rhythm.sweep_at is not None
                 and now - rhythm.sweep_at < AMAZON_SWEEP_INTERVAL_SECONDS):
-            return self._read_main(watch, ctx, outcome, rhythm)
+            return self._in_lane(MAIN_LANE, self._read_main(watch, ctx, outcome, rhythm))
         return self._read_sweep(watch, ctx, outcome, rhythm)
+
+    def _in_lane(self, lane: str, reads):
+        """Run a generator with the client's lane set (the Depo lane may exceed the window limit a little)."""
+        self.client.lane = lane
+        try:
+            yield from reads
+        finally:
+            self.client.lane = ""
 
     def _read_sweep(self, watch: WatchRule, ctx: ReadContext, outcome: WatchRead, rhythm: WatchRhythm) -> Iterator[OfferResult]:
         """The whole variant family; what it finds becomes the memory the main reads replay."""

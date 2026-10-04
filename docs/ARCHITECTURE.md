@@ -195,20 +195,29 @@ results" search notice is a normal stock row read again after five minutes.
   late navigations and redirects to another ASIN.
 - Challenge detection looks at validation forms/inputs, a Robot Check title
   or explicit instructions; script text alone is not a challenge.
-- Protection back-off (since 3.3): one guard for the whole site. The first
-  CAPTCHA/HTTP 503 pauses every Amazon watch (3 → 6 → 12 → 20 minutes, the
-  ladder in `PROTECTION_PAUSE_LADDER_SECONDS`); the first read after the pause
-  is the single probe. A failed probe climbs one step, any successful read
-  clears the guard. The pause survives restarts (`state.json`); watches keep
-  showing their last rows while it lasts. Guards of older versions (one per
-  watch) are dropped at the first cycle.
+- Protection back-off (since 3.3, scope since 3.3.1): the site pauses only when
+  two *different* pages fail one after the other (`AmazonAccess.failed_run`).
+  A page that fails on its own is a watch block: its read ends, the provider
+  notes it (`absorb_block`), the first block changes nothing else, from the second
+  block within 6 hours that watch rests 30 minutes and from the third 60 minutes
+  (`read_due` is false meanwhile) while every other watch keeps reading. A
+  recently blocked watch is ranked last (`read_rank`), so after a pause the
+  probe goes to a page that answers. A site-wide block pauses every Amazon
+  watch (3 → 6 → 12 → 20 minutes, `PROTECTION_PAUSE_LADDER_SECONDS`); the first
+  read after the pause is the single probe. A failed probe climbs one step, any
+  successful read clears the guard. The pause survives restarts (`state.json`).
+  A blocked watch keeps its last rows on the table (they carry their read
+  time). Guards of older versions (one per watch) are dropped at the first cycle.
 - Request budget (`access.py`, since 3.3): a rolling 35-minute window caps how
-  many requests may start. The limit begins at 300, rises 5 % after every
-  clean hour in which the window reached 80 % of it (never above 500), and a
-  block records the window count as the threshold, lowers the limit to 85 % of
-  it and freezes it (floor 60). After a block the minimum request gap doubles
-  for an hour, and for ten minutes after every start. Limit, threshold and slow
-  start survive restarts in `amazon_access.json`; cookies in
+  many requests may start. The limit begins at 300 and rises 5 % after every
+  clean hour in which the window reached 80 % of it (never above 500). The first
+  site-wide block records the window count as the threshold and lowers the limit
+  once to 85 % of it (floor 200); later blocks only record the threshold (the
+  3.3.0 night showed blocks do not follow the request count). The main-page lane
+  (Depo reads) may exceed the limit by 20 %. After a site-wide block the minimum
+  request gap doubles for an hour, and for ten minutes after every start. Limit,
+  threshold and slow start survive restarts in `amazon_access.json` (schema 2; a
+  3.3.0 file is ignored and the limit starts at 300); cookies in
   `amazon_cookies.json`. Every ten minutes the log gets one `Amazon ölçüm:`
   line (window, limit, threshold, requests/min, last-hour requests and blocks,
   Depo checks and verified offers, skipped excluded pages).

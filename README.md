@@ -11,8 +11,9 @@ takip add-on'udur.
   kontrol edilir. Tablodaki renkli daire önceliği gösterir.
 - Amazon: varyasyonlar (renk × kapasite/ölçü, en fazla 60), doğrulanmış Amazon
   Depo teklifleri ayrı satırlarda, "yalnızca platformun kendi satıcısı" filtresi,
-  CAPTCHA/503 sonrası tüm Amazon 3 → 6 → 12 → 20 dakika mola (tek yoklamayla),
-  kayan pencere istek sınırı ve ilk saat yarım hız. Ürün sayfası ve ikinci el
+  iki farklı sayfa art arda engellenirse tüm Amazon 3 → 6 → 12 → 20 dakika mola
+  (tek yoklamayla), tek sayfa tek başına engellenirse yalnız o kart 30–60 dk
+  dinlenir; kayan pencere istek sınırı ve engelden sonra ilk saat yarım hız. Ürün sayfası ve ikinci el
   listesi her ~100 sn'de, varyant taraması ~270 sn'de bir okunur.
 - Bildirimler Pushover ile gelir; CAPTCHA ve HTTP 503 hataları bildirim
   göndermez, panelde görünür.

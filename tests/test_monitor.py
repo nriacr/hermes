@@ -303,6 +303,43 @@ class ProtectionGuardTests(CycleTestCase):
             self.run_later(config([rule]), seconds=120)
         read.assert_called_once()
 
+    def test_a_page_that_fails_on_its_own_pauses_nobody_and_keeps_its_last_rows(self):
+        first = watch("Bir", "https://www.amazon.com.tr/dp/B000000001", target="100000")
+        second = watch("İki", "https://www.amazon.com.tr/dp/B000000002", target="100000")
+        good = [OfferResult("Apple iPhone 17", Decimal("90000"), "Amazon.com.tr", first.url)]
+        other = [OfferResult("Apple Watch Ultra", Decimal("80000"), "Amazon.com.tr", second.url)]
+
+        def amazon_read(rule, ctx, outcome):
+            return good if rule is first else other
+
+        with patch.object(AmazonProvider, "read", side_effect=amazon_read):
+            self.run_cycle(config([first, second]))
+        self.assertEqual(len(self.published_rows()), 2)
+
+        def amazon_read_blocked(rule, ctx, outcome):
+            if rule is first:
+                raise BotProtectionHermesError("Amazon captcha")
+            return other
+
+        with (patch.object(AmazonProvider, "read", side_effect=amazon_read_blocked),
+              patch.object(AmazonProvider, "absorb_block", return_value=True)):
+            state = self.run_later(config([first, second]))
+        # No site pause; the blocked watch keeps its last price and the other one was read.
+        self.assertNotIn(self.SITE, state["_meta"].get("amazon_protection", {}))
+        self.assertEqual(len(self.published_rows()), 2)
+        self.assertIn("captcha", state[key(first)]["last_error"])
+        self.assertTrue(state[key(first)]["offer_keys"])
+
+    def test_a_site_wide_block_keeps_the_blocked_watchs_last_rows_too(self):
+        rule = watch("Bir", "https://www.amazon.com.tr/dp/B000000001", target="100000")
+        good = [OfferResult("Apple iPhone 17", Decimal("90000"), "Amazon.com.tr", rule.url)]
+        with patch.object(AmazonProvider, "read", side_effect=reader(good)):
+            self.run_cycle(config([rule]))
+        with patch.object(AmazonProvider, "read", side_effect=reader(BotProtectionHermesError("Amazon captcha"))):
+            state = self.run_later(config([rule]))
+        self.assertIn(self.SITE, state["_meta"]["amazon_protection"])
+        self.assertEqual(len(self.published_rows()), 1)
+
     def test_a_block_stops_every_other_amazon_watch_in_the_same_cycle(self):
         first = watch("Bir", "https://www.amazon.com.tr/s?k=bir")
         second = watch("İki", "https://www.amazon.com.tr/s?k=iki")
