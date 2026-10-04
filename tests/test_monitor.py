@@ -337,6 +337,25 @@ class ProtectionGuardTests(CycleTestCase):
         self.assertIn("captcha", state[key(first)]["last_error"])
         self.assertTrue(state[key(first)]["offer_keys"])
 
+    def test_a_request_held_back_by_the_client_does_not_climb_the_ladder(self):
+        # 2026-10-05: after the 3.6.0 restart the old 6-minute pause ended before the client's
+        # 15-minute hold, and the held-back request climbed the ladder to 60 minutes.
+        state = {}
+        now = datetime(2026, 10, 5, 0, 17, tzinfo=timezone.utc)
+        with patch.object(state_ops, "local_now", return_value=now):
+            state_ops.note_guard(state, self.SITE, "Bir", BotProtectionHermesError("captcha"))
+        now += timedelta(minutes=16)
+        held = BotProtectionHermesError("molada", challenge_reason="mola", hold_seconds=9 * 60)
+        with patch.object(state_ops, "local_now", return_value=now):
+            state_ops.note_guard(state, self.SITE, "İki", held)
+            self.assertEqual(state_ops.guard_remaining_seconds(state, self.SITE), 9 * 60)
+        self.assertEqual(state["_meta"]["amazon_protection"][self.SITE]["consecutive_blocks"], 1)
+        # The probe after the hold that fails climbs one step from there: 30 minutes.
+        now += timedelta(minutes=10)
+        with patch.object(state_ops, "local_now", return_value=now):
+            state_ops.note_guard(state, self.SITE, "Üç", BotProtectionHermesError("captcha"))
+            self.assertEqual(state_ops.guard_remaining_seconds(state, self.SITE), 30 * 60)
+
     def test_a_read_that_answers_during_the_pause_does_not_end_it(self):
         state = {}
         state_ops.note_guard(state, self.SITE, "Bir", BotProtectionHermesError("captcha"))

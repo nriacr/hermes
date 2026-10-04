@@ -380,7 +380,7 @@ class AmazonClient:
         held = self.access.hold_remaining()
         if held > 0:
             log(f"Amazon engelden sonra molada ({held / 60:.0f} dk kaldı); istek gönderilmedi: {_short_url(url)}")
-            raise BotProtectionHermesError(HOLD_MESSAGE, challenge_reason="mola")
+            raise BotProtectionHermesError(HOLD_MESSAGE, challenge_reason="mola", hold_seconds=held)
         self.access.request_started(lane)
         self.access.count("istek_depo" if lane == MAIN_LANE else "istek_tarama")
         started_at = time.monotonic()

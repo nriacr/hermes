@@ -43,9 +43,12 @@ class HttpStatusHermesError(HermesError):
 class BotProtectionHermesError(HermesError):
     """A site answered with a verification/challenge page instead of content."""
 
-    def __init__(self, message: str, challenge_reason: str = "", http_status: Optional[int] = None) -> None:
+    def __init__(self, message: str, challenge_reason: str = "", http_status: Optional[int] = None,
+                 hold_seconds: Optional[float] = None) -> None:
         self.challenge_reason = challenge_reason
         self.http_status = http_status
+        # Set when nothing was sent because the site still holds back after an earlier block.
+        self.hold_seconds = hold_seconds
         super().__init__(message)
 
 

@@ -253,7 +253,22 @@ def note_guard(state: Dict[str, Any], key: str, source: str, exc: BaseException,
         previous_count = int(previous.get("consecutive_blocks") or 1) if isinstance(previous, dict) else 1
     except (TypeError, ValueError):
         previous_count = 1
-    consecutive = min(len(PROTECTION_PAUSE_LADDER_SECONDS), previous_count + 1) if previous_at and 0 <= (now - previous_at).total_seconds() < 6 * 60 * 60 else 1
+    recent = bool(previous_at and 0 <= (now - previous_at).total_seconds() < 6 * 60 * 60)
+    hold = getattr(exc, "hold_seconds", None)
+    if hold:
+        # Nothing was sent: the client still holds back after an earlier block. The pause covers
+        # the rest of the hold without climbing the ladder; the probe comes after it.
+        store[key] = {
+            "blocked_at": previous.get("blocked_at") if recent else now.isoformat(),
+            "retry_after": (now + timedelta(seconds=math.ceil(hold))).isoformat(),
+            "consecutive_blocks": previous_count if recent else 1,
+            "source": source,
+            "message": str(exc)[:300],
+            "kind": "captcha",
+        }
+        log(f"{site_label} engelden sonraki istek molası sürüyor: {math.ceil(hold / 60)} dk sonra yeniden denenecek.")
+        return
+    consecutive = min(len(PROTECTION_PAUSE_LADDER_SECONDS), previous_count + 1) if recent else 1
     cooldown = guard_cooldown_seconds(consecutive)
     kind = guard_kind(exc)
     store[key] = {

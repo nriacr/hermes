@@ -1,5 +1,12 @@
 # Değişiklik günlüğü
 
+## 3.6.1
+
+- Engelden sonraki 15 dakikalık istek molasında gönderilmeyen bir istek artık yeni bir
+  engel sayılmıyor; mola yalnız kalan süre kadar uzuyor, mola basamağı (15 → 30 → 60)
+  yükselmiyor. 3.6.0'a geçişte eski kısa mola istek molasından önce bittiği için bu
+  durum molayı bir kez 60 dakikaya çıkarmıştı.
+
 ## 3.6.0
 
 4 Ekim günlüğündeki 3.130 Amazon isteği ve 60 engel incelendi. Engel sayfaya değil
