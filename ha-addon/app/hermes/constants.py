@@ -137,16 +137,15 @@ AMAZON_MAIN_LANE_SHARE = 0.28
 # 3.5.2: the share is not held back idle. The sweep leaves the Depo lane only what it still
 # needs: as much as it used in the last 35 minutes, at least this many requests, at most the share.
 AMAZON_MAIN_LANE_FLOOR = 12
-# How many gaps between two main-page reads the measurement line looks at.
+# How many gaps between two reads of the same watch the measurement line looks at (a red watch: the round time).
 AMAZON_MAIN_GAPS_KEPT = 200
 # After a block the client itself sends nothing for this long, so a read already under way
 # in the other lane stops at its next request instead of collecting more blocks.
 AMAZON_BLOCK_HOLD_SECONDS = PROTECTION_PAUSE_LADDER_SECONDS[0]
-# Two reading rhythms per product watch: the configured page (with its used
-# listing, where Amazon Depo offers show up) every AMAZON_PRIORITY_INTERVAL_SECONDS of its category
-# (3.7.0), and the variant sweep every 270 s (a yellow or green category: its own longer interval). A variant page that a watch excludes by title is read once
+# 3.9.0: a product watch is read as a whole (its configured page with the used listing, where Amazon Depo
+# offers show up, and every variant): a red one once per search round (a cycle), a yellow or green one every
+# AMAZON_PRIORITY_INTERVAL_SECONDS. A variant page that a watch excludes by title is read once
 # for its neighbours and then taken from memory for 30 minutes.
-AMAZON_SWEEP_INTERVAL_SECONDS = 270
 AMAZON_EXCLUDED_PAGE_REFRESH_SECONDS = 30 * 60
 AMAZON_STATS_LOG_SECONDS = 10 * 60
 AMAZON_COOKIE_MAX_AGE_SECONDS = 7 * 24 * 60 * 60

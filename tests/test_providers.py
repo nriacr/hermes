@@ -15,7 +15,6 @@ from hermes.constants import (
     AMAZON_PRIORITY_INTERVAL_SECONDS,
     AMAZON_RED_ROUND_FLOOR_SECONDS,
     AMAZON_SLOWDOWN_RECOVER_SECONDS,
-    AMAZON_SWEEP_INTERVAL_SECONDS,
 )
 from hermes.models import OfferResult, SearchResultItem
 from hermes.providers import amazon as amazon_reader
@@ -84,7 +83,7 @@ class AmazonTestCase(unittest.TestCase):
 
 
 class AmazonRhythmTests(AmazonTestCase):
-    """The configured page every 100 s, the variant family every 270 s."""
+    """3.9: a red watch is read as a whole once per search round; yellow and green at their own intervals."""
 
     def family(self, pages):
         variations = [amazon_parser.AmazonProductVariation("Gümüş", ROOT), amazon_parser.AmazonProductVariation("Turuncu", CHILD)]
@@ -97,17 +96,18 @@ class AmazonRhythmTests(AmazonTestCase):
         with self.serve({ROOT: priced()}), patch.object(amazon_reader.time, "monotonic", return_value=1000):
             self.read(product)
             self.assertFalse(self.provider.read_due(product))
+        self.provider.begin_cycle()  # the next search round
         for seconds, due in ((19, False), (20, True)):
             with patch.object(amazon_reader.time, "monotonic", return_value=1000 + seconds):
                 self.assertEqual(self.provider.read_due(product), due)
         with patch.object(amazon_reader.time, "monotonic", return_value=1000):
             self.provider.rhythms[self.provider._rhythm_key(search)] = amazon_reader.WatchRhythm(main_at=1000)
-        for seconds, due in ((269, False), (270, True)):
+        for seconds, due in ((19, False), (20, True)):
             with patch.object(amazon_reader.time, "monotonic", return_value=1000 + seconds):
                 self.assertEqual(self.provider.read_due(search), due)
 
-    def test_the_depo_lane_fetches_the_main_page_again_inside_the_same_cycle(self):
-        rule = watch(url=ROOT, target="100000", include_variations=True)
+    def test_the_depo_lane_reads_fresh_pages_never_the_ones_the_sweep_fetched_in_the_same_cycle(self):
+        rule = watch(url=ROOT, target="100000")
         fetched = []
 
         def http_read(url, _timeout, _expect_search):
@@ -116,7 +116,7 @@ class AmazonRhythmTests(AmazonTestCase):
 
         with patch.object(self.client, "_http_read", side_effect=http_read), \
                 patch.object(amazon_reader.time, "monotonic", return_value=1000):
-            list(self.provider.read(rule, context(), WatchRead()))  # the sweep
+            list(self.provider.read(rule, context(), WatchRead()))  # the sweep queue
             first = len(fetched)
         with patch.object(self.client, "_http_read", side_effect=http_read), \
                 patch.object(amazon_reader.time, "monotonic", return_value=1100):
@@ -143,50 +143,36 @@ class AmazonRhythmTests(AmazonTestCase):
                 self.provider.read(rule, context(), WatchRead())
         self.assertFalse(self.provider._is_busy(self.provider._rhythm_key(rule)))
 
-    def test_the_depo_lane_may_read_any_remembered_family_and_every_product_without_variants(self):
+    def test_the_depo_lane_reads_products_without_variants_and_the_sweep_reads_families_and_searches(self):
         family = watch(url=ROOT, include_variations=True)
         single = watch("Tek", url=CHILD)
         search = watch("Hue", "https://www.amazon.com.tr/s?k=hue")
-        self.assertFalse(self.provider.next_read_is_main(family))  # nothing remembered yet
+        self.assertFalse(self.provider.next_read_is_main(family))  # a family is read in full by the sweep queue
         self.assertTrue(self.provider.needs_sweep(family))
         with self.serve({ROOT: priced()}), patch.object(amazon_reader.time, "monotonic", return_value=1000):
             self.read(family)
-            self.assertTrue(self.provider.next_read_is_main(family))
             self.assertFalse(self.provider.needs_sweep(family))
-        with patch.object(amazon_reader.time, "monotonic", return_value=1270):
-            # The sweep is due, but the Depo lane may still read the main page.
-            self.assertTrue(self.provider.next_read_is_main(family))
+        with patch.object(amazon_reader.time, "monotonic", return_value=1020):  # the red floor has passed
             self.assertTrue(self.provider.needs_sweep(family))
-        with patch.object(amazon_reader.time, "monotonic", return_value=99999):
-            self.assertTrue(self.provider.next_read_is_main(family))
+        self.assertFalse(self.provider.next_read_is_main(family))
         self.assertTrue(self.provider.next_read_is_main(single))
         self.assertFalse(self.provider.needs_sweep(single))  # nothing to sweep: the Depo lane reads its whole page
         self.assertFalse(self.provider.next_read_is_main(search))
         self.assertTrue(self.provider.needs_sweep(search))
         self.assertTrue(amazon_reader.AmazonProvider.has_depo_lane)
 
-    def test_the_depo_lane_reads_only_the_main_page_even_when_the_sweep_is_overdue(self):
-        rule = watch(url=ROOT, target="100000", include_variations=True)
-        pages = {ROOT: priced("100,00", "iPhone Gümüş"), CHILD: priced("200,00", "iPhone Turuncu")}
-        serving, variations = self.family(pages)
-        with serving, variations:
-            with patch.object(amazon_reader.time, "monotonic", return_value=1000):
-                self.read(rule)
-            self.assertEqual(self.fetched, [ROOT, CHILD])
-            pages[ROOT] = priced("90,00", "iPhone Gümüş")
-            pages[CHILD] = priced("150,00", "iPhone Turuncu")
-            # 30 minutes later (the sweep queue has not got to this family): the Depo lane still reads one page.
-            with patch.object(amazon_reader.time, "monotonic", return_value=1000 + 1800):
-                offers = self.read(rule, fresh=False, lane=DEPO_LANE)
-            self.assertEqual(self.fetched, [ROOT, CHILD, ROOT])
-            by_url = {offer.url: offer for offer in offers}
-            self.assertEqual(by_url[ROOT].price, Decimal("90"))
-            self.assertEqual(by_url[CHILD].price, Decimal("200"))  # the remembered sweep price
-            self.assertIsNotNone(by_url[CHILD].checked_at)
-            # The sweep queue (no lane) reads the whole family once its sweep is due.
-            with patch.object(amazon_reader.time, "monotonic", return_value=1000 + 1900):
-                offers = self.read(rule, fresh=False)
-            self.assertEqual({offer.price for offer in offers}, {Decimal("90"), Decimal("150")})
+    def test_a_red_watch_is_read_once_per_round_whichever_lane_gets_to_it(self):
+        rule = watch(url=ROOT)
+        with self.serve({ROOT: priced()}), patch.object(amazon_reader.time, "monotonic", return_value=1000):
+            self.assertTrue(self.provider.read_due(rule))
+            self.read(rule)
+        with patch.object(amazon_reader.time, "monotonic", return_value=1500):
+            self.assertFalse(self.provider.read_due(rule))  # same round, however long it takes
+        self.provider.begin_cycle()
+        with patch.object(amazon_reader.time, "monotonic", return_value=1500):
+            self.assertTrue(self.provider.read_due(rule))
+        with patch.object(amazon_reader.time, "monotonic", return_value=1010):
+            self.assertFalse(self.provider.read_due(rule))  # a round that ends within 20 s waits for the floor
 
     def test_the_depo_lane_reads_a_product_without_variants_in_full_in_its_lane(self):
         rule = watch("Tek", url=ROOT, target="100000")
@@ -213,55 +199,47 @@ class AmazonRhythmTests(AmazonTestCase):
         with patch.object(amazon_reader.time, "monotonic", return_value=1300):
             self.provider.begin_cycle()
         line = next(line for line in LOG_LINES if "Amazon ölçüm:" in line)
-        self.assertIn("ana sayfa aralığı medyan/p90=110/110 sn (n=2)", line)
+        self.assertIn("kart okuma aralığı (tur) medyan/p90=110/110 sn (n=2)", line)
         self.assertIn("istek: depo şeridi=", line)
 
-    def test_main_reads_rank_before_sweeps(self):
+    def test_watches_that_are_not_due_for_a_sweep_rank_before_the_ones_that_are(self):
         rule = watch(url=ROOT, include_variations=True)
-        self.assertEqual(self.provider.read_rank(rule), 1)  # nothing remembered: a sweep is coming
+        self.assertEqual(self.provider.read_rank(rule), 1)  # never read: a sweep is due
         with self.serve({ROOT: priced()}), patch.object(amazon_reader.time, "monotonic", return_value=1000):
             self.read(rule)
-            self.assertEqual(self.provider.read_rank(rule), 0)  # next read is a main read
-        with patch.object(amazon_reader.time, "monotonic", return_value=1270):
-            self.assertEqual(self.provider.read_rank(rule), 1)  # the sweep is due again
+            self.assertEqual(self.provider.read_rank(rule), 0)
+        with patch.object(amazon_reader.time, "monotonic", return_value=1020):
+            self.assertEqual(self.provider.read_rank(rule), 1)
         self.assertEqual(self.provider.read_rank(watch("Hue", "https://www.amazon.com.tr/s?k=hue")), 1)
 
-    def test_main_read_fetches_only_the_configured_page_and_replays_the_other_variants(self):
+    def test_every_round_reads_all_pages_of_a_family_and_replays_nothing(self):
         rule = watch(url=ROOT, target="100000", include_variations=True)
         pages = {ROOT: priced("100,00", "iPhone Gümüş"), CHILD: priced("200,00", "iPhone Turuncu")}
         serving, variations = self.family(pages)
         with serving, variations, patch.object(amazon_reader.time, "monotonic", return_value=1000):
             first = self.read(rule)
-            self.assertEqual(self.fetched, [ROOT, CHILD])
-            self.assertTrue(all(offer.checked_at is None for offer in first))
         pages[ROOT] = priced("90,00", "iPhone Gümüş")
         pages[CHILD] = priced("150,00", "iPhone Turuncu")
         with serving, variations, patch.object(amazon_reader.time, "monotonic", return_value=1100):
             second = self.read(rule, fresh=False)
-        self.assertEqual(self.fetched, [ROOT, CHILD, ROOT])
-        by_url = {offer.url: offer for offer in second}
-        self.assertEqual(by_url[ROOT].price, Decimal("90"))
-        self.assertIsNone(by_url[ROOT].checked_at)
-        # The other variant is the sweep's price (200), not the new page (150), with the time it was read.
-        self.assertEqual(by_url[CHILD].price, Decimal("200"))
-        self.assertIsNotNone(by_url[CHILD].checked_at)
+        self.assertEqual(self.fetched, [ROOT, CHILD, ROOT, CHILD])
+        self.assertEqual({offer.price for offer in first}, {Decimal("100"), Decimal("200")})
+        self.assertEqual({offer.price for offer in second}, {Decimal("90"), Decimal("150")})
+        self.assertTrue(all(offer.checked_at is None for offer in second))
 
-    def test_the_variant_sweep_runs_again_after_270_seconds(self):
-        rule = watch(url=ROOT, target="100000", include_variations=True)
-        pages = {ROOT: priced("100,00", "iPhone Gümüş"), CHILD: priced("200,00", "iPhone Turuncu")}
-        serving, variations = self.family(pages)
-        with serving, variations:
-            with patch.object(amazon_reader.time, "monotonic", return_value=1000):
-                self.read(rule)
-            pages[CHILD] = priced("150,00", "iPhone Turuncu")
-            with patch.object(amazon_reader.time, "monotonic", return_value=1269):
-                self.assertEqual({o.price for o in self.read(rule, fresh=False)}, {Decimal("100"), Decimal("200")})
-            with patch.object(amazon_reader.time, "monotonic", return_value=1270):
-                self.assertEqual({o.price for o in self.read(rule, fresh=False)}, {Decimal("100"), Decimal("150")})
-        self.assertEqual(self.fetched, [ROOT, CHILD, ROOT, ROOT, CHILD])
+    def test_a_yellow_family_is_read_again_after_an_hour_a_green_one_after_three(self):
+        yellow, green = (watch(url=ROOT, include_variations=True, priority=p) for p in ("medium", "low"))
+        for rule, interval in ((yellow, 3600), (green, 3 * 3600)):
+            with self.subTest(priority=rule.priority):
+                self.provider.rhythms[self.provider._rhythm_key(rule)] = amazon_reader.WatchRhythm(
+                    main_at=1000, sweep_at=1000)
+                with patch.object(amazon_reader.time, "monotonic", return_value=1000 + interval - 1):
+                    self.assertFalse(self.provider.needs_sweep(rule))
+                with patch.object(amazon_reader.time, "monotonic", return_value=1000 + interval):
+                    self.assertTrue(self.provider.needs_sweep(rule))
 
     def test_a_sold_out_main_page_drops_its_own_offer_but_not_the_others(self):
-        rule = watch(url=ROOT, target="100000", include_variations=True)
+        rule = watch(url=ROOT, target="100000", include_variations=True, priority="medium")
         pages = {ROOT: priced("100,00", "iPhone Gümüş"), CHILD: priced("200,00", "iPhone Turuncu")}
         serving, variations = self.family(pages)
         with serving, variations:
@@ -273,23 +251,6 @@ class AmazonRhythmTests(AmazonTestCase):
                 offers = self.read(rule, outcome, fresh=False)
             self.assertEqual([offer.url for offer in offers], [CHILD])
             self.assertEqual(outcome.unavailable[0]["product_url"], ROOT)
-            # And the next main read does not bring the sold-out offer back from memory.
-            with patch.object(amazon_reader.time, "monotonic", return_value=1200):
-                self.assertEqual([offer.url for offer in self.read(rule, fresh=False)], [CHILD])
-
-    def test_a_block_in_a_main_read_keeps_the_others_visible_and_reports_the_block(self):
-        rule = watch(url=ROOT, target="100000", include_variations=True)
-        pages = {ROOT: priced("100,00", "iPhone Gümüş"), CHILD: priced("200,00", "iPhone Turuncu")}
-        serving, variations = self.family(pages)
-        with serving, variations:
-            with patch.object(amazon_reader.time, "monotonic", return_value=1000):
-                self.read(rule)
-            pages[ROOT] = BotProtectionHermesError("Amazon captcha")
-            outcome = WatchRead()
-            with patch.object(amazon_reader.time, "monotonic", return_value=1100):
-                offers = self.read(rule, outcome, fresh=False)
-        self.assertEqual([offer.url for offer in offers], [CHILD])
-        self.assertIsInstance(outcome.blocked, BotProtectionHermesError)
 
     def test_a_block_with_nothing_remembered_raises(self):
         rule = watch(url=ROOT, target="100000", include_variations=True)
@@ -353,6 +314,7 @@ class AmazonCategoryRhythmTests(AmazonTestCase):
     """The priority category alone decides the reading interval: red every search round, yellow hourly, green 3 hours."""
 
     def due_after(self, rule, seconds):
+        self.provider.begin_cycle()  # a red watch is due once per round, so ask in a later round
         with patch.object(amazon_reader.time, "monotonic", return_value=1000 + seconds):
             return self.provider.read_due(rule)
 
@@ -386,7 +348,7 @@ class AmazonCategoryRhythmTests(AmazonTestCase):
 
     def test_a_yellow_or_green_family_is_swept_at_its_own_longer_interval(self):
         red, yellow = (watch(url=ROOT, include_variations=True, priority=p) for p in ("high", "medium"))
-        self.assertEqual(self.provider.sweep_interval(red), AMAZON_SWEEP_INTERVAL_SECONDS)
+        self.assertEqual(self.provider.sweep_interval(red), AMAZON_RED_ROUND_FLOOR_SECONDS)
         self.assertEqual(self.provider.sweep_interval(yellow), 3600)
 
     def test_a_watch_never_read_is_due_at_once(self):
@@ -394,21 +356,18 @@ class AmazonCategoryRhythmTests(AmazonTestCase):
 
 class AmazonLaneTests(AmazonTestCase):
     def test_the_main_page_lane_is_set_only_while_it_reads(self):
-        rule = watch(url=ROOT, target="100000", include_variations=True)
+        rule = watch(url=ROOT, target="100000")
         lanes = []
-        pages = {ROOT: priced("100,00"), CHILD: priced("200,00")}
-        variations = [amazon_parser.AmazonProductVariation("Gümüş", ROOT), amazon_parser.AmazonProductVariation("Turuncu", CHILD)]
 
         def fetch(url, _ctx, expect_search=False):
             lanes.append(self.client.lane)
-            return pages[url]
+            return priced("100,00")
 
         with (patch.object(self.provider, "fetch", side_effect=fetch),
-              patch.object(amazon_parser, "extract_product_variations", return_value=variations),
               patch.object(amazon_reader.time, "monotonic", return_value=1000)):
             self.read(rule)
             self.read(rule, fresh=False, lane=DEPO_LANE)
-        self.assertEqual(lanes, ["", "", MAIN_LANE])
+        self.assertEqual(lanes, ["", MAIN_LANE])
         self.assertEqual(self.client.lane, "")
 
 

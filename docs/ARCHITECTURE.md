@@ -256,18 +256,21 @@ results" search notice is a normal stock row read again after five minutes.
   `Amazon engel dalgası:` line with its number of the day, its cause (challenge
   marker and/or HTTP status), the page, the requests of the hour before it and
   the calm time since the previous block; the day's count survives restarts.
-- Two rhythms per product watch (since 3.3, `WatchRhythm`): the configured page
-  with its used listing (where Depo offers show) every
-  `AMAZON_PRIORITY_INTERVAL_SECONDS` of the watch's category (since 3.7: red every search round
-  (3.8.1: floor `AMAZON_RED_ROUND_FLOOR_SECONDS`, 20 s; the round lasts as long as its reads and
-  grows when yellow or green cards are due in it), yellow hourly, green every 3 hours; the price never changes it, the 3.6
-  near/far rule is gone), the variant family every 270 s for a red watch and at
-  its own longer interval for yellow and green (`AmazonProvider.main_interval`,
-  `sweep_interval`). The two rhythms run in two lanes (since 3.5): the Depo
-  lane thread repeats the main reads, the sweep thread works through the due
-  families. Both go through one request turn (one request at a time; since
-  3.8.3 the two lanes alternate when both wait, because a Depo lane without a
-  timer starved the sweep: 3.8.1 let the variants go stale for 10-39 minutes), one rolling window (the Depo lane may use all of it; the sweep
+- One read per watch and round (since 3.9, `WatchRhythm`): a product watch is
+  read as a whole, its configured page with the used listing (where Depo offers
+  show) and every variant of its family. A red watch is read once per search
+  round (a cycle; `AmazonProvider.read_due` checks `main_cycle`, floor
+  `AMAZON_RED_ROUND_FLOOR_SECONDS`, 20 s), a yellow one hourly and a green one
+  every 3 hours (`AMAZON_PRIORITY_INTERVAL_SECONDS`); the price never changes
+  it. The round lasts as long as its reads and grows when yellow or green cards
+  are due in it, so each red page is read every ~5-6 minutes at the 1-4 s delay
+  (the old fast main-page loop of 3.5-3.8.3 and the replay of remembered variant
+  offers are gone: the main pages took half the requests and the variants went
+  stale for 14 minutes). The work runs in two lanes (since 3.5): the Depo lane
+  thread reads the single-page products (once per round), the sweep thread
+  works through the variant families and search pages. Both go through one
+  request turn (one request at a time; since 3.8.3 the two lanes alternate when
+  both wait), one rolling window (the Depo lane may use all of it; the sweep
   all but the part of the Depo reserve not used yet, the reserve being what the
   Depo lane used in the last 35 minutes, at least 12 requests, at most 28 % of
   the limit; and the sweep steps aside while the Depo lane waits for a slot) and one pause: a block on either lane

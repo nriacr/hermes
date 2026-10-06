@@ -8,16 +8,17 @@ takip add-on'udur.
 - Desteklenen siteler: Amazon, Hepsiburada, Trendyol, Network, Beymen Club,
   Ben Gurme, Nordbron, Zara, H&M, Togg.
 - Öncelik: yüksek (kırmızı) her çevrimde, orta (sarı) saatte, düşük (yeşil) 3 saatte
-  bir kontrol edilir; Amazon'da kırmızı kartlar her arama turunda (liste başından sonuna, sonra yeniden başa; en sık 20 saniyede bir). Tablodaki renkli daire önceliği gösterir.
+  bir kontrol edilir; Amazon'da kırmızı kartlar her arama turunda: ana sayfa ve tüm varyantlar liste başından sonuna bir kez okunur, sonra tur yeniden başlar (tur süresi sayfa sayısına bağlı, en sık 20 saniyede bir). Tablodaki renkli daire önceliği gösterir.
 - Amazon: varyasyonlar (renk × kapasite/ölçü, en fazla 60), doğrulanmış Amazon
   Depo teklifleri ayrı satırlarda, "yalnızca platformun kendi satıcısı" filtresi,
   ilk engelde tüm Amazon 5 → 10 → 20 → 30 dakika mola verir (tek yoklamayla) ve
   moladan sonra yeni bir anonim ziyaretçi olarak devam eder. Otomatik hız
   kademesi: engel dalgası tüm kategorilerin aralığını 2 (ikinci dalgada 4) katına
   çıkarır, her 10 dakika engelsiz geçince bir kademe gevşer ve kendiliğinden
-  normal hıza döner. Ürün sayfası ve ikinci el listesi (Depo şeridi) kategorisine
-  göre okunur (fiyatın hedefe yakınlığı etkilemez); varyant taraması kendi
-  şeridinde kırmızı kartlarda ~270 sn'de bir, sarı ve yeşilde kendi aralığında.
+  normal hıza döner. Ürün sayfası, ikinci el listesi ve varyantlar kategorisine
+  göre okunur (fiyatın hedefe yakınlığı etkilemez): kırmızı her turda, sarı
+  saatte, yeşil 3 saatte bir. Tek sayfalık ürünler Depo şeridinde, varyantlı
+  aileler tarama şeridinde okunur; iki şerit sırayla istek atar.
   Kayan pencere istek sınırı 400'den başlar.
 - Bildirimler Pushover ile gelir; CAPTCHA ve HTTP 503 hataları bildirim
   göndermez, panelde görünür.

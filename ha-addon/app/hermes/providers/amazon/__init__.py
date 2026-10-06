@@ -6,7 +6,7 @@ import threading
 import time
 import zlib
 from collections import deque
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Deque, Dict, Iterator, List, Optional, Tuple
 
@@ -15,7 +15,6 @@ from ...constants import (
     AMAZON_COOKIES_PATH,
     AMAZON_EXCLUDED_PAGE_REFRESH_SECONDS,
     AMAZON_MAIN_GAPS_KEPT,
-    AMAZON_SWEEP_INTERVAL_SECONDS,
     AMAZON_PRIORITY_INTERVAL_SECONDS,
     AMAZON_RED_ROUND_FLOOR_SECONDS,
     SITE_AMAZON,
@@ -44,18 +43,15 @@ EXCLUDED_PAGE_CACHE_LIMIT = 512
 class WatchRhythm:
     """What the provider remembers of one product watch between cycles.
 
-    The configured page (with its used listing, where Amazon Depo offers show
-    up) is read every AMAZON_PRIORITY_INTERVAL_SECONDS of the watch's category (red
-    every search round, yellow hourly, green every 3 hours); the whole variant family every
-    AMAZON_SWEEP_INTERVAL_SECONDS (a longer category interval wins). Both are
-    stretched by the access governor's speed factor after a block wave. Between sweeps the other variants'
-    offers are replayed with the time they were really read.
+    Since 3.9 a watch is read as a whole (its configured page with the used listing, where Amazon Depo
+    offers show up, and every variant of its family) once per search round (a cycle) while it is red, and
+    every AMAZON_PRIORITY_INTERVAL_SECONDS (hourly, every 3 hours) while it is yellow or green. The
+    intervals are stretched by the access governor's speed factor after a block wave.
     """
 
     main_at: Optional[float] = None
     sweep_at: Optional[float] = None
-    offers: Dict[str, List[OfferResult]] = field(default_factory=dict)
-    unavailable: List[dict] = field(default_factory=list)
+    main_cycle: int = -1
 
 
 def is_platform_seller(seller: Optional[str]) -> bool:
@@ -119,11 +115,14 @@ class AmazonProvider(Provider):
         self.busy: Dict[Tuple, float] = {}
         self._busy_lock = threading.Lock()
         self.main_gaps: Deque[Tuple[float, float]] = deque(maxlen=AMAZON_MAIN_GAPS_KEPT)
+        self.cycle_no = 0
         self.begin_cycle()
 
     def begin_cycle(self) -> None:
         # Cycle-local caches: responses, parsed product pages and search detail
-        # pages. Prices are never carried into the next cycle.
+        # pages. Prices are never carried into the next cycle. A cycle is one search round:
+        # a red watch is read once in it, by whichever lane gets to it first.
+        self.cycle_no += 1
         self._cycle_caches = {"responses": {}, "pages": {}, "details": {}}
         self._log_measurements()
 
@@ -154,7 +153,7 @@ class AmazonProvider(Provider):
         recent = sorted(gap for at, gap in self.main_gaps if time.monotonic() - at < 30 * 60)
         gaps = (f"{recent[len(recent) // 2]:.0f}/{recent[min(len(recent), math.ceil(len(recent) * 0.9)) - 1]:.0f} sn (n={len(recent)})"
                 if recent else "-")
-        log(f"Amazon ölçüm: {access.stats_line()} | ana sayfa aralığı medyan/p90={gaps} | "
+        log(f"Amazon ölçüm: {access.stats_line()} | kart okuma aralığı (tur) medyan/p90={gaps} | "
             f"istek: depo şeridi={counters.get('istek_depo', 0)}, tarama şeridi={counters.get('istek_tarama', 0)} | "
             f"ana sayfa okuması ort={mean('ana')} | "
             f"varyant taraması ort={mean('tarama')} | depo: sayfa kontrolü={counters.get('depo_sayfa', 0)}, "
@@ -167,21 +166,13 @@ class AmazonProvider(Provider):
     def _rhythm_key(watch: WatchRule) -> Tuple:
         return (watch.url, watch.include_variations, watch.official_seller_only, tuple(watch.excluded_terms))
 
-    def _remembers_family(self, watch: WatchRule) -> bool:
-        """A product watch with variants whose family was swept at least once (its offers are remembered)."""
-        rhythm = self.rhythms.get(self._rhythm_key(watch))
-        return (not self.is_search_url(watch.url) and watch.include_variations
-                and rhythm is not None and rhythm.sweep_at is not None)
-
     def next_read_is_main(self, watch: WatchRule) -> bool:
-        """The Depo lane may read a product page now: a remembered family's main page (however old its
-        last sweep is) or the whole page of a product without variants."""
-        if self.is_search_url(watch.url):
-            return False
-        return not watch.include_variations or self._remembers_family(watch)
+        """The Depo lane reads a product without variants (one page and its used listing). A variant family is
+        read in full by the sweep queue, so every page of a red family is read once per round."""
+        return not self.is_search_url(watch.url) and not watch.include_variations
 
     def needs_sweep(self, watch: WatchRule) -> bool:
-        """Searches, unknown families and families swept more than the sweep interval ago.
+        """Searches and variant families that are due: red ones in every round, the others at their own interval.
 
         A product without variants has nothing to sweep: the Depo lane reads its whole page.
         """
@@ -189,9 +180,10 @@ class AmazonProvider(Provider):
             return True
         if not watch.include_variations:
             return False
-        if not self._remembers_family(watch):
+        rhythm = self.rhythms.get(self._rhythm_key(watch))
+        if rhythm is None or rhythm.sweep_at is None:
             return True
-        return time.monotonic() - self.rhythms[self._rhythm_key(watch)].sweep_at >= self.sweep_interval(watch)
+        return time.monotonic() - rhythm.sweep_at >= self.sweep_interval(watch)
 
     def is_watch_busy(self, watch: WatchRule) -> bool:
         return self._is_busy(self._rhythm_key(watch))
@@ -220,23 +212,27 @@ class AmazonProvider(Provider):
         priority = str(getattr(watch, "priority", "high") or "high").casefold()
         return AMAZON_PRIORITY_INTERVAL_SECONDS.get(priority, AMAZON_PRIORITY_INTERVAL_SECONDS["high"])
 
+    def is_red(self, watch: WatchRule) -> bool:
+        return self.category_interval(watch) <= AMAZON_RED_ROUND_FLOOR_SECONDS
+
     def main_interval(self, watch: WatchRule) -> float:
         return self.category_interval(watch) * self.client.access.speed_factor()
 
     def sweep_interval(self, watch: WatchRule) -> float:
-        """The variant family: every 270 s for a red watch, a yellow or green one at its own longer interval."""
-        return max(AMAZON_SWEEP_INTERVAL_SECONDS, self.category_interval(watch)) * self.client.access.speed_factor()
+        """How soon a whole family or search page is read again: the category's interval (red: the floor)."""
+        return self.main_interval(watch)
 
     def read_due(self, watch: WatchRule) -> bool:
-        """A product page is due again after its category's main interval, a search page after the sweep interval."""
+        """A watch is due after its category's interval; a red one also at most once per search round."""
         key = self._rhythm_key(watch)
         if self._is_busy(key):
             return False
         rhythm = self.rhythms.get(key)
         if rhythm is None or rhythm.main_at is None:
             return True
-        interval = self.sweep_interval(watch) if self.is_search_url(watch.url) else self.main_interval(watch)
-        return time.monotonic() - rhythm.main_at >= interval
+        if self.is_red(watch) and rhythm.main_cycle == self.cycle_no:
+            return False
+        return time.monotonic() - rhythm.main_at >= self.main_interval(watch)
 
     def set_request_delay(self, minimum: float, maximum: float) -> None:
         self.client.delay_range = (float(minimum), float(maximum))
@@ -265,6 +261,7 @@ class AmazonProvider(Provider):
         if rhythm.main_at is not None and now - rhythm.main_at < 15 * 60:
             self.main_gaps.append((now, now - rhythm.main_at))
         rhythm.main_at = now
+        rhythm.main_cycle = self.cycle_no
         with self._busy_lock:
             self.busy[key] = now
         if self.is_search_url(watch.url):
@@ -276,13 +273,7 @@ class AmazonProvider(Provider):
                 raise
             return self._exclusive(key, found)
         depo = ctx.lane == DEPO_LANE
-        remembered = watch.include_variations and rhythm.sweep_at is not None
-        # The Depo lane always reads only the main page of a remembered family, however old its sweep is;
-        # the sweep queue reads a family in full once its sweep is due.
-        if remembered and (depo or now - rhythm.sweep_at < self.sweep_interval(watch)):
-            reads = self._read_main(watch, ctx, outcome, rhythm)
-        else:
-            reads = self._read_sweep(watch, ctx, outcome, rhythm)
+        reads = self._read_product(watch, ctx, outcome, rhythm)
         return self._exclusive(key, self._in_lane(MAIN_LANE, reads) if depo else reads)
 
     def _in_lane(self, lane: str, reads):
@@ -296,56 +287,13 @@ class AmazonProvider(Provider):
             self.client.lane = ""
             self._lane_local.caches = None
 
-    def _read_sweep(self, watch: WatchRule, ctx: ReadContext, outcome: WatchRead, rhythm: WatchRhythm) -> Iterator[OfferResult]:
-        """The whole variant family; what it finds becomes the memory the main reads replay."""
+    def _read_product(self, watch: WatchRule, ctx: ReadContext, outcome: WatchRead, rhythm: WatchRhythm) -> Iterator[OfferResult]:
+        """The configured page with its used listing and, with variants, the whole family."""
         started = time.monotonic()
-        collected: Dict[str, List[OfferResult]] = {}
-        try:
-            for offer in self.iter_product(watch, ctx, outcome):
-                collected.setdefault(offer.url or watch.url, []).append(
-                    replace(offer, checked_at=datetime.now(timezone.utc).isoformat()))
-                yield offer
-        except Exception as exc:  # noqa: BLE001
-            if not outcome.blocked and not is_protection_error(exc):
-                # Nothing readable: no stale offer may be replayed later.
-                rhythm.offers, rhythm.sweep_at = collected, started
-                rhythm.unavailable = list(outcome.unavailable)
-            raise
-        if outcome.blocked:
-            rhythm.offers.update(collected)
-        else:
-            rhythm.offers, rhythm.sweep_at = collected, started
-            rhythm.unavailable = list(outcome.unavailable)
-            self.read_seconds["tarama"].append(time.monotonic() - started)
-
-    def _read_main(self, watch: WatchRule, ctx: ReadContext, outcome: WatchRead, rhythm: WatchRhythm) -> Iterator[OfferResult]:
-        """The configured page and its used listing now; the other variants from memory."""
-        started = time.monotonic()
-        fresh: List[OfferResult] = []
-        error: Optional[BaseException] = None
-        try:
-            for offer in self.iter_product(watch, ctx, outcome, main_only=True):
-                fresh.append(replace(offer, checked_at=datetime.now(timezone.utc).isoformat()))
-                yield offer
-        except Exception as exc:  # noqa: BLE001
-            error = exc
-        main_url = watch.url
-        if not (outcome.blocked or (error is not None and is_protection_error(error))):
-            # A page that answered without offers clears its own memory (sold out, no price).
-            if fresh:
-                rhythm.offers[main_url] = fresh
-            else:
-                rhythm.offers.pop(main_url, None)
-        replay = [offer for url, offers in rhythm.offers.items() if url != main_url for offer in offers]
-        # Out-of-stock variants of the last sweep stay listed; only the main page's entry is fresh.
-        rhythm.unavailable = [item for item in rhythm.unavailable if item.get("product_url") != main_url] + list(outcome.unavailable)
-        outcome.unavailable[:] = rhythm.unavailable
-        if error is not None and is_protection_error(error) and outcome.blocked is None:
-            outcome.blocked = error
-        if error is not None and not fresh and not replay:
-            raise error
-        yield from replay
-        self.read_seconds["ana"].append(time.monotonic() - started)
+        yield from self.iter_product(watch, ctx, outcome)
+        if not outcome.blocked:
+            rhythm.sweep_at = started
+            self.read_seconds["tarama" if watch.include_variations else "ana"].append(time.monotonic() - started)
 
     # -- pages ---------------------------------------------------------------
 
@@ -557,8 +505,7 @@ class AmazonProvider(Provider):
         cache[cache_key] = {"variations": list(variations), "terms": tuple(watch.excluded_terms),
                             "refresh_at": time.monotonic() + AMAZON_EXCLUDED_PAGE_REFRESH_SECONDS * spread}
 
-    def iter_product(self, watch: WatchRule, ctx: ReadContext, outcome: WatchRead,
-                     main_only: bool = False) -> Iterator[OfferResult]:
+    def iter_product(self, watch: WatchRule, ctx: ReadContext, outcome: WatchRead) -> Iterator[OfferResult]:
         """Yield verified depot offers before continuing to the next variant.
 
         Follow actual Twister ASIN edges on every fetched page. A single dimension
@@ -566,7 +513,7 @@ class AmazonProvider(Provider):
         """
         pending = [parser.AmazonProductVariation(label="", url=watch.url)]
         queued = {extract_asin_from_url(watch.url) or watch.url}
-        follow_variations = watch.include_variations and not main_only
+        follow_variations = watch.include_variations
         limit = VARIATION_LIMIT if follow_variations else 1
         absence_cache = self.client.unavailable_product_pages
         errors: List[str] = []
@@ -646,7 +593,7 @@ class AmazonProvider(Provider):
                     if isinstance(offer_error, (OutOfStockHermesError, PriceUnavailableHermesError)):
                         # A red watch's own page is looked at again in every search round (3.8.2), so its
                         # return to stock shows up at once; the 5-minute bound stays for everything else.
-                        if not (variation.url == watch.url and self.category_interval(watch) <= AMAZON_RED_ROUND_FLOOR_SECONDS):
+                        if not (variation.url == watch.url and self.is_red(watch)):
                             self._remember_absence(cache_key, snapshot)
                     elif not exclusion_term:
                         absence_cache.pop(cache_key, None)

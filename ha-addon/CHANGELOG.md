@@ -1,5 +1,19 @@
 # Değişiklik günlüğü
 
+## 3.9.0
+
+- Amazon'da kırmızı kartın tüm sayfaları (ana sayfa, ikinci el listesi ve her varyant) her arama
+  turunda bir kez okunuyor. Tur, listedeki ilk üründen başlayıp son ürünü bitirip yeniden ilk
+  ürüne dönene kadar geçen süre; sarı (saatte bir) ve yeşil (3 saatte bir) kartlar sıraları
+  geldiği turu uzatıyor. Hızlı ana sayfa döngüsü kalktı: ana sayfalar isteklerin yarısını
+  alıyor, varyantlar ise 8-14 dakika bekliyordu. Her kırmızı sayfa şimdi ~5-6 dakikada bir
+  güncelleniyor (1-4 sn bekleme ile).
+- Tek sayfalık ürünler (varyantsız) Depo şeridinde turda bir kez, varyantlı aileler tarama
+  şeridinde okunuyor; iki şerit sırayla istek atıyor. Varyantların eski fiyatını hafızadan
+  gösterme kalktı: her tur hepsi yeniden okunuyor.
+- Ölçüm satırındaki "ana sayfa aralığı" artık "kart okuma aralığı (tur)": aynı kartın iki okuması
+  arasındaki süre.
+
 ## 3.8.3
 
 - 3.8.1'de kırmızı kartlar her turda okunmaya başlayınca Depo şeridi istek sırasını sürekli
