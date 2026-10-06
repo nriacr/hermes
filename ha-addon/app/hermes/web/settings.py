@@ -15,8 +15,8 @@ from .pages import link, render_notice, render_page
 
 OTHER_GROUP = "Diğer"
 PRIORITY_CHOICES = (
-    ("low", "Düşük · 6 saatte bir"),
-    ("medium", "Orta · 2 saatte bir"),
+    ("low", "Düşük · 3 saatte bir"),
+    ("medium", "Orta · saatte bir"),
     ("high", "Yüksek · her çevrim"),
 )
 

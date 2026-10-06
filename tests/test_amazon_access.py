@@ -14,14 +14,16 @@ from support import LOG_LINES
 
 from hermes.constants import (
     AMAZON_BLOCK_HOLD_SECONDS,
-    AMAZON_RECOVERY_SLOW_SECONDS,
+    AMAZON_SLOWDOWN_MAX,
+    AMAZON_SLOWDOWN_RECOVER_SECONDS,
     AMAZON_START_SLOW_SECONDS,
-    AMAZON_WINDOW_MAX_LIMIT,
     AMAZON_WINDOW_MIN_LIMIT,
     AMAZON_WINDOW_SECONDS,
     AMAZON_WINDOW_START_LIMIT,
 )
 from hermes.errors import BotProtectionHermesError
+from hermes import constants as amazon_constants
+from hermes.providers.amazon import access as amazon_access
 from hermes.providers.amazon import client as amazon_client
 from hermes.providers.amazon.access import MAIN_LANE, AmazonAccess
 from hermes.providers.amazon.client import AmazonClient, load_cookies, save_cookies
@@ -100,6 +102,12 @@ def site_block(access):
 
 class AdaptiveLimitTests(unittest.TestCase):
     def setUp(self):
+        # These tests describe the limit's mechanics with round numbers (start 300, ceiling 500);
+        # the shipped values (3.7.0: 400 and 600) are pinned in test_shipped_limits.
+        for name, value in (("AMAZON_WINDOW_START_LIMIT", 300), ("AMAZON_WINDOW_MAX_LIMIT", 500)):
+            patcher = patch.object(amazon_access, name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
         self.fake = FakeTime()
         self.directory = tempfile.TemporaryDirectory()
         self.path = Path(self.directory.name) / "amazon_access.json"
@@ -113,7 +121,7 @@ class AdaptiveLimitTests(unittest.TestCase):
         self.access.peak_since_raise = count
 
     def test_limit_starts_at_300_and_rises_5_percent_after_a_clean_hour_of_real_use(self):
-        self.assertEqual(self.access.limit, AMAZON_WINDOW_START_LIMIT)
+        self.assertEqual(self.access.limit, 300)
         self.use_window(260)
         self.fake.advance(HOUR + 1)
         self.access.request_started()
@@ -125,11 +133,11 @@ class AdaptiveLimitTests(unittest.TestCase):
         self.assertEqual(self.access.limit, 315)
 
     def test_limit_never_rises_above_the_hard_ceiling(self):
-        self.access.limit = AMAZON_WINDOW_MAX_LIMIT - 1
+        self.access.limit = 499
         self.use_window(480)
         self.fake.advance(HOUR + 1)
         self.access.request_started()
-        self.assertEqual(self.access.limit, AMAZON_WINDOW_MAX_LIMIT)
+        self.assertEqual(self.access.limit, 500)
         self.assertLessEqual(self.access.limit, 500)
 
     def test_the_first_block_records_the_threshold_and_lowers_the_limit_once(self):
@@ -206,15 +214,48 @@ class AdaptiveLimitTests(unittest.TestCase):
         self.assertIn("önceki engelden beri=90 dk", last_wave)
         self.assertIn("bugünkü engel dalgası=2", self.access.stats_line())
 
-    def test_a_site_block_starts_an_hour_of_half_speed(self):
+    def test_a_block_wave_slows_the_categories_and_the_speed_returns_by_itself(self):
         self.fake.advance(AMAZON_START_SLOW_SECONDS + 1)
-        self.assertEqual(self.access.gap_multiplier(), 1.0)
+        self.assertEqual(self.access.speed_factor(), 1.0)
         site_block(self.access)
-        self.assertEqual(self.access.gap_multiplier(), 2.0)
-        self.fake.advance(AMAZON_RECOVERY_SLOW_SECONDS - 1)
-        self.assertEqual(self.access.gap_multiplier(), 2.0)
+        self.assertEqual(self.access.speed_factor(), 2.0)
+        self.fake.advance(AMAZON_SLOWDOWN_RECOVER_SECONDS - 1)
+        self.assertEqual(self.access.speed_factor(), 2.0)
         self.fake.advance(2)
-        self.assertEqual(self.access.gap_multiplier(), 1.0)
+        self.assertEqual(self.access.speed_factor(), 1.0)
+        self.assertTrue(any("normal hıza döndü" in line for line in LOG_LINES))
+
+    def test_a_second_wave_doubles_again_but_never_beyond_the_maximum(self):
+        site_block(self.access)
+        self.access.request_finished(False, "B000000009")  # a success ends the wave
+        self.fake.advance(60)
+        site_block(self.access)
+        self.assertEqual(self.access.speed_factor(), 4.0)
+        self.access.request_finished(False, "B000000009")
+        site_block(self.access)
+        self.assertEqual(self.access.speed_factor(), AMAZON_SLOWDOWN_MAX)
+
+    def test_the_speed_comes_back_one_step_per_clean_stretch_and_a_new_block_restarts_the_clock(self):
+        site_block(self.access)
+        self.access.request_finished(False, "B000000009")
+        self.fake.advance(60)
+        site_block(self.access)  # x4
+        self.fake.advance(AMAZON_SLOWDOWN_RECOVER_SECONDS - 1)
+        self.assertEqual(self.access.speed_factor(), 4.0)
+        self.fake.advance(2)
+        self.assertEqual(self.access.speed_factor(), 2.0)
+        self.fake.advance(AMAZON_SLOWDOWN_RECOVER_SECONDS)
+        self.assertEqual(self.access.speed_factor(), 1.0)
+
+    def test_the_slowdown_survives_a_restart(self):
+        path = Path(tempfile.mkdtemp()) / "amazon_access.json"
+        access = access_with(self.fake, path)
+        site_block(access)
+        self.fake.advance(120)
+        restarted = access_with(self.fake, path)
+        self.assertEqual(restarted.speed_factor(), 2.0)
+        self.fake.advance(AMAZON_SLOWDOWN_RECOVER_SECONDS)
+        self.assertEqual(restarted.speed_factor(), 1.0)
 
     def test_the_sweep_leaves_the_depo_lane_only_the_floor_it_has_not_used_yet(self):
         self.access.limit = 100
@@ -275,11 +316,14 @@ class AdaptiveLimitTests(unittest.TestCase):
         self.use_window(300)
         site_block(self.access)
         stored = json.loads(self.path.read_text(encoding="utf-8"))
-        self.assertEqual((stored["schema"], stored["limit"], stored["threshold"], stored["lowered"]), (2, 255, 300, True))
+        self.assertEqual((stored["schema"], stored["limit"], stored["threshold"], stored["lowered"]), (3, 255, 300, True))
         self.fake.advance(120)
         restarted = access_with(self.fake, self.path)
         self.assertEqual((restarted.limit, restarted.threshold, restarted.lowered), (255, 300, True))
         self.assertEqual(restarted.gap_multiplier(), 2.0)
+
+    def test_shipped_limits(self):
+        self.assertEqual((amazon_constants.AMAZON_WINDOW_START_LIMIT, amazon_constants.AMAZON_WINDOW_MAX_LIMIT), (400, 600))
 
     def test_the_lowered_limit_of_3_3_0_is_reset_to_300(self):
         self.path.write_text(json.dumps({"limit": 119, "threshold": 141, "frozen": True, "last_raise_at": 1.0,
@@ -297,7 +341,7 @@ class AdaptiveLimitTests(unittest.TestCase):
     def test_a_broken_file_falls_back_to_the_defaults(self):
         self.path.write_text("{not json", encoding="utf-8")
         access = access_with(self.fake, self.path)
-        self.assertEqual(access.limit, AMAZON_WINDOW_START_LIMIT)
+        self.assertEqual(access.limit, 300)
 
     def test_measurement_line_has_window_threshold_and_rate(self):
         self.use_window(240)
@@ -541,7 +585,7 @@ class RestoreTests(unittest.TestCase):
         self.assertEqual(self.access.threshold, 151)  # not 1: the requests before the restart count
 
     def test_a_restored_full_window_makes_the_sweep_wait_as_without_a_restart(self):
-        self.access.restore([self.finished(seconds * 6) for seconds in range(300)])
+        self.access.restore([self.finished(seconds * 5) for seconds in range(AMAZON_WINDOW_START_LIMIT)])
         before = self.fake.now
         self.access.wait_for_window()
         self.assertGreater(self.fake.now, before)

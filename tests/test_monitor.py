@@ -275,7 +275,7 @@ class EmptyAndStockTests(CycleTestCase):
 class ProtectionGuardTests(CycleTestCase):
     SITE = state_ops.site_guard_key("amazon")
 
-    def test_guard_pauses_15_30_then_60_minutes_and_clears(self):
+    def test_guard_pauses_5_10_20_then_30_minutes_and_clears(self):
         state = {}
         error = BotProtectionHermesError("Amazon captcha")
         now = datetime(2026, 10, 1, 12, tzinfo=timezone.utc)
@@ -286,7 +286,7 @@ class ProtectionGuardTests(CycleTestCase):
                 waited.append(state_ops.guard_remaining_seconds(state, self.SITE))
                 self.assertEqual(state_ops.guard_remaining_seconds(state, "site:other"), 0)
             now += timedelta(seconds=waited[-1] + 1)
-        self.assertEqual(waited, [15 * 60, 30 * 60, 60 * 60, 60 * 60, 60 * 60])
+        self.assertEqual(waited, [5 * 60, 10 * 60, 20 * 60, 30 * 60, 30 * 60])
         state_ops.clear_guard(state, self.SITE)
         self.assertNotIn(self.SITE, state["_meta"]["amazon_protection"])
 
@@ -345,16 +345,16 @@ class ProtectionGuardTests(CycleTestCase):
         with patch.object(state_ops, "local_now", return_value=now):
             state_ops.note_guard(state, self.SITE, "Bir", BotProtectionHermesError("captcha"))
         now += timedelta(minutes=16)
-        held = BotProtectionHermesError("molada", challenge_reason="mola", hold_seconds=9 * 60)
+        held = BotProtectionHermesError("molada", challenge_reason="mola", hold_seconds=2 * 60)
         with patch.object(state_ops, "local_now", return_value=now):
             state_ops.note_guard(state, self.SITE, "İki", held)
-            self.assertEqual(state_ops.guard_remaining_seconds(state, self.SITE), 9 * 60)
+            self.assertEqual(state_ops.guard_remaining_seconds(state, self.SITE), 2 * 60)
         self.assertEqual(state["_meta"]["amazon_protection"][self.SITE]["consecutive_blocks"], 1)
-        # The probe after the hold that fails climbs one step from there: 30 minutes.
-        now += timedelta(minutes=10)
+        # The probe after the hold that fails climbs one step from there: 10 minutes.
+        now += timedelta(minutes=3)
         with patch.object(state_ops, "local_now", return_value=now):
             state_ops.note_guard(state, self.SITE, "Üç", BotProtectionHermesError("captcha"))
-            self.assertEqual(state_ops.guard_remaining_seconds(state, self.SITE), 30 * 60)
+            self.assertEqual(state_ops.guard_remaining_seconds(state, self.SITE), 10 * 60)
 
     def test_a_read_that_answers_during_the_pause_does_not_end_it(self):
         state = {}
@@ -561,7 +561,7 @@ class DepoLaneTests(CycleTestCase):
             return [OfferResult("Apple iPhone 17", Decimal("90000"), "Amazon.com.tr", rule.url)]
 
         try:
-            with (patch.object(amazon_reader, "AMAZON_MAIN_INTERVAL_SECONDS", 0.3),
+            with (patch.object(amazon_reader, "AMAZON_PRIORITY_INTERVAL_SECONDS", {"high": 0.3, "medium": 3600, "low": 10800}),
                   patch.object(AmazonProvider, "read", side_effect=amazon_read)):
                 hermes_monitor.run_cycle()
         finally:
@@ -697,14 +697,14 @@ class ReadOrderTests(CycleTestCase):
 
 
 class SchedulingTests(CycleTestCase):
-    def test_priorities_use_the_cycle_two_hours_and_six_hours(self):
+    def test_priorities_use_the_cycle_one_hour_and_three_hours(self):
         now = datetime.now(timezone.utc)
         checked = {"last_checked_at": now.isoformat()}
         high, medium, low = (watch(name, f"https://www.amazon.com.tr/dp/B00000000{i}", priority=name)
                              for i, name in enumerate(("high", "medium", "low"), start=1))
         cases = ((timedelta(seconds=59), high, False), (timedelta(seconds=60), high, True),
-                 (timedelta(hours=1, minutes=59), medium, False), (timedelta(hours=1, minutes=59), low, False),
-                 (timedelta(hours=2), medium, True), (timedelta(hours=2), low, False), (timedelta(hours=6), low, True))
+                 (timedelta(minutes=59), medium, False), (timedelta(hours=2, minutes=59), low, False),
+                 (timedelta(hours=1), medium, True), (timedelta(hours=1), low, False), (timedelta(hours=3), low, True))
         for elapsed, rule, due in cases:
             with self.subTest(elapsed=elapsed, priority=rule.priority), patch.object(scheduling, "local_now", return_value=now + elapsed):
                 self.assertEqual(scheduling.watch_check_due(rule, checked, 60), due)

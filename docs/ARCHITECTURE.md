@@ -203,7 +203,7 @@ results" search notice is a normal stock row read again after five minutes.
   overrides the language, the Linux platform and the matching Chrome 146 user
   agent and client hints. No Referer (a bookmark visit, `Sec-Fetch-Site: none`)
   and no forced reload. After a block the client sends nothing for
-  `AMAZON_BLOCK_HOLD_SECONDS` (15 minutes; a refused request raises a
+  `AMAZON_BLOCK_HOLD_SECONDS` (the ladder's first step, 5 minutes since 3.7; a refused request raises a
   `mola` protection error without touching the network), and the first request
   after that closes the old session and starts a new anonymous visitor; cookies
   saved before the last block are not restored after a restart.
@@ -212,10 +212,19 @@ results" search notice is a normal stock row read again after five minutes.
   late navigations and redirects to another ASIN.
 - Challenge detection looks at validation forms/inputs, a Robot Check title
   or explicit instructions; script text alone is not a challenge.
+- Speed governor (since 3.7, `AmazonAccess.speed_factor`): a block wave doubles
+  every category's reading interval (x2, x4 on the next wave, never more;
+  `AMAZON_SLOWDOWN_MAX`), and every clean `AMAZON_SLOWDOWN_RECOVER_SECONDS`
+  (10 minutes) halves it again until the normal speed is back; nothing needs
+  to switch it. The provider asks it for every interval (`main_interval`,
+  `sweep_interval`). The factor and its clock survive restarts in
+  `amazon_access.json` (schema 3; an older file is ignored). The old hour of
+  half speed after a block is gone: speed is the goal, so only the governor and
+  the pause slow Amazon down.
 - Protection back-off (since 3.3; every block is site-wide since 3.6): the
   2026-10-04 log showed that a block marks the visitor, not the page (43 of
   the 60 requests right after a block were blocked too), so the first block
-  pauses every Amazon watch (15 → 30 → 60 minutes,
+  pauses every Amazon watch (5 → 10 → 20 → 30 minutes since 3.7,
   `PROTECTION_PAUSE_LADDER_SECONDS`); the first read after the pause is the
   single probe. A failed probe climbs one step; a successful read after the
   pause clears the guard. During the pause neither a further block (the other
@@ -224,7 +233,7 @@ results" search notice is a normal stock row read again after five minutes.
   watch keeps its last rows on the table (they carry their read time). Guards
   of older versions (one per watch) are dropped at the first cycle.
 - Request budget (`access.py`, since 3.3): a rolling 35-minute window caps how
-  many requests may start. The limit begins at 300 and rises 5 % after every
+  many requests may start. The limit begins at 400 (300 before 3.7) and rises 5 % after every
   clean hour in which the window reached 80 % of it (never above 500). The first
   site-wide block records the window count as the threshold and lowers the limit
   once to 85 % of it (floor 200); later blocks only record the threshold (the
@@ -245,10 +254,12 @@ results" search notice is a normal stock row read again after five minutes.
   marker and/or HTTP status), the page, the requests of the hour before it and
   the calm time since the previous block; the day's count survives restarts.
 - Two rhythms per product watch (since 3.3, `WatchRhythm`): the configured page
-  with its used listing (where Depo offers show) every 100 s while the watch is
-  hot (since 3.6: a remembered offer within 15 % of the target, or a Depo
-  offer; a watch never read counts as hot) and every 10 minutes otherwise
-  (`AmazonProvider.main_interval`), the variant family every 270 s. The two rhythms run in two lanes (since 3.5): the Depo
+  with its used listing (where Depo offers show) every
+  `AMAZON_PRIORITY_INTERVAL_SECONDS` of the watch's category (since 3.7: red 60 s,
+  yellow hourly, green every 3 hours; the price never changes it, the 3.6
+  near/far rule is gone), the variant family every 270 s for a red watch and at
+  its own longer interval for yellow and green (`AmazonProvider.main_interval`,
+  `sweep_interval`). The two rhythms run in two lanes (since 3.5): the Depo
   lane thread repeats the main reads, the sweep thread works through the due
   families. Both go through one request lock (one request at a time, the Depo
   lane first), one rolling window (the Depo lane may use all of it; the sweep

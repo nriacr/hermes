@@ -1,5 +1,25 @@
 # Değişiklik günlüğü
 
+## 3.7.0
+
+3.6'dan beri 41 saat ve 15.211 Amazon isteğinde hiç engel olmadı; istek hızı dakikada
+4,0'dan 6,2'ye çıktığı halde. Engellerin sebebi hacim değil, Hermes'in karışık tarayıcı
+kimliğiymiş (3.6.0'da düzeltildi). Bu sürüm hızı önceliğe çeviriyor.
+
+- Öncelik her zaman kategoriden okunuyor, fiyatın hedefe yakınlığına bakılmıyor (3.6'daki
+  "hedefe %15 yakın" kuralı kaldırıldı; hedeften uzak kırmızı kartlar 10 dakikada bir
+  okunuyordu). Amazon'da kırmızı kartlar 60 saniyede, sarı kartlar saatte, yeşil kartlar
+  3 saatte bir okunuyor. Diğer sitelerde sarı saatte, yeşil 3 saatte bir (eskiden 2 ve 6
+  saat), kırmızı yine her çevrimde. Ayarlardaki öncelik yazıları güncellendi.
+- Otomatik hız kademesi: Amazon engel verirse önce kısa bir mola (5 → 10 → 20 → 30 dakika),
+  ardından tüm kategorilerin okuma aralığı 2 katına (ikinci dalgada 4 katına) çıkıyor; her
+  10 dakika engelsiz geçince bir kademe gevşiyor ve kimse dokunmadan eski hıza dönüyor.
+  Eski "engelden sonra bir saat yarım hız" kalktı; yavaşlatan yalnızca mola ve kademe.
+- Kayan pencere istek sınırı 400'den başlıyor, 600'e kadar çıkabiliyor (300 / 500 idi);
+  kırmızı kartların 60 saniyelik ritmi eski sınıra sığmıyordu. Eski erişim dosyası sıfırlanır.
+- Değişmeyenler: varyant taraması kırmızı kartlarda 270 saniye, tarayıcı kimliği, yeni
+  ziyaretçiyle dönüş, engel dalgası günlüğü.
+
 ## 3.6.1
 
 - Engelden sonraki 15 dakikalık istek molasında gönderilmeyen bir istek artık yeni bir

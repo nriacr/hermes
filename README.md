@@ -7,16 +7,18 @@ takip add-on'udur.
   linkten otomatik anlaşılır. Arama linklerinde kart adı aranacak ifadedir.
 - Desteklenen siteler: Amazon, Hepsiburada, Trendyol, Network, Beymen Club,
   Ben Gurme, Nordbron, Zara, H&M.
-- Öncelik: yüksek her çevrimde, orta en az 2 saatte, düşük en az 6 saatte bir
-  kontrol edilir. Tablodaki renkli daire önceliği gösterir.
+- Öncelik: yüksek (kırmızı) her çevrimde, orta (sarı) saatte, düşük (yeşil) 3 saatte
+  bir kontrol edilir; Amazon'da kırmızı kartlar 60 saniyede bir. Tablodaki renkli daire önceliği gösterir.
 - Amazon: varyasyonlar (renk × kapasite/ölçü, en fazla 60), doğrulanmış Amazon
   Depo teklifleri ayrı satırlarda, "yalnızca platformun kendi satıcısı" filtresi,
-  ilk engelde tüm Amazon 15 → 30 → 60 dakika mola verir (tek yoklamayla) ve
-  moladan sonra yeni bir anonim ziyaretçi olarak devam eder; kayan pencere istek
-  sınırı ve engelden sonra ilk saat yarım hız. Hedefe %15 yakın ya da Depo
-  teklifi olan kartların ürün sayfası ve ikinci el listesi (Depo şeridi) her
-  ~100 sn'de, diğerlerininki 10 dakikada bir; varyant taraması kendi şeridinde
-  ~270 sn'de bir okunur.
+  ilk engelde tüm Amazon 5 → 10 → 20 → 30 dakika mola verir (tek yoklamayla) ve
+  moladan sonra yeni bir anonim ziyaretçi olarak devam eder. Otomatik hız
+  kademesi: engel dalgası tüm kategorilerin aralığını 2 (ikinci dalgada 4) katına
+  çıkarır, her 10 dakika engelsiz geçince bir kademe gevşer ve kendiliğinden
+  normal hıza döner. Ürün sayfası ve ikinci el listesi (Depo şeridi) kategorisine
+  göre okunur (fiyatın hedefe yakınlığı etkilemez); varyant taraması kendi
+  şeridinde kırmızı kartlarda ~270 sn'de bir, sarı ve yeşilde kendi aralığında.
+  Kayan pencere istek sınırı 400'den başlar.
 - Bildirimler Pushover ile gelir; CAPTCHA ve HTTP 503 hataları bildirim
   göndermez, panelde görünür.
 - Telegram kanallarında keyword takibi ve Kayıtlı Mesajlar'dan hızlı takip

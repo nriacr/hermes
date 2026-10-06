@@ -8,18 +8,15 @@ import zlib
 from collections import deque
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
-from decimal import Decimal
 from typing import Deque, Dict, Iterator, List, Optional, Tuple
 
 from ...constants import (
     AMAZON_ACCESS_PATH,
-    AMAZON_CALM_MAIN_INTERVAL_SECONDS,
     AMAZON_COOKIES_PATH,
     AMAZON_EXCLUDED_PAGE_REFRESH_SECONDS,
-    AMAZON_HOT_TARGET_FACTOR,
     AMAZON_MAIN_GAPS_KEPT,
-    AMAZON_MAIN_INTERVAL_SECONDS,
     AMAZON_SWEEP_INTERVAL_SECONDS,
+    AMAZON_PRIORITY_INTERVAL_SECONDS,
     SITE_AMAZON,
 )
 from ...errors import EmptySearchResultsHermesError, HermesError, OutOfStockHermesError, PriceUnavailableHermesError
@@ -47,10 +44,10 @@ class WatchRhythm:
     """What the provider remembers of one product watch between cycles.
 
     The configured page (with its used listing, where Amazon Depo offers show
-    up) is read every AMAZON_MAIN_INTERVAL_SECONDS while the watch is *hot*
-    (an offer within AMAZON_HOT_TARGET_FACTOR of its target, or a Depo offer),
-    otherwise every AMAZON_CALM_MAIN_INTERVAL_SECONDS; the whole variant family
-    every AMAZON_SWEEP_INTERVAL_SECONDS. Between sweeps the other variants'
+    up) is read every AMAZON_PRIORITY_INTERVAL_SECONDS of the watch's category (red
+    60 s, yellow hourly, green every 3 hours); the whole variant family every
+    AMAZON_SWEEP_INTERVAL_SECONDS (a longer category interval wins). Both are
+    stretched by the access governor's speed factor after a block wave. Between sweeps the other variants'
     offers are replayed with the time they were really read.
     """
 
@@ -193,7 +190,7 @@ class AmazonProvider(Provider):
             return False
         if not self._remembers_family(watch):
             return True
-        return time.monotonic() - self.rhythms[self._rhythm_key(watch)].sweep_at >= AMAZON_SWEEP_INTERVAL_SECONDS
+        return time.monotonic() - self.rhythms[self._rhythm_key(watch)].sweep_at >= self.sweep_interval(watch)
 
     def is_watch_busy(self, watch: WatchRule) -> bool:
         return self._is_busy(self._rhythm_key(watch))
@@ -217,29 +214,27 @@ class AmazonProvider(Provider):
         return 1 if self.needs_sweep(watch) else 0
 
     @staticmethod
-    def is_hot(watch: WatchRule, rhythm: WatchRhythm) -> bool:
-        """A watch worth the quick rhythm: a remembered offer is a Depo offer or close to the target.
+    def category_interval(watch: WatchRule) -> int:
+        """How often the watch's category reads it; the category alone decides (red 60 s, yellow 1 h, green 3 h)."""
+        priority = str(getattr(watch, "priority", "high") or "high").casefold()
+        return AMAZON_PRIORITY_INTERVAL_SECONDS.get(priority, AMAZON_PRIORITY_INTERVAL_SECONDS["high"])
 
-        A watch whose last read found no offer at all (sold out, no price) stays calm until one appears.
-        """
-        limit = watch.target_price * Decimal(str(AMAZON_HOT_TARGET_FACTOR))
-        return any(offer.is_warehouse or offer.price <= limit for offers in rhythm.offers.values() for offer in offers)
+    def main_interval(self, watch: WatchRule) -> float:
+        return self.category_interval(watch) * self.client.access.speed_factor()
 
-    def main_interval(self, watch: WatchRule) -> int:
-        rhythm = self.rhythms.get(self._rhythm_key(watch))
-        if rhythm is None or self.is_hot(watch, rhythm):
-            return AMAZON_MAIN_INTERVAL_SECONDS
-        return AMAZON_CALM_MAIN_INTERVAL_SECONDS
+    def sweep_interval(self, watch: WatchRule) -> float:
+        """The variant family: every 270 s for a red watch, a yellow or green one at its own longer interval."""
+        return max(AMAZON_SWEEP_INTERVAL_SECONDS, self.category_interval(watch)) * self.client.access.speed_factor()
 
     def read_due(self, watch: WatchRule) -> bool:
-        """A product page is due again after its main interval (quick or calm), a search page after the sweep interval."""
+        """A product page is due again after its category's main interval, a search page after the sweep interval."""
         key = self._rhythm_key(watch)
         if self._is_busy(key):
             return False
         rhythm = self.rhythms.get(key)
         if rhythm is None or rhythm.main_at is None:
             return True
-        interval = AMAZON_SWEEP_INTERVAL_SECONDS if self.is_search_url(watch.url) else self.main_interval(watch)
+        interval = self.sweep_interval(watch) if self.is_search_url(watch.url) else self.main_interval(watch)
         return time.monotonic() - rhythm.main_at >= interval
 
     def close(self) -> None:
@@ -280,7 +275,7 @@ class AmazonProvider(Provider):
         remembered = watch.include_variations and rhythm.sweep_at is not None
         # The Depo lane always reads only the main page of a remembered family, however old its sweep is;
         # the sweep queue reads a family in full once its sweep is due.
-        if remembered and (depo or now - rhythm.sweep_at < AMAZON_SWEEP_INTERVAL_SECONDS):
+        if remembered and (depo or now - rhythm.sweep_at < self.sweep_interval(watch)):
             reads = self._read_main(watch, ctx, outcome, rhythm)
         else:
             reads = self._read_sweep(watch, ctx, outcome, rhythm)

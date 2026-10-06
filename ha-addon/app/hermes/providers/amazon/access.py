@@ -1,26 +1,29 @@
-"""Amazon's request budget: a rolling window, its adaptive limit, block scope and the slow start.
+"""Amazon's request budget: a rolling window, its adaptive limit, block scope, the speed governor and the slow start.
 
 One `AmazonAccess` lives with the client for the whole process and is the only
 place that decides how fast requests may start:
 
 * A rolling window (35 minutes) caps how many requests may start. The limit
-  begins at 300 and rises by 5 % after every clean hour in which the window was
-  really used (never above 500). The first block records the window count as the
+  begins at 400 and rises by 5 % after every clean hour in which the window was
+  really used (never above 600). The first block records the window count as the
   *threshold* and lowers the limit once to 85 % of it (never below 200); later
   blocks only record the threshold. Two lanes share the window: the Depo lane
   (main pages) may use all of it; the variant sweep may use all of it except the
   part of the Depo lane's 28 % share that the Depo lane has not used yet, and it
   steps aside while the Depo lane waits for a free slot. The limit, threshold
   and last raise survive restarts in `amazon_access.json`.
-* After a site-wide block, and for a few minutes after every start, requests run
-  at half speed (the minimum gap doubles).
+* For a few minutes after every start the minimum gap between requests doubles.
 * Every block is site-wide (3.6.0): a block marks the visitor, not the page.
   For `AMAZON_BLOCK_HOLD_SECONDS` after it the client sends nothing at all, so
   a read already under way in the other lane does not collect more blocks.
+* Speed governor (3.7.0): a block wave doubles the reading interval of every
+  category (x2, at most x`AMAZON_SLOWDOWN_MAX`); each clean
+  `AMAZON_SLOWDOWN_RECOVER_SECONDS` halves it again until the normal speed is
+  back, with no one to switch it. `speed_factor()` is what the provider asks.
 * Each block wave (the first block after a success) is logged with its cause
   and the requests of the hour before it, and counted per day.
 
-The pause itself (15 → 30 → 60 minutes) is the site-wide guard kept in
+The pause itself (5 → 10 → 20 → 30 minutes) is the site-wide guard kept in
 `state.json`; this module only measures, limits and holds requests back.
 """
 
@@ -35,8 +38,9 @@ from ...constants import (
     AMAZON_BLOCK_HOLD_SECONDS,
     AMAZON_MAIN_LANE_FLOOR,
     AMAZON_MAIN_LANE_SHARE,
-    AMAZON_RECOVERY_SLOW_FACTOR,
-    AMAZON_RECOVERY_SLOW_SECONDS,
+    AMAZON_SLOWDOWN_MAX,
+    AMAZON_SLOWDOWN_RECOVER_SECONDS,
+    AMAZON_START_SLOW_FACTOR,
     AMAZON_START_SLOW_SECONDS,
     AMAZON_STATS_LOG_SECONDS,
     AMAZON_WINDOW_MAX_LIMIT,
@@ -52,7 +56,7 @@ from ...logging_utils import log
 from ...storage import load_json, save_json
 from ...utils import local_now, utc_now
 
-SCHEMA = 2
+SCHEMA = 3
 RATE_LOOKBACK_SECONDS = 300
 WINDOW_WAIT_STEP_SECONDS = 5.0
 MAIN_LANE = "main"
@@ -90,6 +94,9 @@ class AmazonAccess:
         # Block waves of the current local day: (date, count); survives restarts.
         self.waves_day = ""
         self.waves_count = 0
+        # Speed governor: how many times slower than normal the categories read, and since when.
+        self.slowdown = 1.0
+        self.slowdown_since = self.wall()
         # Two lane threads (Depo and sweep) share the window and the counters.
         self._lock = threading.RLock()
         self._load()
@@ -103,7 +110,7 @@ class AmazonAccess:
         if not isinstance(stored, dict) or not stored:
             return
         if stored.get("schema") != SCHEMA:
-            # 3.3.0 lowered the limit with every block (down to 119 in one night); start over.
+            # An older schema (3.3.0 lowered the limit with every block; 3.7.0 starts higher): start over.
             log("Amazon erişim bütçesi dosyası eski sürümden; pencere sınırı "
                 f"{AMAZON_WINDOW_START_LIMIT}'den yeniden başlıyor.")
             return
@@ -119,6 +126,8 @@ class AmazonAccess:
             self.slow_until = max(self.slow_until, float(stored.get("slow_until", 0)))
             self.waves_day = str(stored.get("waves_day") or "")
             self.waves_count = int(stored.get("waves_count") or 0)
+            self.slowdown = min(AMAZON_SLOWDOWN_MAX, max(1.0, float(stored.get("slowdown") or 1.0)))
+            self.slowdown_since = float(stored.get("slowdown_since") or self.slowdown_since)
         except (TypeError, ValueError):
             log(f"Amazon erişim bütçesi dosyası okunamadı, varsayılanlar kullanılacak: {self.path}")
 
@@ -130,7 +139,7 @@ class AmazonAccess:
                 "schema": SCHEMA, "limit": self.limit, "threshold": self.threshold, "lowered": self.lowered,
                 "last_raise_at": self.last_raise_at, "last_block_at": self.last_block_at,
                 "slow_until": self.slow_until, "waves_day": self.waves_day, "waves_count": self.waves_count,
-                "saved_at": utc_now(),
+                "slowdown": self.slowdown, "slowdown_since": self.slowdown_since, "saved_at": utc_now(),
             })
         except OSError as exc:
             log(f"Amazon erişim bütçesi kaydedilemedi: {exc}")
@@ -245,8 +254,29 @@ class AmazonAccess:
 
     # -- results -----------------------------------------------------------------
 
+    def speed_factor(self) -> float:
+        """1.0 at normal speed; 2.0 or 4.0 while the governor holds the categories back after a block wave.
+
+        Every clean AMAZON_SLOWDOWN_RECOVER_SECONDS halves the factor; it is read often, so recovery needs no timer.
+        """
+        with self._lock:
+            now = self.wall()
+            changed = False
+            while self.slowdown > 1.0 and now - self.slowdown_since >= AMAZON_SLOWDOWN_RECOVER_SECONDS:
+                self.slowdown = max(1.0, self.slowdown / 2)
+                self.slowdown_since += AMAZON_SLOWDOWN_RECOVER_SECONDS
+                changed = True
+                if self.slowdown > 1.0:
+                    log(f"Amazon hız kademesi gevşiyor: x{self.slowdown:g} (engelsiz {AMAZON_SLOWDOWN_RECOVER_SECONDS // 60} dk).")
+                else:
+                    log("Amazon normal hıza döndü (engelsiz süre doldu).")
+            if changed:
+                self._save()
+            return self.slowdown
+
     def gap_multiplier(self) -> float:
-        return AMAZON_RECOVERY_SLOW_FACTOR if self.wall() < self.slow_until else 1.0
+        """The minimum request gap doubles for a few minutes after every start."""
+        return AMAZON_START_SLOW_FACTOR if self.wall() < self.slow_until else 1.0
 
     def count(self, name: str, amount: int = 1) -> None:
         with self._lock:
@@ -277,13 +307,16 @@ class AmazonAccess:
             return
         self.count("engel")
         previous_block_at = self.last_block_at
-        self.slow_until = max(self.slow_until, now + AMAZON_RECOVERY_SLOW_SECONDS)
         self.last_block_at = now
+        self.slowdown_since = now
         # A clean hour is counted from the last site-wide block.
         self.last_raise_at = now
         self.peak_since_raise = 0
         if not self.episode_open:
             self.episode_open = True
+            self.slowdown = min(AMAZON_SLOWDOWN_MAX, self.slowdown * 2)
+            log(f"Amazon hız kademesi: x{self.slowdown:g} (engel sonrası); her {AMAZON_SLOWDOWN_RECOVER_SECONDS // 60} dk "
+                "engelsiz geçince bir kademe gevşer.")
             self._log_wave(now, previous_block_at, page, cause)
             count = self.window_count()
             self.threshold = count
@@ -321,7 +354,8 @@ class AmazonAccess:
                 f"pencere={self.window_count()}/{self.limit} (tarama şeridi sınırı={self.limit_for('')}, "
                 f"depo şeridi son 35 dk={len(self.main_starts)}) | eşik={self.threshold if self.threshold is not None else '-'} | "
                 f"anlık={self.rate_per_minute():.1f} istek/dk | sınır={'bir kez düşürüldü' if self.lowered else 'hiç düşmedi'} | "
-                f"son artıştan beri={(now_wall - self.last_raise_at) / 60:.0f} dk | yarım hız kalan={slow} dk")
+                f"son artıştan beri={(now_wall - self.last_raise_at) / 60:.0f} dk | hız kademesi=x{self.speed_factor():g} | "
+                f"başlangıç yarım hızı kalan={slow} dk")
 
     def stats_due(self) -> bool:
         # Both lane threads ask; only one of them may write the line.

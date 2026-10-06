@@ -421,7 +421,7 @@ class SettingsTests(DataFilesMixin, unittest.TestCase):
         self.assertEqual(watches[0]["priority"], "low")
         self.assertTrue(watches[0]["official_seller_only"])
         html = settings.watch_form(watches[0], 0)
-        for text in ("Yalnızca platformun kendi satıcısı", "Düşük · 6 saatte bir", "Orta · 2 saatte bir", "Yüksek · her çevrim"):
+        for text in ("Yalnızca platformun kendi satıcısı", "Düşük · 3 saatte bir", "Orta · saatte bir", "Yüksek · her çevrim"):
             self.assertIn(text, html)
 
     def test_updating_a_card_keeps_its_variation_setting(self):

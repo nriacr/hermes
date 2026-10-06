@@ -11,7 +11,7 @@ import requests
 from support import LOG_LINES, watch
 
 from hermes.errors import BotProtectionHermesError, EmptySearchResultsHermesError, HermesError, OutOfStockHermesError
-from hermes.constants import AMAZON_CALM_MAIN_INTERVAL_SECONDS, AMAZON_MAIN_INTERVAL_SECONDS
+from hermes.constants import AMAZON_PRIORITY_INTERVAL_SECONDS, AMAZON_SLOWDOWN_RECOVER_SECONDS, AMAZON_SWEEP_INTERVAL_SECONDS
 from hermes.models import OfferResult, SearchResultItem
 from hermes.providers import amazon as amazon_reader
 from hermes.providers.amazon import AmazonProvider
@@ -30,6 +30,10 @@ from hermes.utils import extract_asin_from_url
 ROOT = "https://www.amazon.com.tr/dp/B000000001"
 CHILD = "https://www.amazon.com.tr/dp/B000000002"
 UNAVAILABLE = '<span id="productTitle">iPhone</span><div id="availability">Şu anda mevcut değil.</div>'
+
+
+def site_block(access):
+    access.request_finished(True, "B000000001")
 
 
 def priced(price: str = "100,00", title: str = "iPhone") -> str:
@@ -88,7 +92,7 @@ class AmazonRhythmTests(AmazonTestCase):
         with self.serve({ROOT: priced()}), patch.object(amazon_reader.time, "monotonic", return_value=1000):
             self.read(product)
             self.assertFalse(self.provider.read_due(product))
-        for seconds, due in ((99, False), (100, True)):
+        for seconds, due in ((59, False), (60, True)):
             with patch.object(amazon_reader.time, "monotonic", return_value=1000 + seconds):
                 self.assertEqual(self.provider.read_due(product), due)
         with patch.object(amazon_reader.time, "monotonic", return_value=1000):
@@ -340,8 +344,8 @@ class AmazonRhythmTests(AmazonTestCase):
         self.assertEqual(sum("Amazon ölçüm:" in line for line in LOG_LINES), 1)
 
 
-class AmazonMainRhythmTests(AmazonTestCase):
-    """3.6.0: only a watch close to its target (or with a Depo offer) keeps the quick main-page rhythm."""
+class AmazonCategoryRhythmTests(AmazonTestCase):
+    """3.7.0: the priority category alone decides the reading interval: red 60 s, yellow hourly, green 3 hours."""
 
     def due_after(self, rule, seconds):
         with patch.object(amazon_reader.time, "monotonic", return_value=1000 + seconds):
@@ -351,25 +355,34 @@ class AmazonMainRhythmTests(AmazonTestCase):
         with self.serve({ROOT: priced(price)}), patch.object(amazon_reader.time, "monotonic", return_value=1000):
             self.read(rule)
 
-    def test_a_watch_near_its_target_is_read_again_after_100_seconds(self):
-        rule = watch(url=ROOT, target="1000")
-        self.first_read(rule, "1.100,00")  # 10 % above the target
-        self.assertFalse(self.due_after(rule, AMAZON_MAIN_INTERVAL_SECONDS - 1))
-        self.assertTrue(self.due_after(rule, AMAZON_MAIN_INTERVAL_SECONDS))
+    def test_each_category_has_its_own_interval_whatever_the_price(self):
+        for priority, interval in (("high", 60), ("medium", 3600), ("low", 3 * 3600)):
+            with self.subTest(priority=priority):
+                rule = watch(url=ROOT, target="1000", priority=priority)
+                self.first_read(rule, "9.000,00")  # far above the target: the price changes nothing
+                self.assertFalse(self.due_after(rule, interval - 1))
+                self.assertTrue(self.due_after(rule, interval))
 
-    def test_a_watch_far_above_its_target_is_read_every_10_minutes(self):
-        rule = watch(url=ROOT, target="1000")
-        self.first_read(rule, "1.200,00")  # 20 % above the target
-        self.assertFalse(self.due_after(rule, AMAZON_MAIN_INTERVAL_SECONDS))
-        self.assertFalse(self.due_after(rule, AMAZON_CALM_MAIN_INTERVAL_SECONDS - 1))
-        self.assertTrue(self.due_after(rule, AMAZON_CALM_MAIN_INTERVAL_SECONDS))
+    def test_a_red_watch_far_above_its_target_is_still_read_every_minute(self):
+        rule = watch(url=ROOT, target="3000", priority="high")
+        self.first_read(rule, "7.000,00")
+        self.assertTrue(self.due_after(rule, AMAZON_PRIORITY_INTERVAL_SECONDS["high"]))
 
-    def test_a_depo_offer_keeps_the_quick_rhythm_whatever_its_price(self):
-        rule = watch(url=ROOT, target="10")
-        rhythm = amazon_reader.WatchRhythm(offers={ROOT: [OfferResult("iPhone", Decimal("900"), "Amazon Depo", ROOT, True)]})
-        self.assertTrue(self.provider.is_hot(rule, rhythm))
-        rhythm.offers[ROOT][0].is_warehouse = False
-        self.assertFalse(self.provider.is_hot(rule, rhythm))
+    def test_a_block_wave_stretches_every_interval_and_they_return_by_themselves(self):
+        rule = watch(url=ROOT, priority="high")
+        self.first_read(rule, "100,00")
+        access = self.client.access
+        site_block(access)  # x2
+        self.assertEqual(self.provider.main_interval(rule), 120)
+        self.assertFalse(self.due_after(rule, 119))
+        self.assertTrue(self.due_after(rule, 120))
+        access.slowdown_since -= AMAZON_SLOWDOWN_RECOVER_SECONDS  # a clean stretch passes
+        self.assertEqual(self.provider.main_interval(rule), 60)
+
+    def test_a_yellow_or_green_family_is_swept_at_its_own_longer_interval(self):
+        red, yellow = (watch(url=ROOT, include_variations=True, priority=p) for p in ("high", "medium"))
+        self.assertEqual(self.provider.sweep_interval(red), AMAZON_SWEEP_INTERVAL_SECONDS)
+        self.assertEqual(self.provider.sweep_interval(yellow), 3600)
 
     def test_a_watch_never_read_is_due_at_once(self):
         self.assertTrue(self.provider.read_due(watch(url=ROOT)))
