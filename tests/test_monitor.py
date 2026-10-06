@@ -844,31 +844,35 @@ class RequestSpacingTests(CycleTestCase):
         self.assertEqual(spacing.wait(), 0)  # gap already passed
         self.assertEqual(sleeps, [3.0])
 
-    def test_amazon_client_spaces_every_network_request_but_not_cached_pages(self):
+    def test_amazon_client_waits_a_random_decimal_delay_before_every_network_request_but_not_cached_pages(self):
         from hermes.providers.amazon import client as amazon_client
         from hermes.providers.amazon.client import AmazonClient
-        from hermes.providers.base import RequestSpacing
 
-        spacing = RequestSpacing(5)
-        with AmazonClient(spacing=spacing) as amazon, \
+        sleeps = []
+        with AmazonClient(delay_range=(1, 4), sleep=sleeps.append) as amazon, \
                 patch.object(amazon_client, "curl_requests", None), \
-                patch.object(amazon, "_http_read", return_value="<html>Amazon</html>"), \
-                patch.object(spacing, "wait", return_value=0) as wait:
+                patch.object(amazon.access, "gap_multiplier", return_value=1.0), \
+                patch.object(amazon, "_http_read", return_value="<html>Amazon</html>"):
             cache = {}
-            amazon.fetch(AMAZON, 10, cache=cache)
-            amazon.fetch(AMAZON, 10, cache=cache)  # cached: no request, no wait
-            amazon.fetch("https://www.amazon.com.tr/gp/offer-listing/B000000001?condition=used", 10, cache=cache)
-        self.assertEqual(wait.call_count, 2)
+            for _ in range(30):
+                cache.clear()
+                amazon.fetch(AMAZON, 10, cache=cache)
+                amazon.fetch(AMAZON, 10, cache=cache)  # cached: no request, no wait
+                amazon.fetch("https://www.amazon.com.tr/gp/offer-listing/B000000001?condition=used", 10, cache=cache)
+        self.assertEqual(len(sleeps), 60)  # two network requests per round, the cached page never waits
+        self.assertTrue(all(1 <= seconds <= 4 for seconds in sleeps))
+        self.assertTrue(any(seconds != int(seconds) for seconds in sleeps))  # decimals, not whole seconds
+        self.assertGreater(len({round(seconds, 2) for seconds in sleeps}), 20)  # and really random
 
-    def test_amazon_gap_matches_the_measured_2_5_48_pace(self):
-        import importlib
+    def test_the_monitor_passes_the_configured_delay_to_amazon_and_amazon_has_no_fixed_minimum_gap(self):
+        from hermes.constants import SITE_MIN_REQUEST_GAP_SECONDS as gaps
 
-        import hermes.constants as constants_module
-
-        fresh = importlib.reload(constants_module)
-        self.assertEqual(fresh.SITE_MIN_REQUEST_GAP_SECONDS["amazon"], 5.0)
-        for site in list(constants_module.SITE_MIN_REQUEST_GAP_SECONDS):
-            constants_module.SITE_MIN_REQUEST_GAP_SECONDS[site] = 0
+        cfg = config([watch("iPhone", AMAZON)])
+        cfg.request_delay_min_seconds, cfg.request_delay_max_seconds = 1, 4
+        hermes_monitor = monitor(cfg, self.data, self.notify)
+        self.assertEqual(hermes_monitor.providers["amazon"].client.delay_range, (1.0, 4.0))
+        self.assertNotIn("amazon", gaps)
+        hermes_monitor.close()
 
     def test_other_sites_wait_their_gap_between_watch_reads(self):
         rules = [watch(f"Çanta {i}", f"https://nordbron.com/{i}") for i in range(3)]

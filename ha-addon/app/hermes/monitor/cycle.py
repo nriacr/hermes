@@ -123,6 +123,8 @@ class Monitor:
         self.home_assistant = home_assistant
         self.should_stop = should_stop
         self.providers = providers or ProviderSet()
+        for provider in self.providers:
+            provider.set_request_delay(config.request_delay_min_seconds, config.request_delay_max_seconds)
         self.notifier = notifier or Pushover(config.pushover_user_key, config.pushover_api_token, config.request_timeout_seconds)
         self.files = files or DataFiles()
         self.sleep = sleep
@@ -233,7 +235,8 @@ class Monitor:
     def _site_pace(self, site: str) -> Callable[[str], None]:
         """The random delay, then the site's minimum gap since its previous request start."""
         if self.providers[site].spaces_own_requests:
-            return self.pace
+            # The provider waits before each of its own requests (Amazon, see set_request_delay).
+            return lambda _label: None
         spacing = self._spacing.setdefault(site, RequestSpacing(SITE_MIN_REQUEST_GAP_SECONDS.get(site, 0), sleep=self.sleep))
 
         def pace(label: str) -> None:

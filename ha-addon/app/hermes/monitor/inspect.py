@@ -52,7 +52,8 @@ def inspect_link(url: str, name: str = "", size: str = "", include_variations: b
         log(f"Bağlantı testi | {label} isteği öncesi {delay} saniye bekleniyor.")
         time.sleep(delay)
 
-    amazon = AmazonProvider(AmazonClient(transport="browser" if amazon_browser else "http"))
+    amazon = AmazonProvider(AmazonClient(transport="browser" if amazon_browser else "http",
+                                         delay_range=(delay_min, delay_max)))
     with ProviderSet({amazon.site: amazon}) as providers, requests.Session() as session:
         ctx = ReadContext(timeout=DEFAULT_REQUEST_TIMEOUT_SECONDS, session=session, pace=pace, watch_names=watch_names)
         offers = list(providers[site].read(watch, ctx, WatchRead()))

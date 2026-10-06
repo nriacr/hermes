@@ -238,6 +238,9 @@ class AmazonProvider(Provider):
         interval = self.sweep_interval(watch) if self.is_search_url(watch.url) else self.main_interval(watch)
         return time.monotonic() - rhythm.main_at >= interval
 
+    def set_request_delay(self, minimum: float, maximum: float) -> None:
+        self.client.delay_range = (float(minimum), float(maximum))
+
     def close(self) -> None:
         self.client.close()
 
@@ -413,7 +416,6 @@ class AmazonProvider(Provider):
         cache_key = str(candidate.url or "").strip()
         if cache_key in self.details:
             return self.details[cache_key]
-        ctx.pace(f"Amazon detay | {candidate.title}"[:120])
         html = self.fetch(candidate.url, ctx)
         results = [
             # The search-card title is the match context; Amazon's lightweight
@@ -602,8 +604,6 @@ class AmazonProvider(Provider):
                 )
                 if snapshot is None or needs_variation_upgrade or needs_offer_upgrade:
                     page_was_reused = False
-                    if variation.url != watch.url:
-                        ctx.pace(f"Amazon varyasyon | {variation.label or variation.url}"[:120])
                     html = self.fetch(variation.url, ctx)
                     page_soup = parser.parse_product_page(html)
                     discovered = None

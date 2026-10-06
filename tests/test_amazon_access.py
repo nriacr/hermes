@@ -27,7 +27,6 @@ from hermes.providers.amazon import access as amazon_access
 from hermes.providers.amazon import client as amazon_client
 from hermes.providers.amazon.access import MAIN_LANE, AmazonAccess
 from hermes.providers.amazon.client import AmazonClient, load_cookies, save_cookies
-from hermes.providers.base import RequestSpacing
 
 HOUR = 60 * 60
 
@@ -332,7 +331,7 @@ class AdaptiveLimitTests(unittest.TestCase):
         self.assertEqual(restarted.gap_multiplier(), 2.0)
 
     def test_shipped_limits(self):
-        self.assertEqual((amazon_constants.AMAZON_WINDOW_START_LIMIT, amazon_constants.AMAZON_WINDOW_MAX_LIMIT), (400, 600))
+        self.assertEqual((amazon_constants.AMAZON_WINDOW_START_LIMIT, amazon_constants.AMAZON_WINDOW_MAX_LIMIT), (500, 700))
 
     def test_the_lowered_limit_of_3_3_0_is_reset_to_300(self):
         self.path.write_text(json.dumps({"limit": 119, "threshold": 141, "frozen": True, "last_raise_at": 1.0,
@@ -361,10 +360,10 @@ class AdaptiveLimitTests(unittest.TestCase):
 
 
 class ClientBudgetTests(unittest.TestCase):
-    def test_every_request_goes_through_the_window_and_the_slow_start_gap(self):
+    def test_every_request_goes_through_the_window_and_waits_before_it_stretched_right_after_a_start(self):
         fake = FakeTime()
         access = access_with(fake)
-        spacing = RequestSpacing(5.0, sleep=fake.sleep, clock=fake.clock)
+        sleeps = []
         pages = [requests.Response()]
         pages[0].status_code = 200
         pages[0]._content = b"<html>Amazon product</html>"
@@ -372,25 +371,25 @@ class ClientBudgetTests(unittest.TestCase):
         session = SimpleNamespace(cookies=requests.cookies.RequestsCookieJar(), get=lambda *a, **k: pages[0],
                                   close=lambda: None)
         with patch.object(amazon_client, "curl_requests", SimpleNamespace(Session=lambda: session)):
-            with AmazonClient(spacing=spacing, access=access) as client:
+            with AmazonClient(access=access, delay_range=(1, 4), sleep=sleeps.append) as client:
                 client.fetch("https://www.amazon.com.tr/dp/B000000001", 10)
                 client.fetch("https://www.amazon.com.tr/dp/B000000002", 10)
-                # Right after a start the gap is doubled: 10 seconds instead of 5.
-                self.assertEqual(spacing.min_gap_seconds, 10.0)
+                # Right after a start every wait is doubled: 2 to 8 seconds instead of 1 to 4.
+                self.assertEqual(len(sleeps), 2)
+                self.assertTrue(all(2 <= seconds <= 8 for seconds in sleeps))
                 self.assertEqual(access.counters["istek"], 2)
                 self.assertEqual(access.window_count(), 2)
 
     def test_a_challenge_page_counts_as_a_block(self):
         fake = FakeTime()
         access = access_with(fake)
-        spacing = RequestSpacing(0, sleep=fake.sleep, clock=fake.clock)
         page = requests.Response()
         page.status_code = 200
         page._content = '<form action="/errors/validateCaptcha">Amazon</form>'.encode()
         page.encoding = "utf-8"
         session = SimpleNamespace(cookies=requests.cookies.RequestsCookieJar(), get=lambda *a, **k: page, close=lambda: None)
         with patch.object(amazon_client, "curl_requests", SimpleNamespace(Session=lambda: session)):
-            with AmazonClient(spacing=spacing, access=access) as client:
+            with AmazonClient(access=access, sleep=fake.sleep) as client:
                 with self.assertRaises(Exception):
                     client.fetch("https://www.amazon.com.tr/dp/B000000001", 10)
         # Every block is site-wide: the limit is lowered once and the wave is counted.
@@ -400,7 +399,6 @@ class ClientBudgetTests(unittest.TestCase):
     def test_after_a_block_nothing_is_sent_until_the_hold_ends_then_a_new_visitor_starts(self):
         fake = FakeTime()
         access = access_with(fake)
-        spacing = RequestSpacing(0, sleep=fake.sleep, clock=fake.clock)
         challenge = requests.Response()
         challenge.status_code = 200
         challenge._content = '<form action="/errors/validateCaptcha">Amazon</form>'.encode()
@@ -420,7 +418,7 @@ class ClientBudgetTests(unittest.TestCase):
             return session
 
         with patch.object(amazon_client, "curl_requests", SimpleNamespace(Session=new_session)):
-            with AmazonClient(spacing=spacing, access=access) as client:
+            with AmazonClient(access=access, sleep=fake.sleep) as client:
                 with self.assertRaises(BotProtectionHermesError):
                     client.fetch("https://www.amazon.com.tr/dp/B000000001", 10)
                 fake.advance(60)
@@ -447,7 +445,7 @@ class ClientBudgetTests(unittest.TestCase):
 
         session = SimpleNamespace(cookies=requests.cookies.RequestsCookieJar(), get=get, close=lambda: None)
         with patch.object(amazon_client, "curl_requests", SimpleNamespace(Session=lambda: session)):
-            with AmazonClient(spacing=RequestSpacing(0), access=access_with(FakeTime())) as client:
+            with AmazonClient(access=access_with(FakeTime())) as client:
                 client.fetch("https://www.amazon.com.tr/dp/B000000001", 10)
         headers = sent["headers"]
         self.assertEqual(sent["impersonate"], f"chrome{amazon_client.CHROME_MAJOR}")
@@ -510,8 +508,7 @@ if __name__ == "__main__":
 class LaneClientTests(unittest.TestCase):
     def make_client(self):
         fake = FakeTime()
-        spacing = RequestSpacing(0, sleep=fake.sleep, clock=fake.clock)
-        return AmazonClient(spacing=spacing, access=access_with(fake))
+        return AmazonClient(access=access_with(fake), sleep=fake.sleep)
 
     def test_the_lane_is_per_thread(self):
         import threading
@@ -561,6 +558,39 @@ class LaneClientTests(unittest.TestCase):
         self.assertEqual((client.access.counters["istek_depo"], client.access.counters["istek_tarama"]), (5, 5))
 
 
+    def test_two_busy_lanes_take_turns_so_the_sweep_is_never_starved(self):
+        import threading
+        import time as real_time
+
+        client = self.make_client()
+        order, lock = [], threading.Lock()
+        start = threading.Barrier(2)
+
+        def read_in(lane):
+            def read():
+                with lock:
+                    order.append(lane)
+                real_time.sleep(0.005)
+                return "ok"
+            return read
+
+        def lane_worker(lane):
+            client.lane = lane
+            start.wait()
+            for _ in range(20):
+                client._timed("curl", "https://www.amazon.com.tr/dp/B000000001", False, read_in(lane))
+
+        workers = [threading.Thread(target=lane_worker, args=(lane,)) for lane in (MAIN_LANE, "")]
+        for worker in workers:
+            worker.start()
+        for worker in workers:
+            worker.join()
+        # While both lanes had requests waiting, neither went twice in a row (the Depo lane no longer goes first).
+        both_busy = order[:30]
+        self.assertFalse(any(a == b for a, b in zip(both_busy, both_busy[1:])), both_busy)
+        self.assertEqual((order.count(MAIN_LANE), order.count("")), (20, 20))
+
+
 class RestoreTests(unittest.TestCase):
     """After a restart the window and the last hour come back from the database."""
 
@@ -594,7 +624,7 @@ class RestoreTests(unittest.TestCase):
         self.assertEqual(self.access.threshold, 151)  # not 1: the requests before the restart count
 
     def test_a_restored_full_window_makes_the_sweep_wait_as_without_a_restart(self):
-        self.access.restore([self.finished(seconds * 5) for seconds in range(AMAZON_WINDOW_START_LIMIT)])
+        self.access.restore([self.finished(seconds * 4) for seconds in range(AMAZON_WINDOW_START_LIMIT)])
         before = self.fake.now
         self.access.wait_for_window()
         self.assertGreater(self.fake.now, before)

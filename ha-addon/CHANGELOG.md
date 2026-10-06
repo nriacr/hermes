@@ -1,5 +1,18 @@
 # Değişiklik günlüğü
 
+## 3.8.3
+
+- 3.8.1'de kırmızı kartlar her turda okunmaya başlayınca Depo şeridi istek sırasını sürekli
+  kazanıyor ve varyant taraması 5 dakika yerine 10-39 dakikada bir yapılabiliyordu (iPhone 18
+  Pro / Pro Max varyantları 14-18 dakika önce güncellenmiş görünüyordu). İki şerit artık
+  sırayla istek atıyor; biri doluyken diğeri en fazla bir istek bekliyor.
+- Amazon'daki 5 saniyelik sabit istek aralığı kaldırıldı. Ayarlardaki bekleme min/max değeri
+  artık her Amazon isteğinden önce (ürün, varyant, ikinci el listesi, arama detayı)
+  rastgele ve ondalıklı olarak uygulanıyor; önbellekten gelen sayfa beklemiyor. Başlangıçta
+  ve engelden sonra bekleme 2 ya da 4 katına çıkıyor. Bağlantı testi de aynı beklemeyi kullanıyor.
+- Kayan pencere istek sınırı 500'den başlıyor, 700'e kadar çıkabiliyor (sabit aralık kalkınca
+  istek hızı arttığı için).
+
 ## 3.8.2
 
 - Amazon'da kırmızı bir kartın kendi sayfasında fiyat ya da teklif yoksa (stokta değil), sayfa

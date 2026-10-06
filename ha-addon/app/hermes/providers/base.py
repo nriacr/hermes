@@ -240,6 +240,9 @@ class Provider:
     # otherwise the monitor spaces the start of each watch read.
     spaces_own_requests = False
 
+    def set_request_delay(self, minimum: float, maximum: float) -> None:
+        """The configured random wait before a request; only providers that space their own requests use it."""
+
     def begin_cycle(self) -> None:
         """Forget per-cycle caches; prices are always read again next cycle."""
 

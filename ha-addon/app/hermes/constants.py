@@ -81,13 +81,9 @@ TELEGRAM_STATUS_HEARTBEAT_SECONDS = 60 * 60
 TELEGRAM_QUICK_ADD_GROUP = "Paylaşılanlar"
 PRIORITIES = ("high", "medium", "low")
 # Minimum time between two request starts to one site, on top of the random
-# request delay. Measured from ~17 hours of 2.5.48 Pi logs (2026-10-03), where
-# all sites shared one queue, so per-site queues are not faster than before:
-# Amazon median 5.1 s over 4,992 requests (lower quartile 4.5 s); Network
-# median 1.0 s over 10 reads. Other sites had no reads in that window and keep
-# only the configured delay.
+# request delay (Network only; since 3.8.3 Amazon has none: its client waits the configured
+# random delay before every request instead).
 SITE_MIN_REQUEST_GAP_SECONDS = {
-    SITE_AMAZON: 5.0,
     SITE_NETWORK: 1.0,
 }
 # 3.7.0: the priority category alone decides how often a watch is read: yellow hourly, green every
@@ -117,14 +113,14 @@ AMAZON_SLOWDOWN_RECOVER_SECONDS = 10 * 60
 # For ten minutes after every start the minimum gap between requests doubles.
 AMAZON_START_SLOW_SECONDS = 10 * 60
 AMAZON_START_SLOW_FACTOR = 2.0
-# Rolling request window (3.7.0: starts at 400, up to 600, because 41 clean hours at 6 requests/min and the
-# red category's search rounds need more room than the old 300; the speed governor handles real blocks): starts at 400 in 35 minutes, +5 % after every clean
+# Rolling request window (3.8.3: starts at 500, up to 700, because 41 clean hours at 6 requests/min and the
+# red category's search rounds need more room than the old 300; the speed governor handles real blocks): starts at 500 in 35 minutes, +5 % after every clean
 # hour whose window reached 80 % of the limit, never above 500. A block lowers
 # the limit to 85 % of the window count it happened at and freezes it there.
 AMAZON_WINDOW_SECONDS = 35 * 60
-AMAZON_WINDOW_START_LIMIT = 400
+AMAZON_WINDOW_START_LIMIT = 500
 AMAZON_WINDOW_MIN_LIMIT = 200
-AMAZON_WINDOW_MAX_LIMIT = 600
+AMAZON_WINDOW_MAX_LIMIT = 700
 AMAZON_WINDOW_RAISE_EVERY_SECONDS = 60 * 60
 AMAZON_WINDOW_RAISE_FACTOR = 1.05
 AMAZON_WINDOW_RAISE_MIN_USE = 0.8

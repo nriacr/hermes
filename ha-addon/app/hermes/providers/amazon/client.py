@@ -11,6 +11,7 @@ while, and the first request after that starts a new anonymous visitor.
 """
 
 import os
+import random
 import threading
 import time
 from contextlib import contextmanager
@@ -21,16 +22,11 @@ from urllib.parse import parse_qsl, urlencode, urlsplit
 
 import requests
 
-from ...constants import (
-    AMAZON_COOKIE_MAX_AGE_SECONDS,
-    SITE_AMAZON,
-    SITE_MIN_REQUEST_GAP_SECONDS,
-)
+from ...constants import AMAZON_COOKIE_MAX_AGE_SECONDS
 from ...errors import BotProtectionHermesError, HermesError, error_status
 from ...logging_utils import log
 from ...storage import load_json, save_json
 from ...utils import canonical_amazon_product_url, extract_asin_from_url, normalize_offer_text, repair_mojibake
-from ..base import RequestSpacing
 from ..http import cleaned_html, curl_requests, decode_response_text
 from .access import MAIN_LANE, AmazonAccess
 from .browser import AmazonBrowser
@@ -258,8 +254,8 @@ def save_cookies(session, path: Optional[Path]) -> None:
 class AmazonClient:
     """Process-lived anonymous transports; page/offer caches stay cycle-local."""
 
-    def __init__(self, transport: str = "http", spacing: Optional[RequestSpacing] = None,
-                 access: Optional[AmazonAccess] = None, cookies_path: Optional[Path] = None):
+    def __init__(self, transport: str = "http", access: Optional[AmazonAccess] = None, cookies_path: Optional[Path] = None,
+                 delay_range: Tuple[float, float] = (0.0, 0.0), sleep: Callable[[float], None] = time.sleep):
         # "http" reads with curl (Chrome TLS) and falls back to Chromium once;
         # "browser" reads only through Chromium (used by the link test option).
         self.transport = transport
@@ -272,17 +268,19 @@ class AmazonClient:
         # Request budget (window, slow start) and the cookie jar that survives restarts.
         self.access = access or AmazonAccess()
         # Two lane threads read through this client: the Depo lane ("main") and the variant sweep ("").
-        # Requests go one at a time; the Depo lane goes first when both wait.
+        # Requests go one at a time and the two lanes take turns when both wait (3.8.3).
         self._local = threading.local()
-        self._request_lock = threading.Lock()
-        self._main_waiting = 0
-        self._main_waiting_lock = threading.Lock()
+        self._turn_lock = threading.Condition()
+        self._turn_busy = False
+        self._turn_waiting = {MAIN_LANE: 0, "": 0}
+        self._last_turn_lane: Optional[str] = None
         self.cookies_path = cookies_path
         self._cookies_saved_at = 0.0
-        # Every network request (product, variant, listing, search detail,
-        # browser fallback) waits for this gap; cached pages never do.
-        self.spacing = spacing or RequestSpacing(SITE_MIN_REQUEST_GAP_SECONDS[SITE_AMAZON])
-        self.base_gap_seconds = self.spacing.min_gap_seconds
+        # Every network request (product, variant, listing, search detail, browser fallback) is
+        # preceded by a random wait between the configured minimum and maximum (decimals, no fixed
+        # minimum gap on top; 3.8.3); cached pages never wait. Start and block slow-downs stretch it.
+        self.delay_range = (float(delay_range[0]), float(delay_range[1]))
+        self.sleep = sleep
         # Only absent/unreadable offers, with discovery metadata, never successful prices.
         self.unavailable_product_pages: dict = {}
         # Variant pages a watch excludes by title: their neighbours (edges) are kept for a while
@@ -350,32 +348,33 @@ class AmazonClient:
 
     @contextmanager
     def _turn(self, lane: str):
-        """One request at a time; the Depo lane goes before a waiting sweep."""
-        if lane == MAIN_LANE:
-            with self._main_waiting_lock:
-                self._main_waiting += 1
+        """One request at a time. When both lanes wait they take turns, so a busy Depo lane (red watches read
+        every round) never starves the variant sweep, and the sweep never holds the Depo lane back for long."""
+        lane = MAIN_LANE if lane == MAIN_LANE else ""
+        other = "" if lane == MAIN_LANE else MAIN_LANE
+        with self._turn_lock:
+            self._turn_waiting[lane] += 1
             try:
-                self._request_lock.acquire()
+                while self._turn_busy or (self._turn_waiting[other] and self._last_turn_lane == lane):
+                    self._turn_lock.wait()
             finally:
-                with self._main_waiting_lock:
-                    self._main_waiting -= 1
-        else:
-            waited = 0.0
-            while self._main_waiting and waited < 10:
-                time.sleep(0.05)
-                waited += 0.05
-            self._request_lock.acquire()
+                self._turn_waiting[lane] -= 1
+            self._turn_busy = True
         try:
             yield
         finally:
-            self._request_lock.release()
+            with self._turn_lock:
+                self._turn_busy = False
+                self._last_turn_lane = lane
+                self._turn_lock.notify_all()
 
     def _timed_locked(self, method: str, url: str, expect_search: bool, read, on_request, lane: str):
-        # Half speed after a block and right after a start: the gap doubles.
-        self.spacing.min_gap_seconds = self.base_gap_seconds * self.access.gap_multiplier()
-        waited = self.spacing.wait()
-        if waited >= 0.05:
-            log(f"Amazon istek aralığı için {waited:.1f} sn ek bekleme.")
+        # A random wait before every request; right after a start and after a block it is stretched.
+        low, high = self.delay_range
+        delay = random.uniform(low, high) * self.access.gap_multiplier()
+        if delay > 0:
+            log(f"Amazon isteği öncesi {delay:.2f} saniye bekleniyor.")
+            self.sleep(delay)
         # Checked last, right before sending: a block may have come while this request waited its turn.
         held = self.access.hold_remaining()
         if held > 0:

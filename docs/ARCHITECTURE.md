@@ -156,10 +156,13 @@ card due immediately after the restart.
    cycle replaces its own rows on the table (`CycleRun.rows_of`). All changes to the
    cycle's state, table and files are serialized under one lock; network reads
    and notifications happen outside it. On top of the delay, a minimum gap
-   between request starts per site (`SITE_MIN_REQUEST_GAP_SECONDS`, measured
-   from the 2.5.48 logs: Amazon 5 s, Network 1 s) keeps every site at or below
-   its old pace. Amazon's client applies it to every network request; cached
-   pages never wait. The cycle ends when the slowest queue
+   between request starts per site (`SITE_MIN_REQUEST_GAP_SECONDS`, Network 1 s)
+   keeps that site at or below its old pace. Amazon has no fixed gap since 3.8.3:
+   its client waits a random decimal time between the configured minimum and
+   maximum (`request_delay_*`, stretched by the start and block slow-downs)
+   before every network request (product, variant, listing, search detail);
+   cached pages never wait. The monitor gives it the delay (`set_request_delay`)
+   and does not wait for it itself. The cycle ends when the slowest queue
    has finished.
 4. The provider returns offers (Amazon product families stream them). Apply
    the own-seller filter, the minimum price and exclusions, then record each
@@ -262,8 +265,9 @@ results" search notice is a normal stock row read again after five minutes.
   its own longer interval for yellow and green (`AmazonProvider.main_interval`,
   `sweep_interval`). The two rhythms run in two lanes (since 3.5): the Depo
   lane thread repeats the main reads, the sweep thread works through the due
-  families. Both go through one request lock (one request at a time, the Depo
-  lane first), one rolling window (the Depo lane may use all of it; the sweep
+  families. Both go through one request turn (one request at a time; since
+  3.8.3 the two lanes alternate when both wait, because a Depo lane without a
+  timer starved the sweep: 3.8.1 let the variants go stale for 10-39 minutes), one rolling window (the Depo lane may use all of it; the sweep
   all but the part of the Depo reserve not used yet, the reserve being what the
   Depo lane used in the last 35 minutes, at least 12 requests, at most 28 % of
   the limit; and the sweep steps aside while the Depo lane waits for a slot) and one pause: a block on either lane
