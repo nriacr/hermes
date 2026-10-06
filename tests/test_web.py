@@ -111,6 +111,20 @@ class RouterTests(DataFilesMixin, unittest.TestCase):
         self.assertEqual(self.request("/settings", public_only=True).status, 404)
         self.assertEqual(self.request("/health", public_only=True).status, 200)
 
+    def test_top_bar_has_logo_and_gear_and_page_links_sit_under_settings(self):
+        for path in ("/", "/statistics", "/link-test"):
+            page = self.request(path).payload.decode()
+            self.assertIn("<a class='badge' href='./'", page)
+            self.assertIn("class='gear-button' href='./settings'", page)
+            self.assertNotIn("page-links", page)
+        settings_page = self.request("/settings").payload.decode()
+        self.assertIn("<a class='badge' href='./'", settings_page)
+        self.assertIn("aria-current='page'", settings_page)
+        links = settings_page[settings_page.index("page-links"):]
+        for target, label in (("./'", "Özet Tablo"), ("./statistics'", "İstatistik"), ("./link-test'", "Test")):
+            self.assertIn(f"href='{target}>{label}</a>", links)
+        self.assertGreater(settings_page.index("page-links"), settings_page.index("Değişiklikleri uygula"))
+
     def test_public_pages_link_inside_the_token_surface(self):
         self.write_options({"public_dashboard_enabled": True, "public_dashboard_token": TOKEN})
         page = self.request(f"/public/{TOKEN}/statistics", public_only=True).payload.decode()

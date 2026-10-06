@@ -1,5 +1,11 @@
 # Değişiklik günlüğü
 
+## 3.9.2
+
+- Üst çubukta artık yalnız Hermes logosu ve yanında dişli simgesi var; logo Özet Tablo'ya,
+  dişli Ayarlar'a gidiyor (her sayfada, ingress ve herkese açık yüzeyde aynı).
+- Özet Tablo, İstatistik ve Test düğmeleri üst çubuktan kalktı; Ayarlar sayfasının en altında duruyor.
+
 ## 3.9.1
 
 - Amazon'da istekler arası rastgele bekleme (ayardaki min/max) artık iki isteğin arasındaki süre

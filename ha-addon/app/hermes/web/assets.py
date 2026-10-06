@@ -175,7 +175,8 @@ tbody tr.site-other { --site-bg:rgba(183,177,222,.13); --site-bg-strong:rgba(183
 .settings-page details.is-deleted { opacity:.55; } .settings-page details.is-deleted summary { color:var(--bad); }
 .apply-bar { position:sticky; bottom:0; z-index:8; display:flex; flex-wrap:wrap; gap:12px; align-items:center; justify-content:space-between; margin-top:18px; padding:14px 0 4px; border-top:1px solid var(--line); background:var(--panel); } .apply-bar p { flex:1 1 220px; } .apply-bar .button { min-width:180px; }
 .config-error { margin-top:14px; }
-.nav-actions .button[aria-current='page'] { color:#181a1c; background:linear-gradient(135deg,var(--accent),var(--accent2)); border-color:transparent; }
+.topbar { display:flex; align-items:center; gap:12px; margin-bottom:12px; } .topbar .badge { margin-bottom:0; text-decoration:none; } .gear-button { display:inline-flex; align-items:center; justify-content:center; width:44px; height:44px; border:1px solid var(--line); border-radius:14px; color:var(--text); background:#34383d; text-decoration:none; } .gear-button:hover { border-color:#d6d8d7; } .gear-button[aria-current='page'] { color:#181a1c; background:linear-gradient(135deg,var(--accent),var(--accent2)); border-color:transparent; }
+.page-links { margin-top:18px; }
 .tool-actions { margin-top:10px; }
 @media (max-width:900px) { .watch-top { grid-template-columns:repeat(2,minmax(0,1fr)); } }
 @media (max-width:720px) { .nav-actions, .tool-actions { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); } .nav-actions .button, .tool-actions .button, .tool-actions .inline-form { width:100%; min-width:0; } }

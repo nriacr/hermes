@@ -11,7 +11,7 @@ from ..logging_utils import log
 from ..storage import load_json
 from ..supervisor import save_options_and_restart
 from ..utils import detect_site_from_url, format_tl, parse_bool, parse_decimal, site_label, utc_now, watch_name_required_for_url
-from .pages import link, render_notice, render_page
+from .pages import link, render_notice, render_page, render_page_links
 
 OTHER_GROUP = "Diğer"
 PRIORITY_CHOICES = (
@@ -277,6 +277,7 @@ def render_settings_page(base: str, params: Dict[str, List[str]]) -> bytes:
         + _telegram_section(options)
         + "<div class='apply-bar'><p>Grup, fiyat, yeni kayıt ve silme işlemlerini sırayla yap; bitince bir kez uygula. "
         "Hermes yalnız o zaman yeniden başlar.</p><button class='button primary' type='submit'>Değişiklikleri uygula</button></div></form>"
+        + render_page_links(base)
     )
     overlay = ("<div id='saving-overlay' class='saving-overlay' hidden><div class='saving-dialog'><div class='saving-spinner'></div>"
                "<h2 id='saving-title'>Ayarlar kaydediliyor</h2><p id='saving-message'>Tüm değişiklikler tek seferde Home Assistant'a "
