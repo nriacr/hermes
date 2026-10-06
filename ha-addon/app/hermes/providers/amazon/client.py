@@ -255,7 +255,8 @@ class AmazonClient:
     """Process-lived anonymous transports; page/offer caches stay cycle-local."""
 
     def __init__(self, transport: str = "http", access: Optional[AmazonAccess] = None, cookies_path: Optional[Path] = None,
-                 delay_range: Tuple[float, float] = (0.0, 0.0), sleep: Callable[[float], None] = time.sleep):
+                 delay_range: Tuple[float, float] = (0.0, 0.0), sleep: Callable[[float], None] = time.sleep,
+                 clock: Callable[[], float] = time.monotonic):
         # "http" reads with curl (Chrome TLS) and falls back to Chromium once;
         # "browser" reads only through Chromium (used by the link test option).
         self.transport = transport
@@ -281,6 +282,10 @@ class AmazonClient:
         # minimum gap on top; 3.8.3); cached pages never wait. Start and block slow-downs stretch it.
         self.delay_range = (float(delay_range[0]), float(delay_range[1]))
         self.sleep = sleep
+        self.clock = clock
+        # When the last network request ended: the random wait is the time between two requests, so what
+        # the page processing in between already took (3.9.1: ~3.5 s on the Pi) counts towards it.
+        self._last_request_end: Optional[float] = None
         # Only absent/unreadable offers, with discovery metadata, never successful prices.
         self.unavailable_product_pages: dict = {}
         # Variant pages a watch excludes by title: their neighbours (edges) are kept for a while
@@ -369,12 +374,15 @@ class AmazonClient:
                 self._turn_lock.notify_all()
 
     def _timed_locked(self, method: str, url: str, expect_search: bool, read, on_request, lane: str):
-        # A random wait before every request; right after a start and after a block it is stretched.
+        # A random wait between two requests; right after a start and after a block it is stretched. Time
+        # already spent since the previous request ended (parsing its page) counts towards it.
         low, high = self.delay_range
         delay = random.uniform(low, high) * self.access.gap_multiplier()
-        if delay > 0:
-            log(f"Amazon isteği öncesi {delay:.2f} saniye bekleniyor.")
-            self.sleep(delay)
+        since_last = None if self._last_request_end is None else self.clock() - self._last_request_end
+        remaining = delay if since_last is None else max(0.0, delay - since_last)
+        if remaining > 0:
+            log(f"Amazon isteği öncesi {remaining:.2f} saniye bekleniyor (aralık {delay:.2f} sn).")
+            self.sleep(remaining)
         # Checked last, right before sending: a block may have come while this request waited its turn.
         held = self.access.hold_remaining()
         if held > 0:
@@ -396,6 +404,7 @@ class AmazonClient:
                 log(f"Amazon engeli: sebep={outcome} | tür={cause} | yöntem={method} | adres={_short_url(url)}")
             raise
         finally:
+            self._last_request_end = self.clock()
             self.access.request_finished(blocked, extract_asin_from_url(url) or url, cause)
             if outcome == "ok":
                 self._save_cookies_soon()

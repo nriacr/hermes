@@ -1,5 +1,12 @@
 # Değişiklik günlüğü
 
+## 3.9.1
+
+- Amazon'da istekler arası rastgele bekleme (ayardaki min/max) artık iki isteğin arasındaki süre
+  olarak sayılıyor: önceki sayfanın işlenmesi (Pi'de ortalama 3,5 sn) bu süreye dahil. Eskiden bekleme,
+  işlemenin üstüne ekleniyordu ve iki istek arası ortalama 6 sn oluyordu. İstekler arasındaki boşluk
+  hiçbir zaman çekilen rastgele değerin altına inmiyor.
+
 ## 3.9.0
 
 - Amazon'da kırmızı kartın tüm sayfaları (ana sayfa, ikinci el listesi ve her varyant) her arama

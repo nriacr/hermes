@@ -160,8 +160,9 @@ card due immediately after the restart.
    keeps that site at or below its old pace. Amazon has no fixed gap since 3.8.3:
    its client waits a random decimal time between the configured minimum and
    maximum (`request_delay_*`, stretched by the start and block slow-downs)
-   before every network request (product, variant, listing, search detail);
-   cached pages never wait. The monitor gives it the delay (`set_request_delay`)
+   before every network request (product, variant, listing, search detail),
+   counted from the end of the previous request (3.9.1: the page processing in
+   between counts towards it); cached pages never wait. The monitor gives it the delay (`set_request_delay`)
    and does not wait for it itself. The cycle ends when the slowest queue
    has finished.
 4. The provider returns offers (Amazon product families stream them). Apply

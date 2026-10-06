@@ -793,7 +793,7 @@ class RequestSpacingTests(CycleTestCase):
         from hermes.providers.amazon.client import AmazonClient
 
         sleeps = []
-        with AmazonClient(delay_range=(1, 4), sleep=sleeps.append) as amazon, \
+        with AmazonClient(delay_range=(1, 4), sleep=sleeps.append, clock=lambda: 0.0) as amazon, \
                 patch.object(amazon_client, "curl_requests", None), \
                 patch.object(amazon.access, "gap_multiplier", return_value=1.0), \
                 patch.object(amazon, "_http_read", return_value="<html>Amazon</html>"):

@@ -246,6 +246,28 @@ class AdaptiveLimitTests(unittest.TestCase):
         self.fake.advance(AMAZON_SLOWDOWN_RECOVER_SECONDS)
         self.assertEqual(self.access.speed_factor(), 1.0)
 
+    def test_the_page_processing_between_two_requests_counts_towards_the_random_wait(self):
+        clock = [100.0]
+        sleeps = []
+        page = requests.Response()
+        page.status_code = 200
+        page._content = b"<html>Amazon product</html>"
+        page.encoding = "utf-8"
+        session = SimpleNamespace(cookies=requests.cookies.RequestsCookieJar(), get=lambda *a, **k: page, close=lambda: None)
+        access = access_with(FakeTime())
+        access.slow_until = 0  # no start slow-down
+        with patch.object(amazon_client, "curl_requests", SimpleNamespace(Session=lambda: session)), \
+                patch.object(amazon_client.random, "uniform", return_value=3.0):
+            with AmazonClient(access=access, delay_range=(1, 4), sleep=sleeps.append, clock=lambda: clock[0]) as client:
+                client.fetch("https://www.amazon.com.tr/dp/B000000001", 10)
+                self.assertEqual(sleeps, [3.0])  # the first request waits the whole draw
+                clock[0] += 3.5  # processing the first page took longer than the draw: no extra wait
+                client.fetch("https://www.amazon.com.tr/dp/B000000002", 10)
+                self.assertEqual(sleeps, [3.0])
+                clock[0] += 1.0  # only 1 s of processing: the remaining 2 s of the draw are waited
+                client.fetch("https://www.amazon.com.tr/dp/B000000003", 10)
+                self.assertEqual(sleeps, [3.0, 2.0])
+
     def test_the_governor_stretches_the_request_gap_too(self):
         # A red watch has no timer, so the request gap is how a block slows it down.
         self.fake.advance(AMAZON_START_SLOW_SECONDS + 1)
