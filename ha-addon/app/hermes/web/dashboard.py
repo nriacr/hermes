@@ -29,6 +29,7 @@ SITE_THEME_CLASSES = (
     ("nordbron", "site-nordbron"),
     ("zara", "site-zara"),
     ("h&m", "site-hm"),
+    ("togg", "site-togg"),
 )
 PRIORITY_LABELS = {"high": "Yüksek", "medium": "Orta", "low": "Düşük"}
 

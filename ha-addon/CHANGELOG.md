@@ -1,5 +1,14 @@
 # Değişiklik günlüğü
 
+## 3.8.0
+
+- Yeni site: Togg konfigüratörü (configurator.togg.com.tr). Kartın `name` alanındaki
+  model (örneğin `T10X V2 RWD Uzun Menzil`) sayfanın model listesinde varsa stokta,
+  yoksa `Stokta Olmayanlar` bölümünde görünür; stokta olmaması hata sayılmaz. Model
+  listeye girdiğinde tek bir stok bildirimi gelir. Okuma sıklığı kartın öncelik
+  kategorisine göre; tüm Togg kartları döngü başına tek istek paylaşır. Diğer sitelere
+  dokunulmadı.
+
 ## 3.7.0
 
 3.6'dan beri 41 saat ve 15.211 Amazon isteğinde hiç engel olmadı; istek hızı dakikada

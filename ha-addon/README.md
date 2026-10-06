@@ -5,7 +5,7 @@ Hermes, Home Assistant üzerinde çalışan çok siteli ürün ve Telegram fırs
 ## Özellikler
 
 - Takip edilenler: tek kayıt altında en fazla 5 link izleme
-- Linkten otomatik site algılama: Amazon, Hepsiburada, Trendyol, Network, Beymen Club, Nordbron, Zara, H&M, Ben Gurme
+- Linkten otomatik site algılama: Amazon, Hepsiburada, Trendyol, Network, Beymen Club, Nordbron, Zara, H&M, Ben Gurme, Togg
 - Ürün ve arama linklerini aynı takip kaydı içinde karışık kullanabilme
 - Arama linklerinde, takip adını keyword kabul ederek eşleşen sonuçlar arasından en iyi fiyatı seçme
 - Arama linklerinde sabit olarak en fazla 60 sonuç tarama
@@ -137,6 +137,8 @@ Hermes her siteyi kendi sağlayıcısında okur. Bir sitenin fiyat okuma kuralı
 - **H&M:** Renk ve beden stok bilgisini siteye özel veri yolu üzerinden okur. Stokta olmayan beden hata olarak değil, `Stokta Olmayanlar` bölümünde gösterilir.
 - **Ben Gurme:** Shopify ürün verisindeki canlı stok ve varyant bilgisini okur. Stoktaki her gramaj ayrı satır olarak değerlendirilir; ürün tamamen tükendiyse bu teknik hata sayılmaz ve `Stokta Olmayanlar` bölümünde gösterilir. Ürün tekrar stokta olduğunda hedef fiyattan bağımsız tek bir stok bildirimi gönderilir.
 
+- **Togg:** Konfigüratör sayfasının kullandığı herkese açık model listesini okur (dakikada en fazla bir istek, tüm Togg kartları için ortak). Kartın `name` alanına izlenecek model yazılır (örneğin `T10X V2 RWD Uzun Menzil`); model listede varsa stokta, yoksa `Stokta Olmayanlar` bölümünde görünür. Stokta olmaması hata sayılmaz. Model listeye girdiğinde tek bir stok bildirimi gönderilir. Fiyat takibi yoktur; kart biçimi gereği istenen hedef fiyat yüksek bir sayı girilebilir.
+
 Her site kendi sırasıyla ve istekler arasında ayarlanan bekleme süresiyle okunur. Amazon ve Hepsiburada'nın bot koruması veya değişken sayfa yapısı nedeniyle ek kurtarma denemeleri yalnızca ilk okuma başarısız olduğunda çalışır. Amazon CAPTCHA/429/503 döndürürse, arama bağlantılarındaki 503 yanıtları dahil, Hermes yalnızca etkilenen takip bağlantısını önce 15 dakika, yinelenirse 30 ve en fazla 60 dakika bekletip kendiliğinden yeniden dener. Hata görünür kalır, başarılı okumada bekleme sıfırlanır; diğer bağlantılar taranmaya devam eder. Koruma, fiyat okunmuş bir varyanttan sonra gelirse o doğrulanmış teklif korunur. Amazon Depo teklifi denetimi otomatik yürür; hızlı çevrim için varyasyon taramasını yalnızca gerçekten ihtiyaç duyulan takiplerde etkinleştirmek en verimli yaklaşımdır.
 
 Amazon aramalarında başlığı `Hariç tut` terimleriyle eşleşen sonuçlar, ürün ayrıntısı isteği açılmadan elenir. Varyasyonlu ürünlerde bulunan her varyasyon her uygun çevrimde yeniden okunur; varyasyon bağlantıları veya fiyatları önbellekten atlanmaz.
@@ -155,7 +157,7 @@ ağ yanıtı ve ürün kimliği doğrulanmadan fiyat kullanılmaz.
 
 Her site kendi okuyucusunda (`app/hermes/providers/`) hem sayfayı indirir hem
 fiyatı ayrıştırır: `amazon/`, `hepsiburada/`, `trendyol.py`, `network.py`,
-`beymenclub.py`, `nordbron.py`, `zara.py`, `hm.py`, `bengurme.py`. Yeni site
+`beymenclub.py`, `nordbron.py`, `zara.py`, `hm.py`, `bengurme.py`, `togg.py`. Yeni site
 eklerken mevcut okuyuculara dokunulmaz; yeni bir okuyucu yazılıp
 `providers/registry.py` dosyasına eklenir. Mimari ayrıntılar
 [`docs/ARCHITECTURE.md`](../docs/ARCHITECTURE.md) dosyasındadır.

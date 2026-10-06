@@ -54,7 +54,7 @@ Hermes is a Home Assistant add-on running continuously on a Raspberry Pi. It:
 │       │   ├── hepsiburada/          # fetching; parsing split into common,
 │       │   │                         # prices, variants, search, detail
 │       │   └── trendyol.py, network.py, beymenclub.py, bengurme.py,
-│       │       nordbron.py, zara.py, hm.py, size_availability.py
+│       │       nordbron.py, zara.py, hm.py, togg.py, size_availability.py
 │       ├── telegram/listener.py      # Channels + Saved Messages quick add
 │       └── web/                      # Router, pages, statistics, settings, link test, assets
 ├── tests/                            # unittest suite (python -m unittest)
@@ -301,6 +301,7 @@ results" search notice is a normal stock row read again after five minutes.
   sizes are case-insensitive; a missing size is a stock state.
 - Zara, H&M: colors and the requested size; a missing size is a stock state.
 - Ben Gurme: Shopify JSON; every weight variant is a row; stock-return notice.
+- Togg: the configurator's public model list (one request per cycle for all Togg cards); the card `name` is the model, matched as a phrase. A model in the list is in stock, a missing one is a stock state; stock-return notice.
 
 ## 9. Home Assistant entities
 

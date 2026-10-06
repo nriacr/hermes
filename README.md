@@ -6,7 +6,7 @@ takip add-on'udur.
 - Bir takip kartında en fazla 5 ürün veya arama linki; site ve link türü
   linkten otomatik anlaşılır. Arama linklerinde kart adı aranacak ifadedir.
 - Desteklenen siteler: Amazon, Hepsiburada, Trendyol, Network, Beymen Club,
-  Ben Gurme, Nordbron, Zara, H&M.
+  Ben Gurme, Nordbron, Zara, H&M, Togg.
 - Öncelik: yüksek (kırmızı) her çevrimde, orta (sarı) saatte, düşük (yeşil) 3 saatte
   bir kontrol edilir; Amazon'da kırmızı kartlar 60 saniyede bir. Tablodaki renkli daire önceliği gösterir.
 - Amazon: varyasyonlar (renk × kapasite/ölçü, en fazla 60), doğrulanmış Amazon

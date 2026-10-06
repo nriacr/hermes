@@ -11,6 +11,7 @@ from .hepsiburada import HepsiburadaProvider
 from .hm import HMProvider
 from .network import NetworkProvider
 from .nordbron import NordbronProvider
+from .togg import ToggProvider
 from .trendyol import TrendyolProvider
 from .zara import ZaraProvider
 
@@ -24,6 +25,7 @@ PROVIDER_TYPES = (
     NordbronProvider,
     ZaraProvider,
     HMProvider,
+    ToggProvider,
 )
 
 

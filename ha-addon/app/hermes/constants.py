@@ -36,6 +36,7 @@ SITE_BENGURME = "bengurme"
 SITE_NORDBRON = "nordbron"
 SITE_ZARA = "zara"
 SITE_HM = "hm"
+SITE_TOGG = "togg"
 SITE_LABELS = {
     SITE_AMAZON: "Amazon",
     SITE_HEPSIBURADA: "Hepsiburada",
@@ -46,6 +47,7 @@ SITE_LABELS = {
     SITE_NORDBRON: "Nordbron",
     SITE_ZARA: "Zara",
     SITE_HM: "H&M",
+    SITE_TOGG: "Togg",
 }
 # Host fragments are checked in this order; "amazon" stays last because other
 # hosts never contain it, while a broad match must not shadow a specific site.
@@ -58,6 +60,7 @@ SITE_HOST_MARKERS = (
     ("nordbron", SITE_NORDBRON),
     ("zara", SITE_ZARA),
     ("hm.com", SITE_HM),
+    ("togg", SITE_TOGG),
     ("amazon", SITE_AMAZON),
 )
 # Zara and H&M cards without a group are shown under this group.
