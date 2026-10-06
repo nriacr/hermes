@@ -489,6 +489,7 @@ class AmazonProductTests(AmazonTestCase):
         self.assertIsNotNone(outcome.retry_after)
         # A red watch has no probe to wait for: its page is looked at again in every round.
         red = WatchRead()
+        self.client.unavailable_product_pages.clear()
         with self.serve({ROOT: UNAVAILABLE}):
             with self.assertRaises(OutOfStockHermesError):
                 self.read(watch(url=ROOT, priority="high"), red)
