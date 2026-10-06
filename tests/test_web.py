@@ -121,8 +121,13 @@ class RouterTests(DataFilesMixin, unittest.TestCase):
         self.assertIn("<a class='badge' href='./'", settings_page)
         self.assertIn("aria-current='page'", settings_page)
         links = settings_page[settings_page.index("page-links"):]
-        for target, label in (("./'", "Özet Tablo"), ("./statistics'", "İstatistik"), ("./link-test'", "Test")):
+        for target, label in (("./statistics'", "İstatistik"), ("./link-test'", "Test")):
             self.assertIn(f"href='{target}>{label}</a>", links)
+        self.assertNotIn("Özet Tablo</a>", settings_page)
+        for label in ("Pushover testi", "Bildirim Sıfırla", "Min/Maks Sıfırla"):
+            self.assertIn(label, settings_page)
+            self.assertNotIn(label, self.request("/").payload.decode())
+        self.assertGreater(settings_page.index("Pushover testi"), settings_page.index("Değişiklikleri uygula"))
         self.assertGreater(settings_page.index("page-links"), settings_page.index("Değişiklikleri uygula"))
 
     def test_public_pages_link_inside_the_token_surface(self):
@@ -142,13 +147,13 @@ class RouterTests(DataFilesMixin, unittest.TestCase):
         self.assertEqual(response.status, 303)
         self.assertTrue(response.headers["Location"].startswith("../restarting?"))
         response = self.request("/reset-notifications", "POST")
-        self.assertTrue(response.headers["Location"].startswith("./?reset=ok"))
+        self.assertTrue(response.headers["Location"].startswith("./settings?saved=ok"))
         self.assertEqual(self.runtime.resets, ["notifications"])
 
     def test_public_actions_redirect_inside_the_token_surface(self):
         self.write_options({"public_dashboard_enabled": True, "public_dashboard_token": TOKEN})
         response = self.request(f"/public/{TOKEN}/reset-price-history", "POST", public_only=True)
-        self.assertTrue(response.headers["Location"].startswith(f"/public/{TOKEN}/?history=ok"))
+        self.assertTrue(response.headers["Location"].startswith(f"/public/{TOKEN}/settings?saved=ok"))
         with patch.object(server, "handle_settings_save", return_value=(False, "Hata")):
             response = self.request(f"/public/{TOKEN}/settings/save", "POST", b"x=1", public_only=True)
         self.assertTrue(response.headers["Location"].startswith(f"/public/{TOKEN}/settings?saved=fail"))
@@ -235,7 +240,7 @@ class LiveServerTests(DataFilesMixin, unittest.TestCase):
                 opener.open(urllib.request.Request(f"{base}/reset-notifications", data=b"", method="POST"), timeout=5)
             caught.exception.close()
             self.assertEqual(caught.exception.code, 303)
-            self.assertTrue(caught.exception.headers["Location"].startswith("./?reset=ok"))
+            self.assertTrue(caught.exception.headers["Location"].startswith("./settings?saved=ok"))
             self.assertEqual(runtime.resets, ["notifications"])
         finally:
             httpd.shutdown()

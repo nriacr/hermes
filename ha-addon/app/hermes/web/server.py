@@ -186,9 +186,9 @@ class Router:
         }
         if path not in actions:
             return NOT_FOUND
-        flag, action = actions[path]
+        _, action = actions[path]
         ok, message = action()
-        return redirect(request, "", **{flag: "ok" if ok else "fail", "msg": message})
+        return redirect(request, "settings", saved="ok" if ok else "fail", msg=message)
 
 
 def make_handler(router: Router, public_only: bool):

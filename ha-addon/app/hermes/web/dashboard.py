@@ -390,15 +390,6 @@ def render_telegram_recent(status: Dict[str, Any]) -> str:
 
 # -- pages ----------------------------------------------------------------------------
 
-CONFIRM_SCRIPT = """<script>
-document.querySelectorAll('form[data-confirm]').forEach((form) => {
-  form.addEventListener('submit', (event) => {
-    if (!window.confirm(form.getAttribute('data-confirm') || 'Bu işlemi yapmak istediğine emin misin?')) event.preventDefault();
-  });
-});
-</script>"""
-
-
 LIVE_REFRESH_NOTE = "Sayfa açıkken veriler kendiliğinden güncellenir."
 
 
@@ -432,7 +423,7 @@ def dashboard_live_html(base: str) -> str:
 
 def render_dashboard_page(base: str, params: Dict[str, List[str]], config_error: str = "") -> bytes:
     notice = ""
-    for key in ("test", "reset", "history", "settings"):
+    for key in ("settings",):
         status = params.get(key, [""])[0]
         if status in {"ok", "fail"}:
             notice = render_notice(status, params.get("msg", [""])[0])
@@ -440,19 +431,8 @@ def render_dashboard_page(base: str, params: Dict[str, List[str]], config_error:
     if config_error:
         notice += (f"<p class='notice notice-fail config-error'>Ayarlarda hata var, izleme durdu: {escape(config_error)} "
                    f"<a href='{escape(link(base, 'settings'), quote=True)}'>Ayarları düzelt</a></p>")
-    tools = (
-        "<div class='actions public-actions tool-actions'>"
-        f"<form class='inline-form' method='post' action='{escape(link(base, 'test-pushover'), quote=True)}'>"
-        "<button class='button test' type='submit'>Pushover testi</button></form>"
-        f"<form class='inline-form' method='post' action='{escape(link(base, 'reset-notifications'), quote=True)}' "
-        "data-confirm='Bildirim susturma hafızası sıfırlanacak ve hedef altında kalan fırsatlar için hemen yeni bir kontrol başlatılacak. Devam etmek istiyor musun?'>"
-        "<button class='button secondary' type='submit'>Bildirim Sıfırla</button></form>"
-        f"<form class='inline-form' method='post' action='{escape(link(base, 'reset-price-history'), quote=True)}' "
-        "data-confirm='Min/maks fiyat geçmişi temizlenecek ve güncel fiyattan yeniden başlayacak. Devam etmek istiyor musun?'>"
-        "<button class='button secondary' type='submit'>Min/Maks Sıfırla</button></form></div>"
-    )
-    body = tools + notice + live_region(base, "live/dashboard", dashboard_live_html(base))
-    return render_page(base, "dashboard", "Hermes", body, refresh_seconds=60, scripts=CONFIRM_SCRIPT + live_script_tag(base))
+    body = notice + live_region(base, "live/dashboard", dashboard_live_html(base))
+    return render_page(base, "dashboard", "Hermes", body, refresh_seconds=60, scripts=live_script_tag(base))
 
 
 def live_script_tag(base: str) -> str:

@@ -9,7 +9,6 @@ from .icons import render_web_app_head
 # The top bar carries only the logo (home) and the settings gear; the other
 # pages are reached from the buttons at the bottom of the settings page.
 PAGE_ITEMS = (
-    ("dashboard", "", "Özet Tablo"),
     ("statistics", "statistics", "İstatistik"),
     ("link-test", "link-test", "Test"),
 )
@@ -24,6 +23,15 @@ GEAR_ICON = (
     "1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06"
     "a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z'/></svg>"
 )
+
+
+CONFIRM_SCRIPT = """<script>
+document.querySelectorAll('form[data-confirm]').forEach((form) => {
+  form.addEventListener('submit', (event) => {
+    if (!window.confirm(form.getAttribute('data-confirm') || 'Bu işlemi yapmak istediğine emin misin?')) event.preventDefault();
+  });
+});
+</script>"""
 
 
 def link(base: str, target: str = "") -> str:
@@ -47,6 +55,21 @@ def render_page_links(base: str) -> str:
         for _, target, label in PAGE_ITEMS
     )
     return f"<nav class='actions nav-actions page-links' aria-label='Hermes sayfaları'>{items}</nav>"
+
+
+def render_tool_actions(base: str) -> str:
+    """Pushover test and the two confirmed resets, shown at the bottom of Ayarlar."""
+    return (
+        "<div class='actions public-actions tool-actions'>"
+        f"<form class='inline-form' method='post' action='{escape(link(base, 'test-pushover'), quote=True)}'>"
+        "<button class='button test' type='submit'>Pushover testi</button></form>"
+        f"<form class='inline-form' method='post' action='{escape(link(base, 'reset-notifications'), quote=True)}' "
+        "data-confirm='Bildirim susturma hafızası sıfırlanacak ve hedef altında kalan fırsatlar için hemen yeni bir kontrol başlatılacak. Devam etmek istiyor musun?'>"
+        "<button class='button secondary' type='submit'>Bildirim Sıfırla</button></form>"
+        f"<form class='inline-form' method='post' action='{escape(link(base, 'reset-price-history'), quote=True)}' "
+        "data-confirm='Min/maks fiyat geçmişi temizlenecek ve güncel fiyattan yeniden başlayacak. Devam etmek istiyor musun?'>"
+        "<button class='button secondary' type='submit'>Min/Maks Sıfırla</button></form></div>"
+    )
 
 
 def render_notice(status: str, message: str) -> str:

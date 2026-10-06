@@ -1,5 +1,11 @@
 # Değişiklik günlüğü
 
+## 3.9.3
+
+- Pushover testi, Bildirim Sıfırla ve Min/Maks Sıfırla düğmeleri Özet Tablo'dan kalktı; Ayarlar
+  sayfasının en altında (onay soruları aynı). Sonuç mesajı Ayarlar sayfasında görünüyor.
+- Ayarlar'daki alt düğmelerden "Özet Tablo" kaldırıldı; Hermes logosu zaten oraya gidiyor.
+
 ## 3.9.2
 
 - Üst çubukta artık yalnız Hermes logosu ve yanında dişli simgesi var; logo Özet Tablo'ya,
