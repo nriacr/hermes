@@ -8,7 +8,7 @@ takip add-on'udur.
 - Desteklenen siteler: Amazon, Hepsiburada, Trendyol, Network, Beymen Club,
   Ben Gurme, Nordbron, Zara, H&M, Togg.
 - Öncelik: yüksek (kırmızı) her çevrimde, orta (sarı) saatte, düşük (yeşil) 3 saatte
-  bir kontrol edilir; Amazon'da kırmızı kartlar 60 saniyede bir. Tablodaki renkli daire önceliği gösterir.
+  bir kontrol edilir; Amazon'da kırmızı kartlar her arama turunda (liste başından sonuna, sonra yeniden başa; en sık 20 saniyede bir). Tablodaki renkli daire önceliği gösterir.
 - Amazon: varyasyonlar (renk × kapasite/ölçü, en fazla 60), doğrulanmış Amazon
   Depo teklifleri ayrı satırlarda, "yalnızca platformun kendi satıcısı" filtresi,
   ilk engelde tüm Amazon 5 → 10 → 20 → 30 dakika mola verir (tek yoklamayla) ve

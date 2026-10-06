@@ -275,8 +275,13 @@ class AmazonAccess:
             return self.slowdown
 
     def gap_multiplier(self) -> float:
-        """The minimum request gap doubles for a few minutes after every start."""
-        return AMAZON_START_SLOW_FACTOR if self.wall() < self.slow_until else 1.0
+        """The minimum request gap doubles for a few minutes after every start and stretches with the governor.
+
+        A red watch has no timer of its own (it is read every search round), so the governor slows
+        it down through the gap between requests; the other categories also wait longer intervals.
+        """
+        start = AMAZON_START_SLOW_FACTOR if self.wall() < self.slow_until else 1.0
+        return max(start, self.speed_factor())
 
     def count(self, name: str, amount: int = 1) -> None:
         with self._lock:

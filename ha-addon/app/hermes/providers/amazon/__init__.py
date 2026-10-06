@@ -45,7 +45,7 @@ class WatchRhythm:
 
     The configured page (with its used listing, where Amazon Depo offers show
     up) is read every AMAZON_PRIORITY_INTERVAL_SECONDS of the watch's category (red
-    60 s, yellow hourly, green every 3 hours); the whole variant family every
+    every search round, yellow hourly, green every 3 hours); the whole variant family every
     AMAZON_SWEEP_INTERVAL_SECONDS (a longer category interval wins). Both are
     stretched by the access governor's speed factor after a block wave. Between sweeps the other variants'
     offers are replayed with the time they were really read.
@@ -215,7 +215,7 @@ class AmazonProvider(Provider):
 
     @staticmethod
     def category_interval(watch: WatchRule) -> int:
-        """How often the watch's category reads it; the category alone decides (red 60 s, yellow 1 h, green 3 h)."""
+        """How often the watch's category reads it; the category alone decides (red every search round, yellow 1 h, green 3 h)."""
         priority = str(getattr(watch, "priority", "high") or "high").casefold()
         return AMAZON_PRIORITY_INTERVAL_SECONDS.get(priority, AMAZON_PRIORITY_INTERVAL_SECONDS["high"])
 

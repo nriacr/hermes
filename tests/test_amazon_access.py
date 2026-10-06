@@ -247,6 +247,15 @@ class AdaptiveLimitTests(unittest.TestCase):
         self.fake.advance(AMAZON_SLOWDOWN_RECOVER_SECONDS)
         self.assertEqual(self.access.speed_factor(), 1.0)
 
+    def test_the_governor_stretches_the_request_gap_too(self):
+        # A red watch has no timer, so the request gap is how a block slows it down.
+        self.fake.advance(AMAZON_START_SLOW_SECONDS + 1)
+        self.assertEqual(self.access.gap_multiplier(), 1.0)
+        site_block(self.access)
+        self.assertEqual(self.access.gap_multiplier(), 2.0)
+        self.fake.advance(AMAZON_SLOWDOWN_RECOVER_SECONDS)
+        self.assertEqual(self.access.gap_multiplier(), 1.0)
+
     def test_the_slowdown_survives_a_restart(self):
         path = Path(tempfile.mkdtemp()) / "amazon_access.json"
         access = access_with(self.fake, path)

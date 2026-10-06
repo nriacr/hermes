@@ -255,8 +255,9 @@ results" search notice is a normal stock row read again after five minutes.
   the calm time since the previous block; the day's count survives restarts.
 - Two rhythms per product watch (since 3.3, `WatchRhythm`): the configured page
   with its used listing (where Depo offers show) every
-  `AMAZON_PRIORITY_INTERVAL_SECONDS` of the watch's category (since 3.7: red 60 s,
-  yellow hourly, green every 3 hours; the price never changes it, the 3.6
+  `AMAZON_PRIORITY_INTERVAL_SECONDS` of the watch's category (since 3.7: red every search round
+  (3.8.1: floor `AMAZON_RED_ROUND_FLOOR_SECONDS`, 20 s; the round lasts as long as its reads and
+  grows when yellow or green cards are due in it), yellow hourly, green every 3 hours; the price never changes it, the 3.6
   near/far rule is gone), the variant family every 270 s for a red watch and at
   its own longer interval for yellow and green (`AmazonProvider.main_interval`,
   `sweep_interval`). The two rhythms run in two lanes (since 3.5): the Depo

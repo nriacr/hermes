@@ -1,5 +1,15 @@
 # Değişiklik günlüğü
 
+## 3.8.1
+
+- Amazon'da kırmızı kartların sabit 60 saniyelik süresi kalktı: kırmızı kartlar her arama
+  turunda okunuyor. Tur, listedeki ilk üründen başlayıp son ürünü bitirip yeniden ilk ürüne
+  dönene kadar geçen süre; normalde kırmızı kartları okuma süresi kadar, sarı ya da yeşil
+  kartların sırası geldiği turlar daha uzun. Çok az kırmızı kart olan listelerde Amazon'u
+  yormamak için en sık 20 saniyede bir okunuyor.
+- Engel sonrası otomatik hız kademesi artık istekler arası bekleme süresini de uzatıyor
+  (kırmızı kartların süreleri sabit olmadığı için yavaşlama buradan geliyor).
+
 ## 3.8.0
 
 - Yeni site: Togg konfigüratörü (configurator.togg.com.tr). Kartın `name` alanındaki

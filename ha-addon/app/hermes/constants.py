@@ -91,9 +91,13 @@ SITE_MIN_REQUEST_GAP_SECONDS = {
     SITE_NETWORK: 1.0,
 }
 # 3.7.0: the priority category alone decides how often a watch is read: yellow hourly, green every
-# 3 hours on every site; red every cycle (Amazon: its own 60 s below).
+# 3 hours on every site; red every cycle (Amazon: every search round, see below).
 PRIORITY_INTERVAL_SECONDS = {"medium": 60 * 60, "low": 3 * 60 * 60}
-AMAZON_PRIORITY_INTERVAL_SECONDS = {"high": 60, **PRIORITY_INTERVAL_SECONDS}
+# 3.8.1: a red watch is read once per search round (the Depo lane goes through every active card and starts
+# over); the round lasts as long as the reads in it, so yellow and green cards due in a round lengthen it. The
+# floor only keeps a list with very few red cards from hammering Amazon.
+AMAZON_RED_ROUND_FLOOR_SECONDS = 20
+AMAZON_PRIORITY_INTERVAL_SECONDS = {"high": AMAZON_RED_ROUND_FLOOR_SECONDS, **PRIORITY_INTERVAL_SECONDS}
 
 # -- Amazon access control (3.3.0) ---------------------------------------------
 # Measured 2026-10-03 (Pi logs, 1,147 requests): three unbroken runs at ~10.8
@@ -114,7 +118,7 @@ AMAZON_SLOWDOWN_RECOVER_SECONDS = 10 * 60
 AMAZON_START_SLOW_SECONDS = 10 * 60
 AMAZON_START_SLOW_FACTOR = 2.0
 # Rolling request window (3.7.0: starts at 400, up to 600, because 41 clean hours at 6 requests/min and the
-# red category's 60 s rhythm need more room than the old 300; the speed governor handles real blocks): starts at 400 in 35 minutes, +5 % after every clean
+# red category's search rounds need more room than the old 300; the speed governor handles real blocks): starts at 400 in 35 minutes, +5 % after every clean
 # hour whose window reached 80 % of the limit, never above 500. A block lowers
 # the limit to 85 % of the window count it happened at and freezes it there.
 AMAZON_WINDOW_SECONDS = 35 * 60
