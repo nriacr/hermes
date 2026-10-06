@@ -434,7 +434,7 @@ class AmazonProductTests(AmazonTestCase):
         self.assertEqual(offers, [depot])
 
     def test_no_offer_probe_is_bounded_without_hiding_priced_siblings(self):
-        rule = watch(url=ROOT, include_variations=True)
+        rule = watch(url=ROOT, include_variations=True, priority="medium")
         pages = {ROOT: UNAVAILABLE, CHILD: priced("100,00")}
         variations = [amazon_parser.AmazonProductVariation("Gümüş", ROOT), amazon_parser.AmazonProductVariation("Turuncu", CHILD)]
         with (self.serve(pages), patch.object(amazon_parser, "extract_product_variations", return_value=variations),
@@ -454,8 +454,18 @@ class AmazonProductTests(AmazonTestCase):
         self.assertEqual({offer.url for offer in offers}, {ROOT, CHILD})
         self.assertFalse(self.client.unavailable_product_pages)
 
+    def test_a_red_watchs_own_page_without_offer_is_looked_at_in_every_round(self):
+        rule = watch(url=ROOT, priority="high")
+        with self.serve({ROOT: UNAVAILABLE}):
+            for _ in range(3):
+                self.provider.begin_cycle()
+                with self.assertRaises(OutOfStockHermesError):
+                    self.read(rule)
+        self.assertEqual(self.fetched, [ROOT, ROOT, ROOT])
+        self.assertFalse(self.client.unavailable_product_pages)
+
     def test_missing_price_probe_is_bounded_but_never_becomes_fake_stock(self):
-        rule = watch(url=ROOT)
+        rule = watch(url=ROOT, priority="low")
         with self.serve({ROOT: '<span id="productTitle">iPhone</span>'}):
             for _ in range(2):
                 self.provider.begin_cycle()
@@ -475,8 +485,14 @@ class AmazonProductTests(AmazonTestCase):
         outcome = WatchRead()
         with self.serve({ROOT: UNAVAILABLE}):
             with self.assertRaises(OutOfStockHermesError):
-                self.read(watch(url=ROOT), outcome)
+                self.read(watch(url=ROOT, priority="medium"), outcome)
         self.assertIsNotNone(outcome.retry_after)
+        # A red watch has no probe to wait for: its page is looked at again in every round.
+        red = WatchRead()
+        with self.serve({ROOT: UNAVAILABLE}):
+            with self.assertRaises(OutOfStockHermesError):
+                self.read(watch(url=ROOT, priority="high"), red)
+        self.assertIsNone(red.retry_after)
 
     def test_walks_color_capacity_graph_and_yields_depot_immediately(self):
         rule = watch(url=ROOT, target="100000", include_variations=True)

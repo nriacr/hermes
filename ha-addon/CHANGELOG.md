@@ -1,5 +1,11 @@
 # Değişiklik günlüğü
 
+## 3.8.2
+
+- Amazon'da kırmızı bir kartın kendi sayfasında fiyat ya da teklif yoksa (stokta değil), sayfa
+  artık 5 dakika bekletilmeden her arama turunda yeniden kontrol ediliyor; stoğa dönüşü en geç
+  bir tur sonra görülüyor. Sarı ve yeşil kartlarda ve varyantlarda 5 dakikalık sınır aynen duruyor.
+
 ## 3.8.1
 
 - Amazon'da kırmızı kartların sabit 60 saniyelik süresi kalktı: kırmızı kartlar her arama

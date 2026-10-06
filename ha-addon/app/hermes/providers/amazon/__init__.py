@@ -17,6 +17,7 @@ from ...constants import (
     AMAZON_MAIN_GAPS_KEPT,
     AMAZON_SWEEP_INTERVAL_SECONDS,
     AMAZON_PRIORITY_INTERVAL_SECONDS,
+    AMAZON_RED_ROUND_FLOOR_SECONDS,
     SITE_AMAZON,
 )
 from ...errors import EmptySearchResultsHermesError, HermesError, OutOfStockHermesError, PriceUnavailableHermesError
@@ -643,7 +644,10 @@ class AmazonProvider(Provider):
                         if snapshot.get("offers") is None or needs_offer_upgrade:
                             snapshot.update(page_state)
                     if isinstance(offer_error, (OutOfStockHermesError, PriceUnavailableHermesError)):
-                        self._remember_absence(cache_key, snapshot)
+                        # A red watch's own page is looked at again in every search round (3.8.2), so its
+                        # return to stock shows up at once; the 5-minute bound stays for everything else.
+                        if not (variation.url == watch.url and self.category_interval(watch) <= AMAZON_RED_ROUND_FLOOR_SECONDS):
+                            self._remember_absence(cache_key, snapshot)
                     elif not exclusion_term:
                         absence_cache.pop(cache_key, None)
                         self.client.excluded_pages.pop(cache_key, None)
