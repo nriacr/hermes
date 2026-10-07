@@ -1,5 +1,11 @@
 # Değişiklik günlüğü
 
+## 3.9.5
+
+- Özet Tablo'da "Güncel fiyat" ve "Hedef" sütunları artık tüm tablolarda aynı yerden başlıyor:
+  Stokta Olmayanlar tablosundaki Hedef, fiyat tablosundaki Güncel fiyat ile aynı hizada.
+  Bilgisayar görünümünde sütun genişlikleri sabit; telefon görünümü değişmedi.
+
 ## 3.9.4
 
 - "Stokta Olmayanlar" tablosuna "Son güncelleme" sütunu eklendi: ürünün stokta olmadığının en son

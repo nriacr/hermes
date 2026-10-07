@@ -3,6 +3,7 @@
 import gzip
 import json
 import unittest
+from hermes.web.assets import APP_CSS
 import urllib.error
 import urllib.parse
 from datetime import datetime, timedelta, timezone
@@ -312,6 +313,8 @@ class DashboardTests(DataFilesMixin, unittest.TestCase):
         html = dashboard.render_stock_section([{"seller": "Zara", "product_title": "Polo / M", "target": "1.500 TL",
                                                 "checked_at": stamp}])
         self.assertIn("Son<br>güncelleme", html)
+        self.assertIn("<table class='stock-table'>", html)
+        self.assertIn(".stock-table th:nth-child(3)", APP_CSS)
         self.assertIn('data-label="Son güncelleme" class="updated-cell">2 gün önce', html)
         self.assertIn('class="updated-cell">-</td>', dashboard.render_stock_section([{"seller": "Zara", "product_title": "X"}]))
 
