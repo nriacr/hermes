@@ -65,6 +65,7 @@ class StockSummaryRow:
     product_url: str
     target_price: Decimal
     reason: str
+    checked_at: str = ""
 
 
 @dataclass

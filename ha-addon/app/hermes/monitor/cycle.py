@@ -596,6 +596,7 @@ class Monitor:
             "amazon_partial_result": False,
             "amazon_no_offer_retry_after": None,
             "unavailable_variants": list(outcome.unavailable),
+            "unavailable_checked_at": utc_now(),
         }
         self._add_rows(run, key, (), summary.cached_stock_rows(watch, run.state[key], seller))
         if not provider.backs_off_on_protection:
@@ -625,6 +626,7 @@ class Monitor:
             "last_error_status": None,
             "last_out_of_stock_at": utc_now(),
             "unavailable_variants": unavailable,
+            "unavailable_checked_at": utc_now(),
             "amazon_no_offer_retry_after": outcome.retry_after,
         })
         run.state[key] = failed
@@ -681,6 +683,7 @@ class Monitor:
             # Explicit marketplace absence: keep the query visible as a stock row
             # and do not request the same empty search every cycle.
             failed["unavailable_variants"] = [{"product_title": watch.name or watch.url, "product_url": watch.url, "reason": str(exc)}]
+            failed["unavailable_checked_at"] = utc_now()
             failed["amazon_no_offer_retry_after"] = (
                 datetime.now(timezone.utc) + timedelta(seconds=NO_RESULTS_RECHECK_SECONDS)
             ).isoformat()

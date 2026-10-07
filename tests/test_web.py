@@ -306,6 +306,15 @@ class DashboardTests(DataFilesMixin, unittest.TestCase):
         self.assertIn("Zara</strong><span>2 ürün", html)
         self.assertIn("H&amp;M</strong><span>1 ürün", html)
 
+    def test_stock_rows_show_when_they_were_last_checked(self):
+        from datetime import datetime, timedelta, timezone
+        stamp = (datetime.now(timezone.utc) - timedelta(days=2, minutes=1)).isoformat()
+        html = dashboard.render_stock_section([{"seller": "Zara", "product_title": "Polo / M", "target": "1.500 TL",
+                                                "checked_at": stamp}])
+        self.assertIn("Son<br>güncelleme", html)
+        self.assertIn('data-label="Son güncelleme" class="updated-cell">2 gün önce', html)
+        self.assertIn('class="updated-cell">-</td>', dashboard.render_stock_section([{"seller": "Zara", "product_title": "X"}]))
+
     def test_warehouse_rows_are_labeled_without_priority_dot(self):
         html = dashboard.render_table_row(price_row(is_warehouse=True))
         self.assertIn('class="warehouse-tag">DEPO</strong>', html)

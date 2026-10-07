@@ -958,6 +958,19 @@ class SummaryFileTests(CycleTestCase):
         self.assertEqual((payload["row_count"], payload["stock_row_count"]), (0, 1))
         self.assertEqual(payload["stock_rows"][0]["reason"], "Zara beden stokta değil: M")
 
+    def test_stock_rows_keep_their_last_check_time(self):
+        entry = {"unavailable_variants": [{"product_title": "Polo / M", "product_url": "https://example.com/zara"}],
+                 "unavailable_checked_at": "2026-10-07T10:00:00+00:00", "last_checked_at": "2026-10-01T10:00:00+00:00"}
+        class W:
+            target_price = Decimal("1290")
+        row = summary.cached_stock_rows(W, entry, "Zara")[0]
+        self.assertEqual(row.checked_at, "2026-10-07T10:00:00+00:00")
+        legacy = {**entry, "last_out_of_stock_at": "2026-10-05T10:00:00+00:00"}
+        legacy.pop("unavailable_checked_at")
+        self.assertEqual(summary.cached_stock_rows(W, legacy, "Zara")[0].checked_at, "2026-10-05T10:00:00+00:00")
+        summary.save_price_summary(self.data.files.summary, [], [row])
+        self.assertEqual(self.data.summary()["stock_rows"][0]["checked_at"], row.checked_at)
+
     def test_deduplication_rules(self):
         same = [self.row("Ürün", "https://example.test/product", "100"), self.row("Ürün", "https://example.test/product", "95"),
                 self.row("Farklı", "https://example.test/product?color=blue", "96")]

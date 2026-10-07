@@ -235,13 +235,14 @@ def render_stock_section(rows: List[Dict[str, Any]]) -> str:
         return (f'<tr class="{site_theme_class(seller_text)} stock-missing-row"><td data-label="Satıcı" class="seller-cell">{escape(seller_text)}</td>'
                 f'<td data-label="Ürün" class="product-cell" title="{escape(full, quote=True)}">{label}</td>'
                 f'<td data-label="Hedef" class="target-cell">{escape(display_tl(row.get("target", "-")))}</td>'
-                f'<td data-label="Durum" class="diff-cell">{escape(repair_mojibake(row.get("reason") or "Stokta yok"))}</td></tr>')
+                f'<td data-label="Durum" class="diff-cell">{escape(repair_mojibake(row.get("reason") or "Stokta yok"))}</td>'
+                f'<td data-label="Son güncelleme" class="updated-cell">{escape(relative_time_text(row.get("checked_at")))}</td></tr>')
 
     def table(body_rows, empty_text=""):
         body = "".join(stock_row(row) for row in body_rows)
         if not body and empty_text:
-            body = f"<tr class='empty-row'><td colspan='4'>{escape(empty_text)}</td></tr>"
-        return ("<div class='table-wrap'><table><thead><tr><th>Satıcı</th><th>Ürün Adı</th><th>Hedef</th><th>Durum</th>"
+            body = f"<tr class='empty-row'><td colspan='5'>{escape(empty_text)}</td></tr>"
+        return ("<div class='table-wrap'><table><thead><tr><th>Satıcı</th><th>Ürün Adı</th><th>Hedef</th><th>Durum</th><th>Son<br>güncelleme</th>"
                 f"</tr></thead><tbody>{body}</tbody></table></div>")
 
     if not rows:

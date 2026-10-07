@@ -88,13 +88,19 @@ def cached_summary_rows(watch: WatchRule, key: str, state: Dict[str, Any], selle
     return rows
 
 
+def _stock_checked_at(entry: Dict[str, Any]) -> str:
+    # Older entries predate unavailable_checked_at; the out-of-stock or read time is the closest record.
+    return str(entry.get("unavailable_checked_at") or entry.get("last_out_of_stock_at")
+               or entry.get("last_checked_at") or "")
+
+
 def cached_stock_rows(watch: WatchRule, entry: Dict[str, Any], seller: str) -> List[StockSummaryRow]:
     unavailable = entry.get("unavailable_variants", [])
     if not isinstance(unavailable, list):
         return []
     return [
         StockSummaryRow(seller, str(item["product_title"]), str(item["product_url"]), watch.target_price,
-                        str(item.get("reason") or "Stokta yok"))
+                        str(item.get("reason") or "Stokta yok"), _stock_checked_at(entry))
         for item in unavailable
         if isinstance(item, dict) and item.get("product_title") and item.get("product_url")
     ]
@@ -208,7 +214,8 @@ def save_price_summary(path: Path, rows: List[PriceSummaryRow], stock_rows: List
         "rows": [_row_payload(index, row) for index, row in enumerate(sorted_rows, start=1)],
         "stock_rows": [
             {"no": index, "seller": row.seller, "product_title": row.product_title, "product_url": row.product_url,
-             "target": format_tl(row.target_price, with_currency=True), "reason": row.reason}
+             "target": format_tl(row.target_price, with_currency=True), "reason": row.reason,
+             "checked_at": row.checked_at}
             for index, row in enumerate(sorted_stock, start=1)
         ],
     })
@@ -253,6 +260,7 @@ def stock_rows_from_payload(payload: Dict[str, Any]) -> List[StockSummaryRow]:
                 product_url=str(raw.get("product_url") or ""),
                 target_price=parse_decimal(str(raw.get("target") or "")),
                 reason=str(raw.get("reason") or ""),
+                checked_at=str(raw.get("checked_at") or ""),
             ))
         except HermesError:
             continue

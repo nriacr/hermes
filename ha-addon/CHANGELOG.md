@@ -1,5 +1,11 @@
 # Değişiklik günlüğü
 
+## 3.9.4
+
+- "Stokta Olmayanlar" tablosuna "Son güncelleme" sütunu eklendi: ürünün stokta olmadığının en son
+  ne zaman doğrulandığı (ör. "12 dk önce", "2 gün önce") görünüyor. Ingress ve herkese açık
+  yüzeyde aynı; eski kayıtlarda süre, kayıtlı son stok/okuma zamanından alınıyor.
+
 ## 3.9.3
 
 - Pushover testi, Bildirim Sıfırla ve Min/Maks Sıfırla düğmeleri Özet Tablo'dan kalktı; Ayarlar
