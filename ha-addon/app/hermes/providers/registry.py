@@ -30,7 +30,7 @@ PROVIDER_TYPES = (
 
 
 class ProviderSet:
-    """One provider instance per site, owned by the monitor or a link test."""
+    """One provider instance per site, owned by the monitor."""
 
     def __init__(self, overrides: Dict[str, Provider] | None = None) -> None:
         self.providers: Dict[str, Provider] = {}

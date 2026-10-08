@@ -1,4 +1,4 @@
-"""Settings page: tracking cards and Telegram options, saved once with one restart."""
+"""Settings page: tracking cards, Telegram and timing options, saved once with one restart."""
 
 import re
 import urllib.parse
@@ -11,7 +11,7 @@ from ..logging_utils import log
 from ..storage import load_json
 from ..supervisor import save_options_and_restart
 from ..utils import detect_site_from_url, format_tl, parse_bool, parse_decimal, site_label, utc_now, watch_name_required_for_url
-from .pages import link, render_notice, render_page, render_page_links, render_tool_actions, CONFIRM_SCRIPT
+from .pages import link, render_notice, render_page, render_tool_actions, CONFIRM_SCRIPT
 
 OTHER_GROUP = "Diğer"
 PRIORITY_CHOICES = (
@@ -242,6 +242,44 @@ def _telegram_section(options: Dict[str, Any]) -> str:
             f"<details><summary>Telegram ayarları</summary><div class='form-grid'>{inner}</div></details></section>")
 
 
+# Supervisor options shown at the bottom of Ayarlar: (key, label, note, lowest, highest).
+TIMING_FIELDS = (
+    ("interval_seconds", "Çevrim aralığı", "İki kontrol turu arasındaki bekleme (saniye)", 1, 86400),
+    ("request_delay_min_seconds", "Bekleme süresi min", "Aynı sitede iki istek arasındaki en kısa süre (saniye)", 0, 120),
+    ("request_delay_max_seconds", "Bekleme süresi maks", "Aynı sitede iki istek arasındaki en uzun süre (saniye)", 0, 120),
+)
+
+
+def _timing_section(options: Dict[str, Any]) -> str:
+    fields = "".join(
+        f"<label>{escape(label)}<input type='number' inputmode='numeric' name='{key}' min='{lowest}' max='{highest}' step='1' "
+        f"value='{escape(str(options.get(key, '')), quote=True)}' required><small>{escape(note)}</small></label>"
+        for key, label, note, lowest, highest in TIMING_FIELDS
+    )
+    return f"<section class='settings-section timing-settings'><h2>Zamanlama</h2><div class='form-grid'>{fields}</div></section>"
+
+
+def _update_timing_options(options: Dict[str, Any], form) -> None:
+    """Same limits as the add-on schema; a page without these fields keeps the saved values."""
+    values = {}
+    for key, label, _note, lowest, highest in TIMING_FIELDS:
+        raw = _first(form, key)
+        if not raw:
+            continue
+        try:
+            value = int(raw)
+        except ValueError as exc:
+            raise ValueError(f"{label} tam sayı olmalı.") from exc
+        if not lowest <= value <= highest:
+            raise ValueError(f"{label} {lowest} ile {highest} saniye arasında olmalı.")
+        values[key] = value
+    low = values.get("request_delay_min_seconds", options.get("request_delay_min_seconds"))
+    high = values.get("request_delay_max_seconds", options.get("request_delay_max_seconds"))
+    if low is not None and high is not None and int(low) > int(high):
+        raise ValueError("Bekleme süresi min, bekleme süresi maks değerinden büyük olamaz.")
+    options.update(values)
+
+
 def render_settings_page(base: str, params: Dict[str, List[str]]) -> bytes:
     options = read_options()
     configured_groups = _list_from_text("\n".join(str(group) for group in _as_list(options.get("gruplar"))))
@@ -275,10 +313,10 @@ def render_settings_page(base: str, params: Dict[str, List[str]]) -> bytes:
                   for index, item in enumerate(watches))
         + "</section>"
         + _telegram_section(options)
+        + _timing_section(options)
         + "<div class='apply-bar'><p>Grup, fiyat, yeni kayıt ve silme işlemlerini sırayla yap; bitince bir kez uygula. "
         "Hermes yalnız o zaman yeniden başlar.</p><button class='button primary' type='submit'>Değişiklikleri uygula</button></div></form>"
         + render_tool_actions(base)
-        + render_page_links(base)
     )
     overlay = ("<div id='saving-overlay' class='saving-overlay' hidden><div class='saving-dialog'><div class='saving-spinner'></div>"
                "<h2 id='saving-title'>Ayarlar kaydediliyor</h2><p id='saving-message'>Tüm değişiklikler tek seferde Home Assistant'a "
@@ -449,6 +487,7 @@ def apply_settings_operation(existing_options: Dict[str, Any], form: Dict[str, L
     if operation == "update_existing":
         options["takip_edilenler"] = build_watches(form)
         _update_telegram_options(options, form)
+        _update_timing_options(options, form)
         return options, "Ayarlar kaydedildi."
     if operation == "add_watch":
         new_watches = build_watches(form)

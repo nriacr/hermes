@@ -4,8 +4,6 @@ import gzip
 import json
 import unittest
 from hermes.web.assets import APP_CSS
-import urllib.error
-import urllib.parse
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from unittest.mock import patch
@@ -13,12 +11,10 @@ from unittest.mock import patch
 from support import TempData
 
 from hermes.config import prepare_watches
-from hermes.errors import EmptySearchResultsHermesError
 from hermes import history as history_module
 from hermes.history import History
-from hermes.models import OfferResult
 from hermes.utils import SystemLoad, parse_decimal, utc_now
-from hermes.web import assets, dashboard, link_test, server, settings
+from hermes.web import assets, dashboard, server, settings
 from hermes.web import statistics as statistics_page
 
 TOKEN = "t" * 32
@@ -95,7 +91,7 @@ class RouterTests(DataFilesMixin, unittest.TestCase):
         return self.router.handle(request) if request else server.NOT_FOUND
 
     def test_ingress_pages_and_assets_are_served(self):
-        for path in ("/", "/statistics", "/settings", "/link-test", "/restarting"):
+        for path in ("/", "/statistics", "/settings", "/restarting"):
             with self.subTest(path=path):
                 response = self.request(path)
                 self.assertEqual(response.status, 200)
@@ -104,6 +100,8 @@ class RouterTests(DataFilesMixin, unittest.TestCase):
         self.assertIn(b"waitForHermes", self.request("/restart.js").payload)
         self.assertEqual(self.request("/health").payload, b"ok\n")
         self.assertEqual(self.request("/unknown").status, 404)
+        self.assertEqual(self.request("/link-test").status, 404)  # the link test was removed in 3.11
+        self.assertEqual(self.request("/link-test", "POST").status, 404)
 
     def test_public_surface_needs_an_enabled_long_token(self):
         self.assertEqual(self.request(f"/public/{TOKEN}/", public_only=True).status, 404)
@@ -116,8 +114,8 @@ class RouterTests(DataFilesMixin, unittest.TestCase):
         self.assertEqual(self.request("/settings", public_only=True).status, 404)
         self.assertEqual(self.request("/health", public_only=True).status, 200)
 
-    def test_top_bar_has_logo_and_gear_and_page_links_sit_under_settings(self):
-        for path in ("/", "/statistics", "/link-test"):
+    def test_top_bar_has_logo_and_gear_and_one_button_row_sits_under_settings(self):
+        for path in ("/", "/statistics"):
             page = self.request(path).payload.decode()
             self.assertIn("<a class='badge' href='./'", page)
             self.assertIn("class='gear-button' href='./settings'", page)
@@ -125,15 +123,17 @@ class RouterTests(DataFilesMixin, unittest.TestCase):
         settings_page = self.request("/settings").payload.decode()
         self.assertIn("<a class='badge' href='./'", settings_page)
         self.assertIn("aria-current='page'", settings_page)
-        links = settings_page[settings_page.index("page-links"):]
-        for target, label in (("./statistics'", "İstatistik"), ("./link-test'", "Test")):
-            self.assertIn(f"href='{target}>{label}</a>", links)
+        row = settings_page[settings_page.index("tool-actions"):]
+        row = row[:row.index("</div>")]
+        self.assertIn("href='./statistics'>İstatistik</a>", row)
+        self.assertNotIn("link-test", settings_page)
+        self.assertNotIn(">Test</a>", settings_page)
         self.assertNotIn("Özet Tablo</a>", settings_page)
         for label in ("Pushover testi", "Bildirim Sıfırla", "Min/Maks Sıfırla"):
-            self.assertIn(label, settings_page)
+            self.assertIn(label, row)
             self.assertNotIn(label, self.request("/").payload.decode())
         self.assertGreater(settings_page.index("Pushover testi"), settings_page.index("Değişiklikleri uygula"))
-        self.assertGreater(settings_page.index("page-links"), settings_page.index("Değişiklikleri uygula"))
+        self.assertGreater(settings_page.index("tool-actions"), settings_page.index("Değişiklikleri uygula"))
 
     def test_public_pages_link_inside_the_token_surface(self):
         self.write_options({"public_dashboard_enabled": True, "public_dashboard_token": TOKEN})
@@ -518,6 +518,30 @@ class SettingsTests(DataFilesMixin, unittest.TestCase):
         for text in ("name='delete_watch_index'", "name='update_watch_index'", "name='watch_index'"):
             self.assertNotIn(text, page)
 
+    def test_timing_options_sit_at_the_bottom_and_are_saved_with_the_page(self):
+        self.write_options({"interval_seconds": 5, "request_delay_min_seconds": 1, "request_delay_max_seconds": 4, "takip_edilenler": []})
+        page = settings.render_settings_page(".", {}).decode()
+        timing = page[page.index("timing-settings"):page.index("apply-bar")]
+        for label, name, value in (("Çevrim aralığı", "interval_seconds", 5), ("Bekleme süresi min", "request_delay_min_seconds", 1),
+                                   ("Bekleme süresi maks", "request_delay_max_seconds", 4)):
+            self.assertIn(f"{label}<input type='number' inputmode='numeric' name='{name}'", timing)
+            self.assertIn(f"value='{value}' required>", timing)
+        self.assertGreater(page.index("timing-settings"), page.index("Telegram takip"))
+        source = {"interval_seconds": 5, "request_delay_min_seconds": 1, "request_delay_max_seconds": 4, "takip_edilenler": []}
+        form = {"operation": ["update_existing"], "interval_seconds": ["30"], "request_delay_min_seconds": ["2"],
+                "request_delay_max_seconds": ["6"]}
+        options, _ = settings.apply_settings_operation(source, form)
+        self.assertEqual((options["interval_seconds"], options["request_delay_min_seconds"], options["request_delay_max_seconds"]),
+                         (30, 2, 6))
+        # A card saved on its own (or an older page) carries no timing fields and keeps the saved values.
+        options, _ = settings.apply_settings_operation(source, {"operation": ["update_existing"]})
+        self.assertEqual(options["interval_seconds"], 5)
+        for bad, message in (({"interval_seconds": ["0"]}, "Çevrim aralığı 1 ile 86400"),
+                             ({"request_delay_max_seconds": ["abc"]}, "Bekleme süresi maks tam sayı"),
+                             ({"request_delay_min_seconds": ["9"], "request_delay_max_seconds": ["3"]}, "min, bekleme süresi maks")):
+            with self.subTest(bad=bad), self.assertRaisesRegex(ValueError, message):
+                settings.apply_settings_operation(source, {"operation": ["update_existing"], **bad})
+
     def test_configured_groups_are_offered_and_filterable(self):
         self.write_options({"gruplar": ["Moda", "Teknoloji", "Market"], "takip_edilenler": []})
         page = settings.render_settings_page(".", {}).decode()
@@ -624,29 +648,6 @@ class SettingsTests(DataFilesMixin, unittest.TestCase):
         for text in ("data-watch-group-filter", "data-delete-watch", "add-watch-card"):
             self.assertIn(text, assets.SETTINGS_SCRIPT)
         self.assertIn("waitForHermes", assets.RESTART_SCRIPT)
-
-
-class LinkTestPageTests(DataFilesMixin, unittest.TestCase):
-    def submit(self, body: bytes) -> str:
-        return link_test.render_link_test_result(".", body).decode()
-
-    def test_results_are_rendered_without_saving(self):
-        offer = OfferResult("Örnek ürün / Mavi", Decimal("18999"), "Amazon", "https://www.amazon.com.tr/dp/B000000001")
-        with patch.object(link_test, "inspect_link", return_value=("amazon", [offer])) as inspect:
-            page = self.submit(b"url=https%3A%2F%2Fwww.amazon.com.tr%2Fdp%2FB000000001&name=Ornek&size=XL"
-                               b"&exclude_terms=kilif%2Ckoruyucu&include_variations=1")
-        inspect.assert_called_once_with("https://www.amazon.com.tr/dp/B000000001", name="Ornek", size="XL", include_variations=True,
-                                        excluded_terms=["kilif", "koruyucu"], amazon_browser=False)
-        for text in ("Test sonuçları", "Örnek ürün / Mavi", "18.999 TL", "Geçici sonuçlar. Kayıt ve bildirim oluşturmaz."):
-            self.assertIn(text, page)
-        self.assertFalse(self.data.files.state.exists())
-
-    def test_empty_search_is_a_normal_notice(self):
-        error = EmptySearchResultsHermesError("Amazon Depo içinde juo 240w için sonuç bulunamadı", no_results_notice=True)
-        with patch.object(link_test, "inspect_link", side_effect=error):
-            page = self.submit(b"url=" + urllib.parse.quote("https://www.amazon.com.tr/s?k=juo").encode() + b"&name=Juo")
-        self.assertIn("Ürün bulunamadı", page)
-        self.assertNotIn("notice-fail", page)
 
 
 if __name__ == "__main__":

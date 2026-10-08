@@ -24,7 +24,7 @@ takip add-on'udur.
   göndermez, panelde görünür.
 - Telegram kanallarında keyword takibi ve Kayıtlı Mesajlar'dan hızlı takip
   ekleme.
-- Panel: özet tablo, istatistik, bağlantı testi ve ayarlar. Home Assistant
+- Panel: özet tablo, istatistik ve ayarlar. Home Assistant
   içinden (ingress) ve isteğe bağlı token'lı public adresten aynı şekilde
   çalışır.
 

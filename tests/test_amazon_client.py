@@ -168,19 +168,12 @@ class AmazonTransportTests(unittest.TestCase):
         html = '<html>Amazon<div id="search"><h3>Amazon Depo içinde juo 240w için sonuç bulunamadı</h3></div></html>'
         self.assertIn("sonuç bulunamadı", amazon_client.checked_html(response(200, html), expect_search=True))
 
-    def test_browser_transport_reads_only_through_chromium(self):
-        with (patch.object(amazon_client, "curl_requests", curl_module(FakeCurlSession([response(200, "Amazon")]))),
-              AmazonClient(transport="browser") as client,
-              patch.object(client.browser, "read", return_value=HtmlResponse(PRODUCT, "<html>Amazon</html>", 200)) as browser,
-              patch.object(client, "_http_read") as http_read):
-            client.fetch(PRODUCT, 10)
-        browser.assert_called_once()
-        http_read.assert_not_called()
-
     def test_browser_captcha_and_service_failure_are_errors_not_stock(self):
         for status, html in ((503, "<html>Amazon Service Unavailable</html>"),
                              (200, '<html>Amazon<form action="/errors/validateCaptcha"><input name="captchacharacters"></form></html>')):
-            with self.subTest(status=status), AmazonClient(transport="browser") as client:
+            with (self.subTest(status=status), AmazonClient() as client,
+                  # The browser is the fallback after a failed (non-protection) curl read.
+                  patch.object(client, "_http_read", side_effect=HermesError("bozuk sayfa"))):
                 read = (patch.object(client.browser, "read", side_effect=HttpStatusHermesError(503, PRODUCT)) if status == 503
                         else patch.object(client.browser, "read", return_value=HtmlResponse(PRODUCT, html, status)))
                 with read, self.assertRaises(HermesError) as caught:

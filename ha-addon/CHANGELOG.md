@@ -1,5 +1,15 @@
 # Değişiklik günlüğü
 
+## 3.11.0
+
+- Ayarlar sayfasının en altında "Zamanlama" bölümü: "Çevrim aralığı", "Bekleme süresi min" ve
+  "Bekleme süresi maks" (Home Assistant yapılandırmasındaki interval_seconds ve request_delay_*
+  ayarları). Değişiklikleri uygula ile diğer ayarlarla birlikte kaydedilir; sınırlar Home Assistant
+  ile aynı, min değer maks değerden büyük olamaz.
+- Ayarlar'ın altındaki düğmeler tek satırda: Pushover testi, Bildirim Sıfırla, Min/Maks Sıfırla,
+  İstatistik (telefonda 2x2).
+- Bağlantı testi ("Test" düğmesi, sayfası ve Amazon'un yalnız-tarayıcı okuma seçeneği) tamamen kaldırıldı.
+
 ## 3.10.0
 
 - İstatistik sayfasında "Hata dönemleri": bir sitenin birbirine 15 dakikadan yakın engel ve hataları tek

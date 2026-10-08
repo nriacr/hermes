@@ -6,12 +6,8 @@ from typing import Optional
 from ..constants import APP_VERSION
 from .icons import render_web_app_head
 
-# The top bar carries only the logo (home) and the settings gear; the other
-# pages are reached from the buttons at the bottom of the settings page.
-PAGE_ITEMS = (
-    ("statistics", "statistics", "İstatistik"),
-    ("link-test", "link-test", "Test"),
-)
+# The top bar carries only the logo (home) and the settings gear; İstatistik is
+# reached from the button row at the bottom of the settings page.
 
 GEAR_ICON = (
     "<svg viewBox='0 0 24 24' width='22' height='22' fill='none' stroke='currentColor' stroke-width='2' "
@@ -49,16 +45,8 @@ def render_topbar(base: str, current: str) -> str:
     )
 
 
-def render_page_links(base: str) -> str:
-    items = "".join(
-        f"<a class='button secondary' href='{escape(link(base, target), quote=True)}'>{escape(label)}</a>"
-        for _, target, label in PAGE_ITEMS
-    )
-    return f"<nav class='actions nav-actions page-links' aria-label='Hermes sayfaları'>{items}</nav>"
-
-
 def render_tool_actions(base: str) -> str:
-    """Pushover test and the two confirmed resets, shown at the bottom of Ayarlar."""
+    """One row at the bottom of Ayarlar: Pushover test, the two confirmed resets and İstatistik."""
     return (
         "<div class='actions public-actions tool-actions'>"
         f"<form class='inline-form' method='post' action='{escape(link(base, 'test-pushover'), quote=True)}'>"
@@ -68,7 +56,8 @@ def render_tool_actions(base: str) -> str:
         "<button class='button secondary' type='submit'>Bildirim Sıfırla</button></form>"
         f"<form class='inline-form' method='post' action='{escape(link(base, 'reset-price-history'), quote=True)}' "
         "data-confirm='Min/maks fiyat geçmişi temizlenecek ve güncel fiyattan yeniden başlayacak. Devam etmek istiyor musun?'>"
-        "<button class='button secondary' type='submit'>Min/Maks Sıfırla</button></form></div>"
+        "<button class='button secondary' type='submit'>Min/Maks Sıfırla</button></form>"
+        f"<a class='button secondary' href='{escape(link(base, 'statistics'), quote=True)}'>İstatistik</a></div>"
     )
 
 

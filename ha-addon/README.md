@@ -26,9 +26,9 @@ Hermes, Home Assistant üzerinde çalışan çok siteli ürün ve Telegram fırs
 
 Ana alanlar:
 
-- `interval_seconds`
-- `request_delay_min_seconds`
-- `request_delay_max_seconds`
+- `interval_seconds` (Hermes Ayarlar: "Çevrim aralığı")
+- `request_delay_min_seconds` (Hermes Ayarlar: "Bekleme süresi min")
+- `request_delay_max_seconds` (Hermes Ayarlar: "Bekleme süresi maks")
 - `pushover_user_key`
 - `pushover_api_token`
 - `takip_edilenler[]`

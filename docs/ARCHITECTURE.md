@@ -45,7 +45,6 @@ Hermes is a Home Assistant add-on running continuously on a Raspberry Pi. It:
 │       │   ├── state.py              # state.json entries, history, the per-site guard
 │       │   ├── summary.py            # latest_price_summary.json, cycle history
 │       │   ├── alerts.py             # Summary-drop and search-error warnings
-│       │   └── inspect.py            # Link test (no state, no notification)
 │       ├── providers/
 │       │   ├── base.py               # Provider interface + shared parse helpers
 │       │   ├── http.py               # Shared HTTP helpers
@@ -56,7 +55,7 @@ Hermes is a Home Assistant add-on running continuously on a Raspberry Pi. It:
 │       │   └── trendyol.py, network.py, beymenclub.py, bengurme.py,
 │       │       nordbron.py, zara.py, hm.py, togg.py, size_availability.py
 │       ├── telegram/listener.py      # Channels + Saved Messages quick add
-│       └── web/                      # Router, pages, statistics, settings, link test, assets
+│       └── web/                      # Router, pages, statistics, settings, assets
 ├── tests/                            # unittest suite (python -m unittest)
 └── tools/check.sh, tools/install_rpi.sh
 ```
@@ -337,10 +336,13 @@ of the next cycle. Home Assistant being unreachable never affects monitoring.
 One router serves both surfaces. Ingress pages use relative links ("." or
 ".."), public pages `/public/<token>`; the token needs at least 24
 characters, `public_dashboard_enabled`, and is compared in constant time.
-Pages: summary (`/`), `statistics`, `link-test`, `settings`, `restarting`;
+Pages: summary (`/`), `statistics`, `settings`, `restarting`;
 actions: `test-pushover`, `reset-notifications`, `reset-price-history`,
 `reset-errors` (deletes failed `reads` rows, keeps `requests`; back to `statistics`),
-`settings/save`, `link-test`. Every page has the same navigation. The
+`settings/save`. Every page has the same navigation. Ayarlar ends with the
+"Zamanlama" section (`interval_seconds`, `request_delay_min_seconds`,
+`request_delay_max_seconds`, same limits as the add-on schema, saved with the
+page) and one button row: Pushover test, the two resets, İstatistik. The
 statistics page (`web/statistics.py`, since 3.4) is built from the `reads`
 table around one number, the check frequency: the median time between two
 reads of the same high-priority watch (gaps over 6 hours are pauses, not the

@@ -22,7 +22,6 @@ from ..utils import parse_bool
 from . import assets
 from .dashboard import dashboard_live_html, render_dashboard_page
 from .icons import HERMES_ICON_PNG, HERMES_ICON_SVG, render_web_manifest
-from .link_test import render_link_test_page, render_link_test_result
 from .pages import link
 from .statistics import render_statistics_page, statistics_live_html
 from .settings import handle_settings_save, render_restart_page, render_settings_page, should_return_to_main
@@ -164,7 +163,6 @@ class Router:
             "/": lambda: render_dashboard_page(request.base, request.params, self.runtime.config_error),
             "/statistics": lambda: render_statistics_page(request.base, request.params),
             "/settings": lambda: render_settings_page(request.base, request.params),
-            "/link-test": lambda: render_link_test_page(request.base),
             "/restarting": lambda: render_restart_page(request.base, request.params),
             "/settings/restarting": lambda: render_restart_page(request.base, request.params),
         }
@@ -173,8 +171,6 @@ class Router:
         return Response(200, pages[path](), HTML)
 
     def _post(self, request: Request, path: str) -> Response:
-        if path == "/link-test":
-            return Response(200, render_link_test_result(request.base, request.body), HTML)
         if path == "/settings/save":
             ok, message = handle_settings_save(request.body)
             if not ok:

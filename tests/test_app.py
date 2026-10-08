@@ -1,4 +1,4 @@
-"""Configuration, Telegram quick add, link test and the application runtime."""
+"""Configuration, Telegram quick add and the application runtime."""
 
 import asyncio
 import json
@@ -14,8 +14,7 @@ from hermes import app as hermes_app
 from hermes import config as hermes_config
 from hermes.errors import HermesError
 from hermes.models import OfferResult
-from hermes.monitor import inspect, runner
-from hermes.providers.amazon import AmazonProvider
+from hermes.monitor import runner
 from hermes.providers.nordbron import NordbronProvider
 from hermes.storage import load_json, save_json
 from hermes.telegram import listener as telegram
@@ -163,34 +162,6 @@ class TelegramConnectionTests(unittest.TestCase):
             self.assertEqual(json.loads((data.root / "quick.json").read_text())["pending"], [])
         finally:
             data.cleanup()
-
-
-class LinkInspectionTests(unittest.TestCase):
-    def test_link_test_uses_the_real_provider_read_without_state(self):
-        offers = [OfferResult("Çanta", Decimal("4500"), url="https://nordbron.com/canta"),
-                  OfferResult("Çanta kılıfı", Decimal("100"), url="https://nordbron.com/kilif")]
-        with (patch.object(NordbronProvider, "read", return_value=offers) as read,
-              patch.object(inspect, "load_config", side_effect=HermesError("ayar yok"))):
-            site, result = inspect.inspect_link("https://nordbron.com/canta", excluded_terms=["kılıf"])
-        self.assertEqual(site, "nordbron")
-        self.assertEqual([offer.title for offer in result], ["Çanta"])
-        read.assert_called_once()
-
-    def test_empty_link_and_filtered_out_results_are_explained(self):
-        with self.assertRaisesRegex(HermesError, "bağlantı girilmeli"):
-            inspect.inspect_link("")
-        with (patch.object(NordbronProvider, "read", return_value=[OfferResult("Kılıf", Decimal("1"))]),
-              patch.object(inspect, "load_config", side_effect=HermesError("ayar yok"))):
-            with self.assertRaisesRegex(HermesError, "okunabilir ürün"):
-                inspect.inspect_link("https://nordbron.com/x", excluded_terms=["kılıf"])
-
-    def test_amazon_browser_option_selects_the_browser_transport(self):
-        seen = []
-        with (patch.object(AmazonProvider, "read", side_effect=lambda self_rule, *_a: seen.append(1) or [OfferResult("x", Decimal("1"))]),
-              patch.object(inspect, "AmazonClient", wraps=inspect.AmazonClient) as client,
-              patch.object(inspect, "load_config", side_effect=HermesError("ayar yok"))):
-            inspect.inspect_link("https://www.amazon.com.tr/dp/B000000001", amazon_browser=True)
-        self.assertEqual(client.call_args.kwargs["transport"], "browser")
 
 
 class RuntimeTests(unittest.TestCase):

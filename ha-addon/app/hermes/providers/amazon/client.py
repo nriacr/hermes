@@ -254,12 +254,10 @@ def save_cookies(session, path: Optional[Path]) -> None:
 class AmazonClient:
     """Process-lived anonymous transports; page/offer caches stay cycle-local."""
 
-    def __init__(self, transport: str = "http", access: Optional[AmazonAccess] = None, cookies_path: Optional[Path] = None,
+    def __init__(self, access: Optional[AmazonAccess] = None, cookies_path: Optional[Path] = None,
                  delay_range: Tuple[float, float] = (0.0, 0.0), sleep: Callable[[float], None] = time.sleep,
                  clock: Callable[[], float] = time.monotonic):
-        # "http" reads with curl (Chrome TLS) and falls back to Chromium once;
-        # "browser" reads only through Chromium (used by the link test option).
-        self.transport = transport
+        # Reads with curl (Chrome TLS) and falls back to Chromium once.
         self.requests_session = requests.Session()
         _seed_session(self.requests_session)
         self.curl_session = None
@@ -330,17 +328,14 @@ class AmazonClient:
         key = (expect_search, candidate)
         if key in cache:
             return cache[key]
-        if self.transport == "browser":
+        method = "curl" if curl_requests is not None else "requests"
+        try:
+            html = self._timed(method, candidate, expect_search, lambda: self._http_read(candidate, timeout, expect_search), on_request)
+        except Exception as exc:  # noqa: BLE001
+            if is_protection_error(exc):
+                raise
+            log(f"Amazon {method} okuması başarısız, tarayıcıyla bir kez denenecek: {block_reason(exc)} | {_short_url(candidate)}")
             html = self._timed("browser", candidate, expect_search, lambda: self._browser_read(candidate, timeout, expect_search), on_request)
-        else:
-            method = "curl" if curl_requests is not None else "requests"
-            try:
-                html = self._timed(method, candidate, expect_search, lambda: self._http_read(candidate, timeout, expect_search), on_request)
-            except Exception as exc:  # noqa: BLE001
-                if is_protection_error(exc):
-                    raise
-                log(f"Amazon {method} okuması başarısız, tarayıcıyla bir kez denenecek: {block_reason(exc)} | {_short_url(candidate)}")
-                html = self._timed("browser", candidate, expect_search, lambda: self._browser_read(candidate, timeout, expect_search), on_request)
         cache[key] = html
         return html
 
