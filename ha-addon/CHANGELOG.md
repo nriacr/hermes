@@ -1,5 +1,11 @@
 # Değişiklik günlüğü
 
+## 3.12.1
+
+- Ayarlar'ın altındaki düğme satırına "Hermes'i yeniden başlat" eklendi (Home Assistant içinde ve public
+  sayfada aynı). Onaydan sonra Hermes, Home Assistant üzerinden uygulama olarak yeniden başlar; ayarlar
+  değişmez, "yeniden başlatılıyor" sayfası Hermes hazır olunca Ayarlar'a döner.
+
 ## 3.12.0
 
 - Öncelikler artık adla değil süreyle: "Her çevrim", "30 dk", "60 dk", "3 saat", "6 saat"

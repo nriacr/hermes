@@ -11,7 +11,7 @@ from ..constants import (
 )
 from ..logging_utils import log
 from ..storage import load_json
-from ..supervisor import save_options_and_restart
+from ..supervisor import save_options_and_restart, schedule_restart
 from ..utils import detect_site_from_url, format_tl, parse_bool, parse_decimal, site_label, utc_now, watch_name_required_for_url
 from .dashboard import priority_dot
 from .pages import link, render_notice, render_page, render_tool_actions, CONFIRM_SCRIPT
@@ -322,7 +322,7 @@ def render_restart_page(base: str, params: Dict[str, List[str]]) -> bytes:
     body = (
         "<h2 class='page-heading'>Hermes yeniden başlatılıyor</h2>"
         f"<p class='notice notice-ok'>{escape(message)}</p>"
-        "<p>Değişiklikler Home Assistant yapılandırmasına kaydedildi. Hermes yeniden başlarken bu sayfa kısa süre bekleyecek; "
+        "<p>Hermes yeniden başlarken bu sayfa kısa süre bekleyecek; "
         f"hazır olduğunda {'ana ekran' if return_to_main else 'ayarlar ekranı'} otomatik yenilenecek.</p>"
         "<p class='footer-note' id='restart-status'>Hazırlanıyor... Birkaç saniye içinde bağlantı kontrolü başlayacak.</p>"
         f"<div class='actions'><a class='button secondary' href='{escape(destination, quote=True)}'>"
@@ -489,6 +489,16 @@ def handle_settings_save(body: bytes):
         return True, f"{change_message} Hermes yeniden başlatılıyor; 10-20 saniye sonra sayfayı yenileyebilirsin."
     except Exception as exc:  # noqa: BLE001
         return False, f"Ayarlar kaydedilemedi: {exc}"
+
+
+def handle_restart():
+    """"Hermes'i yeniden başlat": the add-on restarts through Home Assistant, settings unchanged."""
+    try:
+        schedule_restart()
+        log("Panelden yeniden başlatma istendi; Hermes Home Assistant üzerinden yeniden başlatılacak.")
+        return True, "Hermes yeniden başlatılıyor; ayarlar değişmedi."
+    except Exception as exc:  # noqa: BLE001
+        return False, f"Hermes yeniden başlatılamadı: {exc}"
 
 
 def should_return_to_main(body: bytes) -> bool:

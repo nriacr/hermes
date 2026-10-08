@@ -128,6 +128,8 @@ class RouterTests(DataFilesMixin, unittest.TestCase):
         row = settings_page[settings_page.index("tool-actions"):]
         row = row[:row.index("</div>")]
         self.assertIn("href='./statistics'>İstatistik</a>", row)
+        self.assertIn("action='./restart' data-confirm='Hermes, Home Assistant üzerinden uygulama olarak yeniden başlatılacak.", row)
+        self.assertGreater(row.index("Hermes'i yeniden başlat"), row.index("İstatistik"))
         self.assertNotIn("link-test", settings_page)
         self.assertNotIn(">Test</a>", settings_page)
         self.assertNotIn("Özet Tablo</a>", settings_page)
@@ -136,6 +138,22 @@ class RouterTests(DataFilesMixin, unittest.TestCase):
             self.assertNotIn(label, self.request("/").payload.decode())
         self.assertGreater(settings_page.index("Pushover testi"), settings_page.index("Değişiklikleri uygula"))
         self.assertGreater(settings_page.index("tool-actions"), settings_page.index("Değişiklikleri uygula"))
+
+    def test_restart_button_restarts_hermes_through_home_assistant_on_both_surfaces(self):
+        self.write_options({"public_dashboard_enabled": True, "public_dashboard_token": TOKEN})
+        with patch.object(settings, "schedule_restart") as restart:
+            ingress = self.request("/restart", "POST")
+            public = self.request(f"/public/{TOKEN}/restart", "POST", public_only=True)
+        self.assertEqual(restart.call_count, 2)
+        self.assertEqual(ingress.status, 303)
+        self.assertTrue(ingress.headers["Location"].startswith("./restarting?msg="))
+        self.assertTrue(public.headers["Location"].startswith(f"/public/{TOKEN}/restarting?msg="))
+        page = self.request("/restarting?msg=Hermes+yeniden+ba%C5%9Flat%C4%B1l%C4%B1yor%3B+ayarlar+de%C4%9Fi%C5%9Fmedi.").payload.decode()
+        self.assertIn("Hermes yeniden başlatılıyor; ayarlar değişmedi.", page)
+        self.assertNotIn("kaydedildi", page)
+        with patch.object(settings, "schedule_restart", side_effect=RuntimeError("Supervisor yok")):
+            failed = self.request("/restart", "POST")
+        self.assertIn("saved=fail", failed.headers["Location"])
 
     def test_public_pages_link_inside_the_token_surface(self):
         self.write_options({"public_dashboard_enabled": True, "public_dashboard_token": TOKEN})

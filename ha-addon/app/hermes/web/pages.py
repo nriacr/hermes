@@ -46,7 +46,7 @@ def render_topbar(base: str, current: str) -> str:
 
 
 def render_tool_actions(base: str) -> str:
-    """One row at the bottom of Ayarlar: Pushover test, the two confirmed resets and İstatistik."""
+    """One row at the bottom of Ayarlar: Pushover test, the two confirmed resets, İstatistik and the confirmed restart."""
     return (
         "<div class='actions public-actions tool-actions'>"
         f"<form class='inline-form' method='post' action='{escape(link(base, 'test-pushover'), quote=True)}'>"
@@ -57,7 +57,11 @@ def render_tool_actions(base: str) -> str:
         f"<form class='inline-form' method='post' action='{escape(link(base, 'reset-price-history'), quote=True)}' "
         "data-confirm='Min/maks fiyat geçmişi temizlenecek ve güncel fiyattan yeniden başlayacak. Devam etmek istiyor musun?'>"
         "<button class='button secondary' type='submit'>Min/Maks Sıfırla</button></form>"
-        f"<a class='button secondary' href='{escape(link(base, 'statistics'), quote=True)}'>İstatistik</a></div>"
+        f"<a class='button secondary' href='{escape(link(base, 'statistics'), quote=True)}'>İstatistik</a>"
+        f"<form class='inline-form' method='post' action='{escape(link(base, 'restart'), quote=True)}' "
+        "data-confirm='Hermes, Home Assistant üzerinden uygulama olarak yeniden başlatılacak. Süren tarama yarıda kalır; "
+        "ayarlar değişmez. Devam etmek istiyor musun?'>"
+        "<button class='button secondary' type='submit'>Hermes'i yeniden başlat</button></form></div>"
     )
 
 

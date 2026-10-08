@@ -181,7 +181,7 @@ tbody tr.site-other { --site-bg:rgba(183,177,222,.13); --site-bg-strong:rgba(183
 .tool-actions { margin-top:18px; }
 .statistics-reset { margin-top:18px; }
 @media (max-width:900px) { .watch-top { grid-template-columns:repeat(2,minmax(0,1fr)); } }
-@media (max-width:720px) { .nav-actions, .tool-actions { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); } .nav-actions .button, .tool-actions .button, .tool-actions .inline-form { width:100%; min-width:0; } }
+@media (max-width:720px) { .nav-actions, .tool-actions { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); } .nav-actions .button, .tool-actions .button, .tool-actions .inline-form { width:100%; min-width:0; } .tool-actions > :last-child:nth-child(odd) { grid-column:1 / -1; } }
 @media (max-width:700px) { .watch-bottom > label:first-child { flex:1 1 100%; max-width:none; } .watch-bottom .watch-actions { width:100%; margin-left:0; } .watch-bottom .watch-actions .button { width:100%; } .apply-bar .button { width:100%; } }
 @media (max-width:420px) { .watch-top { grid-template-columns:1fr; } }
 """

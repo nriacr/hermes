@@ -24,7 +24,7 @@ from .dashboard import dashboard_live_html, render_dashboard_page
 from .icons import HERMES_ICON_PNG, HERMES_ICON_SVG, render_web_manifest
 from .pages import link
 from .statistics import render_statistics_page, statistics_live_html
-from .settings import handle_settings_save, render_restart_page, render_settings_page, should_return_to_main
+from .settings import handle_restart, handle_settings_save, render_restart_page, render_settings_page, should_return_to_main
 
 PUBLIC_TOKEN_MIN_LENGTH = 24
 # Text responses above this size are gzip-compressed when the browser accepts it.
@@ -177,6 +177,9 @@ class Router:
                 return redirect(request, "settings", saved="fail", msg=message)
             extra = {"return_to_main": "1"} if should_return_to_main(request.body) else {}
             return redirect(request, "restarting", msg=message, **extra)
+        if path == "/restart":
+            ok, message = handle_restart()
+            return redirect(request, "restarting", msg=message) if ok else redirect(request, "settings", saved="fail", msg=message)
         if path == "/reset-errors":
             ok, message = self.runtime.reset_error_history()
             return redirect(request, "statistics", saved="ok" if ok else "fail", msg=message)

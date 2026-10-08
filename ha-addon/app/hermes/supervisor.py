@@ -60,7 +60,14 @@ def restart_addon() -> None:
     try:
         _post(_addon_path("restart"), {}, timeout=5)
     except Exception as exc:  # noqa: BLE001
-        log(f"Ayarlar kaydedildi ama Hermes otomatik yeniden başlatılamadı: {exc}")
+        log(f"Hermes Home Assistant üzerinden yeniden başlatılamadı: {exc}")
+
+
+def schedule_restart(delay_seconds: float = 2.0) -> None:
+    """Restart the add-on through the Supervisor shortly, so the current page response is sent first."""
+    timer = threading.Timer(delay_seconds, restart_addon)
+    timer.daemon = True
+    timer.start()
 
 
 def save_options_and_restart(options: Dict[str, Any], restart_delay_seconds: float = 2.0) -> Dict[str, Any]:
@@ -68,7 +75,5 @@ def save_options_and_restart(options: Dict[str, Any], restart_delay_seconds: flo
     saved_options = options_with_defaults(options)
     _post(_addon_path("options"), {"options": saved_options})
     save_json(OPTIONS_PATH, saved_options)
-    timer = threading.Timer(restart_delay_seconds, restart_addon)
-    timer.daemon = True
-    timer.start()
+    schedule_restart(restart_delay_seconds)
     return saved_options

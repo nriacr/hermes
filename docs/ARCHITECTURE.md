@@ -341,10 +341,11 @@ characters, `public_dashboard_enabled`, and is compared in constant time.
 Pages: summary (`/`), `statistics`, `settings`, `restarting`;
 actions: `test-pushover`, `reset-notifications`, `reset-price-history`,
 `reset-errors` (deletes failed `reads` rows, keeps `requests`; back to `statistics`),
+`restart` (Supervisor add-on restart after 2 s, settings unchanged; shows `restarting`),
 `settings/save`. Every page has the same navigation. Ayarlar ends with the
 "Zamanlama" section (`interval_seconds`, `request_delay_min_seconds`,
 `request_delay_max_seconds`, same limits as the add-on schema, saved with the
-page) and one button row: Pushover test, the two resets, İstatistik. The
+page) and one button row: Pushover test, the two resets, İstatistik, restart. The
 statistics page (`web/statistics.py`, since 3.4) is built from the `reads`
 table around one number, the check frequency: the median time between two
 reads of the same every-cycle watch (`high` in rows before 3.12; gaps over 6 hours are pauses, not the
