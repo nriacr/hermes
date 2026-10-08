@@ -1,5 +1,11 @@
 # Değişiklik günlüğü
 
+## 3.15.0
+
+- Tüm sayfalar aynı tasarım dilinde: İstatistik ve "yeniden başlatılıyor" sayfaları da Özet Tablo ve
+  Ayarlar gibi koyu, cam görünümlü bölümler, Sora/Inter yazı tipleri ve neon vurgularla çiziliyor
+  (kartlar, grafik, site sağlık çubukları, tablolar, hata dönemleri). Veriler ve işlevler aynı.
+
 ## 3.14.0
 
 - Ayarlar sayfası Özet Tablo ile aynı görünümde: koyu tema, Sora/Inter yazı tipleri, cam görünümlü bölümler,

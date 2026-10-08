@@ -331,7 +331,7 @@ def render_restart_page(base: str, params: Dict[str, List[str]]) -> bytes:
     script = (f"<script id='hermes-restart-script' src='{escape(link(base, 'restart.js'), quote=True)}?v={escape(APP_VERSION)}' defer "
               f"data-settings-path='{escape(link(base, 'settings'), quote=True)}' data-return-path='{escape(destination, quote=True)}' "
               f"data-health-path='{escape(link(base, 'health'), quote=True)}'></script>")
-    return render_page(base, "settings", "Hermes yeniden başlatılıyor", body, scripts=script)
+    return render_page(base, "settings", "Hermes yeniden başlatılıyor", body, body_class="public ov", scripts=script)
 
 
 # -- saving ---------------------------------------------------------------------------

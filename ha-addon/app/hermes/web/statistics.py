@@ -428,7 +428,7 @@ def render_statistics_page(base: str, params: Optional[Dict[str, List[str]]] = N
             f"{notice}{intro}"
             + live_region(base, f"live/statistics?p={period}", statistics_live_html(base, params))
             + render_reset_errors(base))
-    return render_page(base, "statistics", "Hermes İstatistik", body, refresh_seconds=60,
+    return render_page(base, "statistics", "Hermes İstatistik", body, body_class="public ov", refresh_seconds=60,
                        scripts=CONFIRM_SCRIPT + live_script_tag(base))
 
 

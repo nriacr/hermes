@@ -385,6 +385,9 @@ price closes each line. Filters, tab and the open sheet are client state (`overv
 swap (`hermes-live` event); the entrance animation runs once (`ov-first`). Statistics and Ayarlar keep the
 shared stylesheet rules; priority dots (five colors from red, every cycle, to green, 6 hours) appear in the
 sheet of normal offers and at the start of each card in Ayarlar, DEPO tag on warehouse offers.
+Since 3.15 every page (summary, Ayarlar, İstatistik, the restart screen) carries `body.ov`: `OVERVIEW_CSS` sets the
+global tokens, fonts, background and logo, `SETTINGS_SKIN_CSS` and `STATISTICS_SKIN_CSS` restyle the forms, buttons,
+summary panels, charts and tables of those pages without changing their markup.
 
 ## 11. Telegram
 

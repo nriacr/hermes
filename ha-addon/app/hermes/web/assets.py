@@ -406,8 +406,8 @@ body.ov a { color:inherit; }
 # Ayarlar wears the same skin as the home screen: only colors, shapes, fonts and motion change;
 # the form markup and its scripts are untouched.
 SETTINGS_SKIN_CSS = """
-body.ov.settings-page { --line:rgba(255,255,255,.1); --text:#f4f2ff; --muted:#9a95b8; --card:rgba(255,255,255,.055); --panel:transparent; --accent:#b6ff3b; --accent2:#27e1ff; --bad:#ff7ab8; --ok:#b6ff3b; }
-.settings-page .page-heading { margin:6px 0 14px; font:800 clamp(28px,4vw,40px)/1.05 var(--display); letter-spacing:-.045em; }
+body.ov { --line:rgba(255,255,255,.1); --text:#f4f2ff; --muted:#9a95b8; --card:rgba(255,255,255,.055); --panel:transparent; --accent:#b6ff3b; --accent2:#27e1ff; --bad:#ff7ab8; --ok:#b6ff3b; }
+body.ov .page-heading { margin:6px 0 14px; font:800 clamp(28px,4vw,40px)/1.05 var(--display); letter-spacing:-.045em; }
 .settings-page .settings-section { margin-top:16px; padding:18px; border-radius:22px; border:1px solid var(--edge); background:var(--glass); backdrop-filter:blur(10px); }
 .settings-page .settings-section h2 { margin:0 0 12px; font:700 13px var(--display); letter-spacing:.14em; text-transform:uppercase; color:var(--mute); }
 .settings-page details { margin:10px 0; border-radius:18px; border:1px solid var(--edge); background:rgba(255,255,255,.045); transition:border-color .25s,background .25s; }
@@ -423,24 +423,51 @@ body.ov.settings-page { --line:rgba(255,255,255,.1); --text:#f4f2ff; --muted:#9a
 .settings-page input::placeholder { color:var(--faint); }
 .settings-page input[type='checkbox'] { width:18px; height:18px; accent-color:var(--lime); }
 .settings-page .checkbox-row { color:var(--text); font-size:13.5px; }
-.settings-page .button, .settings-page .button.test { min-height:42px; padding:0 16px; border-radius:14px; border:1px solid var(--edge); background:var(--glass2); color:var(--text); font:700 13px var(--display); transition:transform .2s,border-color .2s; }
-.settings-page .button:hover { transform:translateY(-2px); border-color:rgba(255,255,255,.28); }
-.settings-page .button.primary, .period-switch .button[aria-current='page'] { border-color:transparent; background:linear-gradient(95deg,var(--lime),var(--cyan)); color:#07110a; }
-.settings-page .button.danger { border-color:transparent; background:linear-gradient(95deg,#ff3d9a,#ff6b6b); color:#fff; }
-.settings-page .notice { margin:0 0 12px; border-radius:16px; }
-.settings-page .notice-ok { color:var(--lime); background:rgba(182,255,59,.08); border-color:rgba(182,255,59,.25); } .settings-page .notice-fail { color:#ffb3d3; background:rgba(255,61,154,.1); border-color:rgba(255,61,154,.3); }
+body.ov .button, body.ov .button.test { min-height:42px; padding:0 16px; border-radius:14px; border:1px solid var(--edge); background:var(--glass2); color:var(--text); font:700 13px var(--display); transition:transform .2s,border-color .2s; }
+body.ov .button:hover { transform:translateY(-2px); border-color:rgba(255,255,255,.28); }
+body.ov .button.primary, .period-switch .button[aria-current='page'] { border-color:transparent; background:linear-gradient(95deg,var(--lime),var(--cyan)); color:#07110a; }
+body.ov .button.danger { border-color:transparent; background:linear-gradient(95deg,#ff3d9a,#ff6b6b); color:#fff; }
+body.ov .notice { margin:0 0 12px; border-radius:16px; }
+body.ov .notice-ok { color:var(--lime); background:rgba(182,255,59,.08); border-color:rgba(182,255,59,.25); } body.ov .notice-fail { color:#ffb3d3; background:rgba(255,61,154,.1); border-color:rgba(255,61,154,.3); }
 .settings-page .watch-search { color:var(--mute); font-weight:500; } .settings-page .watch-search input { background:rgba(0,0,0,.28); }
 .settings-page .watch-group-filter { min-height:36px; padding:0 14px; border-radius:99px; border:1px solid var(--edge); background:var(--glass); color:var(--text); font:600 13px var(--display); transition:transform .2s,background .2s; } .settings-page .watch-group-filter:hover { transform:translateY(-2px); border-color:rgba(255,255,255,.28); }
 .settings-page .watch-group-filter[aria-pressed='true'] { background:rgba(182,255,59,.14); border-color:rgba(182,255,59,.45); } .settings-page .watch-group-filter[aria-pressed='false'] { background:transparent; color:var(--faint); opacity:.8; }
 .settings-page .watch-hint, .settings-page .apply-bar p { color:var(--mute); }
 .settings-page .apply-bar { bottom:10px; margin-top:20px; padding:12px 14px; border:1px solid var(--edge); border-radius:20px; background:rgba(14,11,28,.82); backdrop-filter:blur(14px); box-shadow:0 12px 40px rgba(0,0,0,.45); }
 .settings-page .tool-actions { margin-top:22px; }
+body.ov .footer-note { border-left:0; border-radius:16px; background:var(--glass); border:1px solid var(--edge); color:var(--mute); }
 .settings-page .saving-dialog { border-color:var(--edge); border-radius:24px; background:linear-gradient(170deg,#161233,#0a0814); } .settings-page .saving-spinner { border-color:rgba(255,255,255,.14); border-top-color:var(--lime); }
 .settings-page details.is-deleted summary { color:#ff7ab8; }
 """.strip()
 
 APP_CSS = APP_CSS + "\n" + OVERVIEW_CSS
-APP_CSS = APP_CSS + "\n" + SETTINGS_SKIN_CSS
+
+# Every other page (İstatistik, the restart screen) wears the same skin.
+STATISTICS_SKIN_CSS = """
+body.ov { --ok:#b6ff3b; --warn:#ffc857; --head:rgba(255,255,255,.07); }
+.ov .summary-panel { margin-top:16px; padding:18px; border-radius:22px; border:1px solid var(--edge); background:var(--glass); backdrop-filter:blur(10px); }
+.ov .summary-head { align-items:center; } .ov .summary-head h2 { margin:0; font:700 13px var(--display); letter-spacing:.14em; text-transform:uppercase; color:var(--mute); } .ov .summary-head span { color:var(--mute); }
+.ov .statistics-intro { max-width:640px; font-size:14px; }
+.ov .statistics-top { margin-top:6px; } .ov .statistics-top .page-heading { margin:0; }
+.ov .period-switch .button[aria-current='page'] { border-color:transparent; }
+.ov .stat-tile { padding:14px 16px; border-radius:20px; border:1px solid var(--edge); background:var(--glass); backdrop-filter:blur(10px); }
+.ov .stat-tile span { font:600 11px var(--body); letter-spacing:.08em; } .ov .stat-tile strong { font:800 28px/1.05 var(--display); letter-spacing:-.04em; } .ov .stat-tile small { color:var(--mute); }
+.ov .stat-tile-alert strong { color:#ff7ab8; }
+.ov .statistics-chart { border:1px solid var(--edge); border-radius:18px; background:rgba(0,0,0,.28); }
+.ov .statistics-chart .grid-line { stroke:rgba(255,255,255,.08); } .ov .statistics-chart .axis-line { stroke:rgba(255,255,255,.2); }
+.ov .statistics-chart .check-bar { fill:#7be0ff; } .ov .statistics-chart .failure-count { fill:#ff7ab8; }
+.ov .legend-bar { background:#7be0ff; } .ov .legend-count { color:#ff7ab8; }
+.ov .site-health { padding:14px 16px; border-radius:18px; border:1px solid var(--edge); background:rgba(255,255,255,.045); }
+.ov .site-health header strong { font:700 15px var(--display); } .ov .health-bar { height:9px; border-radius:99px; background:var(--glass2); }
+.ov .health-ok { background:linear-gradient(95deg,var(--lime),var(--cyan)); } .ov .health-blocked { background:var(--warn); } .ov .health-error { background:#ff3d9a; }
+.ov .site-health dd { font-family:var(--display); } .ov .site-health dd.bad, .ov .measure-table td.bad { color:#ff7ab8; } .ov .statistics-good { color:var(--lime); }
+.ov .table-wrap, .ov .measure-wrap { border:1px solid var(--edge); border-radius:18px; } .ov th { background:rgba(255,255,255,.07); color:var(--mute); font-family:var(--body); } .ov td { border-bottom-color:var(--edge); }
+.ov .daily-history { margin-top:16px; padding:14px 18px; border-radius:22px; border:1px solid var(--edge); background:var(--glass); } .ov .daily-history summary { font:700 14px var(--display); }
+.ov .error-spells li { border-radius:16px; border:1px solid rgba(255,61,154,.28); border-left:3px solid #ff3d9a; background:rgba(255,61,154,.07); } .ov .error-spells li span { color:#ff7ab8; }
+.ov .spell-title { font:700 13px var(--display); letter-spacing:.14em; text-transform:uppercase; color:var(--mute); }
+.ov .statistics-empty { color:var(--mute); }
+""".strip()
+APP_CSS = APP_CSS + "\n" + SETTINGS_SKIN_CSS + "\n" + STATISTICS_SKIN_CSS
 
 OVERVIEW_SCRIPT = """
 (() => {

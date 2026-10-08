@@ -424,8 +424,16 @@ class DashboardTests(DataFilesMixin, unittest.TestCase):
         self.assertIn("<body class='public ov settings-page'>", page)
         css = self.router_get("/app.css")
         for text in ("body.ov .topbar .badge::before", "conic-gradient", "ov-spin", ".settings-page .settings-section",
-                     ".settings-page .button.primary"):
+                     "body.ov .button.primary"):
             self.assertIn(text, css)
+
+    def test_every_page_wears_the_same_skin(self):
+        router = server.Router(FakeRuntime())
+        for path in ("/", "/settings", "/statistics", "/restarting"):
+            page = router.handle(server.split_request(path, "GET", b"", False)).payload.decode()
+            self.assertIn("<body class='public ov", page, path)
+        for text in (".ov .stat-tile", ".ov .summary-panel", ".ov .site-health", ".ov .health-ok"):
+            self.assertIn(text, self.router_get("/app.css"))
 
     def test_prices_are_whole_lira(self):
         self.assertEqual(parse_decimal("1.500"), Decimal("1500"))
