@@ -1,5 +1,21 @@
 # Değişiklik günlüğü
 
+## 3.13.0
+
+- Özet Tablo baştan tasarlandı (koyu tema, yeni yazı tipleri ve renkler, hareketli geçişler; telefonda ve
+  bilgisayarda aynı düzen). Tablo yerine kartlar: hedef fiyatın altındaki ürünler üstte "Fırsatlar" kartlarında,
+  altında Takipte, Stokta yok ve Telegram sekmeleri. Eski tablodaki tüm veri korunuyor.
+- Her kartta site rengi, kısa ad, fiyat, fiyat geçmişi çizgisi, geçmişe göre yüzde değişim ("yeni" yeni
+  takip) ve son güncelleme zamanı. Ürün adı sığmayınca sondan kısalır. Aynı takibin birden çok sonucu
+  (renk, hafıza) kendi başlığı altında toplanır ve ayıran kısımlar küçük etiketlerle gösterilir.
+- Karta dokununca ayrıntı penceresi: güncel fiyat, hedefe yakınlık çubuğu, en düşük/en yüksek, satıcı, stok,
+  tarama sıklığı (öncelik noktası), son güncelleme, takip başlangıcı ve fiyat geçmişi grafiği (hedef çizgisiyle).
+  Pencere ekrana sığar, kaydırma çubuğu çıkmaz.
+- Sitelere göre süzme düğmeleri (yalnız ürünü olan siteler). Sayfa kendiliğinden yenilenirken seçili sekme,
+  süzgeç ve açık pencere korunur; giriş animasyonu yalnız ilk açılışta oynar.
+- Yazı tipleri (Sora, Inter) uygulamanın içinde; panel dış bağlantı kullanmaz. İstatistik ve Ayarlar sayfaları
+  değişmedi. Fiyat geçmişi mevcut `hermes.db` kayıtlarından okunur, veri yapısı değişmedi.
+
 ## 3.12.2
 
 - Yeniden başlatırken (düğme veya ayar kaydı) logda çıkan yanıltıcı "yeniden başlatılamadı: timed out" satırı

@@ -1,6 +1,7 @@
-"""Summary table, statistics, errors and Telegram cards."""
+"""The Özet Tablo home screen: deal cards, price tiles with history, stock list, Telegram and errors."""
 
 import re
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from decimal import ROUND_DOWN, Decimal, InvalidOperation
 from html import escape
@@ -8,6 +9,7 @@ from typing import Any, Dict, List, Optional
 
 from ..constants import (
     APP_VERSION,
+    DATABASE_PATH,
     PRIORITY_DESCRIPTIONS,
     STATE_PATH,
     SUMMARY_PATH,
@@ -16,11 +18,10 @@ from ..constants import (
     normalize_priority,
 )
 from ..storage import load_json
-from ..utils import PROCESS_STARTED_AT, is_search_url, parse_bool, parse_iso_datetime, repair_mojibake, site_label
+from ..utils import PROCESS_STARTED_AT, format_tl, is_search_url, parse_bool, parse_iso_datetime, repair_mojibake, site_label
 from .pages import link, render_notice, render_page
+from .pricechart import SPOT_SIZE, detail_chart, load_histories, offer_index, sparkline, with_current
 
-TABLE_TITLE_MAX_LENGTH = 60
-GROUP_TITLE_MAX_LENGTH = 70
 SITE_THEME_CLASSES = (
     ("amazon", "site-amazon"),
     ("hepsiburada", "site-hepsiburada"),
@@ -60,11 +61,6 @@ def display_tl(value, signed: bool = False) -> str:
     return f"{sign}{whole_lira:,} TL".replace(",", ".")
 
 
-def display_tl_range(value, fallback_min="-", fallback_max="-") -> str:
-    parts = [part.strip() for part in str(value or f"{fallback_min} / {fallback_max}").split("/") if part.strip()]
-    return " / ".join(display_tl(part) for part in parts) if parts else "-"
-
-
 def _parse_local_time(value):
     raw = str(value or "").strip()
     try:
@@ -87,13 +83,6 @@ def relative_time_text(value) -> str:
     return f"{hours} sa önce" if hours < 24 else f"{hours // 24} gün önce"
 
 
-def relative_minutes_text(value) -> str:
-    parsed = parse_iso_datetime(str(value or ""))
-    if not parsed:
-        return "-"
-    return f"{max(0, int((datetime.now().astimezone() - parsed.astimezone()).total_seconds() // 60))} dk önce"
-
-
 def duration_text(seconds_value, fallback="-") -> str:
     if seconds_value in (None, ""):
         return str(fallback or "-")
@@ -103,15 +92,6 @@ def duration_text(seconds_value, fallback="-") -> str:
         return str(fallback or "-")
     minutes, seconds = divmod(total_seconds, 60)
     return f"{minutes} dk {seconds} sn" if minutes else f"{seconds} sn"
-
-
-def shortened_title(value, max_length: int, ellipsis: bool = True) -> tuple[str, str]:
-    """A compact label plus the full text for its tooltip."""
-    full_title = repair_mojibake(value or "-").strip() or "-"
-    if len(full_title) <= max_length:
-        return full_title, full_title
-    visible = f"{full_title[:max_length - 3].rstrip()}..." if ellipsis else full_title[:max_length].rstrip()
-    return visible, full_title
 
 
 def site_theme_class(seller: str) -> str:
@@ -130,154 +110,290 @@ def is_target_hit(row: Dict[str, Any]) -> bool:
     return difference is not None and difference <= 0
 
 
-def difference_sort_value(row: Dict[str, Any]) -> Decimal:
-    cleaned = re.sub(r"[^0-9,.-]", "", repair_mojibake(str(row.get("difference") or "0"))).strip()
-    if not cleaned:
-        return Decimal("0")
-    cleaned = cleaned.replace(".", "").replace(",", ".") if "," in cleaned else cleaned.replace(".", "")
-    try:
-        return Decimal(cleaned)
-    except InvalidOperation:
-        return Decimal("0")
+# -- offers ---------------------------------------------------------------------------
 
-
-def row_sort_key(row: Dict[str, Any]):
-    return (repair_mojibake(str(row.get("seller") or "")).casefold(), difference_sort_value(row),
-            repair_mojibake(str(row.get("product_title") or "")).casefold())
-
-
-# -- price table ----------------------------------------------------------------------
+STOCK_SUFFIX = re.compile(r"\s*\(Stok\s+(\d+)\)\s*$", re.IGNORECASE)
+VARIANT_SPLIT = re.compile(r"\s*[,/;]\s*")
+MAX_VARIANT_TAGS = 3
 
 
 def priority_dot(priority) -> str:
-    """Round mark at the start of a row: red (every cycle) through orange and yellow to green (6 hours)."""
+    """Round mark for a card's scan interval: red (every cycle) through orange and yellow to green (6 hours)."""
     key = normalize_priority(priority)
     text = escape(PRIORITY_DESCRIPTIONS[key], quote=True)
     return f'<i class="priority-dot priority-{key}" title="{text}" aria-label="{text}"></i>'
 
 
-def render_table_row(row: Dict[str, Any]) -> str:
-    seller_text = repair_mojibake(row.get("seller") or "-")
-    visible_title, full_title = shortened_title(row.get("product_title"), TABLE_TITLE_MAX_LENGTH, ellipsis=False)
-    is_warehouse = parse_bool(row.get("is_warehouse"), default=False)
-    warehouse_tag = '<strong class="warehouse-tag">DEPO</strong>' if is_warehouse else ""
-    dot = "" if is_warehouse else priority_dot(row.get("priority"))
-    title_html = f'<span class="product-title">{dot}{warehouse_tag}{escape(visible_title)}</span>'
-    product_url = str(row.get("product_url") or "").strip()
-    if product_url:
-        title_html = f'<a href="{escape(product_url, quote=True)}" target="_blank" rel="noopener noreferrer">{title_html}</a>'
-    classes = [site_theme_class(seller_text)] + (["deal-row"] if is_target_hit(row) else [])
-    price_range = display_tl_range(row.get("price_range"), row.get("min_price", "-"), row.get("max_price", "-"))
+@dataclass
+class Offer:
+    """One published price row with what the home screen shows about it."""
+    row: Dict[str, Any]
+    seller: str
+    title: str
+    stock: str
+    site: str
+    price: Decimal
+    target: Decimal
+    low: Decimal
+    high: Decimal
+    hit: bool
+    warehouse: bool
+    checked_at: str
+    points: list = field(default_factory=list)
+
+    @property
+    def gap_share(self) -> Decimal:
+        """How far above (or below, negative) the target the price is, as a share of the target."""
+        return (self.price - self.target) / self.target if self.target else Decimal("0")
+
+
+def build_offers(rows: List[Dict[str, Any]], state: Dict[str, Any]) -> List[Offer]:
+    histories = load_histories(DATABASE_PATH, offer_index(state), rows)
+    offers = []
+    for row, points in zip(rows, histories):
+        price = parse_turkish_money(row.get("price"))
+        if price is None:
+            continue
+        target = parse_turkish_money(row.get("target")) or Decimal("0")
+        seller = repair_mojibake(row.get("seller") or "-")
+        full_title = repair_mojibake(row.get("product_title") or "-").strip() or "-"
+        stock = STOCK_SUFFIX.search(full_title)
+        checked_at = str(row.get("price_checked_at") or "")
+        moment = _parse_local_time(checked_at) or datetime.now().astimezone()
+        offers.append(Offer(
+            row=row, seller=seller, title=STOCK_SUFFIX.sub("", full_title) or full_title, stock=stock.group(1) if stock else "",
+            site=site_theme_class(seller), price=price, target=target,
+            low=parse_turkish_money(row.get("min_price")) or price, high=parse_turkish_money(row.get("max_price")) or price,
+            hit=is_target_hit(row), warehouse=parse_bool(row.get("is_warehouse"), default=False), checked_at=checked_at,
+            points=with_current(points, price, moment),
+        ))
+    return offers
+
+
+def variant_labels(titles: List[str]) -> List[List[str]]:
+    """What differs between the results of one watch (storage, color), so equal-looking tiles can be told apart."""
+    segments = [[part for part in VARIANT_SPLIT.split(title) if part] for title in titles]
+    common = [part for part in segments[0] if all(part in other for other in segments)] if segments else []
+    if not common:  # nothing in common: a tag would only repeat the whole title
+        return [[] for _ in titles]
+    return [[part for part in parts if part not in common][:MAX_VARIANT_TAGS] for parts in segments]
+
+
+def lira(value: Decimal) -> str:
+    return format_tl(value, with_currency=True)
+
+
+def price_parts(value: Decimal) -> str:
+    return f"{format_tl(value)}<small>TL</small>"
+
+
+def percent_text(value: float) -> str:
+    return f"{abs(value):.1f}".replace(".", ",")
+
+
+def change_chip(offer: Offer) -> str:
+    """Price movement since the first recorded point: lower is good (green), higher is pink."""
+    if len(offer.points) < 2:
+        return "<span class='ov-chg flat'>yeni</span>"
+    first = offer.points[0][1]
+    change = (float(offer.price) - first) / first * 100 if first else 0.0
+    if abs(change) < 0.05:
+        return "<span class='ov-chg flat'>sabit</span>"
+    direction, symbol = ("up", "▲") if change > 0 else ("down", "▼")
+    return f"<span class='ov-chg {direction}'>{symbol} %{percent_text(change)}</span>"
+
+
+def ago_html(value: str) -> str:
+    return f"<span class='ov-ago'>{escape(relative_time_text(value))}</span>"
+
+
+def site_dot(offer: Offer) -> str:
+    return f"<span class='ov-site'>{escape(offer.seller)}</span>"
+
+
+def detail_html(offer: Offer) -> str:
+    """Everything known about one offer; shown in the sheet that opens when its card is tapped."""
+    proximity = min(100, int(offer.target / offer.price * 100)) if offer.price else 0
+    gap = abs(offer.price - offer.target)
+    gap_chip = (f"<span class='ov-chg down'>hedefin {escape(lira(gap))} altında</span>" if offer.hit
+                else f"<span class='ov-chg flat'>hedefe {escape(lira(gap))} var</span>")
+    facts = [("En düşük", lira(offer.low)), ("En yüksek", lira(offer.high)), ("Satıcı", offer.seller)]
+    if offer.stock:
+        facts.append(("Stok", f"{offer.stock} adet"))
+    cells = "".join(f"<div class='ov-fact'><span>{escape(label)}</span><b>{escape(text)}</b></div>" for label, text in facts)
+    if not offer.warehouse:
+        interval = PRIORITY_DESCRIPTIONS[normalize_priority(offer.row.get("priority"))]
+        cells += f"<div class='ov-fact'><span>Tarama sıklığı</span><b>{priority_dot(offer.row.get('priority'))}{escape(interval)}</b></div>"
+    cells += f"<div class='ov-fact'><span>Son güncelleme</span><b>{escape(relative_time_text(offer.checked_at))}</b></div>"
+    if len(offer.points) > 1:
+        cells += f"<div class='ov-fact'><span>Takip başlangıcı</span><b>{offer.points[0][0].strftime('%d.%m.%Y')}</b></div>"
+    chart = (detail_chart(offer.points, float(offer.target)) if len(offer.points) > 1
+             else "<p class='ov-note'>Fiyat geçmişi ilk değişiklikten sonra çizilir.</p>")
+    product_url = str(offer.row.get("product_url") or "").strip()
+    link_html = (f"<a class='ov-d-link' href='{escape(product_url, quote=True)}' target='_blank' rel='noopener noreferrer'>Ürüne git →</a>"
+                 if product_url else "")
+    depo = "<span class='ov-depo'>DEPO</span>" if offer.warehouse else ""
     return (
-        f'<tr class="{" ".join(classes)}"><td data-label="Satıcı" class="seller-cell">{escape(seller_text)}</td>'
-        f'<td data-label="Ürün" class="product-cell" title="{escape(full_title, quote=True)}">{title_html}</td>'
-        f'<td data-label="Güncel fiyat" class="price-cell">{escape(display_tl(row.get("price", "-")))}</td>'
-        f'<td data-label="Hedef fiyat" class="target-cell">{escape(display_tl(row.get("target", "-")))}</td>'
-        f'<td data-label="Fark" class="diff-cell">{escape(display_tl(row.get("difference", "-"), signed=True))}</td>'
-        f'<td data-label="Min / Maks" class="range-cell">{escape(price_range)}</td>'
-        f'<td data-label="Son güncelleme" class="updated-cell">{escape(relative_minutes_text(row.get("price_checked_at")))}</td></tr>'
+        f"<div class='ov-d-top'><div class='ov-av'>{escape(offer.seller[:1].upper())}</div><h3>{escape(offer.title)}{depo}</h3>{link_html}"
+        "<button type='button' class='ov-x' data-close aria-label='Kapat'>×</button></div>"
+        f"<div class='ov-d-price'><b>{price_parts(offer.price)}</b>{change_chip(offer)}{gap_chip}</div>"
+        f"<div class='ov-meter'><div class='ov-meter-track'><div class='ov-meter-fill' style='width:{proximity}%'></div></div>"
+        f"<p><span>Hedef {lira(offer.target)}</span><span>%{proximity} yakınlık</span></p></div>"
+        f"<div class='ov-facts'>{cells}</div><div class='ov-chartbox'>{chart}</div>"
     )
 
 
-def render_rows_table(rows: List[Dict[str, Any]], empty_text: str) -> str:
-    body = "".join(render_table_row(row) for row in rows) if rows else f"<tr class='empty-row'><td colspan='7'>{escape(empty_text)}</td></tr>"
+def card_attributes(offer: Offer) -> str:
+    return f"data-open tabindex='0' role='button' aria-label='{escape(offer.title, quote=True)}'"
+
+
+def render_deal(offer: Offer) -> str:
+    share = float(-offer.gap_share * 100)
     return (
-        "<div class='table-wrap'><table class='price-summary-table'><thead><tr><th>Satıcı</th><th>Ürün Adı</th>"
-        "<th>Güncel<br>fiyat</th><th>Hedef<br>fiyat</th><th>Fark</th><th>Min / Maks</th><th>Son<br>güncelleme</th></tr>"
-        f"</thead><tbody>{body}</tbody></table></div>"
+        f"<article class='ov-deal {offer.site}' {card_attributes(offer)}>"
+        f"<div class='ov-deal-top'>{site_dot(offer)}{ago_html(offer.checked_at)}</div>"
+        f"<h3 title='{escape(offer.title, quote=True)}'>{escape(offer.title)}</h3>"
+        f"<div class='ov-deal-foot'><div class='ov-price'>{price_parts(offer.price)}</div>"
+        f"<div class='ov-deal-side'>{sparkline(offer.points, SPOT_SIZE)}"
+        f"<div class='ov-off'>−%{percent_text(share)}<small>hedefin altında</small></div></div></div>"
+        f"<div class='ov-detail' hidden>{detail_html(offer)}</div></article>"
     )
 
 
-def split_result_groups(rows: List[Dict[str, Any]]):
-    """Rows of one watch with several results collapse under the watch name."""
+def render_tile(offer: Offer, tags: Optional[List[str]] = None, index: int = 0) -> str:
+    tag_html = f"<div class='ov-vars'>{''.join(f'<em>{escape(tag)}</em>' for tag in tags)}</div>" if tags else ""
+    return (
+        f"<article class='ov-tile {offer.site}' data-site='{offer.site}' style='--n:{index}' {card_attributes(offer)}>"
+        f"<div class='ov-av'>{escape(offer.seller[:1].upper())}</div>"
+        f"<div class='ov-tx'><h4 title='{escape(offer.title, quote=True)}'>{escape(offer.title)}</h4>{tag_html}"
+        f"<div class='ov-price'>{price_parts(offer.price)}</div></div>"
+        f"<div class='ov-side'>{sparkline(offer.points)}{change_chip(offer)}{ago_html(offer.checked_at)}</div>"
+        f"<div class='ov-detail' hidden>{detail_html(offer)}</div></article>"
+    )
+
+
+def group_offers(offers: List[Offer]):
+    """Single results first (closest to target first); a watch with several results gets its own section."""
     grouped: Dict[str, Dict[str, Any]] = {}
-    ungrouped = []
-    for row in rows:
-        group_key = str(row.get("search_group") or "").strip()
-        if not group_key:
-            ungrouped.append(row)
+    singles = []
+    for offer in offers:
+        key = str(offer.row.get("search_group") or "").strip()
+        if not key:
+            singles.append(offer)
             continue
-        group = grouped.setdefault(group_key, {"label": str(row.get("search_group_label") or "").strip(), "rows": []})
-        group["rows"].append(row)
-    groups = []
+        group = grouped.setdefault(key, {"label": str(offer.row.get("search_group_label") or "").strip(), "offers": []})
+        group["offers"].append(offer)
+    sections = []
     for group in grouped.values():
-        if len(group["rows"]) < 2:
-            ungrouped.extend(group["rows"])
+        if len(group["offers"]) < 2:
+            singles.extend(group["offers"])
             continue
-        group["rows"].sort(key=row_sort_key)
-        groups.append((group["label"] or "Arama sonuçları", group["rows"]))
-    ungrouped.sort(key=row_sort_key)
-    groups.sort(key=lambda item: (row_sort_key(item[1][0]), item[0].casefold()))
-    return ungrouped, groups
+        group["offers"].sort(key=lambda item: item.gap_share)
+        sections.append((group["label"] or "Arama sonuçları", group["offers"]))
+    singles.sort(key=lambda item: item.gap_share)
+    sections.sort(key=lambda item: item[1][0].gap_share)
+    return singles, sections
 
 
-def render_group(label: str, rows: List[Dict[str, Any]]) -> str:
-    visible, full = shortened_title(label, GROUP_TITLE_MAX_LENGTH)
-    return (f"<details class='search-result-group' data-key='group:{escape(full, quote=True)}'>"
-            f"<summary><strong title='{escape(full, quote=True)}'>{escape(visible)}</strong>"
-            f"<span>{len(rows)} sonuç</span></summary>{render_rows_table(rows, '')}</details>")
+def render_watch_pane(offers: List[Offer]) -> str:
+    sites = sorted({(offer.site, offer.seller) for offer in offers}, key=lambda item: item[1].casefold())
+    chips = ("<div class='ov-filters'><button type='button' class='ov-chip' data-filter='all' aria-pressed='true'>Tümü</button>"
+             + "".join(f"<button type='button' class='ov-chip {site}' data-filter='{site}' aria-pressed='false'><i></i>{escape(name)}</button>"
+                       for site, name in sites) + "</div>")
+    if not offers:
+        return chips + "<p class='ov-empty'>Hedef üstünde bekleyen ürün yok.</p>"
+    singles, sections = group_offers(offers)
+    body = f"<div class='ov-tiles'>{''.join(render_tile(offer, None, number) for number, offer in enumerate(singles))}</div>" if singles else ""
+    for label, members in sections:
+        tags = variant_labels([member.title for member in members])
+        body += (f"<section class='ov-group'><h3 class='ov-group-head {members[0].site}'><i></i><b title='{escape(label, quote=True)}'>{escape(label)}</b>"
+                 f"<span>{len(members)} sonuç</span></h3><div class='ov-tiles'>"
+                 f"{''.join(render_tile(member, tag, number) for number, (member, tag) in enumerate(zip(members, tags)))}</div></section>")
+    return chips + body
 
 
-def render_table_section(title: str, rows, empty_text: str, extra_class: str = "", collapse: bool = False) -> str:
-    if not rows or not collapse:
-        body = render_rows_table(rows, empty_text)
-    else:
-        ungrouped, groups = split_result_groups(rows)
-        body = (render_rows_table(ungrouped, empty_text) if ungrouped else "") + "".join(
-            render_group(label, group_rows) for label, group_rows in groups)
-    return f"<div class='table-section {extra_class}'><h3>{escape(title)}</h3>{body}</div>"
-
-
-def render_stock_section(rows: List[Dict[str, Any]]) -> str:
-    def stock_row(row):
-        seller_text = repair_mojibake(row.get("seller") or "-")
-        visible, full = shortened_title(row.get("product_title"), TABLE_TITLE_MAX_LENGTH, ellipsis=False)
-        product_url = str(row.get("product_url") or "").strip()
-        label = (f'<a href="{escape(product_url, quote=True)}" target="_blank" rel="noopener noreferrer"><span>{escape(visible)}</span></a>'
-                 if product_url else f"<span>{escape(visible)}</span>")
-        return (f'<tr class="{site_theme_class(seller_text)} stock-missing-row"><td data-label="Satıcı" class="seller-cell">{escape(seller_text)}</td>'
-                f'<td data-label="Ürün" class="product-cell" title="{escape(full, quote=True)}">{label}</td>'
-                f'<td data-label="Hedef" class="target-cell">{escape(display_tl(row.get("target", "-")))}</td>'
-                f'<td data-label="Durum" class="diff-cell">{escape(repair_mojibake(row.get("reason") or "Stokta yok"))}</td>'
-                f'<td data-label="Son güncelleme" class="updated-cell">{escape(relative_time_text(row.get("checked_at")))}</td></tr>')
-
-    def table(body_rows, empty_text=""):
-        body = "".join(stock_row(row) for row in body_rows)
-        if not body and empty_text:
-            body = f"<tr class='empty-row'><td colspan='5'>{escape(empty_text)}</td></tr>"
-        return ("<div class='table-wrap'><table class='stock-table'><thead><tr><th>Satıcı</th><th>Ürün Adı</th><th>Hedef</th><th>Durum</th><th>Son<br>güncelleme</th>"
-                f"</tr></thead><tbody>{body}</tbody></table></div>")
-
+def render_stock_pane(rows: List[Dict[str, Any]]) -> str:
     if not rows:
-        body = table([], "Stok dışında izlenen ürün yok.")
-    else:
-        by_site: Dict[str, list] = {}
-        for row in rows:
-            by_site.setdefault(repair_mojibake(row.get("seller") or "Diğer"), []).append(row)
-        body = "".join(
-            f"<details class='search-result-group stock-site-group' data-key='stock:{escape(seller, quote=True)}'><summary><strong>{escape(seller)}</strong>"
-            f"<span>{len(site_rows)} ürün</span></summary>{table(site_rows)}</details>"
-            for seller, site_rows in sorted(by_site.items(), key=lambda item: item[0].casefold())
+        return "<p class='ov-empty'>Stok dışında izlenen ürün yok.</p>"
+    items = []
+    for row in sorted(rows, key=lambda item: (repair_mojibake(str(item.get("seller") or "")).casefold(),
+                                              repair_mojibake(str(item.get("product_title") or "")).casefold())):
+        seller = repair_mojibake(row.get("seller") or "-")
+        title = repair_mojibake(row.get("product_title") or "-").strip() or "-"
+        url = str(row.get("product_url") or "").strip()
+        name = (f"<a href='{escape(url, quote=True)}' target='_blank' rel='noopener noreferrer'>{escape(title)}</a>" if url else escape(title))
+        items.append(
+            f"<li class='ov-row {site_theme_class(seller)}'><div class='ov-av'>{escape(seller[:1].upper())}</div>"
+            f"<div class='ov-tx'><h4>{name}</h4><span>{escape(seller)} · {escape(repair_mojibake(row.get('reason') or 'Stokta yok'))} · hedef "
+            f"{escape(display_tl(row.get('target', '-')))}</span></div>{ago_html(row.get('checked_at'))}</li>")
+    return f"<ul class='ov-rows'>{''.join(items)}</ul>"
+
+
+def render_telegram_pane(status: Dict[str, Any]) -> str:
+    items = status.get("recent_notifications") if isinstance(status.get("recent_notifications"), list) else []
+    rows = []
+    for item in items[:5]:
+        if not isinstance(item, dict):
+            continue
+        keyword = escape(str(item.get("keyword") or "-"))
+        url = str(item.get("url") or "").strip()
+        title = (f"<a href='{escape(url, quote=True)}' target='_blank' rel='noopener noreferrer'>{keyword}</a>" if url else keyword)
+        rows.append(f"<li class='ov-row'><div class='ov-tx'><h4>{title}</h4>"
+                    f"<span>{escape(str(item.get('channel') or '-'))} · {escape(str(item.get('created_at') or '-'))}</span>"
+                    f"<p>{escape(str(item.get('message') or ''))}</p></div></li>")
+    return f"<ul class='ov-rows'>{''.join(rows)}</ul>" if rows else "<p class='ov-empty'>Henüz Telegram bildirimi yok.</p>"
+
+
+def render_errors(errors: List[Dict[str, Any]]) -> str:
+    if not errors:
+        return "<div class='ov-ok'>✓ Son 24 saatte hata yok</div>"
+    items = []
+    for detail in errors:
+        links = "".join(
+            "<div class='ov-failed'><span>Hatalı link</span>"
+            f"<a href='{escape(item['url'], quote=True)}' target='_blank' rel='noopener noreferrer'>{escape(item['url'][:93] + '...' if len(item['url']) > 96 else item['url'])}</a>"
+            f"<em>{escape(item['message'])}</em></div>"
+            for item in detail["failed_links"]
         )
-    return f"<div class='table-section stock-section'><h3>Stokta Olmayanlar</h3>{body}</div>"
+        open_link = (f"<a href='{escape(detail['url'], quote=True)}' target='_blank' rel='noopener noreferrer'>Linki aç</a>"
+                     if detail["url"] else "")
+        items.append(f"<li><strong>{escape(detail['title'])}</strong><span>{escape(detail['meta'])}</span>"
+                     f"<em>Hata: {escape(detail['message'])}</em>{links}{open_link}</li>")
+    return (f"<section class='ov-errors'><h2 class='ov-sec'>Hatalar <small>son 24 saat · {len(errors)}</small></h2>"
+            f"<ul>{''.join(items)}</ul></section>")
 
 
-def render_summary(payload: Dict[str, Any]) -> str:
+def render_summary(payload: Dict[str, Any], state: Dict[str, Any], telegram_status: Dict[str, Any], errors: List[Dict[str, Any]]) -> str:
     rows = [row for row in payload.get("rows", []) if isinstance(row, dict)] if isinstance(payload.get("rows"), list) else []
     stock_rows = [row for row in payload.get("stock_rows", []) if isinstance(row, dict)] if isinstance(payload.get("stock_rows"), list) else []
     if not rows and not stock_rows:
-        return ("<section class='summary-panel'><div class='summary-head'><h2>Özet Tablo</h2><span>Henüz tablo yok</span></div>"
-                "<p class='empty-table'>İlk kontrol döngüsü tamamlandığında son fiyat tablosu burada görünecek.</p></section>")
-    deal_rows = [row for row in rows if is_target_hit(row)]
-    watch_rows = [row for row in rows if not is_target_hit(row)]
-    sections = (
-        render_table_section("Hedef Fiyat Altındaki Fırsatlar", deal_rows, "Şu anda hedef fiyatın altına düşen ürün yok.", "deals-section")
-        + render_table_section("Hedefin Üstünde Kalan Ürünler", watch_rows, "Hedef üstünde bekleyen ürün yok.", collapse=True)
-        + render_stock_section(stock_rows)
+        recent = render_telegram_pane(telegram_status) if telegram_status.get("recent_notifications") else ""
+        return ("<section class='ov-hero'><div><h1>Özet Tablo</h1><p>İlk kontrol döngüsü tamamlandığında son fiyat tablosu burada görünecek.</p></div></section>"
+                + (f"<h2 class='ov-sec'>Telegram</h2>{recent}" if recent else "") + render_errors(errors))
+    offers = build_offers(rows, state)
+    deals = sorted((offer for offer in offers if offer.hit), key=lambda offer: offer.gap_share)
+    watching = [offer for offer in offers if not offer.hit]
+    cycle = escape(duration_text(payload.get("cycle_duration_seconds"), payload.get("cycle_duration_minutes") or "-"))
+    status = (f"<div class='ov-status'><span class='ov-pulse'></span>Çevrim <b>{cycle}</b> · Son güncelleme "
+              f"<b>{escape(relative_time_text(payload.get('checked_at')))}</b></div>")
+    numbers = (f"<div class='ov-nums'><div class='ov-num'><b>{len(offers)}</b><span>takipte ürün</span></div>"
+               f"<div class='ov-num'><b>{len(stock_rows)}</b><span>stokta yok</span></div>"
+               f"<div class='ov-num deal'><b>{len(deals)}</b><span>fırsat</span></div></div>")
+    spot = (f"<div class='ov-spot'>{''.join(render_deal(offer) for offer in deals)}</div>" if deals
+            else "<p class='ov-empty'>Şu anda hedef fiyatın altına düşen ürün yok.</p>")
+    telegram_count = min(5, len(telegram_status.get("recent_notifications") or [])) if isinstance(telegram_status.get("recent_notifications"), list) else 0
+    tabs = (
+        "<div class='ov-tabs' role='tablist'>"
+        f"<button type='button' class='ov-tab' role='tab' data-tab='watch' aria-selected='true'>Takipte <small>{len(watching)}</small></button>"
+        f"<button type='button' class='ov-tab' role='tab' data-tab='stock' aria-selected='false'>Stokta yok <small>{len(stock_rows)}</small></button>"
+        f"<button type='button' class='ov-tab' role='tab' data-tab='tg' aria-selected='false'>Telegram <small>{telegram_count}</small></button></div>"
     )
-    counts = f"{len(rows)} ürün · {len(deal_rows)} fırsat · {len(stock_rows)} stokta yok"
-    return f"<section class='summary-panel'><div class='summary-head'><h2>Özet Tablo</h2><span>{escape(counts)}</span></div>{sections}</section>"
-
+    panes = (f"<div class='ov-pane' data-pane='watch'>{render_watch_pane(watching)}</div>"
+             f"<div class='ov-pane' data-pane='stock' hidden>{render_stock_pane(stock_rows)}</div>"
+             f"<div class='ov-pane' data-pane='tg' hidden>{render_telegram_pane(telegram_status)}</div>")
+    return (f"{status}<section class='ov-hero'><div><h1>Özet Tablo</h1>"
+            "<p>Hedef fiyatın altına inen ürünler en önde. Detay için karta dokun.</p></div>"
+            f"{numbers}</section><h2 class='ov-sec'>Fırsatlar</h2>{spot}{tabs}{panes}{render_errors(errors)}")
 
 # -- errors -------------------------------------------------------------------------
 
@@ -346,28 +462,6 @@ def collect_errors(state: Dict[str, Any], hours: int = 24) -> List[Dict[str, Any
     return sorted(errors, key=lambda item: item["checked_at"], reverse=True)
 
 
-def render_error_card(errors: List[Dict[str, Any]]) -> str:
-    items = []
-    for detail in errors:
-        links = "".join(
-            "<div class='failed-link'><span>Hatalı link</span>"
-            f"<a href='{escape(item['url'], quote=True)}' target='_blank' rel='noopener noreferrer'>{escape(item['url'][:93] + '...' if len(item['url']) > 96 else item['url'])}</a>"
-            f"<em>{escape(item['message'])}</em></div>"
-            for item in detail["failed_links"]
-        )
-        open_link = (f"<a href='{escape(detail['url'], quote=True)}' target='_blank' rel='noopener noreferrer'>Linki aç</a>"
-                     if detail["url"] else "")
-        items.append(f"<li><strong>{escape(detail['title'])}</strong><span>{escape(detail['meta'])}</span>"
-                     f"<em>Hata: {escape(detail['message'])}</em>{links}{open_link}</li>")
-    body = "".join(items) or "<li class='empty-error'>Son 24 saatte hata yok.</li>"
-    error_class = " status-error" if errors else ""
-    return (f"<section class='card error-card public-error-card{error_class}'><span>Hata sayısı (son 24 saat)</span>"
-            f"<strong>{len(errors)}</strong><ul>{body}</ul></section>")
-
-
-# -- Telegram -------------------------------------------------------------------------
-
-
 def telegram_error_count_24h() -> int:
     payload = load_json(TELEGRAM_ERROR_EVENTS_PATH, [])
     cutoff = datetime.now().astimezone() - timedelta(hours=24)
@@ -379,23 +473,6 @@ def telegram_error_count_24h() -> int:
     return count
 
 
-def render_telegram_recent(status: Dict[str, Any]) -> str:
-    items = status.get("recent_notifications") if isinstance(status.get("recent_notifications"), list) else []
-    rows = []
-    for item in items[:5]:
-        if not isinstance(item, dict):
-            continue
-        keyword = escape(str(item.get("keyword") or "-"))
-        url = str(item.get("url") or "").strip()
-        title_html = (f"<a href='{escape(url, quote=True)}' target='_blank' rel='noopener noreferrer'>{keyword}</a>"
-                      if url else f"<strong>{keyword}</strong>")
-        rows.append(f"<li>{title_html}<span>{escape(str(item.get('channel') or '-'))} · {escape(str(item.get('created_at') or '-'))}</span>"
-                    f"<em>{escape(str(item.get('message') or ''))}</em></li>")
-    if not rows:
-        return "<div class='telegram-recent'><h3>Son Telegram Bildirimleri</h3><p>Henüz Telegram bildirimi yok.</p></div>"
-    return f"<div class='telegram-recent'><h3>Son Telegram Bildirimleri</h3><ul>{''.join(rows)}</ul></div>"
-
-
 # -- pages ----------------------------------------------------------------------------
 
 LIVE_REFRESH_NOTE = "Sayfa açıkken veriler kendiliğinden güncellenir."
@@ -403,6 +480,9 @@ LIVE_REFRESH_NOTE = "Sayfa açıkken veriler kendiliğinden güncellenir."
 
 # Seconds between in-place refreshes; the old full reload was 60 s.
 LIVE_INTERVAL_SECONDS = {"live/dashboard": 15, "live/statistics": 60}
+
+SHEET = ("<div class='ov-modal' id='ov-modal' hidden><div class='ov-sheet' id='ov-sheet' role='dialog' "
+         "aria-modal='true' aria-label='Ürün ayrıntısı'></div></div>")
 
 
 def live_region(base: str, endpoint: str, html: str) -> str:
@@ -414,19 +494,11 @@ def live_region(base: str, endpoint: str, html: str) -> str:
 def dashboard_live_html(base: str) -> str:
     """Everything on the summary page that changes while it is open."""
     payload = load_json(SUMMARY_PATH, {})
-    payload = payload if isinstance(payload, dict) else {}
-    cycle = escape(duration_text(payload.get("cycle_duration_seconds"), payload.get("cycle_duration_minutes") or "-"))
-    pills = (
-        "<div class='public-cycle-row'>"
-        f"<section class='public-cycle-pill'><span>Çevrim süresi</span><strong>{cycle}</strong></section>"
-        f"<section class='public-cycle-pill'><span>Son güncelleme</span><strong>{escape(relative_time_text(payload.get('checked_at')))}</strong></section>"
-        "</div>"
-    )
-    telegram_status = load_json(TELEGRAM_STATUS_PATH, {})
     state = load_json(STATE_PATH, {})
-    return (pills + render_summary(payload)
-            + render_telegram_recent(telegram_status if isinstance(telegram_status, dict) else {})
-            + render_error_card(collect_errors(state if isinstance(state, dict) else {})))
+    telegram_status = load_json(TELEGRAM_STATUS_PATH, {})
+    state = state if isinstance(state, dict) else {}
+    return render_summary(payload if isinstance(payload, dict) else {}, state,
+                          telegram_status if isinstance(telegram_status, dict) else {}, collect_errors(state))
 
 
 def render_dashboard_page(base: str, params: Dict[str, List[str]], config_error: str = "") -> bytes:
@@ -440,8 +512,13 @@ def render_dashboard_page(base: str, params: Dict[str, List[str]], config_error:
         notice += (f"<p class='notice notice-fail config-error'>Ayarlarda hata var, izleme durdu: {escape(config_error)} "
                    f"<a href='{escape(link(base, 'settings'), quote=True)}'>Ayarları düzelt</a></p>")
     body = notice + live_region(base, "live/dashboard", dashboard_live_html(base))
-    return render_page(base, "dashboard", "Hermes", body, refresh_seconds=60, scripts=live_script_tag(base))
+    return render_page(base, "dashboard", "Hermes", body, body_class="public ov ov-first", refresh_seconds=60,
+                       scripts=live_script_tag(base) + overview_script_tag(base), after_main=SHEET)
 
 
 def live_script_tag(base: str) -> str:
     return f"<script src='{escape(link(base, 'live.js'), quote=True)}?v={escape(APP_VERSION)}' defer></script>"
+
+
+def overview_script_tag(base: str) -> str:
+    return f"<script src='{escape(link(base, 'overview.js'), quote=True)}?v={escape(APP_VERSION)}' defer></script>"

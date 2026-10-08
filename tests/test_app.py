@@ -262,7 +262,7 @@ class EndToEndTests(unittest.TestCase):
                 with urllib.request.urlopen(f"{base}/", timeout=5) as response:
                     page = response.read().decode()
                 self.assertIn("Stark Sırt Çantası", page)
-                self.assertIn("Hedef Fiyat Altındaki Fırsatlar", page)
+                self.assertIn("class='ov-deal ", page)
                 runtime.service.monitor.notifier.send.assert_called_once()
                 ok, message = runtime.reset_notifications()
                 self.assertTrue(ok, message)

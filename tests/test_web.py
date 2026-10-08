@@ -56,6 +56,7 @@ class DataFilesMixin:
             patch("hermes.config.OPTIONS_PATH", self.options_path),
             patch.object(dashboard, "SUMMARY_PATH", self.data.files.summary),
             patch.object(dashboard, "STATE_PATH", self.data.files.state),
+            patch.object(dashboard, "DATABASE_PATH", self.data.files.database),
             patch.object(statistics_page, "DATABASE_PATH", self.data.files.database),
             patch.object(statistics_page, "SUMMARY_PATH", self.data.files.summary),
             patch.object(dashboard, "TELEGRAM_STATUS_PATH", root / "status.json"),
@@ -289,109 +290,177 @@ class DashboardTests(DataFilesMixin, unittest.TestCase):
         })
         self.data.write_summary({"rows": [price_row()]})
         html = dashboard.render_dashboard_page(".", {}).decode()
-        self.assertIn("Hata sayısı (son 24 saat)</span><strong>2</strong>", html)
+        self.assertIn("Hatalar <small>son 24 saat · 2</small>", html)
         self.assertIn("Amazon: iPhone", html)
         self.assertNotIn("Eski", html)
-        self.assertGreater(html.index("Hata sayısı"), html.index("Özet Tablo"))
+        self.assertGreater(html.index("Hatalar <small>"), html.index("Özet Tablo"))
+        self.data.write_state({})
+        self.assertIn("Son 24 saatte hata yok", dashboard.render_dashboard_page(".", {}).decode())
 
     def test_error_links_of_variants_are_listed(self):
         details = dashboard.error_link_details("https://www.hepsiburada.com/a-p-1 | Fiyat yok; https://www.hepsiburada.com/b-p-2 | Erişim yok")
         self.assertEqual([item["url"] for item in details], ["https://www.hepsiburada.com/a-p-1", "https://www.hepsiburada.com/b-p-2"])
         self.assertEqual(dashboard.clean_error_message("https://x.test | Site 403"), "Site 403")
 
-    def test_multi_result_watch_collapses_under_its_name(self):
-        rows = [price_row(product_title="Juo Q3 Yeşil", product_url="https://example.test/green", difference="+37,00",
+    def live(self):
+        return dashboard.dashboard_live_html(".")
+
+    def test_multi_result_watch_gets_its_own_section_with_variant_tags(self):
+        rows = [price_row(product_title="Juo Q3, 256 GB / Yeşil", product_url="https://example.test/green", price="14.000 TL",
                           search_group="g", search_group_label="Juo Q3"),
-                price_row(product_title="Juo Q3 Kırmızı", product_url="https://example.test/red", difference="+99,00",
+                price_row(product_title="Juo Q3, 256 GB / Kırmızı", product_url="https://example.test/red", price="14.500 TL",
                           search_group="g", search_group_label="Juo Q3")]
-        rendered = dashboard.render_table_section("Hedefin Üstünde Kalan Ürünler", rows, "Boş", collapse=True)
-        self.assertIn("<details class='search-result-group' data-key='group:Juo Q3'>", rendered)
-        self.assertIn("2 sonuç", rendered)
+        self.data.write_summary({"rows": rows})
+        html = self.live()
+        self.assertIn("<h3 class='ov-group-head site-amazon'>", html)
+        self.assertIn("2 sonuç", html)
+        self.assertIn("<em>Yeşil</em>", html)
+        self.assertIn("<em>Kırmızı</em>", html)
+        self.assertNotIn("<em>256 GB</em>", html)  # shared by every result, so it is not a difference
 
-    def test_open_rows_are_ordered_by_seller_then_difference(self):
-        rows = [{"seller": "Hepsiburada", "product_title": "Uzak", "difference": "+900,00"},
-                {"seller": "Amazon", "product_title": "Orta", "difference": "+600,00"},
-                {"seller": "Amazon", "product_title": "Yakın", "difference": "+100,00"},
-                {"seller": "Hepsiburada", "product_title": "Yakın", "difference": "+150,00"},
-                {"seller": "Amazon", "product_title": "Varyasyon B", "difference": "+75,00", "search_group": "g", "search_group_label": "Juo"},
-                {"seller": "Amazon", "product_title": "Varyasyon A", "difference": "+50,00", "search_group": "g", "search_group_label": "Juo"}]
-        open_rows, groups = dashboard.split_result_groups(rows)
-        self.assertEqual([row["product_title"] for row in open_rows], ["Yakın", "Orta", "Yakın", "Uzak"])
-        self.assertEqual([row["product_title"] for row in groups[0][1]], ["Varyasyon A", "Varyasyon B"])
+    def test_watching_tiles_are_ordered_by_distance_to_target_and_single_groups_stay_plain(self):
+        rows = [price_row(product_title="Uzak", product_url="https://example.test/far", price="20.000 TL"),
+                price_row(product_title="Yakın", product_url="https://example.test/near", price="13.100 TL"),
+                price_row(product_title="Tek", product_url="https://example.test/one", price="16.000 TL",
+                          search_group="g", search_group_label="Tek")]
+        self.data.write_summary({"rows": rows})
+        html = self.live()
+        self.assertEqual([html.index(f"aria-label='{title}'") for title in ("Yakın", "Tek", "Uzak")],
+                         sorted(html.index(f"aria-label='{title}'") for title in ("Yakın", "Tek", "Uzak")))
+        self.assertNotIn("ov-group-head", html)
 
-    def test_a_single_grouped_row_stays_open(self):
-        open_rows, groups = dashboard.split_result_groups([price_row(search_group="g", search_group_label="Tek")])
-        self.assertEqual((len(open_rows), groups), (1, []))
+    def test_deals_come_first_with_the_biggest_discount_first_and_only_watching_rows_are_tiles(self):
+        rows = [price_row(product_title="Az indirim", product_url="https://example.test/a", price="12.900 TL"),
+                price_row(product_title="Çok indirim", product_url="https://example.test/b", price="10.000 TL"),
+                price_row(product_title="Hedef üstü", product_url="https://example.test/c", price="14.000 TL")]
+        self.data.write_summary({"rows": rows})
+        html = self.live()
+        self.assertEqual(html.count("class='ov-deal "), 2)
+        self.assertEqual(html.count("class='ov-tile "), 1)
+        self.assertLess(html.index("aria-label='Çok indirim'"), html.index("aria-label='Az indirim'"))
+        self.assertIn("<div class='ov-num deal'><b>2</b><span>fırsat</span></div>", html)
+        self.assertIn("−%23,1<small>hedefin altında</small>", html)
 
-    def test_stock_rows_are_collapsed_by_site(self):
-        html = dashboard.render_stock_section([{"seller": "Zara", "product_title": "Polo / M", "target": "1.500 TL"},
-                                               {"seller": "Zara", "product_title": "Gömlek / XL", "target": "1.500 TL"},
-                                               {"seller": "H&M", "product_title": "Pantolon / L", "target": "1.200 TL"}])
-        self.assertEqual(html.count("stock-site-group"), 2)
-        self.assertIn("Zara</strong><span>2 ürün", html)
-        self.assertIn("H&amp;M</strong><span>1 ürün", html)
+    def test_site_filter_chips_list_only_sellers_that_have_tiles(self):
+        self.data.write_summary({"rows": [price_row(price="14.000 TL"), price_row(seller="Network", product_url="https://n.test/p", price="14.000 TL")]})
+        html = self.live()
+        self.assertIn("data-filter='site-amazon'", html)
+        self.assertIn("data-filter='site-network'", html)
+        self.assertNotIn("data-filter='site-zara'", html)
 
-    def test_stock_rows_show_when_they_were_last_checked(self):
-        from datetime import datetime, timedelta, timezone
+    def test_stock_rows_show_reason_target_link_and_when_they_were_last_checked(self):
         stamp = (datetime.now(timezone.utc) - timedelta(days=2, minutes=1)).isoformat()
-        html = dashboard.render_stock_section([{"seller": "Zara", "product_title": "Polo / M", "target": "1.500 TL",
-                                                "checked_at": stamp}])
-        self.assertIn("Son<br>güncelleme", html)
-        self.assertIn("<table class='stock-table'>", html)
-        self.assertIn(".stock-table th:nth-child(3)", APP_CSS)
-        self.assertIn('data-label="Son güncelleme" class="updated-cell">2 gün önce', html)
-        self.assertIn('class="updated-cell">-</td>', dashboard.render_stock_section([{"seller": "Zara", "product_title": "X"}]))
+        self.data.write_summary({"rows": [], "stock_rows": [
+            {"seller": "Zara", "product_title": "Polo / M", "product_url": "https://zara.test/p", "target": "1.500 TL",
+             "reason": "Zara beden stokta değil: M", "checked_at": stamp},
+            {"seller": "H&M", "product_title": "Pantolon / L", "target": "1.200 TL"}]})
+        html = self.live()
+        self.assertIn("<li class='ov-row site-zara'>", html)
+        self.assertIn("<a href='https://zara.test/p'", html)
+        self.assertIn("Zara · Zara beden stokta değil: M · hedef 1.500 TL", html)
+        self.assertIn("<span class='ov-ago'>2 gün önce</span>", html)
+        self.assertIn("<span class='ov-ago'>-</span>", html)
+        self.assertIn("Stokta yok <small>2</small>", html)
+        self.assertIn("H&amp;M · Stokta yok · hedef 1.200 TL", html)
 
-    def test_warehouse_rows_are_labeled_without_priority_dot(self):
-        html = dashboard.render_table_row(price_row(is_warehouse=True))
-        self.assertIn('class="warehouse-tag">DEPO</strong>', html)
-        self.assertNotIn("priority-dot", html)
+    def test_warehouse_offers_are_tagged_and_have_no_scan_interval(self):
+        self.data.write_summary({"rows": [price_row(is_warehouse=True)]})
+        html = self.live()
+        self.assertIn("<span class='ov-depo'>DEPO</span>", html)
+        self.assertNotIn("Tarama sıklığı", html)
 
-    def test_normal_rows_show_one_of_five_priority_dots(self):
+    def test_detail_shows_one_of_five_priority_dots(self):
         for priority, label in (("cycle", "Her çevrimde fiyat taranır"), ("30m", "30 dk'da bir taranır"),
                                 ("60m", "60 dk'da bir taranır"), ("3h", "3 saatte bir taranır"), ("6h", "6 saatte bir taranır"),
                                 ("high", "6 saatte bir taranır")):  # a row saved before 3.12
             with self.subTest(priority=priority):
-                html = dashboard.render_table_row(price_row(priority=priority))
+                self.data.write_summary({"rows": [price_row(priority=priority)]})
+                html = self.live()
                 self.assertIn(f"priority-{'6h' if priority == 'high' else priority}", html)
                 self.assertIn(f'title="{escape(label, quote=True)}"', html)
         colors = [APP_CSS.split(f".priority-{key} {{ background:")[1].split(";")[0] for key in ("cycle", "30m", "60m", "3h", "6h")]
         self.assertEqual(colors, ["#ff5c64", "#ff9548", "#f2c94c", "#c4dc4a", "#3fbf6a"])  # red to green
 
-    def test_titles_are_60_characters_without_ellipsis_and_groups_70_with(self):
-        full = "Çok uzun ürün adı " * 12
-        visible, tooltip = dashboard.shortened_title(full, dashboard.TABLE_TITLE_MAX_LENGTH, ellipsis=False)
-        self.assertEqual(visible, full.strip()[:60].rstrip())
-        html = dashboard.render_table_row(price_row(product_title=full))
-        self.assertIn(visible, html)
-        self.assertIn(tooltip, html)
-        group_title = "Çok uzun grup başlığı " * 8
-        visible, tooltip = dashboard.shortened_title(group_title, dashboard.GROUP_TITLE_MAX_LENGTH)
-        self.assertEqual(len(visible), 70)
-        self.assertTrue(visible.endswith("..."))
-        self.assertIn(f"title='{tooltip}'", dashboard.render_group(group_title, []))
-        self.assertIn(f"data-key='group:{tooltip}'", dashboard.render_group(group_title, []))
+    def test_stock_count_leaves_the_title_and_the_full_detail_is_in_the_sheet(self):
+        self.data.write_summary({"rows": [price_row(product_title="Edifier M60 (Stok 5)", price="14.000 TL", min_price="12.000 TL",
+                                                    max_price="15.000 TL", price_checked_at=utc_now())]})
+        html = self.live()
+        self.assertIn("<h4 title='Edifier M60'>Edifier M60</h4>", html)
+        self.assertIn("<span>Stok</span><b>5 adet</b>", html)
+        for fact in ("En düşük</span><b>12.000 TL", "En yüksek</span><b>15.000 TL", "Satıcı</span><b>Amazon",
+                     "Son güncelleme</span><b>az önce", "Hedef 13.000 TL", "hedefe 1.000 TL var", "Ürüne git"):
+            self.assertIn(fact, html)
+
+    def test_price_line_comes_from_the_price_history_database(self):
+        url = "https://www.amazon.com.tr/dp/B000000001"
+        self.data.write_state({"offer": {"url": url, "tracking_id": "card1", "is_warehouse": False}})
+        store = History.at(self.data.files.database)
+        store.record_price("offer", "amazon", "Ürün", Decimal("16000"), datetime.now(timezone.utc) - timedelta(days=9))
+        store.record_price("offer", "amazon", "Ürün", Decimal("14000"), datetime.now(timezone.utc) - timedelta(days=2))
+        store.close()
+        self.data.write_summary({"rows": [price_row(price="14.000 TL", tracking_id="card1")]})
+        html = self.live()
+        self.assertIn("class='ov-chart'", html)
+        self.assertIn("<span class='ov-chg down'>▼ %12,5</span>", html)  # 16.000 -> 14.000
+        self.assertIn("Takip başlangıcı", html)
+        self.data.write_summary({"rows": [price_row(price="14.000 TL", tracking_id="other card")]})
+        self.assertNotIn("class='ov-chart'", self.live())
+        self.assertIn("<span class='ov-chg flat'>yeni</span>", self.live())
+
+    def test_price_that_rose_since_the_first_record_is_marked_up(self):
+        self.data.write_state({"offer": {"url": "https://www.amazon.com.tr/dp/B000000001", "tracking_id": "", "is_warehouse": False}})
+        store = History.at(self.data.files.database)
+        store.record_price("offer", "amazon", "Ürün", Decimal("10000"), datetime.now(timezone.utc) - timedelta(days=3))
+        store.close()
+        self.data.write_summary({"rows": [price_row(price="14.000 TL")]})
+        self.assertIn("▲ %40,0", self.live())
 
     def test_prices_are_whole_lira(self):
         self.assertEqual(parse_decimal("1.500"), Decimal("1500"))
         self.assertEqual(settings._price_input_value("3000,0"), "3.000")
         self.assertEqual(dashboard.display_tl("1.500,75"), "1.500 TL")
         self.assertEqual(dashboard.display_tl("+125,90", signed=True), "+125 TL")
-        self.assertEqual(dashboard.display_tl_range("1.500,75 / 2.000,01"), "1.500 TL / 2.000 TL")
+        self.write_whole_lira_row()
 
-    def test_price_age_is_shown_in_minutes(self):
+    def write_whole_lira_row(self):
+        self.data.write_summary({"rows": [price_row(price="14.000,75 TL", price_checked_at=utc_now())]})
+        self.assertIn("<div class='ov-price'>14.000<small>TL</small></div>", self.live())
+
+    def test_price_age_reads_in_minutes_hours_or_days(self):
         checked_at = (datetime.now(timezone.utc) - timedelta(minutes=125)).isoformat()
-        html = dashboard.render_table_row(price_row(price_checked_at=checked_at))
-        self.assertIn("125 dk önce", html)
-        self.assertIn('data-label="Son güncelleme"', html)
+        self.data.write_summary({"rows": [price_row(price="14.000 TL", price_checked_at=checked_at)]})
+        self.assertIn("<span class='ov-ago'>2 sa önce</span>", self.live())
+
+    def test_the_home_screen_keeps_its_state_across_in_place_refreshes(self):
+        script = self.router_get("/overview.js")
+        for text in ("hermes-live", "data-tab", "data-filter", "data-open", "ov-first", "Escape", "overflow"):
+            self.assertIn(text, script)
+        self.assertIn("hermes-live", self.router_get("/live.js"))
+
+    def test_fonts_ship_with_the_panel(self):
+        router = server.Router(FakeRuntime())
+        for name in assets.FONT_FILES:
+            response = router.handle(server.split_request(f"/fonts/{name}", "GET", b"", False))
+            self.assertEqual((response.status, response.content_type), (200, "font/woff2"))
+            self.assertTrue(response.payload.startswith(b"wOF2"))
+            self.assertIn(f"fonts/{name}", APP_CSS)
+
+    def router_get(self, path):
+        response = server.Router(FakeRuntime()).handle(server.split_request(path, "GET", b"", False))
+        return response.payload.decode()
 
     def test_telegram_notifications_are_listed(self):
         (self.data.root / "status.json").write_text(json.dumps({"recent_notifications": [
             {"keyword": "airpods", "channel": "@firsatz", "created_at": "2026-10-03 12:00:00", "message": "AirPods indirim",
              "url": "https://t.me/firsatz/1"}]}), encoding="utf-8")
         html = dashboard.render_dashboard_page(".", {}).decode()
-        self.assertIn("https://t.me/firsatz/1", html)
+        self.assertIn("https://t.me/firsatz/1", html)  # shown even before the first price table exists
         self.assertIn("AirPods indirim", html)
+        self.data.write_summary({"rows": [price_row(price="14.000 TL")]})
+        html = dashboard.render_dashboard_page(".", {}).decode()
+        self.assertIn("data-pane='tg'", html)
+        self.assertIn("AirPods indirim", html)
+        self.assertIn("Telegram <small>1</small>", html)
 
 
 class StatisticsPageTests(DataFilesMixin, unittest.TestCase):

@@ -117,7 +117,9 @@ ASSETS: Dict[str, Callable[[Request], Response]] = {
     "/settings.js": lambda _r: Response(200, assets.SETTINGS_SCRIPT.encode("utf-8"), "application/javascript; charset=utf-8"),
     "/restart.js": lambda _r: Response(200, assets.RESTART_SCRIPT.encode("utf-8"), "application/javascript; charset=utf-8"),
     "/live.js": lambda _r: Response(200, assets.LIVE_SCRIPT.encode("utf-8"), "application/javascript; charset=utf-8"),
+    "/overview.js": lambda _r: Response(200, assets.OVERVIEW_SCRIPT.encode("utf-8"), "application/javascript; charset=utf-8"),
     "/settings/restart.js": lambda _r: Response(200, assets.RESTART_SCRIPT.encode("utf-8"), "application/javascript; charset=utf-8"),
+    **{f"/fonts/{name}": (lambda _r, name=name: Response(200, assets.read_font(name), "font/woff2")) for name in assets.FONT_FILES},
     "/icon.png": lambda _r: Response(200, HERMES_ICON_PNG, "image/png"),
     "/icon.svg": lambda _r: Response(200, HERMES_ICON_SVG, "image/svg+xml"),
     "/manifest.webmanifest": lambda r: Response(200, render_web_manifest(r.base), "application/manifest+json; charset=utf-8"),
@@ -210,7 +212,7 @@ def make_handler(router: Router, public_only: bool):
                 log(f"Panel isteği işlenemedi: {method} {urllib.parse.urlparse(self.path).path[:40]} | {exc}")
                 response = Response(500, "Hermes bu sayfayı şu an hazırlayamadı.\n".encode("utf-8"))
             payload, headers = response.payload, dict(response.headers)
-            if (len(payload) >= GZIP_MIN_BYTES and not response.content_type.startswith("image/png")
+            if (len(payload) >= GZIP_MIN_BYTES and not response.content_type.startswith(("image/png", "font/"))
                     and "gzip" in self.headers.get("Accept-Encoding", "")):
                 payload = gzip.compress(payload, compresslevel=6)
                 headers.update({"Content-Encoding": "gzip", "Vary": "Accept-Encoding"})

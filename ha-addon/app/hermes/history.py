@@ -327,6 +327,18 @@ def read_prices(path: Path, offer_key: str) -> List[Tuple[datetime, Decimal]]:
     return [(parse_iso_datetime(checked_at).astimezone(), Decimal(price)) for checked_at, price in rows]
 
 
+def read_prices_by_key(path: Path, offer_keys: List[str]) -> Dict[str, List[Tuple[datetime, Decimal]]]:
+    """Price points of several offers in one read (the home screen draws a line per row)."""
+    found: Dict[str, List[Tuple[datetime, Decimal]]] = {key: [] for key in offer_keys}
+    for start in range(0, len(offer_keys), 200):
+        chunk = offer_keys[start:start + 200]
+        rows = _read(path, "SELECT offer_key, checked_at, price FROM prices WHERE offer_key IN "
+                           f"({', '.join('?' * len(chunk))}) ORDER BY checked_at, rowid", tuple(chunk))
+        for key, checked_at, price in rows:
+            found[key].append((parse_iso_datetime(checked_at).astimezone(), Decimal(price)))
+    return found
+
+
 def read_requests(path: Path, site: str, since: datetime) -> List[Tuple[datetime, int, str]]:
     """(finished at, duration ms, outcome) of one site's network requests since a moment, oldest first."""
     rows = _read(path, "SELECT at, duration_ms, outcome FROM requests WHERE site = ? AND at >= ? ORDER BY at, rowid",

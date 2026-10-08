@@ -133,7 +133,7 @@ Hermes her siteyi kendi sağlayıcısında okur. Bir sitenin fiyat okuma kuralı
 - **Network:** Sayfadaki normal fiyatın yanında `Sepette` fiyatı varsa indirimli sepet fiyatını önceliklendirir. Beden girilmişse yalnızca istenen beden stoktayken fiyatı tabloya alır; `XL`, `xl` ve parantezli beden ekleri eşdeğer kabul edilir.
 - **Beymen Club:** Network ile aynı şekilde normal fiyatın yanında `Sepette`, `2 ve üzeri` veya `3 ve üzeri` kampanya fiyatı varsa indirimli fiyatı önceliklendirir. Beden girilmişse yalnızca istenen beden stoktayken fiyatı tabloya alır; büyük/küçük harf farkı yoktur.
 - **Nordbron:** Sayfadaki ürün fiyatını okur; bot koruması veya captcha gerçek hata olarak kaydedilir.
-- **Zara:** Renk varyasyonlarını ve seçilen bedeni kontrol eder. İstenen beden stokta değilse bu durum hata değil, özet tablodaki `Stokta Olmayanlar` bölümüne yazılır. `6` ve `44` gibi girilen bedenler, sayfadaki yaş/EU ekleriyle uyumlu karşılaştırılır.
+- **Zara:** Renk varyasyonlarını ve seçilen bedeni kontrol eder. İstenen beden stokta değilse bu durum hata değil, Özet Tablo'daki `Stokta yok` sekmesine yazılır. `6` ve `44` gibi girilen bedenler, sayfadaki yaş/EU ekleriyle uyumlu karşılaştırılır.
 - **H&M:** Renk ve beden stok bilgisini siteye özel veri yolu üzerinden okur. Stokta olmayan beden hata olarak değil, `Stokta Olmayanlar` bölümünde gösterilir.
 - **Ben Gurme:** Shopify ürün verisindeki canlı stok ve varyant bilgisini okur. Stoktaki her gramaj ayrı satır olarak değerlendirilir; ürün tamamen tükendiyse bu teknik hata sayılmaz ve `Stokta Olmayanlar` bölümünde gösterilir. Ürün tekrar stokta olduğunda hedef fiyattan bağımsız tek bir stok bildirimi gönderilir.
 
@@ -202,12 +202,13 @@ diğer takipler, istek aralıkları ve tur sonu beklemesine bağlıdır. Çok k�
 süreli stokların tamamını yakalama garantisi yoktur. `Test` sayfası aynı
 varyasyon okuyucusunu kullanır, kayıt veya bildirim oluşturmaz.
 
-### Tablo başlıkları
+### Özet Tablo görünümü
 
-Fırsat ve stok dışı tablolarındaki ürün adları en fazla 60 karakter gösterir;
-kesilen adın sonuna üç nokta eklenmez. Varyasyon sonuçlarını açan grup başlıkları
-en fazla 70 karakter gösterir. Tam ürün adı veya grup adı hücrenin üzerine
-gelindiğinde görünür; bağlantı ve takip verisi kısaltılmaz.
+Özet Tablo kartlardan oluşur: hedef fiyatın altındaki ürünler üstte "Fırsatlar" kartlarında, altında
+Takipte, Stokta yok ve Telegram sekmeleri vardır. Karttaki ürün adı sığmayınca sondan "..." ile kısalır;
+tam ad, en düşük/en yüksek fiyat, stok, tarama sıklığı, son güncelleme ve fiyat geçmişi grafiği karta
+dokununca açılan pencerede görünür. Aynı takibin birden çok sonucunu ayıran kısımlar (renk, hafıza)
+küçük etiket olarak gösterilir. Bağlantı ve takip verisi kısaltılmaz.
 
 Amazon'un normal araması ile Amazon Depo araması aynı teklifi ayrı kaynaklardan
 getirse bile tablo bunu tek satırda gösterir. Yeni ürün ve Depo teklifi ise

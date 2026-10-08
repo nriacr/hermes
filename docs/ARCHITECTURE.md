@@ -371,11 +371,20 @@ Text responses of 1 KB or more are gzip-compressed when accepted. Tools, notices
 stay outside the live region. Without JavaScript the page falls back to a
 full reload every 60 seconds (`<noscript>` refresh).
 
-Visual rules: dark charcoal/gray, high-contrast text, muted provider accents,
-whole-lira prices (`1.500 TL`), product names 60 characters without ellipsis,
-group titles 70 characters, full text in the tooltip, priority dots on normal
-rows only (five colors from red, every cycle, through orange, yellow and
-yellow-green to green, 6 hours; the same dot starts each card in Ayarlar), DEPO tag on warehouse rows, compact mobile cards, correct Turkish.
+Visual rules of the summary page (3.13, `web/dashboard.py`, `web/pricechart.py`, `OVERVIEW_CSS` and
+`OVERVIEW_SCRIPT` in `web/assets.py`): dark theme with Sora and Inter served from `web/fonts/` (no outside
+connection), one color per provider (`site-*` classes), whole-lira prices (`1.500 TL`). Deals (price at or below
+target) are cards on top; the rest sit in tabs (Takipte, Stokta yok, Telegram) as tiles: seller color, name
+(clamped, cut at the end), price, price line, change since the first recorded price, age of the last read.
+Results of one watch share a section whose tiles carry small tags for what differs between them. Tapping a card
+opens a sheet built from the card's hidden `.ov-detail` (price, target proximity, min/max, seller, stock, scan
+interval dot, age, first record, step chart with the target line); it must fit the viewport without scrolling.
+The price lines come from `hermes.db` `prices`: a summary row is matched to its `state.json` offer entry (same
+link, Depo flag and tracking card) and `history.read_prices_by_key` reads all lines in one query; the current
+price closes each line. Filters, tab and the open sheet are client state (`overview.js`) and survive the live
+swap (`hermes-live` event); the entrance animation runs once (`ov-first`). Statistics and Ayarlar keep the
+shared stylesheet rules; priority dots (five colors from red, every cycle, to green, 6 hours) appear in the
+sheet of normal offers and at the start of each card in Ayarlar, DEPO tag on warehouse offers.
 
 ## 11. Telegram
 
