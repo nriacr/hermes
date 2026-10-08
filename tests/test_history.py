@@ -14,10 +14,11 @@ import requests
 from support import LOG_LINES, TempData, config, key, monitor, notifier, watch
 
 from hermes import history as history_module
-from hermes.errors import BotProtectionHermesError, HttpStatusHermesError, OutOfStockHermesError, PriceUnavailableHermesError
+from hermes.errors import BotProtectionHermesError, HermesError, HttpStatusHermesError, OutOfStockHermesError, PriceUnavailableHermesError
 from hermes.history import History, read_cycles, read_prices, read_site_reads, read_site_requests
 from hermes.models import OfferResult
-from hermes.monitor import runner, scheduling, state as state_ops, summary
+from hermes.monitor import cycle as cycle_module, runner, scheduling, state as state_ops, summary
+from hermes.utils import SystemLoad
 
 AMAZON = "https://www.amazon.com.tr/dp/B000000001"
 HEPSIBURADA = "https://www.hepsiburada.com/urun-p-HBC000001"
@@ -173,6 +174,17 @@ class SchemaUpgradeTests(HistoryCase):
             self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], history_module.SCHEMA_VERSION)
 
 
+    def test_a_3_4_database_gains_detail_and_load_columns(self):
+        with sqlite3.connect(self.data.files.database) as db:
+            db.execute("CREATE TABLE reads (at TEXT NOT NULL, site TEXT NOT NULL, outcome TEXT NOT NULL, duration_ms INTEGER NOT NULL, "
+                       "watch_key TEXT NOT NULL DEFAULT '', priority TEXT NOT NULL DEFAULT '')")
+            db.execute("INSERT INTO reads VALUES ('2026-10-03T20:00:00+00:00', 'amazon', 'error', 1000, 'watch_x', 'high')")
+        self.history.record_read("amazon", "timeout", 2000, "watch_x", "high", "Zaman aşımı", SystemLoad(150, 300))
+        rows = history_module.read_reads(self.data.files.database, datetime(2026, 1, 1, tzinfo=timezone.utc))
+        self.assertEqual([(row.outcome, row.detail, row.load) for row in rows],
+                         [("error", "", SystemLoad()), ("timeout", "Zaman aşımı", SystemLoad(150, 300))])
+
+
 class WriteTests(HistoryCase):
     def test_price_points_are_recorded_only_on_change(self):
         for price in ("100", "100", "90", "90", "100"):
@@ -285,6 +297,27 @@ class MonitorHistoryTests(HistoryCase):
         self.assertEqual(self.reads(), ["captcha", "http_503", "stock", "error", "timeout", "connection", "unreadable"])
         with sqlite3.connect(self.data.files.database) as db:
             self.assertEqual({row for row in db.execute("SELECT watch_key, priority FROM reads")}, {(key(rule), "high")})
+
+    def test_a_wrapped_browser_timeout_counts_as_timeout_and_keeps_its_reason_and_the_pi_load(self):
+        class TimeoutException(Exception):
+            pass
+
+        def fail(_w, _ctx, _o):
+            try:
+                raise TimeoutException("page load")
+            except TimeoutException as exc:
+                raise HermesError("Amazon gerçek tarayıcı sayfası okunamadı (TimeoutException).") from exc
+
+        rule = watch("iPhone", AMAZON, target="100")
+        cfg = config([rule])
+        with patch.object(cycle_module, "system_load", return_value=SystemLoad(92, 640)):
+            self.run_cycle(cfg, fail)
+            self.run_later(cfg, lambda _w, _ctx, _o: [amazon_offer("90")], 70)
+        with sqlite3.connect(self.data.files.database) as db:
+            rows = db.execute("SELECT outcome, detail, cpu_percent, memory_mb FROM reads ORDER BY rowid").fetchall()
+        self.assertEqual(rows, [("timeout", "Amazon gerçek tarayıcı sayfası okunamadı (TimeoutException).", 92, 640),
+                                ("ok", "", None, None)])
+        self.assertTrue(any(line.endswith("(TimeoutException). | işlemci %92 · boş bellek 640 MB") for line in LOG_LINES))
 
     def test_amazon_requests_reach_the_database(self):
         rule = watch("iPhone", AMAZON, target="100")

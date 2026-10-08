@@ -1,10 +1,12 @@
+import os
 import random
 import re
 import unicodedata
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import ROUND_DOWN, Decimal, InvalidOperation
 from html import unescape
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 from urllib.parse import parse_qs, urlparse, urlunparse
 
 from .constants import AMAZON_BASE_URL, DEFAULT_HEADERS, SITE_HOST_MARKERS, SITE_LABELS, USER_AGENTS
@@ -20,6 +22,45 @@ HEPSIBURADA_PRODUCT_URL_PATTERN = re.compile(
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+# Errors read before this moment belong to the previous run (see recent watch errors).
+PROCESS_STARTED_AT = datetime.now(timezone.utc)
+
+
+@dataclass(frozen=True)
+class SystemLoad:
+    """How busy the Pi was at a failed read: CPU use (1-minute load per core) and free memory."""
+
+    cpu_percent: Optional[int] = None
+    memory_mb: Optional[int] = None
+
+    @property
+    def text(self) -> str:
+        parts = []
+        if self.cpu_percent is not None:
+            parts.append(f"işlemci %{self.cpu_percent}")
+        if self.memory_mb is not None:
+            parts.append(f"boş bellek {self.memory_mb} MB")
+        return " · ".join(parts)
+
+
+def system_load() -> SystemLoad:
+    """Read without raising; inside the add-on container both values describe the whole Pi."""
+    try:
+        cpu_percent: Optional[int] = round(os.getloadavg()[0] / (os.cpu_count() or 1) * 100)
+    except (AttributeError, OSError):
+        cpu_percent = None
+    memory_mb = None
+    try:
+        with open("/proc/meminfo", encoding="ascii") as handle:
+            for line in handle:
+                if line.startswith("MemAvailable:"):
+                    memory_mb = int(line.split()[1]) // 1024
+                    break
+    except (OSError, ValueError, IndexError):
+        pass
+    return SystemLoad(cpu_percent, memory_mb)
 
 
 def local_now() -> datetime:

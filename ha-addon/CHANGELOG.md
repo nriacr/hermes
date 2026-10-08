@@ -1,5 +1,16 @@
 # Değişiklik günlüğü
 
+## 3.10.0
+
+- İstatistik sayfasında "Hata dönemleri": bir sitenin birbirine 15 dakikadan yakın engel ve hataları tek
+  satırda (saat aralığı, kaç okuma, hangi tür, en sık neden, o sıradaki Pi yükü). 65 ayrı hata yerine
+  "19:01–19:56 · Amazon · 65 okuma · Zaman aşımı" görünüyor.
+- Başarısız her okuma veritabanına hata metniyle ve o anki işlemci kullanımı ile boş bellekle kaydediliyor;
+  aynı bilgi log satırına da yazılıyor. Pi logu kısa olsa da neden kaybolmuyor.
+- Tarayıcının sayfa yükleme zaman aşımı artık "Sayfa okunamadı" değil "Zaman aşımı" olarak sayılıyor.
+- Hata sayısı sensörü ve Özet Tablo'daki hata kartı, Hermes yeniden başlamadan önce kalan hataları
+  göstermiyor; ürün yeniden okunup yine hata verirse hemen görünür.
+
 ## 3.9.5
 
 - Özet Tablo'da "Güncel fiyat" ve "Hedef" sütunları artık tüm tablolarda aynı yerden başlıyor:

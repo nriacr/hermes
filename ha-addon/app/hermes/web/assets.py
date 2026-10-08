@@ -137,6 +137,13 @@ tbody tr.site-other { --site-bg:rgba(183,177,222,.13); --site-bg-strong:rgba(183
 .measure-wrap { border:1px solid var(--line); border-radius:14px; }
 .measure-table th:not(:first-child),.measure-table td:not(:first-child) { text-align:right !important; }
 .measure-table td.zero { color:var(--muted); }
+.spell-title { margin:18px 0 0; font-size:14px; }
+.error-spells { list-style:none; margin:10px 0 0; padding:0; display:grid; gap:8px; }
+.error-spells li { padding:10px 12px; border:1px solid var(--line); border-left:3px solid var(--bad); border-radius:12px; background:#202327; }
+.error-spells li div { display:flex; flex-wrap:wrap; justify-content:space-between; gap:4px 12px; }
+.error-spells li strong { font-size:14px; font-variant-numeric:tabular-nums; }
+.error-spells li span { color:var(--bad); font-size:13px; font-weight:700; }
+.error-spells li small { display:block; margin-top:5px; color:var(--muted); font-size:12px; overflow-wrap:anywhere; }
 @media (max-width:720px) {
   .stat-tiles { grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
   .stat-tile strong { font-size:22px; }

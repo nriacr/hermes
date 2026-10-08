@@ -22,9 +22,9 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from .logging_utils import log
 from .storage import load_json
-from .utils import parse_iso_datetime
+from .utils import SystemLoad, parse_iso_datetime
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS cycles (checked_at TEXT NOT NULL, duration_seconds REAL NOT NULL);
@@ -35,7 +35,8 @@ CREATE TABLE IF NOT EXISTS prices (
 CREATE INDEX IF NOT EXISTS prices_offer ON prices (offer_key, checked_at);
 CREATE TABLE IF NOT EXISTS reads (
     at TEXT NOT NULL, site TEXT NOT NULL, outcome TEXT NOT NULL, duration_ms INTEGER NOT NULL,
-    watch_key TEXT NOT NULL DEFAULT '', priority TEXT NOT NULL DEFAULT ''
+    watch_key TEXT NOT NULL DEFAULT '', priority TEXT NOT NULL DEFAULT '',
+    detail TEXT NOT NULL DEFAULT '', cpu_percent INTEGER, memory_mb INTEGER
 );
 CREATE INDEX IF NOT EXISTS reads_at ON reads (at);
 CREATE TABLE IF NOT EXISTS requests (
@@ -44,6 +45,11 @@ CREATE TABLE IF NOT EXISTS requests (
 );
 CREATE INDEX IF NOT EXISTS requests_at ON requests (at);
 """
+READ_COLUMNS = (
+    ("watch_key", "TEXT NOT NULL DEFAULT ''"), ("priority", "TEXT NOT NULL DEFAULT ''"),
+    ("detail", "TEXT NOT NULL DEFAULT ''"), ("cpu_percent", "INTEGER"), ("memory_mb", "INTEGER"),
+)
+DETAIL_MAX_CHARS = 300
 # Price points are kept for good; the rest is pruned once a day.
 CYCLE_KEEP_DAYS = 90
 MEASUREMENT_KEEP_DAYS = 30
@@ -97,12 +103,13 @@ class History:
             # last few rows but never corrupts the file.
             connection.execute("PRAGMA synchronous=NORMAL")
             connection.executescript(SCHEMA)
-            # Version 2 (3.4): which watch was read and its priority. Older rows
-            # keep empty values.
+            # Version 2 (3.4): which watch was read and its priority. Version 3
+            # (3.10): why a read failed and how busy the Pi was. Older rows keep
+            # empty values; older Hermes versions name their columns and keep working.
             columns = {row[1] for row in connection.execute("PRAGMA table_info(reads)")}
-            for column in ("watch_key", "priority"):
+            for column, definition in READ_COLUMNS:
                 if column not in columns:
-                    connection.execute(f"ALTER TABLE reads ADD COLUMN {column} TEXT NOT NULL DEFAULT ''")
+                    connection.execute(f"ALTER TABLE reads ADD COLUMN {column} {definition}")
             connection.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
             self._connection = connection
         return self._connection
@@ -154,10 +161,17 @@ class History:
             self._last_prune = time.monotonic()
         self._write("çevrim", statements)
 
-    def record_read(self, site: str, outcome: str, duration_ms: int, watch_key: str = "", priority: str = "") -> None:
-        """One watch read: ok, empty, stock, captcha, http_<status>, timeout, connection, unreadable or error."""
-        self._write("okuma", [("INSERT INTO reads (at, site, outcome, duration_ms, watch_key, priority) VALUES (?, ?, ?, ?, ?, ?)",
-                               (_at(), site, outcome, max(0, int(duration_ms)), watch_key, priority))])
+    def record_read(self, site: str, outcome: str, duration_ms: int, watch_key: str = "", priority: str = "",
+                    detail: str = "", load: Optional[SystemLoad] = None) -> None:
+        """One watch read: ok, empty, stock, captcha, http_<status>, timeout, connection, unreadable or error.
+
+        A failed read also keeps its error text and the Pi's load at that moment.
+        """
+        load = load or SystemLoad()
+        self._write("okuma", [("INSERT INTO reads (at, site, outcome, duration_ms, watch_key, priority, detail, cpu_percent, "
+                               "memory_mb) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                               (_at(), site, outcome, max(0, int(duration_ms)), watch_key, priority,
+                                str(detail or "")[:DETAIL_MAX_CHARS], load.cpu_percent, load.memory_mb))])
 
     def record_request(self, site: str, method: str, kind: str, outcome: str, duration_ms: int) -> None:
         """One network request of a site that reports them (Amazon)."""
@@ -310,13 +324,16 @@ class Read:
     duration_ms: int
     watch_key: str
     priority: str
+    detail: str = ""
+    load: SystemLoad = SystemLoad()
 
 
 def read_reads(path: Path, since: datetime) -> List[Read]:
-    rows = _read(path, "SELECT at, site, outcome, duration_ms, watch_key, priority FROM reads WHERE at >= ? ORDER BY at, rowid",
-                 (_at(since),))
-    return [Read(parse_iso_datetime(at).astimezone(), site, outcome, int(ms), key, priority)
-            for at, site, outcome, ms, key, priority in rows]
+    rows = _read(path, "SELECT at, site, outcome, duration_ms, watch_key, priority, detail, cpu_percent, memory_mb FROM reads "
+                       "WHERE at >= ? ORDER BY at, rowid", (_at(since),))
+    return [Read(parse_iso_datetime(at).astimezone(), site, outcome, int(ms), key, priority, detail or "",
+                 SystemLoad(cpu, memory))
+            for at, site, outcome, ms, key, priority, detail, cpu, memory in rows]
 
 
 @dataclass

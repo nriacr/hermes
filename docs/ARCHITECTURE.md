@@ -109,7 +109,8 @@ separate read-only connections. Tables: `cycles` (kept 90 days), `prices`
 (a point whenever an offer's price changes; kept, cleared by "Fiyat geçmişini
 sıfırla"), `reads` (each watch read: outcome ok, empty, stock, captcha,
 http_<status>, timeout, connection, unreadable or error, its duration, and
-since 3.4 the watch key and priority; older rows keep these two empty) and `requests` (each Amazon network request with
+since 3.4 the watch key and priority; older rows keep these two empty; since 3.10 a failed read
+also keeps its error text and the Pi's CPU use and free memory at that moment) and `requests` (each Amazon network request with
 method and outcome); measurements are kept 30 days. On first start the cycle
 durations of `cycle_history.json` and the min/max/last prices in `state.json`
 are copied in once (`meta.json_migrated_at`); the JSON files are not changed.
@@ -321,8 +322,8 @@ With `homeassistant_api: true` Hermes writes through the Supervisor proxy:
   saving first).
 - `sensor.hermes_son_tur`: end of the last cycle (timestamp); attributes
   `sure_saniye`, `tarama_saniye`, `urun_sayisi`, `stokta_olmayan`.
-- `sensor.hermes_hata_sayisi`: watches whose last read failed in 24 hours;
-  attribute `hatalar` (site, takip, hata).
+- `sensor.hermes_hata_sayisi`: watches whose last read failed in 24 hours and
+  since Hermes started (the panel's error card uses the same rule); attribute `hatalar` (site, takip, hata).
 - Event `hermes_firsat` after every delivered opportunity notification with
   `site`, `takip`, `urun`, `fiyat`, `fiyat_metni`, `hedef`, `fark`, `depo`,
   `satici`, `url`.
@@ -348,7 +349,9 @@ blocks and errors), a bar chart of the check frequency per hour or day with
 that slot's block/error count above the bar, one card per site (health bar
 ok/blocked/error, check frequency, typical read time, blocks, errors, last
 read, Amazon network requests), a table of block and error types per site
-with when each was last seen, and a collapsed 7-day daily history. Cycles
+with when each was last seen, the error spells (failures of one site less
+than 15 minutes apart as one row: time span, count per type, the most common
+reason and the Pi's worst load; newest 8), and a collapsed 7-day daily history. Cycles
 that read no watch are not recorded (rows from before 3.2.2 were removed once,
 `meta.idle_cycles_dropped_at`); the `cycles` table is kept but not shown.
 

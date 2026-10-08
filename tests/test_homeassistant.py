@@ -55,10 +55,14 @@ class BridgeTests(unittest.TestCase):
         state = {
             "watch_a": {"site": "amazon", "watch_name": "Kulaklık", "last_error": "Amazon captcha", "last_checked_at": now.isoformat()},
             "watch_old": {"site": "zara", "last_error": "Eski", "last_checked_at": (now - timedelta(days=2)).isoformat()},
+            # Failed before the restart and not read again yet: history, not a current error.
+            "watch_before_start": {"site": "amazon", "last_error": "Zaman aşımı",
+                                   "last_checked_at": (now - timedelta(hours=2)).isoformat()},
             "watch_ok": {"site": "hm", "last_error": None, "last_checked_at": now.isoformat()},
             "_meta": {},
         }
-        with patch.object(bridge, "set_state") as set_state:
+        with patch.object(bridge, "set_state") as set_state, \
+                patch.object(homeassistant, "PROCESS_STARTED_AT", now - timedelta(hours=1)):
             bridge.publish_cycle(rows, 2, state, 125.4, 65.2, finished_at=now)
         published = {call.args[0]: call.args[1:] for call in set_state.call_args_list}
         count, attributes = published["sensor.hermes_firsat_sayisi"]

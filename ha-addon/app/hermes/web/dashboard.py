@@ -14,7 +14,7 @@ from ..constants import (
     TELEGRAM_STATUS_PATH,
 )
 from ..storage import load_json
-from ..utils import is_search_url, parse_bool, parse_iso_datetime, repair_mojibake, site_label
+from ..utils import PROCESS_STARTED_AT, is_search_url, parse_bool, parse_iso_datetime, repair_mojibake, site_label
 from .pages import link, render_notice, render_page
 
 TABLE_TITLE_MAX_LENGTH = 60
@@ -308,8 +308,12 @@ def error_link_details(error_text) -> List[Dict[str, str]]:
 
 
 def collect_errors(state: Dict[str, Any], hours: int = 24) -> List[Dict[str, Any]]:
-    """Watches whose last read failed within the last day."""
-    cutoff = datetime.now().astimezone() - timedelta(hours=hours)
+    """Watches whose last read failed within the last day and since Hermes started.
+
+    A failure from before a restart is not shown: it is history, and the watch is
+    read again when its turn comes (low-priority watches only once an hour or less).
+    """
+    cutoff = max(datetime.now().astimezone() - timedelta(hours=hours), PROCESS_STARTED_AT)
     errors, seen = [], set()
     for key, entry in state.items() if isinstance(state, dict) else []:
         if key == "_meta" or not isinstance(entry, dict) or not entry.get("last_error"):

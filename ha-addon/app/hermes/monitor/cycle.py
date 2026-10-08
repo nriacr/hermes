@@ -30,7 +30,7 @@ from ..notifier import Pushover
 from ..providers.base import DEPO_LANE, Provider, ReadContext, RequestSpacing, WatchRead, excluded_term_in_title
 from ..providers.registry import ProviderSet
 from ..storage import load_json, save_json
-from ..utils import canonical_tracking_url, format_tl, local_now, parse_iso_datetime, site_label, utc_now
+from ..utils import SystemLoad, canonical_tracking_url, format_tl, local_now, parse_iso_datetime, site_label, system_load, utc_now
 from . import alerts, scheduling, state as state_ops, summary
 from .state import offer_key as make_offer_key, watch_key as make_watch_key
 
@@ -72,10 +72,12 @@ def read_outcome(provider: Provider, exc: BaseException) -> str:
         return f"http_{status}"
     if isinstance(exc, BotProtectionHermesError) or provider.is_protection_error(exc):
         return "captcha"
-    name = type(exc).__name__.lower()
-    if isinstance(exc, requests.Timeout) or "timeout" in name:
+    # A provider error may wrap the transport failure (e.g. the browser's TimeoutException).
+    causes = (exc, exc.__cause__) if exc.__cause__ is not None else (exc,)
+    names = [type(item).__name__.lower() for item in causes]
+    if any(isinstance(item, requests.Timeout) for item in causes) or any("timeout" in name for name in names):
         return "timeout"
-    if isinstance(exc, requests.ConnectionError) or "connection" in name:
+    if any(isinstance(item, requests.ConnectionError) for item in causes) or any("connection" in name for name in names):
         return "connection"
     if isinstance(exc, HermesError):
         # Hermes reached the page but could not find a product or price on it.
@@ -403,11 +405,15 @@ class Monitor:
         # Read duration includes the provider's own extra page delays.
         started_at = time.monotonic()
         result = "ok"
+        failure: Optional[BaseException] = None
+        load: Optional[SystemLoad] = None
         try:
             offers = (offer for offer in provider.read(watch, ctx, outcome) if provider.keeps_offer(watch, offer))
             recorded = self._record_offers(run, provider, watch, entry, seller, offers)
             if outcome.blocked:
-                result = read_outcome(provider, outcome.blocked)
+                failure = outcome.blocked
+                result = read_outcome(provider, failure)
+                load = system_load()
             with self._lock:
                 self._record_success(run, provider, watch, key, seller, recorded, outcome)
         except OutOfStockHermesError as exc:
@@ -415,12 +421,17 @@ class Monitor:
             with self._lock:
                 self._record_out_of_stock(run, provider, watch, key, entry, seller, outcome, exc)
         except Exception as exc:  # noqa: BLE001
-            result = "empty" if is_normal_empty_result(exc) else read_outcome(provider, outcome.blocked or exc)
+            if is_normal_empty_result(exc):
+                result = "empty"
+            else:
+                failure = outcome.blocked or exc
+                result = read_outcome(provider, failure)
+                load = system_load()
             with self._lock:
-                self._record_failure(run, provider, watch, key, entry, seller, outcome, exc)
+                self._record_failure(run, provider, watch, key, entry, seller, outcome, exc, load)
         finally:
             self.history.record_read(watch.site, result, round((time.monotonic() - started_at) * 1000), key,
-                                     scheduling.watch_priority(watch))
+                                     scheduling.watch_priority(watch), str(failure) if failure else "", load)
 
     def _depo_lane_due(self, run: CycleRun, provider: Provider, watch: WatchRule) -> bool:
         """True for a watch whose next read is a quick main-page read and whose rhythm and schedule say it is due."""
@@ -638,14 +649,14 @@ class Monitor:
         summary.save_incremental_summary(self.files.summary, [], stock_rows, removed_price_ids=stale_ids)
 
     def _record_failure(self, run: CycleRun, provider: Provider, watch: WatchRule, key: str, entry: Dict[str, Any],
-                        seller: str, outcome: WatchRead, exc: BaseException) -> None:
+                        seller: str, outcome: WatchRead, exc: BaseException, load: Optional[SystemLoad] = None) -> None:
         stale_ids = summary.cached_offer_ids(watch, key, run.state, seller)
         is_search = provider.is_search_url(watch.url)
         normal_empty = is_normal_empty_result(exc)
         if normal_empty:
             log(f"Arama sonucu boş: {seller} | {watch.name or watch.url}")
         else:
-            log(f"Hata: {seller} | {watch.url} | {exc}")
+            log(f"Hata: {seller} | {watch.url} | {exc}" + (f" | {load.text}" if load and load.text else ""))
         access_error = outcome.blocked or exc
         # A protection page keeps the watch's last rows on the table; they carry their read time.
         kept_after_block = provider.backs_off_on_protection and bool(outcome.blocked or provider.is_protection_error(exc))

@@ -14,7 +14,7 @@ import requests
 
 from .logging_utils import log
 from .models import OfferResult, PriceSummaryRow, WatchRule
-from .utils import format_tl, parse_iso_datetime, site_label
+from .utils import PROCESS_STARTED_AT, format_tl, parse_iso_datetime, site_label
 
 CORE_API_URL = "http://supervisor/core/api"
 OPPORTUNITY_EVENT = "hermes_firsat"
@@ -133,8 +133,8 @@ class HomeAssistantBridge:
 
 
 def recent_errors(state: Dict[str, Any], now: datetime, hours: int = 24) -> List[Dict[str, str]]:
-    """Watches whose latest read failed within the last day (as on the dashboard)."""
-    cutoff = now - timedelta(hours=hours)
+    """Watches whose latest read failed within the last day and since Hermes started (as on the dashboard)."""
+    cutoff = max(now - timedelta(hours=hours), PROCESS_STARTED_AT)
     errors = []
     for key, entry in state.items():
         if key == "_meta" or not isinstance(entry, dict) or not entry.get("last_error"):

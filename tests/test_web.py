@@ -17,7 +17,7 @@ from hermes.errors import EmptySearchResultsHermesError
 from hermes import history as history_module
 from hermes.history import History
 from hermes.models import OfferResult
-from hermes.utils import parse_decimal, utc_now
+from hermes.utils import SystemLoad, parse_decimal, utc_now
 from hermes.web import assets, dashboard, link_test, server, settings
 from hermes.web import statistics as statistics_page
 
@@ -374,10 +374,10 @@ class StatisticsPageTests(DataFilesMixin, unittest.TestCase):
         router = server.Router(FakeRuntime())
         self.request = lambda path, public_only=False: router.handle(server.split_request(path, "GET", b"", public_only))
 
-    def read(self, minutes_ago, site="amazon", outcome="ok", key="w1", priority="high", ms=2000):
+    def read(self, minutes_ago, site="amazon", outcome="ok", key="w1", priority="high", ms=2000, detail="", load=None):
         moment = self.now - timedelta(minutes=minutes_ago)
         with patch.object(history_module, "_at", lambda value=None: moment.astimezone(timezone.utc).isoformat(timespec="seconds")):
-            self.store.record_read(site, outcome, ms, key, priority)
+            self.store.record_read(site, outcome, ms, key, priority, detail, load)
 
     def page(self, period="24h"):
         return self.request(f"/statistics?p={period}").payload.decode()
@@ -421,6 +421,29 @@ class StatisticsPageTests(DataFilesMixin, unittest.TestCase):
             self.assertIn(f"<td>{label}</td>", errors)
         self.assertLess(errors.index("Captcha"), errors.index("Zaman aşımı"))
         self.assertIn("<th>Tür</th><th>Amazon</th><th>Hepsiburada</th><th>En son</th>", errors)
+
+    def test_failures_close_together_are_one_spell_with_reason_and_pi_load(self):
+        url = "https://www.amazon.com.tr/dp/B0D95R2PXM/"
+        timeout = f"{url} | Amazon gerçek tarayıcı sayfası okunamadı (TimeoutException)."
+        for minutes, load in ((100, SystemLoad(80, 900)), (95, SystemLoad(160, 400)), (85, None)):
+            self.read(minutes, outcome="timeout", detail=timeout, load=load)
+        self.read(90)  # successful reads in between do not end the spell
+        self.read(88, outcome="unreadable", detail="Fiyat bulunamadı")
+        self.read(50, outcome="captcha")  # 35 minutes later: a new spell
+        self.read(40, site="togg", outcome="connection")
+        html = self.page()
+        spells = html.split("Hata dönemleri")[1].split("</ul>")[0]
+        rows = spells.split("<li>")[1:]
+        self.assertEqual(len(rows), 3)
+        self.assertIn("Togg</strong><span>1 okuma · Bağlantı hatası</span>", rows[0])
+        self.assertIn("Amazon</strong><span>1 okuma · Captcha (bot koruması)</span>", rows[1])
+        start, end = self.now - timedelta(minutes=100), self.now - timedelta(minutes=85)
+        end_text = f"{end:%H:%M}" if end.date() == start.date() else f"{end:%d.%m %H:%M}"
+        self.assertIn(f"<strong>{start:%d.%m %H:%M}–{end_text} · Amazon</strong>", rows[2])
+        self.assertIn("<span>4 okuma · Zaman aşımı 3, Sayfa okunamadı 1</span>", rows[2])
+        self.assertIn("<small>Amazon gerçek tarayıcı sayfası okunamadı (TimeoutException). · Pi: işlemci %160 · "
+                      "boş bellek 400 MB</small>", rows[2])
+        self.assertNotIn(url, spells)
 
     def test_period_switch_drives_the_whole_page(self):
         self.read(3 * 24 * 60, outcome="captcha")

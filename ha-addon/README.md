@@ -77,7 +77,7 @@ Hermes her çevrimden sonra Home Assistant'a şu sensörleri yazar:
   özelliğinde site, ürün, fiyat, hedef, fark, depo ve link bulunur (en fazla 25).
 - `sensor.hermes_son_tur`: son çevrimin bittiği zaman; süre, ürün ve stok dışı
   sayıları özelliklerde.
-- `sensor.hermes_hata_sayisi`: son 24 saatte okunamayan takip sayısı ve hatalar.
+- `sensor.hermes_hata_sayisi`: son 24 saatte ve Hermes son açıldığından beri okunamayan takip sayısı ve hatalar.
 
 Her fırsat bildiriminde `hermes_firsat` olayı tetiklenir (site, takip, ürün,
 fiyat, hedef, fark, depo, satıcı, link). Örnek otomasyon tetikleyicisi:

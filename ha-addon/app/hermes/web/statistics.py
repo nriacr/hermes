@@ -1,4 +1,4 @@
-"""Statistics page: how often products are checked, per-site health and error types.
+"""Statistics page: how often products are checked, per-site health, error types and error spells.
 
 Everything comes from the `reads` table of `hermes.db` (one row per watch
 read). The central number is the check frequency: the typical time between two
@@ -7,6 +7,7 @@ drives the whole page.
 """
 
 import statistics
+from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from html import escape
@@ -15,8 +16,8 @@ from typing import Dict, List, Optional, Tuple
 from ..constants import DATABASE_PATH, SUMMARY_PATH
 from ..history import BLOCKED_OUTCOMES, Read, read_reads, read_site_requests
 from ..storage import load_json
-from ..utils import site_label
-from .dashboard import duration_text, live_region, live_script_tag, relative_time_text, site_theme_class
+from ..utils import SystemLoad, site_label
+from .dashboard import clean_error_message, duration_text, live_region, live_script_tag, relative_time_text, site_theme_class
 from .pages import link, render_page
 
 PERIODS = {"24h": ("Son 24 saat", timedelta(hours=24)), "7d": ("Son 7 gün", timedelta(days=7))}
@@ -25,6 +26,9 @@ CURRENT = " aria-current='page'"
 SUCCESS_OUTCOMES = ("ok", "empty", "stock")
 # A longer gap is a pause (restart, settings change), not the check rhythm.
 MAX_CHECK_GAP = timedelta(hours=6)
+# Failures of one site closer together than this are one spell ("hata dönemi").
+SPELL_GAP = timedelta(minutes=15)
+MAX_LISTED_SPELLS = 8
 ERROR_LABELS = {
     "captcha": "Captcha (bot koruması)",
     "http_503": "503 · site meşgul",
@@ -295,6 +299,83 @@ def render_error_types(reads: List[Read]) -> str:
             f"<thead><tr><th>Tür</th>{head}<th>En son</th></tr></thead><tbody>{rows}</tbody></table></div>")
 
 
+@dataclass
+class Spell:
+    """Consecutive failures of one site: one row instead of one per read."""
+
+    site: str
+    start: datetime
+    end: datetime
+    labels: Counter = field(default_factory=Counter)
+    details: Counter = field(default_factory=Counter)
+    cpu: List[int] = field(default_factory=list)
+    memory: List[int] = field(default_factory=list)
+
+    @property
+    def count(self) -> int:
+        return sum(self.labels.values())
+
+    def add(self, item: Read) -> None:
+        self.end = item.at
+        self.labels[error_label(item.outcome)] += 1
+        if item.detail:
+            self.details[clean_error_message(item.detail)] += 1
+        if item.load.cpu_percent is not None:
+            self.cpu.append(item.load.cpu_percent)
+        if item.load.memory_mb is not None:
+            self.memory.append(item.load.memory_mb)
+
+    @property
+    def worst_load(self) -> SystemLoad:
+        """Highest CPU use and lowest free memory seen during the spell."""
+        return SystemLoad(max(self.cpu) if self.cpu else None, min(self.memory) if self.memory else None)
+
+
+def failure_spells(reads: List[Read]) -> List[Spell]:
+    """Failures grouped per site into spells, newest first."""
+    spells: List[Spell] = []
+    open_by_site: Dict[str, Spell] = {}
+    for item in sorted((item for item in reads if is_failure(item.outcome)), key=lambda item: item.at):
+        spell = open_by_site.get(item.site)
+        if spell is None or item.at - spell.end > SPELL_GAP:
+            spell = open_by_site[item.site] = Spell(item.site, item.at, item.at)
+            spells.append(spell)
+        spell.add(item)
+    return sorted(spells, key=lambda spell: spell.end, reverse=True)
+
+
+def _spell_time(spell: Spell) -> str:
+    start = spell.start.strftime("%d.%m %H:%M")
+    if spell.end - spell.start < timedelta(minutes=1):
+        return start
+    end = spell.end.strftime("%H:%M" if spell.end.date() == spell.start.date() else "%d.%m %H:%M")
+    return f"{start}–{end}"
+
+
+def render_spells(reads: List[Read]) -> str:
+    spells = failure_spells(reads)
+    if not spells:
+        return ""
+    items = []
+    for spell in spells[:MAX_LISTED_SPELLS]:
+        kinds = ", ".join(f"{label} {count}" if len(spell.labels) > 1 else label
+                          for label, count in spell.labels.most_common())
+        notes = []
+        if spell.details:
+            notes.append(spell.details.most_common(1)[0][0])
+        if spell.worst_load.text:
+            notes.append(f"Pi: {spell.worst_load.text}")
+        note = f"<small>{escape(' · '.join(notes))}</small>" if notes else ""
+        items.append(
+            f"<li><div><strong>{escape(_spell_time(spell))} · "
+            f"{escape(site_label(spell.site))}</strong><span>{spell.count} okuma · {escape(kinds)}</span></div>{note}</li>"
+        )
+    more = len(spells) - MAX_LISTED_SPELLS
+    extra = f"<p class='site-note'>ve {more} dönem daha</p>" if more > 0 else ""
+    return ("<h3 class='spell-title'>Hata dönemleri</h3><p class='site-note'>Birbirine 15 dakikadan yakın engel ve hatalar "
+            f"tek satırda; en yeni üstte.</p><ul class='error-spells'>{''.join(items)}</ul>{extra}")
+
+
 def render_daily_history(reads: List[Read], now: datetime) -> str:
     since = now - timedelta(days=7)
     days = buckets(reads, check_gaps(reads, since), since, "7d")
@@ -332,7 +413,7 @@ def statistics_live_html(base: str, params: Optional[Dict[str, List[str]]] = Non
         f"<section class='summary-panel'><div class='summary-head'><h2>Siteler</h2><span>{escape(label)}</span></div>"
         f"{render_sites(site_figures(reads, gaps), requests_by_site)}</section>"
         f"<section class='summary-panel'><div class='summary-head'><h2>Engel ve hata türleri</h2><span>{escape(label)}</span></div>"
-        f"{render_error_types(reads)}</section>"
+        f"{render_error_types(reads)}{render_spells(reads)}</section>"
         f"{render_daily_history(week, now)}"
     )
 
