@@ -376,8 +376,10 @@ class DashboardTests(DataFilesMixin, unittest.TestCase):
             with self.subTest(priority=priority):
                 self.data.write_summary({"rows": [price_row(priority=priority)]})
                 html = self.live()
+                short = {"cycle": "Her çevrim", "30m": "30 dk", "60m": "60 dk", "3h": "3 saat", "6h": "6 saat", "high": "6 saat"}[priority]
                 self.assertIn(f"priority-{'6h' if priority == 'high' else priority}", html)
                 self.assertIn(f'title="{escape(label, quote=True)}"', html)
+                self.assertIn(f"</i>{short}</b>", html)  # a short word under "Tarama sıklığı", not a sentence
         colors = [APP_CSS.split(f".priority-{key} {{ background:")[1].split(";")[0] for key in ("cycle", "30m", "60m", "3h", "6h")]
         self.assertEqual(colors, ["#ff5c64", "#ff9548", "#f2c94c", "#c4dc4a", "#3fbf6a"])  # red to green
 
@@ -401,7 +403,9 @@ class DashboardTests(DataFilesMixin, unittest.TestCase):
         self.data.write_summary({"rows": [price_row(price="14.000 TL", tracking_id="card1")]})
         html = self.live()
         self.assertIn("class='ov-chart'", html)
-        self.assertIn("<span class='ov-chg down'>▼ %12,5</span>", html)  # 16.000 -> 14.000
+        self.assertIn("<span class='ov-chg down' title='İlk kayıtlı fiyata göre (", html)  # 16.000 -> 14.000
+        self.assertIn("▼ %12,5</span>", html)
+        self.assertIn("<span>İlk kayıtlı fiyat</span><b>16.000 TL</b>", html)
         self.assertIn("Takip başlangıcı", html)
         self.data.write_summary({"rows": [price_row(price="14.000 TL", tracking_id="other card")]})
         self.assertNotIn("class='ov-chart'", self.live())
@@ -414,6 +418,14 @@ class DashboardTests(DataFilesMixin, unittest.TestCase):
         store.close()
         self.data.write_summary({"rows": [price_row(price="14.000 TL")]})
         self.assertIn("▲ %40,0", self.live())
+
+    def test_settings_share_the_home_screen_skin_and_the_logo_is_a_spinning_ring(self):
+        page = self.router_get("/settings")
+        self.assertIn("<body class='public ov settings-page'>", page)
+        css = self.router_get("/app.css")
+        for text in ("body.ov .topbar .badge::before", "conic-gradient", "ov-spin", ".settings-page .settings-section",
+                     ".settings-page .button.primary"):
+            self.assertIn(text, css)
 
     def test_prices_are_whole_lira(self):
         self.assertEqual(parse_decimal("1.500"), Decimal("1500"))

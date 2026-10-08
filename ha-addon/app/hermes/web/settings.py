@@ -312,7 +312,7 @@ def render_settings_page(base: str, params: Dict[str, List[str]]) -> bytes:
                "<h2 id='saving-title'>Ayarlar kaydediliyor</h2><p id='saving-message'>Tüm değişiklikler tek seferde Home Assistant'a "
                "yazılıyor. Hermes bir kez yeniden başlayacak; hazır olduğunda ayarlara otomatik dönülecek.</p></div></div>")
     script = f"<script src='{escape(link(base, 'settings.js'), quote=True)}?v={escape(APP_VERSION)}' defer></script>"
-    return render_page(base, "settings", "Hermes Ayarlar", body, body_class="public settings-page", after_main=overlay, scripts=CONFIRM_SCRIPT + script)
+    return render_page(base, "settings", "Hermes Ayarlar", body, body_class="public ov settings-page", after_main=overlay, scripts=CONFIRM_SCRIPT + script)
 
 
 def render_restart_page(base: str, params: Dict[str, List[str]]) -> bytes:

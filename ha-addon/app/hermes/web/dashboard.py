@@ -11,6 +11,7 @@ from ..constants import (
     APP_VERSION,
     DATABASE_PATH,
     PRIORITY_DESCRIPTIONS,
+    PRIORITY_LABELS,
     STATE_PATH,
     SUMMARY_PATH,
     TELEGRAM_ERROR_EVENTS_PATH,
@@ -200,7 +201,8 @@ def change_chip(offer: Offer) -> str:
     if abs(change) < 0.05:
         return "<span class='ov-chg flat'>sabit</span>"
     direction, symbol = ("up", "▲") if change > 0 else ("down", "▼")
-    return f"<span class='ov-chg {direction}'>{symbol} %{percent_text(change)}</span>"
+    since = escape(offer.points[0][0].strftime("%d.%m.%Y"), quote=True)
+    return f"<span class='ov-chg {direction}' title='İlk kayıtlı fiyata göre ({since})'>{symbol} %{percent_text(change)}</span>"
 
 
 def ago_html(value: str) -> str:
@@ -222,11 +224,12 @@ def detail_html(offer: Offer) -> str:
         facts.append(("Stok", f"{offer.stock} adet"))
     cells = "".join(f"<div class='ov-fact'><span>{escape(label)}</span><b>{escape(text)}</b></div>" for label, text in facts)
     if not offer.warehouse:
-        interval = PRIORITY_DESCRIPTIONS[normalize_priority(offer.row.get("priority"))]
+        interval = PRIORITY_LABELS[normalize_priority(offer.row.get("priority"))]
         cells += f"<div class='ov-fact'><span>Tarama sıklığı</span><b>{priority_dot(offer.row.get('priority'))}{escape(interval)}</b></div>"
     cells += f"<div class='ov-fact'><span>Son güncelleme</span><b>{escape(relative_time_text(offer.checked_at))}</b></div>"
     if len(offer.points) > 1:
-        cells += f"<div class='ov-fact'><span>Takip başlangıcı</span><b>{offer.points[0][0].strftime('%d.%m.%Y')}</b></div>"
+        cells += (f"<div class='ov-fact'><span>İlk kayıtlı fiyat</span><b>{lira(Decimal(str(offer.points[0][1])))}</b></div>"
+                  f"<div class='ov-fact'><span>Takip başlangıcı</span><b>{offer.points[0][0].strftime('%d.%m.%Y')}</b></div>")
     chart = (detail_chart(offer.points, float(offer.target)) if len(offer.points) > 1
              else "<p class='ov-note'>Fiyat geçmişi ilk değişiklikten sonra çizilir.</p>")
     product_url = str(offer.row.get("product_url") or "").strip()

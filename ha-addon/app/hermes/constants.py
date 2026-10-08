@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 
-APP_VERSION = "3.13.0"
+APP_VERSION = "3.14.0"
 
 # Persistent add-on data. File names are a public interface: 2.x releases read
 # the same files, so a rollback never loses history or notification state.

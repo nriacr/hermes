@@ -1,5 +1,15 @@
 # Değişiklik günlüğü
 
+## 3.14.0
+
+- Ayarlar sayfası Özet Tablo ile aynı görünümde: koyu tema, Sora/Inter yazı tipleri, cam görünümlü bölümler,
+  neon vurgulu düğmeler, canlı arka plan. Form alanları, kartlar ve kaydetme akışı aynı; yalnız görünüm değişti.
+  İstatistik sayfası şimdilik eski görünümde.
+- Hermes logosu önizlemedeki gibi: dönen renkli halka içinde "H".
+- Ayrıntı penceresinde "Tarama sıklığı" kısa yazılır ("Her çevrim", "30 dk", "60 dk", "3 saat", "6 saat").
+- Fiyat değişimi yüzdesi ilk kayıtlı fiyata göre hesaplanır; pencerede "İlk kayıtlı fiyat" ve takip başlangıcı
+  görünür, yüzdenin üzerine gelince tarih de yazar.
+
 ## 3.13.0
 
 - Özet Tablo baştan tasarlandı (koyu tema, yeni yazı tipleri ve renkler, hareketli geçişler; telefonda ve
