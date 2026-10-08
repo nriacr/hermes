@@ -46,11 +46,17 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual([item.site for item in watches], ["amazon"])
         self.assertTrue(any("amzn.eu" in line for line in LOG_LINES))
 
-    def test_inactive_cards_and_unknown_priorities(self):
+    def test_inactive_cards_skipped_and_old_or_unknown_priorities_read_every_6_hours(self):
         watches = hermes_config.prepare_watches([
             {"name": "Pasif", "target_price": 1, "url_1": "https://nordbron.com/a", "active": False},
-            {"name": "Acil", "target_price": 1, "url_1": "https://nordbron.com/b", "priority": "acil"}])
-        self.assertEqual([(item.name, item.priority) for item in watches], [("Acil", "high")])
+            {"name": "Acil", "target_price": 1, "url_1": "https://nordbron.com/b", "priority": "acil"},
+            # Cards saved before 3.12 move to the lowest priority, whatever they were.
+            {"name": "Eski yüksek", "target_price": 1, "url_1": "https://nordbron.com/c", "priority": "high"},
+            {"name": "Eski orta", "target_price": 1, "url_1": "https://nordbron.com/d", "priority": "medium"},
+            {"name": "Önceliksiz", "target_price": 1, "url_1": "https://nordbron.com/e"},
+            {"name": "Yeni", "target_price": 1, "url_1": "https://nordbron.com/f", "priority": "30m"}])
+        self.assertEqual([(item.name, item.priority) for item in watches],
+                         [("Acil", "6h"), ("Eski yüksek", "6h"), ("Eski orta", "6h"), ("Önceliksiz", "6h"), ("Yeni", "30m")])
 
     def test_minimum_above_target_is_rejected(self):
         with self.assertRaisesRegex(HermesError, "minimum fiyat"):
@@ -84,7 +90,8 @@ class TelegramQuickAddTests(unittest.TestCase):
         saved = save.call_args.args[0]
         self.assertIn("Paylaşılanlar", saved["gruplar"])
         self.assertEqual(saved["takip_edilenler"][0], {"name": "edifier m60", "group": "Paylaşılanlar", "target_price": 8700.0,
-                                                       "url_1": url, "notify_once_in_24H": True, "active": True})
+                                                       "url_1": url, "notify_once_in_24H": True, "active": True,
+                                                       "priority": "cycle"})
 
     def test_an_already_watched_link_is_not_added_twice(self):
         url = "https://www.amazon.com.tr/dp/B000000001"

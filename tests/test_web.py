@@ -3,6 +3,8 @@
 import gzip
 import json
 import unittest
+from html import escape
+
 from hermes.web.assets import APP_CSS
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -327,12 +329,16 @@ class DashboardTests(DataFilesMixin, unittest.TestCase):
         self.assertIn('class="warehouse-tag">DEPO</strong>', html)
         self.assertNotIn("priority-dot", html)
 
-    def test_normal_rows_show_priority_dots(self):
-        for priority, label in (("high", "Yüksek"), ("medium", "Orta"), ("low", "Düşük")):
+    def test_normal_rows_show_one_of_five_priority_dots(self):
+        for priority, label in (("cycle", "Her çevrimde fiyat taranır"), ("30m", "30 dk'da bir taranır"),
+                                ("60m", "60 dk'da bir taranır"), ("3h", "3 saatte bir taranır"), ("6h", "6 saatte bir taranır"),
+                                ("high", "6 saatte bir taranır")):  # a row saved before 3.12
             with self.subTest(priority=priority):
                 html = dashboard.render_table_row(price_row(priority=priority))
-                self.assertIn(f"priority-{priority}", html)
-                self.assertIn(f'title="{label} öncelik"', html)
+                self.assertIn(f"priority-{'6h' if priority == 'high' else priority}", html)
+                self.assertIn(f'title="{escape(label, quote=True)}"', html)
+        colors = [APP_CSS.split(f".priority-{key} {{ background:")[1].split(";")[0] for key in ("cycle", "30m", "60m", "3h", "6h")]
+        self.assertEqual(colors, ["#ff5c64", "#ff9548", "#f2c94c", "#c4dc4a", "#3fbf6a"])  # red to green
 
     def test_titles_are_60_characters_without_ellipsis_and_groups_70_with(self):
         full = "Çok uzun ürün adı " * 12
@@ -380,7 +386,7 @@ class StatisticsPageTests(DataFilesMixin, unittest.TestCase):
         self.request = lambda path, public_only=False: router.handle(server.split_request(path, "GET", b"", public_only))
         self.request_post = lambda path: router.handle(server.split_request(path, "POST", b"", False))
 
-    def read(self, minutes_ago, site="amazon", outcome="ok", key="w1", priority="high", ms=2000, detail="", load=None):
+    def read(self, minutes_ago, site="amazon", outcome="ok", key="w1", priority="cycle", ms=2000, detail="", load=None):
         moment = self.now - timedelta(minutes=minutes_ago)
         with patch.object(history_module, "_at", lambda value=None: moment.astimezone(timezone.utc).isoformat(timespec="seconds")):
             self.store.record_read(site, outcome, ms, key, priority, detail, load)
@@ -398,7 +404,7 @@ class StatisticsPageTests(DataFilesMixin, unittest.TestCase):
         for minutes in (30, 26, 22):  # every 4 minutes
             self.read(minutes, key="iphone")
         for minutes in (30, 10):  # a medium card does not count
-            self.read(minutes, key="kahve", priority="medium")
+            self.read(minutes, key="kahve", priority="60m")
         self.read(29, key="")  # rows from 3.3 and older have no watch
         self.read(500, key="iphone")  # a 7-hour pause is not the rhythm
         html = self.page()
@@ -490,12 +496,18 @@ class SettingsTests(DataFilesMixin, unittest.TestCase):
     def test_seller_filter_and_priority_are_saved_and_rendered(self):
         watches = settings.build_watches({"watches_count": ["1"], "watches_0_name": ["iPhone"], "watches_0_target_price": ["100000"],
                                           "watches_0_url_1": ["https://www.amazon.com.tr/dp/B000000001"],
-                                          "watches_0_priority": ["low"], "watches_0_official_seller_only": ["1"]})
-        self.assertEqual(watches[0]["priority"], "low")
+                                          "watches_0_priority": ["3h"], "watches_0_official_seller_only": ["1"]})
+        self.assertEqual(watches[0]["priority"], "3h")
         self.assertTrue(watches[0]["official_seller_only"])
         html = settings.watch_form(watches[0], 0)
-        for text in ("Yalnızca platformun kendi satıcısı", "Düşük · 3 saatte bir", "Orta · saatte bir", "Yüksek · her çevrim"):
+        for text in ("Yalnızca platformun kendi satıcısı", ">Her çevrim</option>", ">30 dk</option>", ">60 dk</option>",
+                     "selected>3 saat</option>", ">6 saat</option>", "<summary><i class=\"priority-dot priority-3h\""):
             self.assertIn(text, html)
+        for old in ("Yüksek", "Orta", "Düşük"):
+            self.assertNotIn(old, html)
+        # A new card starts at every cycle; a card saved before 3.12 shows 6 hours.
+        self.assertIn("value='cycle' title='Her çevrimde fiyat taranır' selected>", settings.watch_form({}, 0, is_new=True))
+        self.assertIn("selected>6 saat</option>", settings.watch_form({"name": "Eski", "priority": "high"}, 0))
 
     def test_updating_a_card_keeps_its_variation_setting(self):
         options, _ = settings.apply_settings_operation(

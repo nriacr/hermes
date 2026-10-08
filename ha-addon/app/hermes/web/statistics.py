@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 from html import escape
 from typing import Dict, List, Optional, Tuple
 
-from ..constants import DATABASE_PATH, SUMMARY_PATH
+from ..constants import DATABASE_PATH, DEFAULT_PRIORITY, SUMMARY_PATH
 from ..history import BLOCKED_OUTCOMES, SUCCESS_OUTCOMES, Read, read_reads, read_site_requests
 from ..storage import load_json
 from ..utils import SystemLoad, site_label
@@ -100,7 +100,8 @@ def check_gaps(reads: List[Read], since: datetime) -> List[Tuple[Read, float]]:
     previous: Dict[str, Read] = {}
     gaps = []
     for item in reads:
-        if not item.watch_key or item.priority != "high":
+        # "high" rows were recorded before 3.12, when every-cycle watches were called high priority.
+        if not item.watch_key or item.priority not in (DEFAULT_PRIORITY, "high"):
             continue
         before = previous.get(item.watch_key)
         previous[item.watch_key] = item

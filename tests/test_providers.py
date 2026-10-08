@@ -228,7 +228,7 @@ class AmazonRhythmTests(AmazonTestCase):
         self.assertTrue(all(offer.checked_at is None for offer in second))
 
     def test_a_yellow_family_is_read_again_after_an_hour_a_green_one_after_three(self):
-        yellow, green = (watch(url=ROOT, include_variations=True, priority=p) for p in ("medium", "low"))
+        yellow, green = (watch(url=ROOT, include_variations=True, priority=p) for p in ("60m", "3h"))
         for rule, interval in ((yellow, 3600), (green, 3 * 3600)):
             with self.subTest(priority=rule.priority):
                 self.provider.rhythms[self.provider._rhythm_key(rule)] = amazon_reader.WatchRhythm(
@@ -239,7 +239,7 @@ class AmazonRhythmTests(AmazonTestCase):
                     self.assertTrue(self.provider.needs_sweep(rule))
 
     def test_a_sold_out_main_page_drops_its_own_offer_but_not_the_others(self):
-        rule = watch(url=ROOT, target="100000", include_variations=True, priority="medium")
+        rule = watch(url=ROOT, target="100000", include_variations=True, priority="60m")
         pages = {ROOT: priced("100,00", "iPhone Gümüş"), CHILD: priced("200,00", "iPhone Turuncu")}
         serving, variations = self.family(pages)
         with serving, variations:
@@ -323,7 +323,7 @@ class AmazonCategoryRhythmTests(AmazonTestCase):
             self.read(rule)
 
     def test_each_category_has_its_own_interval_whatever_the_price(self):
-        for priority, interval in (("high", AMAZON_RED_ROUND_FLOOR_SECONDS), ("medium", 3600), ("low", 3 * 3600)):
+        for priority, interval in (("cycle", AMAZON_RED_ROUND_FLOOR_SECONDS), ("60m", 3600), ("3h", 3 * 3600)):
             with self.subTest(priority=priority):
                 rule = watch(url=ROOT, target="1000", priority=priority)
                 self.first_read(rule, "9.000,00")  # far above the target: the price changes nothing
@@ -331,12 +331,12 @@ class AmazonCategoryRhythmTests(AmazonTestCase):
                 self.assertTrue(self.due_after(rule, interval))
 
     def test_a_red_watch_far_above_its_target_is_still_read_every_round(self):
-        rule = watch(url=ROOT, target="3000", priority="high")
+        rule = watch(url=ROOT, target="3000", priority="cycle")
         self.first_read(rule, "7.000,00")
-        self.assertTrue(self.due_after(rule, AMAZON_PRIORITY_INTERVAL_SECONDS["high"]))
+        self.assertTrue(self.due_after(rule, AMAZON_PRIORITY_INTERVAL_SECONDS["cycle"]))
 
     def test_a_block_wave_stretches_every_interval_and_they_return_by_themselves(self):
-        rule = watch(url=ROOT, priority="high")
+        rule = watch(url=ROOT, priority="cycle")
         self.first_read(rule, "100,00")
         access = self.client.access
         site_block(access)  # x2
@@ -347,7 +347,7 @@ class AmazonCategoryRhythmTests(AmazonTestCase):
         self.assertEqual(self.provider.main_interval(rule), AMAZON_RED_ROUND_FLOOR_SECONDS)
 
     def test_a_yellow_or_green_family_is_swept_at_its_own_longer_interval(self):
-        red, yellow = (watch(url=ROOT, include_variations=True, priority=p) for p in ("high", "medium"))
+        red, yellow = (watch(url=ROOT, include_variations=True, priority=p) for p in ("cycle", "60m"))
         self.assertEqual(self.provider.sweep_interval(red), AMAZON_RED_ROUND_FLOOR_SECONDS)
         self.assertEqual(self.provider.sweep_interval(yellow), 3600)
 
@@ -393,7 +393,7 @@ class AmazonProductTests(AmazonTestCase):
         self.assertEqual(offers, [depot])
 
     def test_no_offer_probe_is_bounded_without_hiding_priced_siblings(self):
-        rule = watch(url=ROOT, include_variations=True, priority="medium")
+        rule = watch(url=ROOT, include_variations=True, priority="60m")
         pages = {ROOT: UNAVAILABLE, CHILD: priced("100,00")}
         variations = [amazon_parser.AmazonProductVariation("Gümüş", ROOT), amazon_parser.AmazonProductVariation("Turuncu", CHILD)]
         with (self.serve(pages), patch.object(amazon_parser, "extract_product_variations", return_value=variations),
@@ -414,7 +414,7 @@ class AmazonProductTests(AmazonTestCase):
         self.assertFalse(self.client.unavailable_product_pages)
 
     def test_a_red_watchs_own_page_without_offer_is_looked_at_in_every_round(self):
-        rule = watch(url=ROOT, priority="high")
+        rule = watch(url=ROOT, priority="cycle")
         with self.serve({ROOT: UNAVAILABLE}):
             for _ in range(3):
                 self.provider.begin_cycle()
@@ -424,7 +424,7 @@ class AmazonProductTests(AmazonTestCase):
         self.assertFalse(self.client.unavailable_product_pages)
 
     def test_missing_price_probe_is_bounded_but_never_becomes_fake_stock(self):
-        rule = watch(url=ROOT, priority="low")
+        rule = watch(url=ROOT, priority="3h")
         with self.serve({ROOT: '<span id="productTitle">iPhone</span>'}):
             for _ in range(2):
                 self.provider.begin_cycle()
@@ -444,14 +444,14 @@ class AmazonProductTests(AmazonTestCase):
         outcome = WatchRead()
         with self.serve({ROOT: UNAVAILABLE}):
             with self.assertRaises(OutOfStockHermesError):
-                self.read(watch(url=ROOT, priority="medium"), outcome)
+                self.read(watch(url=ROOT, priority="60m"), outcome)
         self.assertIsNotNone(outcome.retry_after)
         # A red watch has no probe to wait for: its page is looked at again in every round.
         red = WatchRead()
         self.client.unavailable_product_pages.clear()
         with self.serve({ROOT: UNAVAILABLE}):
             with self.assertRaises(OutOfStockHermesError):
-                self.read(watch(url=ROOT, priority="high"), red)
+                self.read(watch(url=ROOT, priority="cycle"), red)
         self.assertIsNone(red.retry_after)
 
     def test_walks_color_capacity_graph_and_yields_depot_immediately(self):

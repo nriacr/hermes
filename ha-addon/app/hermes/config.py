@@ -12,8 +12,8 @@ from .constants import (
     FASHION_GROUP,
     FASHION_SITES,
     OPTIONS_PATH,
-    PRIORITIES,
     SEARCH_RESULT_LIMIT,
+    normalize_priority,
 )
 from .errors import HermesError
 from .logging_utils import log
@@ -195,10 +195,8 @@ def prepare_watches(raw_watches: object) -> List[WatchRule]:
         minimum_price = _optional_price(item, "minimum_price")
         if minimum_price is not None and minimum_price > target_price:
             raise HermesError(f"Takip edilen ({context_name}) için minimum fiyat hedef fiyattan büyük olamaz.")
-        priority = str(item.get("priority") or "high").strip().casefold()
-        if priority not in PRIORITIES:
-            log(f"Bilinmeyen takip önceliği varsayılan yapıldı: {context_name} | {priority}")
-            priority = "high"
+        # Pre-3.12 cards (high/medium/low or none) are read every 6 hours until they are saved again.
+        priority = normalize_priority(item.get("priority"))
         size = str(item.get("size") or "").strip()
         # A card may contain several links, but all of them belong to the same
         # tracking rule. This keeps their results separate from another card.
@@ -219,7 +217,6 @@ def prepare_watches(raw_watches: object) -> List[WatchRule]:
                     official_seller_only=parse_bool(item.get("official_seller_only"), default=False),
                     check_now_token=str(item.get("check_now_token") or "").strip(),
                     max_items_to_scan=SEARCH_RESULT_LIMIT,
-                    check_interval_minutes=_optional_bounded_integer(item, "check_interval_minutes", 1, 1440),
                     notify_once_in_24h=parse_bool(item.get("notify_once_in_24H"), default=True),
                     active=True,
                     tracking_id=tracking_id,

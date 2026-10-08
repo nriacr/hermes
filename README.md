@@ -7,8 +7,8 @@ takip add-on'udur.
   linkten otomatik anlaşılır. Arama linklerinde kart adı aranacak ifadedir.
 - Desteklenen siteler: Amazon, Hepsiburada, Trendyol, Network, Beymen Club,
   Ben Gurme, Nordbron, Zara, H&M, Togg.
-- Öncelik: yüksek (kırmızı) her çevrimde, orta (sarı) saatte, düşük (yeşil) 3 saatte
-  bir kontrol edilir; Amazon'da kırmızı kartlar her arama turunda: ana sayfa ve tüm varyantlar liste başından sonuna bir kez okunur, sonra tur yeniden başlar (tur süresi sayfa sayısına bağlı, en sık 20 saniyede bir). Tablodaki renkli daire önceliği gösterir.
+- Öncelik süresiyle seçilir: her çevrim (kırmızı), 30 dk (turuncu), 60 dk (sarı), 3 saat
+  (sarı-yeşil), 6 saat (yeşil); Amazon'da her çevrim kartları her arama turunda: ana sayfa ve tüm varyantlar liste başından sonuna bir kez okunur, sonra tur yeniden başlar (tur süresi sayfa sayısına bağlı, en sık 20 saniyede bir). Tablodaki renkli daire önceliği gösterir.
 - Amazon: varyasyonlar (renk × kapasite/ölçü, en fazla 60), doğrulanmış Amazon
   Depo teklifleri ayrı satırlarda, "yalnızca platformun kendi satıcısı" filtresi,
   ilk engelde tüm Amazon 5 → 10 → 20 → 30 dakika mola verir (tek yoklamayla) ve

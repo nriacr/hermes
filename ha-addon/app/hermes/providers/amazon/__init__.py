@@ -18,6 +18,7 @@ from ...constants import (
     AMAZON_PRIORITY_INTERVAL_SECONDS,
     AMAZON_RED_ROUND_FLOOR_SECONDS,
     SITE_AMAZON,
+    normalize_priority,
 )
 from ...errors import EmptySearchResultsHermesError, HermesError, OutOfStockHermesError, PriceUnavailableHermesError
 from ...logging_utils import log
@@ -44,8 +45,8 @@ class WatchRhythm:
     """What the provider remembers of one product watch between cycles.
 
     Since 3.9 a watch is read as a whole (its configured page with the used listing, where Amazon Depo
-    offers show up, and every variant of its family) once per search round (a cycle) while it is red, and
-    every AMAZON_PRIORITY_INTERVAL_SECONDS (hourly, every 3 hours) while it is yellow or green. The
+    offers show up, and every variant of its family) once per search round (a cycle) while it is read every
+    cycle (red), and every AMAZON_PRIORITY_INTERVAL_SECONDS (30 min to 6 hours) otherwise. The
     intervals are stretched by the access governor's speed factor after a block wave.
     """
 
@@ -208,9 +209,8 @@ class AmazonProvider(Provider):
 
     @staticmethod
     def category_interval(watch: WatchRule) -> int:
-        """How often the watch's category reads it; the category alone decides (red every search round, yellow 1 h, green 3 h)."""
-        priority = str(getattr(watch, "priority", "high") or "high").casefold()
-        return AMAZON_PRIORITY_INTERVAL_SECONDS.get(priority, AMAZON_PRIORITY_INTERVAL_SECONDS["high"])
+        """How often the watch's priority reads it; the priority alone decides (every search round, 30 min ... 6 h)."""
+        return AMAZON_PRIORITY_INTERVAL_SECONDS[normalize_priority(getattr(watch, "priority", None))]
 
     def is_red(self, watch: WatchRule) -> bool:
         return self.category_interval(watch) <= AMAZON_RED_ROUND_FLOOR_SECONDS

@@ -16,11 +16,10 @@ class WatchRule:
     group: str = ""
     size: str = ""
     include_variations: bool = False
-    priority: str = "high"
+    priority: str = "cycle"
     official_seller_only: bool = False
     check_now_token: str = ""
     max_items_to_scan: int = 60
-    check_interval_minutes: Optional[int] = None
     notify_once_in_24h: bool = True
     active: bool = True
     # Shared by every URL in one configured tracking card.
@@ -50,7 +49,7 @@ class PriceSummaryRow:
     search_group_label: str = ""
     is_warehouse: bool = False
     tracking_id: str = ""
-    priority: str = "high"
+    priority: str = "cycle"
     price_checked_at: str = ""
 
     @property

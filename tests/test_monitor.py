@@ -233,7 +233,7 @@ class EmptyAndStockTests(CycleTestCase):
         self.assertIn("sonuç bulunamadı", self.published_stock()[0]["reason"])
 
     def test_deferred_stock_row_keeps_its_last_classification(self):
-        rule = watch(url=AMAZON, priority="medium")
+        rule = watch(url=AMAZON, priority="60m")
         with patch.object(AmazonProvider, "read", side_effect=reader(OutOfStockHermesError("Stokta yok", "iPhone", AMAZON))) as read:
             self.run_cycle(config([rule]), times=2)
         read.assert_called_once()
@@ -634,7 +634,7 @@ class ReadOrderTests(CycleTestCase):
     def test_quick_reads_come_before_long_ones_inside_a_priority_tier(self):
         long_read = watch("Uzun", "https://www.amazon.com.tr/dp/B000000001", include_variations=True)
         quick = watch("Hızlı", "https://www.amazon.com.tr/dp/B000000002", include_variations=True)
-        medium_quick = watch("Orta", "https://www.amazon.com.tr/dp/B000000003", priority="medium")
+        medium_quick = watch("Orta", "https://www.amazon.com.tr/dp/B000000003", priority="60m")
         ranks = {long_read.url: 1, quick.url: 0, medium_quick.url: 0}
         ordered = scheduling.priority_order([medium_quick, long_read, quick], lambda rule: ranks[rule.url])
         self.assertEqual([rule.name for rule in ordered], ["Hızlı", "Uzun", "Orta"])
@@ -645,7 +645,7 @@ class SchedulingTests(CycleTestCase):
         now = datetime.now(timezone.utc)
         checked = {"last_checked_at": now.isoformat()}
         high, medium, low = (watch(name, f"https://www.amazon.com.tr/dp/B00000000{i}", priority=name)
-                             for i, name in enumerate(("high", "medium", "low"), start=1))
+                             for i, name in enumerate(("cycle", "60m", "3h"), start=1))
         cases = ((timedelta(seconds=59), high, False), (timedelta(seconds=60), high, True),
                  (timedelta(minutes=59), medium, False), (timedelta(hours=2, minutes=59), low, False),
                  (timedelta(hours=1), medium, True), (timedelta(hours=1), low, False), (timedelta(hours=3), low, True))
@@ -655,15 +655,15 @@ class SchedulingTests(CycleTestCase):
 
     def test_each_site_reads_high_priority_before_medium_and_low(self):
         rules = [watch(p, f"https://www.amazon.com.tr/dp/B00000000{i}", priority=p)
-                 for i, p in enumerate(("low", "high", "medium", "high"), start=1)]
-        self.assertEqual([rule.priority for rule in scheduling.priority_order(rules)], ["high", "high", "medium", "low"])
+                 for i, p in enumerate(("3h", "cycle", "60m", "cycle"), start=1)]
+        self.assertEqual([rule.priority for rule in scheduling.priority_order(rules)], ["cycle", "cycle", "60m", "3h"])
         self.assertEqual([rule.url for rule in scheduling.priority_order(rules)][:2], [rules[1].url, rules[3].url])
 
     def test_deferred_medium_and_low_watches_keep_their_last_prices(self):
         now = datetime.now(timezone.utc)
-        medium = watch("Orta öncelik", "https://nordbron.com/orta", target="150", priority="medium")
-        low = watch("Düşük öncelik", "https://nordbron.com/dusuk", target="250", priority="low")
-        high = watch("Yüksek öncelik", "https://nordbron.com/yuksek", target="350", priority="high")
+        medium = watch("Orta öncelik", "https://nordbron.com/orta", target="150", priority="60m")
+        low = watch("Düşük öncelik", "https://nordbron.com/dusuk", target="250", priority="3h")
+        high = watch("Yüksek öncelik", "https://nordbron.com/yuksek", target="350", priority="cycle")
         state = {}
         for rule, price in ((medium, "120"), (low, "220")):
             offer_key = f"cached-{rule.priority}"
@@ -676,11 +676,11 @@ class SchedulingTests(CycleTestCase):
             self.run_cycle(config([medium, low, high], interval_seconds=60))
         read.assert_called_once()
         rows = {row["priority"]: row for row in self.published_rows()}
-        self.assertEqual({p: rows[p]["price"] for p in rows}, {"medium": "120 TL", "low": "220 TL", "high": "300 TL"})
-        self.assertEqual(rows["medium"]["price_checked_at"], now.isoformat())
+        self.assertEqual({p: rows[p]["price"] for p in rows}, {"60m": "120 TL", "3h": "220 TL", "cycle": "300 TL"})
+        self.assertEqual(rows["60m"]["price_checked_at"], now.isoformat())
         coverage = next(line for line in LOG_LINES if "Çevrim öncelik kapsamı:" in line)
-        self.assertIn("yüksek=1 başladı, 1 sırası geldi, 0 ertelendi", coverage)
-        self.assertIn("orta=0 başladı, 0 sırası geldi, 1 ertelendi", coverage)
+        self.assertIn("Her çevrim=1 başladı, 1 sırası geldi, 0 ertelendi", coverage)
+        self.assertIn("60 dk=0 başladı, 0 sırası geldi, 1 ertelendi", coverage)
 
     def test_stopping_hermes_ends_the_cycle_between_watches(self):
         rules = [watch(f"Ürün {i}", f"https://nordbron.com/{i}") for i in range(3)]
@@ -942,7 +942,7 @@ class SummaryFileTests(CycleTestCase):
 
     def test_normal_and_warehouse_rows_of_one_asin_stay_separate(self):
         url = "https://www.amazon.com.tr/dp/B0D95QG8W4?th=1"
-        normal = self.row("Edifier M60 Siyah", url, "8899", "9000", priority="low")
+        normal = self.row("Edifier M60 Siyah", url, "8899", "9000", priority="3h")
         warehouse = self.row("Edifier M60 Siyah", url, "8787.77", "9000", is_warehouse=True)
         summary.save_price_summary(self.data.files.summary, [normal])
         summary.save_incremental_summary(self.data.files.summary, [warehouse])

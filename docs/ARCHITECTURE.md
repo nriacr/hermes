@@ -122,9 +122,11 @@ database error is logged once and never stops monitoring.
 The only watch model is `takip_edilenler`. Each card has optional `name`
 (required for search links), `group`, `target_price`, optional
 `minimum_price`, comma-separated `exclude_terms`, `size`,
-`include_variations`, `priority` (high: every cycle, medium: ≥ 2 h, low:
-≥ 6 h), `official_seller_only`, `url_1` … `url_5`, a legacy
-`check_interval_minutes`, `notify_once_in_24H` and `active`. The search limit
+`include_variations`, `priority` (since 3.12: `cycle`, `30m`, `60m`, `3h`,
+`6h`; a pre-3.12 value `high`/`medium`/`low`, a missing or an unknown one
+means `6h`, which moved every existing card to the lowest priority),
+`official_seller_only`, `url_1` … `url_5`, `notify_once_in_24H` and `active`
+(the legacy `check_interval_minutes` is ignored since 3.12). The search limit
 is fixed at 60. An unsupported link is skipped without stopping the card.
 A card's identity (`tracking_id`) is derived from name, target, size and links
 exactly as in 2.x.
@@ -142,7 +144,7 @@ card due immediately after the restart.
    (`Provider.read_due`), keep its last rows and skip it. While a site's guard
    is active (Amazon pauses as a whole), its watches keep their last rows too.
 3. Every site reads its due watches in its own queue (one thread per site),
-   high → medium → low (inside a tier the provider's `read_rank` puts quick
+   every cycle → 30 min → 60 min → 3 h → 6 h (inside a tier the provider's `read_rank` puts quick
    reads before long ones), with the configured random delay before each of its
    requests. A slow or protected site never delays another; each site has one
    sequential queue, except Amazon (since 3.5): `Provider.has_depo_lane` gives it
@@ -259,11 +261,11 @@ results" search notice is a normal stock row read again after five minutes.
   the calm time since the previous block; the day's count survives restarts.
 - One read per watch and round (since 3.9, `WatchRhythm`): a product watch is
   read as a whole, its configured page with the used listing (where Depo offers
-  show) and every variant of its family. A red watch is read once per search
-  round (a cycle; `AmazonProvider.read_due` checks `main_cycle`, floor
-  `AMAZON_RED_ROUND_FLOOR_SECONDS`, 20 s), a yellow one hourly and a green one
-  every 3 hours (`AMAZON_PRIORITY_INTERVAL_SECONDS`); the price never changes
-  it. The round lasts as long as its reads and grows when yellow or green cards
+  show) and every variant of its family. An every-cycle (red) watch is read
+  once per search round (`AmazonProvider.read_due` checks `main_cycle`, floor
+  `AMAZON_RED_ROUND_FLOOR_SECONDS`, 20 s), the others every 30 min, 60 min,
+  3 h or 6 h (`AMAZON_PRIORITY_INTERVAL_SECONDS`); the price never changes
+  it. The round lasts as long as its reads and grows when slower cards
   are due in it, so each red page is read every ~5-6 minutes at the 1-4 s delay
   (the old fast main-page loop of 3.5-3.8.3 and the replay of remembered variant
   offers are gone: the main pages took half the requests and the variants went
@@ -345,7 +347,7 @@ actions: `test-pushover`, `reset-notifications`, `reset-price-history`,
 page) and one button row: Pushover test, the two resets, İstatistik. The
 statistics page (`web/statistics.py`, since 3.4) is built from the `reads`
 table around one number, the check frequency: the median time between two
-reads of the same high-priority watch (gaps over 6 hours are pauses, not the
+reads of the same every-cycle watch (`high` in rows before 3.12; gaps over 6 hours are pauses, not the
 rhythm). One switch, `statistics?p=24h|7d`, drives the whole page: four tiles
 (check frequency, last cycle from the published summary, success rate,
 blocks and errors), a bar chart of the check frequency per hour or day with
@@ -371,7 +373,8 @@ full reload every 60 seconds (`<noscript>` refresh).
 Visual rules: dark charcoal/gray, high-contrast text, muted provider accents,
 whole-lira prices (`1.500 TL`), product names 60 characters without ellipsis,
 group titles 70 characters, full text in the tooltip, priority dots on normal
-rows only, DEPO tag on warehouse rows, compact mobile cards, correct Turkish.
+rows only (five colors from red, every cycle, through orange, yellow and
+yellow-green to green, 6 hours; the same dot starts each card in Ayarlar), DEPO tag on warehouse rows, compact mobile cards, correct Turkish.
 
 ## 11. Telegram
 

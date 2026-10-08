@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 
-APP_VERSION = "3.11.0"
+APP_VERSION = "3.12.0"
 
 # Persistent add-on data. File names are a public interface: 2.x releases read
 # the same files, so a rollback never loses history or notification state.
@@ -79,21 +79,37 @@ SEARCH_RESULT_LIMIT = 60
 SEARCH_ERROR_NOTIFICATION_HOUR = 11
 TELEGRAM_STATUS_HEARTBEAT_SECONDS = 60 * 60
 TELEGRAM_QUICK_ADD_GROUP = "Paylaşılanlar"
-PRIORITIES = ("high", "medium", "low")
+# 3.12.0: five priorities named by how often they are read, from every cycle to every 6 hours.
+# Values from before 3.12 ("high", "medium", "low") and missing or unknown values mean the lowest
+# priority: the owner moved every existing card to 6 hours with this release.
+PRIORITIES = ("cycle", "30m", "60m", "3h", "6h")
+DEFAULT_PRIORITY = "cycle"
+LOWEST_PRIORITY = "6h"
+PRIORITY_LABELS = {"cycle": "Her çevrim", "30m": "30 dk", "60m": "60 dk", "3h": "3 saat", "6h": "6 saat"}
+PRIORITY_DESCRIPTIONS = {
+    "cycle": "Her çevrimde fiyat taranır", "30m": "30 dk'da bir taranır", "60m": "60 dk'da bir taranır",
+    "3h": "3 saatte bir taranır", "6h": "6 saatte bir taranır",
+}
 # Minimum time between two request starts to one site, on top of the random
 # request delay (Network only; since 3.8.3 Amazon has none: its client waits the configured
 # random delay before every request instead).
 SITE_MIN_REQUEST_GAP_SECONDS = {
     SITE_NETWORK: 1.0,
 }
-# 3.7.0: the priority category alone decides how often a watch is read: yellow hourly, green every
-# 3 hours on every site; red every cycle (Amazon: every search round, see below).
-PRIORITY_INTERVAL_SECONDS = {"medium": 60 * 60, "low": 3 * 60 * 60}
-# 3.8.1: a red watch is read once per search round (the Depo lane goes through every active card and starts
+# The priority alone decides how often a watch is read, on every site; "cycle" every cycle
+# (Amazon: every search round, see below).
+PRIORITY_INTERVAL_SECONDS = {"30m": 30 * 60, "60m": 60 * 60, "3h": 3 * 60 * 60, "6h": 6 * 60 * 60}
+# 3.8.1: an every-cycle (red) watch is read once per search round (the Depo lane goes through every active card and starts
 # over); the round lasts as long as the reads in it, so yellow and green cards due in a round lengthen it. The
 # floor only keeps a list with very few red cards from hammering Amazon.
 AMAZON_RED_ROUND_FLOOR_SECONDS = 20
-AMAZON_PRIORITY_INTERVAL_SECONDS = {"high": AMAZON_RED_ROUND_FLOOR_SECONDS, **PRIORITY_INTERVAL_SECONDS}
+AMAZON_PRIORITY_INTERVAL_SECONDS = {"cycle": AMAZON_RED_ROUND_FLOOR_SECONDS, **PRIORITY_INTERVAL_SECONDS}
+
+
+def normalize_priority(value) -> str:
+    """A current priority key; anything else (pre-3.12 values, empty, unknown) is the lowest."""
+    text = str(value or "").strip().casefold()
+    return text if text in PRIORITIES else LOWEST_PRIORITY
 
 # -- Amazon access control (3.3.0) ---------------------------------------------
 # Measured 2026-10-03 (Pi logs, 1,147 requests): three unbroken runs at ~10.8
@@ -143,7 +159,7 @@ AMAZON_MAIN_GAPS_KEPT = 200
 # in the other lane stops at its next request instead of collecting more blocks.
 AMAZON_BLOCK_HOLD_SECONDS = PROTECTION_PAUSE_LADDER_SECONDS[0]
 # 3.9.0: a product watch is read as a whole (its configured page with the used listing, where Amazon Depo
-# offers show up, and every variant): a red one once per search round (a cycle), a yellow or green one every
+# offers show up, and every variant): an every-cycle one once per search round, the others every
 # AMAZON_PRIORITY_INTERVAL_SECONDS. A variant page that a watch excludes by title is read once
 # for its neighbours and then taken from memory for 30 minutes.
 AMAZON_EXCLUDED_PAGE_REFRESH_SECONDS = 30 * 60

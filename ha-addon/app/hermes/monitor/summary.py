@@ -4,6 +4,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List
 
+from ..constants import normalize_priority
 from ..errors import HermesError
 from ..logging_utils import log
 from ..models import PriceSummaryRow, StockSummaryRow, WatchRule
@@ -65,7 +66,8 @@ def summary_row_from_state(watch: WatchRule, state_entry: Dict[str, Any], seller
         search_group_label=search_group_label,
         tracking_id=str(state_entry.get("tracking_id") or watch.tracking_id or ""),
         is_warehouse=bool(state_entry.get("is_warehouse", False)),
-        priority=str(state_entry.get("priority") or watch.priority or "high"),
+        # The card's current priority: a state entry keeps the value of its last read.
+        priority=normalize_priority(watch.priority),
         # Older offer entries only stored the read time as last_checked_at.
         price_checked_at=str(state_entry.get("last_price_checked_at") or state_entry.get("last_checked_at") or ""),
     )
@@ -240,7 +242,7 @@ def rows_from_payload(payload: Dict[str, Any]) -> List[PriceSummaryRow]:
                 search_group_label=str(raw.get("search_group_label") or ""),
                 is_warehouse=bool(raw.get("is_warehouse", False)),
                 tracking_id=str(raw.get("tracking_id") or ""),
-                priority=str(raw.get("priority") or "high"),
+                priority=normalize_priority(raw.get("priority")),
                 price_checked_at=str(raw.get("price_checked_at") or ""),
             ))
         except HermesError:

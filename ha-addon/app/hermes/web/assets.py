@@ -28,7 +28,7 @@ tbody tr.site-zara { --site-bg:rgba(176,218,139,.13); --site-bg-strong:rgba(176,
 tbody tr.site-hm { --site-bg:rgba(214,178,255,.13); --site-bg-strong:rgba(214,178,255,.25); --site-line:rgba(214,178,255,.84); --site-link:#dec4ff; }
 tbody tr.site-togg { --site-bg:rgba(255,164,138,.13); --site-bg-strong:rgba(255,164,138,.25); --site-line:rgba(255,164,138,.84); --site-link:#ffc2b3; }
 tbody tr.site-other { --site-bg:rgba(183,177,222,.13); --site-bg-strong:rgba(183,177,222,.22); --site-line:rgba(183,177,222,.72); --site-link:#d1caff; } tbody tr[class*='site-'] td { background:linear-gradient(90deg,var(--site-bg),rgba(36,39,43,.40)); } tbody tr[class*='site-'] td:first-child { border-left:4px solid var(--site-line); color:var(--site-link); font-weight:800; } tbody tr[class*='site-'] .product-cell a { color:var(--site-link); } tbody tr[class*='site-']:hover td { background:linear-gradient(90deg,rgba(255,255,255,.055),var(--site-bg)); }
-.product-cell { max-width:360px; white-space:normal; line-height:1.22; } .product-cell a { color:#e4e6e6; text-decoration:none; } .product-cell a:hover { color:#ffd166; text-decoration:underline; } .product-cell .product-title { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; text-overflow:ellipsis; } .product-cell .warehouse-tag { display:inline-block; margin:0 8px 0 0; padding:0 7px; border-radius:5px; background:rgba(236,183,82,.20); color:#fff; font-size:13px; font-weight:900; letter-spacing:.05em; line-height:1.1; vertical-align:top; } .product-cell .priority-dot { display:inline-block; width:8px; height:8px; margin:0 7px 1px 0; border-radius:50%; vertical-align:middle; } .priority-high { background:#ff5c64; } .priority-medium { background:#f2c94c; } .priority-low { background:#57cc7a; } .deal-row td { color:#b7f0dc; } .deal-row td:first-child { color:var(--site-link); } .deal-row .product-cell a { color:#b7f0dc; } .note { margin-top:18px; border-left:4px solid #a9adaf; padding:12px 14px; background:rgba(169,173,175,.14); border-radius:10px; font-size:13px; } .footer { margin-top:18px; font-size:12px; color:var(--muted); }
+.product-cell { max-width:360px; white-space:normal; line-height:1.22; } .product-cell a { color:#e4e6e6; text-decoration:none; } .product-cell a:hover { color:#ffd166; text-decoration:underline; } .product-cell .product-title { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; text-overflow:ellipsis; } .product-cell .warehouse-tag { display:inline-block; margin:0 8px 0 0; padding:0 7px; border-radius:5px; background:rgba(236,183,82,.20); color:#fff; font-size:13px; font-weight:900; letter-spacing:.05em; line-height:1.1; vertical-align:top; } .priority-dot { display:inline-block; flex:none; width:8px; height:8px; margin:0 7px 1px 0; border-radius:50%; vertical-align:middle; } .priority-cycle { background:#ff5c64; } .priority-30m { background:#ff9548; } .priority-60m { background:#f2c94c; } .priority-3h { background:#c4dc4a; } .priority-6h { background:#3fbf6a; } .deal-row td { color:#b7f0dc; } .deal-row td:first-child { color:var(--site-link); } .deal-row .product-cell a { color:#b7f0dc; } .note { margin-top:18px; border-left:4px solid #a9adaf; padding:12px 14px; background:rgba(169,173,175,.14); border-radius:10px; font-size:13px; } .footer { margin-top:18px; font-size:12px; color:var(--muted); }
 .public main { max-width:1180px; } .public .hero { padding:18px; } .public .badge { font-size:clamp(22px,4vw,36px); }
 .public-actions { margin:16px 0 6px; } .public-actions .button { min-width:132px; }
 .public-cycle-row { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; margin:10px 0 4px; }
@@ -222,13 +222,6 @@ SETTINGS_SCRIPT = """
     });
   });
   watchSearch?.addEventListener('input', refreshWatchList);
-  document.addEventListener('change', (event) => {
-    const priority = event.target.closest('[data-watch-priority]');
-    if (!priority) return;
-    const card = priority.closest('[data-watch-card]');
-    const legacyInterval = card?.querySelector('[data-legacy-check-interval]');
-    if (legacyInterval) legacyInterval.value = '';
-  });
   refreshWatchList();
 
   const nextWatchIndex = () => {

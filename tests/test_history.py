@@ -308,7 +308,7 @@ class MonitorHistoryTests(HistoryCase):
             self.run_later(cfg, fail, minutes * 70)
         self.assertEqual(self.reads(), ["captcha", "http_503", "stock", "error", "timeout", "connection", "unreadable"])
         with sqlite3.connect(self.data.files.database) as db:
-            self.assertEqual({row for row in db.execute("SELECT watch_key, priority FROM reads")}, {(key(rule), "high")})
+            self.assertEqual({row for row in db.execute("SELECT watch_key, priority FROM reads")}, {(key(rule), "cycle")})
 
     def test_a_wrapped_browser_timeout_counts_as_timeout_and_keeps_its_reason_and_the_pi_load(self):
         class TimeoutException(Exception):

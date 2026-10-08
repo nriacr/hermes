@@ -8,10 +8,12 @@ from typing import Any, Dict, List, Optional
 
 from ..constants import (
     APP_VERSION,
+    PRIORITY_DESCRIPTIONS,
     STATE_PATH,
     SUMMARY_PATH,
     TELEGRAM_ERROR_EVENTS_PATH,
     TELEGRAM_STATUS_PATH,
+    normalize_priority,
 )
 from ..storage import load_json
 from ..utils import PROCESS_STARTED_AT, is_search_url, parse_bool, parse_iso_datetime, repair_mojibake, site_label
@@ -31,7 +33,6 @@ SITE_THEME_CLASSES = (
     ("h&m", "site-hm"),
     ("togg", "site-togg"),
 )
-PRIORITY_LABELS = {"high": "Yüksek", "medium": "Orta", "low": "Düşük"}
 
 
 # -- formatting ---------------------------------------------------------------------
@@ -148,18 +149,20 @@ def row_sort_key(row: Dict[str, Any]):
 # -- price table ----------------------------------------------------------------------
 
 
+def priority_dot(priority) -> str:
+    """Round mark at the start of a row: red (every cycle) through orange and yellow to green (6 hours)."""
+    key = normalize_priority(priority)
+    text = escape(PRIORITY_DESCRIPTIONS[key], quote=True)
+    return f'<i class="priority-dot priority-{key}" title="{text}" aria-label="{text}"></i>'
+
+
 def render_table_row(row: Dict[str, Any]) -> str:
     seller_text = repair_mojibake(row.get("seller") or "-")
     visible_title, full_title = shortened_title(row.get("product_title"), TABLE_TITLE_MAX_LENGTH, ellipsis=False)
     is_warehouse = parse_bool(row.get("is_warehouse"), default=False)
     warehouse_tag = '<strong class="warehouse-tag">DEPO</strong>' if is_warehouse else ""
-    priority = str(row.get("priority") or "high").strip().casefold()
-    priority_dot = ""
-    if not is_warehouse and priority in PRIORITY_LABELS:
-        label = PRIORITY_LABELS[priority]
-        priority_dot = (f'<i class="priority-dot priority-{escape(priority)}" title="{label} öncelik" '
-                        f'aria-label="{label} öncelik"></i>')
-    title_html = f'<span class="product-title">{priority_dot}{warehouse_tag}{escape(visible_title)}</span>'
+    dot = "" if is_warehouse else priority_dot(row.get("priority"))
+    title_html = f'<span class="product-title">{dot}{warehouse_tag}{escape(visible_title)}</span>'
     product_url = str(row.get("product_url") or "").strip()
     if product_url:
         title_html = f'<a href="{escape(product_url, quote=True)}" target="_blank" rel="noopener noreferrer">{title_html}</a>'

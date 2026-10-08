@@ -1,5 +1,15 @@
 # Değişiklik günlüğü
 
+## 3.12.0
+
+- Öncelikler artık adla değil süreyle: "Her çevrim", "30 dk", "60 dk", "3 saat", "6 saat"
+  (her çevrimde, 30 dk'da, 60 dk'da, 3 saatte, 6 saatte bir taranır). Yüksek/orta/düşük kalktı.
+- Öncelik rengi beş kademe: kırmızı (her çevrim), turuncu (30 dk), sarı (60 dk), sarı-yeşil (3 saat),
+  yeşil (6 saat). Özet Tablo satırlarında ve Ayarlar'daki her kartın başında yuvarlak işaret.
+- Bu sürüme geçişte mevcut tüm takip kartları en düşük önceliğe (6 saat) geçer; yeni kartlar
+  (Ayarlar ve Telegram hızlı ekleme) "Her çevrim" ile başlar. Kart bir sonraki kayıtta yeni değerle yazılır.
+- Kartlardaki eski "kontrol aralığı (dakika)" alanı artık kullanılmıyor; sıklığı yalnız öncelik belirler.
+
 ## 3.11.0
 
 - Ayarlar sayfasının en altında "Zamanlama" bölümü: "Çevrim aralığı", "Bekleme süresi min" ve

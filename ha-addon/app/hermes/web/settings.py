@@ -6,19 +6,17 @@ from html import escape
 from typing import Any, Dict, List, Optional
 
 from ..config import DEFAULT_TELEGRAM_CHANNELS, WATCH_URL_FIELDS, options_with_defaults, read_options, watch_group, watch_urls
-from ..constants import APP_VERSION, PRIORITIES, STATE_PATH, SUMMARY_PATH
+from ..constants import (
+    APP_VERSION, DEFAULT_PRIORITY, PRIORITIES, PRIORITY_DESCRIPTIONS, PRIORITY_LABELS, STATE_PATH, SUMMARY_PATH, normalize_priority,
+)
 from ..logging_utils import log
 from ..storage import load_json
 from ..supervisor import save_options_and_restart
 from ..utils import detect_site_from_url, format_tl, parse_bool, parse_decimal, site_label, utc_now, watch_name_required_for_url
+from .dashboard import priority_dot
 from .pages import link, render_notice, render_page, render_tool_actions, CONFIRM_SCRIPT
 
 OTHER_GROUP = "Diğer"
-PRIORITY_CHOICES = (
-    ("low", "Düşük · 3 saatte bir"),
-    ("medium", "Orta · saatte bir"),
-    ("high", "Yüksek · her çevrim"),
-)
 
 
 def _as_list(value) -> list:
@@ -136,16 +134,8 @@ def watch_display_name(item, index: int, known_titles: Dict[str, str]) -> str:
 
 
 def _card_priority(item: Dict[str, Any], is_new: bool) -> str:
-    if is_new:
-        return "high"
-    priority = str(item.get("priority") or "").strip().casefold()
-    if priority in PRIORITIES:
-        return priority
-    try:
-        legacy_interval = int(item.get("check_interval_minutes")) if item.get("check_interval_minutes") not in (None, "") else None
-    except (TypeError, ValueError):
-        legacy_interval = None
-    return "low" if legacy_interval and legacy_interval > 120 else "medium" if legacy_interval else "high"
+    """A new card starts at every cycle; a saved card shows its priority (pre-3.12 cards: 6 hours)."""
+    return DEFAULT_PRIORITY if is_new else normalize_priority(item.get("priority"))
 
 
 def watch_form(item: Dict[str, Any], index: int, is_new: bool = False, groups=None, known_titles=None, show_remove=False) -> str:
@@ -168,7 +158,8 @@ def watch_form(item: Dict[str, Any], index: int, is_new: bool = False, groups=No
     )
     priority_field = (
         f"<label class='watch-priority'>Öncelik<select name='{escape(prefix + 'priority', quote=True)}' data-watch-priority>"
-        + "".join(f"<option value='{value}'{' selected' if priority == value else ''}>{label}</option>" for value, label in PRIORITY_CHOICES)
+        + "".join(f"<option value='{value}' title='{escape(PRIORITY_DESCRIPTIONS[value], quote=True)}'"
+                  f"{' selected' if priority == value else ''}>{escape(PRIORITY_LABELS[value])}</option>" for value in PRIORITIES)
         + "</select></label>"
     )
     exclude_field = _field(prefix, "exclude_terms", "Hariç Tut", exclude_terms).replace("<label>", "<label class='watch-exclude'>", 1)
@@ -183,8 +174,6 @@ def watch_form(item: Dict[str, Any], index: int, is_new: bool = False, groups=No
                    if show_remove else "")
     else:
         actions = "<div class='watch-actions'><button class='button danger' type='button' data-delete-watch>Sil</button></div>"
-    legacy_interval = (f"<input type='hidden' name='{escape(prefix + 'check_interval_minutes', quote=True)}' "
-                       f"value='{escape(str(item.get('check_interval_minutes') or ''), quote=True)}' data-legacy-check-interval>")
     inner = (
         f"<input type='hidden' name='{escape(prefix + 'delete', quote=True)}' value='0' data-delete-flag>"
         "<div class='watch-layout'><div class='watch-top'>"
@@ -194,14 +183,15 @@ def watch_form(item: Dict[str, Any], index: int, is_new: bool = False, groups=No
         f"{_field(prefix, 'minimum_price', 'Hedef Fiyat Min', _price_input_value(item.get('minimum_price', '')))}"
         f"{_field(prefix, 'size', 'Beden', item.get('size', ''))}"
         f"</div><div class='watch-links'>{link_fields}</div>"
-        f"<div class='watch-bottom'>{priority_field}{exclude_field}{flags}{actions}{legacy_interval}"
-        "<p class='watch-hint'>Yüksek öncelik her çevrimde kontrol edilir. Satıcı filtresi şu an Amazon’da uygulanır; "
+        f"<div class='watch-bottom'>{priority_field}{exclude_field}{flags}{actions}"
+        "<p class='watch-hint'>Öncelik, fiyatın ne sıklıkla tarandığıdır: her çevrimde, 30 dk, 60 dk, 3 saat ya da 6 saatte bir. Satıcı filtresi şu an Amazon’da uygulanır; "
         "doğrulanmış Depo teklifleri korunur.</p></div></div>"
     )
     attributes = " data-new-watch='true'" if is_new else (
         f" data-watch-group='{escape(group, quote=True)}' data-watch-search='{escape(display_name, quote=True)}'"
     )
-    return f"<details data-watch-card{attributes}><summary>{escape(title)}</summary><div class='form-grid'>{inner}</div></details>"
+    dot = "" if is_new else priority_dot(priority)
+    return f"<details data-watch-card{attributes}><summary>{dot}{escape(title)}</summary><div class='form-grid'>{inner}</div></details>"
 
 
 def group_choices(configured_groups, items) -> List[str]:
@@ -354,16 +344,6 @@ def _price_from_form(value) -> int:
         raise ValueError(f"Hedef fiyat geçersiz: {value!r}") from exc
 
 
-def _number(value):
-    text = str(value or "").strip()
-    if text == "":
-        return None
-    try:
-        return int(text) if text.isdigit() else float(text)
-    except ValueError:
-        return text
-
-
 def _card_context(index: int, name: str, urls: List[str]) -> str:
     identity = name or (urls[0] if urls else "yeni kayıt")
     return f"Takip {index + 1} ({identity[:93] + '...' if len(identity) > 96 else identity})"
@@ -377,8 +357,7 @@ def build_watch(form: Dict[str, List[str]], index: int) -> Optional[Dict[str, An
     minimum_price = _first(form, prefix + "minimum_price")
     size = _first(form, prefix + "size")
     exclude_terms = _first(form, prefix + "exclude_terms")
-    interval = _first(form, prefix + "check_interval_minutes")
-    priority = _first(form, prefix + "priority", "high").casefold()
+    priority = _first(form, prefix + "priority", DEFAULT_PRIORITY).casefold()
     if priority not in PRIORITIES:
         raise ValueError(f"{_card_context(index, name, [])}: öncelik geçersiz.")
     urls = list(dict.fromkeys(url for field in WATCH_URL_FIELDS if (url := _first(form, prefix + field))))
@@ -409,8 +388,6 @@ def build_watch(form: Dict[str, List[str]], index: int) -> Optional[Dict[str, An
         item["size"] = size
     for number, url in enumerate(urls, start=1):
         item[f"url_{number}"] = url
-    if interval:
-        item["check_interval_minutes"] = _number(interval)
     return item
 
 

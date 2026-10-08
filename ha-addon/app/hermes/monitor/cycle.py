@@ -17,6 +17,7 @@ from ..constants import (
     CYCLE_HISTORY_PATH,
     DATABASE_PATH,
     PRIORITIES,
+    PRIORITY_LABELS,
     SITE_MIN_REQUEST_GAP_SECONDS,
     STATE_PATH,
     SUMMARY_PATH,
@@ -204,7 +205,7 @@ class Monitor:
             log("Çevrim öncelik kapsamı: " + " | ".join(
                 f"{label}={run.priority_scope[key]['started']} başladı, {run.priority_scope[key]['due']} sırası geldi, "
                 f"{run.priority_scope[key]['deferred']} ertelendi"
-                for key, label in (("high", "yüksek"), ("medium", "orta"), ("low", "düşük"))
+                for key, label in PRIORITY_LABELS.items()
             ))
         if self.config.watches:
             # A cycle lasts until the slowest site queue has finished.

@@ -11,6 +11,7 @@ import requests
 
 from ..config import read_options, watch_urls
 from ..constants import (
+    DEFAULT_PRIORITY,
     TELEGRAM_ERROR_EVENTS_PATH,
     TELEGRAM_LOGIN_STATE_PATH,
     TELEGRAM_QUICK_ADD_GROUP,
@@ -278,6 +279,7 @@ def _quick_add_watch(url: str, target_price, name: str = "") -> str:
         "url_1": normalized_url,
         "notify_once_in_24H": True,
         "active": True,
+        "priority": DEFAULT_PRIORITY,
     }]
     _ensure_quick_add_group(options)
     save_options_and_restart(options)
