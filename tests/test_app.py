@@ -16,6 +16,7 @@ from hermes.errors import HermesError
 from hermes.models import OfferResult
 from hermes.monitor import runner
 from hermes.providers.nordbron import NordbronProvider
+from hermes import supervisor
 from hermes.storage import load_json, save_json
 from hermes.telegram import listener as telegram
 
@@ -169,6 +170,20 @@ class TelegramConnectionTests(unittest.TestCase):
             self.assertEqual(json.loads((data.root / "quick.json").read_text())["pending"], [])
         finally:
             data.cleanup()
+
+
+class SupervisorRestartTests(unittest.TestCase):
+    def test_a_timeout_while_the_supervisor_stops_hermes_is_not_reported_as_a_failure(self):
+        for error in (TimeoutError("timed out"), RuntimeError("Supervisor API bağlantısı kurulamadı: timed out")):
+            with self.subTest(error=error), patch.object(supervisor, "_post", side_effect=error):
+                LOG_LINES.clear()
+                supervisor.restart_addon()
+                self.assertEqual(LOG_LINES[-1].split("] ", 1)[-1] if "] " in LOG_LINES[-1] else LOG_LINES[-1],
+                                 "Yeniden başlatma isteği Home Assistant'a iletildi; Hermes kapanıyor.")
+        with patch.object(supervisor, "_post", side_effect=RuntimeError("Supervisor API hata verdi: 403 forbidden")):
+            LOG_LINES.clear()
+            supervisor.restart_addon()
+        self.assertIn("yeniden başlatılamadı: Supervisor API hata verdi: 403", LOG_LINES[-1])
 
 
 class RuntimeTests(unittest.TestCase):

@@ -60,7 +60,17 @@ def restart_addon() -> None:
     try:
         _post(_addon_path("restart"), {}, timeout=5)
     except Exception as exc:  # noqa: BLE001
+        if _is_timeout(exc):
+            # The Supervisor stops this container before it answers the restart call (measured 2026-10-08:
+            # the timeout comes ~7 s after the request and Hermes is up again ~20 s later); not a failure.
+            log("Yeniden başlatma isteği Home Assistant'a iletildi; Hermes kapanıyor.")
+            return
         log(f"Hermes Home Assistant üzerinden yeniden başlatılamadı: {exc}")
+
+
+def _is_timeout(exc: BaseException) -> bool:
+    reason = getattr(exc, "reason", None)
+    return isinstance(exc, TimeoutError) or isinstance(reason, TimeoutError) or "timed out" in str(exc)
 
 
 def schedule_restart(delay_seconds: float = 2.0) -> None:

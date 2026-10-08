@@ -1,5 +1,11 @@
 # Değişiklik günlüğü
 
+## 3.12.2
+
+- Yeniden başlatırken (düğme veya ayar kaydı) logda çıkan yanıltıcı "yeniden başlatılamadı: timed out" satırı
+  kalktı: Home Assistant Hermes'i cevap vermeden kapattığı için bu zaman aşımı beklenen durum; yerine
+  "Yeniden başlatma isteği Home Assistant'a iletildi; Hermes kapanıyor." yazılıyor. Gerçek hatalar yine yazılır.
+
 ## 3.12.1
 
 - Ayarlar'ın altındaki düğme satırına "Hermes'i yeniden başlat" eklendi (Home Assistant içinde ve public
