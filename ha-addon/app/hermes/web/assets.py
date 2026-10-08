@@ -185,6 +185,7 @@ tbody tr.site-other { --site-bg:rgba(183,177,222,.13); --site-bg-strong:rgba(183
 .topbar { display:flex; align-items:center; gap:12px; margin-bottom:12px; } .topbar .badge { margin-bottom:0; text-decoration:none; } .gear-button { display:inline-flex; align-items:center; justify-content:center; width:44px; height:44px; border:1px solid var(--line); border-radius:14px; color:var(--text); background:#34383d; text-decoration:none; } .gear-button:hover { border-color:#d6d8d7; } .gear-button[aria-current='page'] { color:#181a1c; background:linear-gradient(135deg,var(--accent),var(--accent2)); border-color:transparent; }
 .page-links { margin-top:18px; }
 .tool-actions { margin-top:10px; }
+.statistics-reset { margin-top:18px; }
 @media (max-width:900px) { .watch-top { grid-template-columns:repeat(2,minmax(0,1fr)); } }
 @media (max-width:720px) { .nav-actions, .tool-actions { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); } .nav-actions .button, .tool-actions .button, .tool-actions .inline-form { width:100%; min-width:0; } }
 @media (max-width:700px) { .watch-bottom > label:first-child { flex:1 1 100%; max-width:none; } .watch-bottom .watch-actions { width:100%; margin-left:0; } .watch-bottom .watch-actions .button { width:100%; } .apply-bar .button { width:100%; } }

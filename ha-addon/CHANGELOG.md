@@ -10,6 +10,9 @@
 - Tarayıcının sayfa yükleme zaman aşımı artık "Sayfa okunamadı" değil "Zaman aşımı" olarak sayılıyor.
 - Hata sayısı sensörü ve Özet Tablo'daki hata kartı, Hermes yeniden başlamadan önce kalan hataları
   göstermiyor; ürün yeniden okunup yine hata verirse hemen görünür.
+- İstatistik sayfasının altında "Hata kayıtlarını sıfırla" düğmesi: onay sorusundan sonra tüm engel ve hata
+  okumalarını siler, sayaçlar sıfırdan başlar. Başarılı okumalar, sitelerin ağ isteği sayıları (Amazon'un
+  bekleme süresi buradan hesaplanıyor) ve ürünlerin güncel hata durumu yerinde kalır.
 
 ## 3.9.5
 

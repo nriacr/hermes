@@ -37,6 +37,10 @@ class FakeRuntime:
         self.resets.append("notifications")
         return True, "Bildirimler sıfırlandı."
 
+    def reset_error_history(self):
+        self.resets.append("errors")
+        return True, "Hata kayıtları silindi (3 kayıt)."
+
     def reset_price_history(self):
         self.resets.append("history")
         return True, "Min/maks sıfırlandı."
@@ -371,8 +375,10 @@ class StatisticsPageTests(DataFilesMixin, unittest.TestCase):
         super().setUp()
         self.store = History.at(self.data.files.database)
         self.now = datetime.now().astimezone()
-        router = server.Router(FakeRuntime())
+        self.runtime = FakeRuntime()
+        router = server.Router(self.runtime)
         self.request = lambda path, public_only=False: router.handle(server.split_request(path, "GET", b"", public_only))
+        self.request_post = lambda path: router.handle(server.split_request(path, "POST", b"", False))
 
     def read(self, minutes_ago, site="amazon", outcome="ok", key="w1", priority="high", ms=2000, detail="", load=None):
         moment = self.now - timedelta(minutes=minutes_ago)
@@ -444,6 +450,19 @@ class StatisticsPageTests(DataFilesMixin, unittest.TestCase):
         self.assertIn("<small>Amazon gerçek tarayıcı sayfası okunamadı (TimeoutException). · Pi: işlemci %160 · "
                       "boş bellek 400 MB</small>", rows[2])
         self.assertNotIn(url, spells)
+
+    def test_reset_button_asks_first_and_returns_to_statistics_with_the_result(self):
+        html = self.page("7d")
+        form = html.split("statistics-reset")[1].split("</form>")[0]
+        self.assertIn("action='./reset-errors'", form)
+        self.assertIn("data-confirm='İstatistikteki tüm engel ve hata kayıtları kalıcı olarak silinecek", form)
+        self.assertIn("form[data-confirm]", html)  # the confirm script is on the page
+        response = self.request_post("/reset-errors")
+        self.assertEqual(response.status, 303)
+        self.assertTrue(response.headers["Location"].startswith("./statistics?saved=ok&msg="))
+        self.assertEqual(self.runtime.resets, ["errors"])
+        notice = self.request("/statistics?saved=ok&msg=Hata+kay%C4%B1tlar%C4%B1+silindi+%283+kay%C4%B1t%29.").payload.decode()
+        self.assertIn("<p class='notice notice-ok'>Hata kayıtları silindi (3 kayıt).</p>", notice)
 
     def test_period_switch_drives_the_whole_page(self):
         self.read(3 * 24 * 60, outcome="captcha")

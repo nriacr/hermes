@@ -339,6 +339,7 @@ One router serves both surfaces. Ingress pages use relative links ("." or
 characters, `public_dashboard_enabled`, and is compared in constant time.
 Pages: summary (`/`), `statistics`, `link-test`, `settings`, `restarting`;
 actions: `test-pushover`, `reset-notifications`, `reset-price-history`,
+`reset-errors` (deletes failed `reads` rows, keeps `requests`; back to `statistics`),
 `settings/save`, `link-test`. Every page has the same navigation. The
 statistics page (`web/statistics.py`, since 3.4) is built from the `reads`
 table around one number, the check frequency: the median time between two

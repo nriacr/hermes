@@ -185,6 +185,18 @@ class SchemaUpgradeTests(HistoryCase):
                          [("error", "", SystemLoad()), ("timeout", "Zaman aşımı", SystemLoad(150, 300))])
 
 
+class ErrorResetTests(HistoryCase):
+    def test_reset_removes_only_failed_reads_and_keeps_the_request_log(self):
+        for outcome in ("ok", "empty", "stock", "captcha", "timeout", "unreadable", "http_503"):
+            self.history.record_read("amazon", outcome, 100)
+        self.history.record_request("amazon", "curl", "ürün", "bot_korumasi", 300)
+        self.assertEqual(runner.reset_error_history(self.data.files), 4)
+        rows = history_module.read_reads(self.data.files.database, datetime.now(timezone.utc) - timedelta(hours=1))
+        self.assertEqual([row.outcome for row in rows], ["ok", "empty", "stock"])
+        self.assertEqual(read_site_requests(self.data.files.database, datetime.now(timezone.utc) - timedelta(hours=1))[0].captcha, 1)
+        self.assertTrue(any("hata kayıtları sıfırlandı: okuma=4" in line for line in LOG_LINES))
+
+
 class WriteTests(HistoryCase):
     def test_price_points_are_recorded_only_on_change(self):
         for price in ("100", "100", "90", "90", "100"):

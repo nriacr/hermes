@@ -14,16 +14,15 @@ from html import escape
 from typing import Dict, List, Optional, Tuple
 
 from ..constants import DATABASE_PATH, SUMMARY_PATH
-from ..history import BLOCKED_OUTCOMES, Read, read_reads, read_site_requests
+from ..history import BLOCKED_OUTCOMES, SUCCESS_OUTCOMES, Read, read_reads, read_site_requests
 from ..storage import load_json
 from ..utils import SystemLoad, site_label
 from .dashboard import clean_error_message, duration_text, live_region, live_script_tag, relative_time_text, site_theme_class
-from .pages import link, render_page
+from .pages import CONFIRM_SCRIPT, link, render_notice, render_page
 
 PERIODS = {"24h": ("Son 24 saat", timedelta(hours=24)), "7d": ("Son 7 gün", timedelta(days=7))}
 DEFAULT_PERIOD = "24h"
 CURRENT = " aria-current='page'"
-SUCCESS_OUTCOMES = ("ok", "empty", "stock")
 # A longer gap is a pause (restart, settings change), not the check rhythm.
 MAX_CHECK_GAP = timedelta(hours=6)
 # Failures of one site closer together than this are one spell ("hata dönemi").
@@ -422,6 +421,19 @@ def render_statistics_page(base: str, params: Optional[Dict[str, List[str]]] = N
     period = period_key(params or {})
     intro = ("<p class='statistics-intro'>Kontrol sıklığı, yüksek öncelikli bir ürünün iki okuması arasındaki tipik süredir. "
              "Engel; captcha, 503 ve 429 yanıtlarıdır. Sayfa açıkken veriler dakikada bir güncellenir.</p>")
-    body = (f"<div class='statistics-top'><h2 class='page-heading'>İstatistik</h2>{render_period_switch(base, period)}</div>{intro}"
-            + live_region(base, f"live/statistics?p={period}", statistics_live_html(base, params)))
-    return render_page(base, "statistics", "Hermes İstatistik", body, refresh_seconds=60, scripts=live_script_tag(base))
+    params = params or {}
+    notice = render_notice(params.get("saved", [""])[0], params.get("msg", [""])[0])
+    body = (f"<div class='statistics-top'><h2 class='page-heading'>İstatistik</h2>{render_period_switch(base, period)}</div>"
+            f"{notice}{intro}"
+            + live_region(base, f"live/statistics?p={period}", statistics_live_html(base, params))
+            + render_reset_errors(base))
+    return render_page(base, "statistics", "Hermes İstatistik", body, refresh_seconds=60,
+                       scripts=CONFIRM_SCRIPT + live_script_tag(base))
+
+
+def render_reset_errors(base: str) -> str:
+    """Confirmed delete of every failed read; the counters start again from zero."""
+    return (f"<div class='actions tool-actions statistics-reset'><form class='inline-form' method='post' "
+            f"action='{escape(link(base, 'reset-errors'), quote=True)}' data-confirm='İstatistikteki tüm engel ve hata "
+            "kayıtları kalıcı olarak silinecek; sayaçlar sıfırdan başlayacak. Başarılı okumalar kalır. Devam etmek istiyor musun?'>"
+            "<button class='button secondary' type='submit'>Hata kayıtlarını sıfırla</button></form></div>")

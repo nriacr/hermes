@@ -58,6 +58,8 @@ MIGRATED_KEY = "json_migrated_at"
 IDLE_DROPPED_KEY = "idle_cycles_dropped_at"
 # Read and request outcomes that mean the site refused us (back-off material).
 BLOCKED_OUTCOMES = ("captcha", "http_429", "http_503")
+# Read outcomes that are not a failure: a price, a valid empty search, out of stock.
+SUCCESS_OUTCOMES = ("ok", "empty", "stock")
 
 
 def _at(value: Optional[datetime] = None) -> str:
@@ -200,6 +202,22 @@ class History:
         with self._lock:
             self._last_prices.clear()
         self._write("fiyat sıfırlama", [("DELETE FROM prices", ())])
+
+    def clear_errors(self) -> int:
+        """Remove every failed read ("İstatistik > Sıfırla"); successful reads and the request log stay.
+
+        The `requests` table is kept on purpose: Amazon's back-off window is restored from it.
+        """
+        failed = ", ".join("?" * len(SUCCESS_OUTCOMES))
+        with self._lock:
+            try:
+                count = self._db().execute(f"SELECT COUNT(*) FROM reads WHERE outcome NOT IN ({failed})",
+                                           SUCCESS_OUTCOMES).fetchone()[0]
+            except sqlite3.Error:
+                count = 0
+        if not self._write("hata sıfırlama", [(f"DELETE FROM reads WHERE outcome NOT IN ({failed})", SUCCESS_OUTCOMES)]):
+            raise RuntimeError("veritabanına yazılamadı")
+        return count
 
     # -- first start ----------------------------------------------------------------
 
@@ -366,7 +384,7 @@ def read_site_reads(path: Path, since: datetime) -> List[SiteReads]:
     for site, outcome, duration_ms in _read(path, "SELECT site, outcome, duration_ms FROM reads WHERE at >= ?", (_at(since),)):
         report = by_site.setdefault(site, SiteReads(site))
         report.total += 1
-        if outcome in ("ok", "empty", "stock"):
+        if outcome in SUCCESS_OUTCOMES:
             report.ok += 1
             durations.setdefault(site, []).append(duration_ms)
         elif outcome in BLOCKED_OUTCOMES:

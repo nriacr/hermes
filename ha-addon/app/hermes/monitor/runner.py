@@ -52,6 +52,12 @@ def reset_price_history(files: DataFiles) -> int:
     return count
 
 
+def reset_error_history(files: DataFiles) -> int:
+    count = History.at(files.database).clear_errors()
+    log(f"İstatistik hata kayıtları sıfırlandı: okuma={count}")
+    return count
+
+
 @dataclass
 class Command:
     name: str
@@ -69,6 +75,7 @@ class Command:
 COMMANDS: Dict[str, Callable[[], Command]] = {
     "reset_notifications": lambda: Command("reset_notifications", reset_notifications, run_cycle=True),
     "reset_price_history": lambda: Command("reset_price_history", reset_price_history),
+    "reset_error_history": lambda: Command("reset_error_history", reset_error_history),
 }
 
 

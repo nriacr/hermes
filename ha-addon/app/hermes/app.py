@@ -10,7 +10,7 @@ from .constants import APP_VERSION, INGRESS_PORT, PUBLIC_PORT
 from .logging_utils import log
 from .models import HermesConfig
 from .monitor.cycle import DataFiles
-from .monitor.runner import MonitorService, reset_notifications, reset_price_history
+from .monitor.runner import MonitorService, reset_error_history, reset_notifications, reset_price_history
 from .telegram.listener import start_telegram_listener
 from .web.server import Router, start_server
 
@@ -62,6 +62,13 @@ class HermesRuntime:
             "reset_price_history", reset_price_history,
             "Min/maks fiyat geçmişi sıfırlandı. Temizlenen kayıt alanı: {count}.",
             "Şu an bir tarama sürüyor. Min/maks sıfırlaması tarama biter bitmez uygulanacak.",
+        )
+
+    def reset_error_history(self) -> Tuple[bool, str]:
+        return self._action(
+            "reset_error_history", reset_error_history,
+            "İstatistikteki engel ve hata kayıtları silindi ({count} kayıt).",
+            "Şu an bir tarama sürüyor. Hata kayıtları tarama biter bitmez silinecek.",
         )
 
     def stop(self) -> None:
