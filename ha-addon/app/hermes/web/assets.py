@@ -375,6 +375,12 @@ body.ov a { color:inherit; }
 .ov-deal-depo .ov-price { color:#15121f; } .ov-deal-depo .ov-price small, .ov-deal-depo .ov-off small { color:#5a4a10; }
 .ov-deal-depo .ov-deal-side .ov-spark { color:#15121f; } .ov-deal-depo .ov-off { color:#15121f; }
 .ov-deal-depo .ov-depo { background:#15121f; color:#ffd35c; }
+.ov-tile.ov-tile-depo { background:linear-gradient(160deg,#ffdd6b,#ffc533); border-color:#ffd35c; box-shadow:0 0 22px rgba(255,211,92,.22); color:#15121f; }
+.ov-tile.ov-tile-depo:hover { border-color:#fff1b8; } .ov-tile.ov-tile-depo::after { display:none; }
+.ov-tile-depo .ov-av { background:#15121f; color:#ffd35c; } .ov-tile-depo .ov-tx h4 { color:#15121f; font-weight:600; } .ov-tile-depo .ov-price { color:#15121f; } .ov-tile-depo .ov-price small { color:#5a4a10; }
+.ov-tile-depo .ov-side .ov-spark { color:#15121f; } .ov-tile-depo .ov-ago { color:#4a3a08; }
+.ov-tile-depo .ov-chg, .ov-tile-depo .ov-chg.down, .ov-tile-depo .ov-chg.up, .ov-tile-depo .ov-chg.flat { background:#15121f; } .ov-tile-depo .ov-chg.down { color:#b6ff3b; } .ov-tile-depo .ov-chg.up { color:#ff7ab8; } .ov-tile-depo .ov-chg.flat { color:#c4bfe0; }
+.ov-tile-depo .ov-depo { background:#15121f; color:#ffd35c; } .ov-tile-depo .ov-vars em { background:rgba(21,18,31,.14); border-color:rgba(21,18,31,.25); color:#2a2208; }
 .ov-tabs { display:inline-flex; max-width:100%; margin-bottom:18px; padding:5px; border-radius:99px; background:var(--glass); border:1px solid var(--edge); overflow-x:auto; } .ov-tab { padding:9px 18px; border:0; border-radius:99px; background:none; color:var(--mute); font:600 14px var(--display); cursor:pointer; white-space:nowrap; transition:background .25s,color .25s; } .ov-tab small { margin-left:4px; opacity:.7; font-weight:600; } .ov-tab[aria-selected='true'] { color:#0b0916; background:linear-gradient(95deg,var(--lime),var(--cyan)); }
 .ov-pane[hidden], .ov-tile[hidden], .ov-group[hidden] { display:none; }
 .ov-filters { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:18px; } .ov-chip { display:inline-flex; align-items:center; gap:8px; padding:7px 14px; border-radius:99px; background:var(--glass); border:1px solid var(--edge); color:var(--ink); font:600 13px var(--display); cursor:pointer; transition:transform .25s,background .25s; } .ov-chip:hover { transform:translateY(-2px); } .ov-chip i { width:9px; height:9px; border-radius:50%; background:var(--c); box-shadow:0 0 12px var(--c); } .ov-chip[aria-pressed='true'] { border-color:var(--c,#fff); background:color-mix(in srgb,var(--c,#fff) 24%,transparent); }

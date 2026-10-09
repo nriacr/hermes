@@ -373,6 +373,9 @@ class DashboardTests(DataFilesMixin, unittest.TestCase):
         deals = self.live()
         self.assertEqual(deals.count("ov-deal-depo"), 1)  # only the Depo deal card turns yellow
         self.assertIn(".ov-deal-depo", APP_CSS)
+        self.data.write_summary({"rows": [price_row(is_warehouse=True, price="14.000 TL"), price_row(product_url="https://example.test/n", price="14.000 TL")]})
+        self.assertEqual(self.live().count("ov-tile-depo"), 1)  # a watching Depo tile is yellow too
+        self.assertIn(".ov-tile-depo", APP_CSS)
         self.data.write_summary({"rows": [price_row(is_warehouse=True, price="14.000 TL")]})
         self.assertIn("<div class='ov-vars'><span class='ov-depo'>DEPO</span></div>", self.live().split("<div class='ov-detail'")[0])
         self.data.write_summary({"rows": [price_row(price="14.000 TL")]})

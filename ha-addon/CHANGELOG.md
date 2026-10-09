@@ -1,5 +1,10 @@
 # Değişiklik günlüğü
 
+## 3.15.4
+
+- Takipteki Depo kartları da (fırsat olmayanlar) tamamen sarı; yazılar, etiketler, fiyat çizgisi ve değişim
+  yüzdesi koyu antrasit zeminde/yazıda okunaklı kalır.
+
 ## 3.15.3
 
 - Depo fırsat kartları tamamen sarı (DEPO etiketiyle aynı sarı); yazılar, fiyat çizgisi ve etiket koyu antrasit,

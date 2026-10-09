@@ -268,7 +268,7 @@ def render_tile(offer: Offer, tags: Optional[List[str]] = None, index: int = 0) 
     depo = "<span class='ov-depo'>DEPO</span>" if offer.warehouse else ""
     tag_html = f"<div class='ov-vars'>{depo}{''.join(f'<em>{escape(tag)}</em>' for tag in tags or [])}</div>" if tags or depo else ""
     return (
-        f"<article class='ov-tile {offer.site}' data-site='{offer.site}' style='--n:{index}' {card_attributes(offer)}>"
+        f"<article class='ov-tile {offer.site}{' ov-tile-depo' if offer.warehouse else ''}' data-site='{offer.site}' style='--n:{index}' {card_attributes(offer)}>"
         f"<div class='ov-av'>{escape(offer.seller[:1].upper())}</div>"
         f"<div class='ov-tx'><h4 title='{escape(offer.title, quote=True)}'>{escape(offer.title)}</h4>{tag_html}"
         f"<div class='ov-price'>{price_parts(offer.price)}</div></div>"
