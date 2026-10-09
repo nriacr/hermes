@@ -8,6 +8,8 @@ APP_SLUG="769724e3_hermes"
 EXPECTED_VERSION="$(sed -n 's/^version: "\([^"]*\)"/\1/p' "$REPO_DIR/ha-addon/config.yaml" | head -n 1)"
 BACKUP="${HERMES_BACKUP_SLUG:-}"
 [ -x "$SSH_HELPER" ] && [ -n "$EXPECTED_VERSION" ]
+# Fail on missing management/backup access before tests or any live mutation.
+HA_SSH_HELPER="$SSH_HELPER" "${PYTHON:-python3}" "$SCRIPT_DIR/check_access.py" --homeassistant-only
 # Always check before mutating the live system. Supplying a backup only reuses a verified full backup.
 (cd "$REPO_DIR" && sh tools/check.sh)
 if [ -z "$BACKUP" ]; then

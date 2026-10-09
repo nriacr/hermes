@@ -1,0 +1,18 @@
+#!/usr/bin/env sh
+set -eu
+REPO_DIR="$(git rev-parse --show-toplevel)"
+require_workflow=""
+has_updates=0
+zero=0000000000000000000000000000000000000000
+empty_tree=4b825dc642cb6eb9a060e54bf8d69288fbee4904
+while read -r local_ref local_oid remote_ref remote_oid; do
+  [ "$local_oid" = "$zero" ] && continue
+  has_updates=1
+  base="$remote_oid"
+  [ "$base" = "$zero" ] && base="$empty_tree"
+  if ! git diff --quiet "$base" "$local_oid" -- .github/workflows; then
+    require_workflow="--require-workflow"
+  fi
+done
+[ "$has_updates" -eq 0 ] && exit 0
+exec "${PYTHON:-python3}" "$REPO_DIR/tools/check_access.py" --github-only $require_workflow

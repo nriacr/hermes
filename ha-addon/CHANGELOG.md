@@ -17,6 +17,8 @@
   kullanılmayan eski stil sınıfları temizlendi. Sistem yükü ölçümü doğru adlandırıldı.
 - Yayın aracı tam yedek, kalite/config kontrolü, kurulum, yeni sürümde tamamlanan okuma ve geri dönüşü doğruluyor.
   Bağımsız Home Assistant durma uyarısı tanımı eklendi.
+- Yayın öncesi GitHub/otomatik kontrol ve Home Assistant yönetim/yedek yetkileri denetleniyor;
+  otomatik kontroller derlenen görüntünün açılışını da doğruluyor.
 - Amazon davranışı değişmedi.
 
 ## 3.15.4

@@ -149,6 +149,11 @@ of each site are described in `docs/ARCHITECTURE.md`.
    conversation history.
 7. Update README/docs when behavior, options, providers, or operations change.
 8. Review the diff for secrets, unrelated changes, stale code, and compatibility.
+   Enable the repository's access guard once per checkout with
+   `git config --local core.hooksPath .githooks`. The pre-push hook checks GitHub
+   publishing access and requires the existing credential's `workflow` scope
+   when automation files change. Do not skip a rejected access guard; repair the
+   authorized credential. Never echo credential-helper output or raw API errors.
 9. Commit intentionally and push to `main` so Home Assistant receives the update.
 10. After a successful push, run `sh tools/install_rpi.sh` to refresh the
     configured Hermes repository, install its latest add-on version on the

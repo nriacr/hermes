@@ -20,6 +20,10 @@ jobs:
         run: python -m pip install -r ha-addon/app/requirements.txt -r requirements-dev.txt
       - name: Run quality checks
         run: PYTHON=python RUFF=ruff sh tools/check.sh
+      - name: Check release tools
+        run: |
+          python -m compileall -q tools
+          sh -n .githooks/pre-push tools/install_rpi.sh tools/rollback_rpi.sh
 
   container-build:
     runs-on: ubuntu-latest
@@ -27,3 +31,24 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build add-on image
         run: docker build --tag hermes-addon:ci ./ha-addon
+      - name: Start image without user credentials
+        run: docker run --detach --name hermes-smoke --env HERMES_DATA_DIR=/tmp/hermes-ci hermes-addon:ci
+      - name: Verify recovery panel and health startup
+        run: |
+          docker exec --interactive hermes-smoke python - <<'PY'
+          import time
+          import urllib.request
+          for attempt in range(30):
+              try:
+                  for path in ('health', 'settings'):
+                      with urllib.request.urlopen('http://127.0.0.1:8099/' + path, timeout=2) as response:
+                          assert response.status == 200
+                  break
+              except (OSError, AssertionError):
+                  if attempt == 29:
+                      raise
+                  time.sleep(1)
+          PY
+      - name: Remove smoke-test container
+        if: always()
+        run: docker rm --force hermes-smoke || true

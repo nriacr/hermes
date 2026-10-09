@@ -28,3 +28,5 @@ Ayrıntılar: [add-on kılavuzu](ha-addon/README.md),
 [değişiklik günlüğü](ha-addon/CHANGELOG.md),
 [mimari](docs/ARCHITECTURE.md). Geliştirme kuralları [AGENTS.md](AGENTS.md)
 dosyasındadır.
+
+Yayın erişimi ve otomatik yetki kontrolü: [yayın erişimi kılavuzu](docs/RELEASE_ACCESS.md).
