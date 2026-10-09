@@ -5,6 +5,7 @@ condition, same tracking card); the points come from the `prices` table of `herm
 which stores a price only when it changes, so lines are drawn as steps.
 """
 
+import json
 from datetime import datetime
 from decimal import Decimal
 from typing import Any, Dict, List, Sequence, Tuple
@@ -125,13 +126,18 @@ def detail_chart(points: List[Point], target: float) -> str:
     labels = (f"<text x='{x(first):.1f}' y='{CHART_HEIGHT - 7}' font-size='11' fill='#9a95b8'>{_day(first)}</text>"
               f"<text x='{x(last):.1f}' y='{CHART_HEIGHT - 7}' text-anchor='end' font-size='11' fill='#9a95b8'>{_day(last)}</text>")
     target_y = y(target)
+    # Each stored change as [x, y, epoch seconds, price]: the page script answers "what was the price then" on hover.
+    hover = json.dumps([[round(x(moment), 1), round(y(price), 1), int(moment.timestamp()), round(price)] for moment, price in points])
     return (
-        f"<svg class='ov-chart' viewBox='0 0 {CHART_WIDTH} {CHART_HEIGHT}' role='img' aria-label='Fiyat geçmişi'>"
+        f"<svg class='ov-chart' viewBox='0 0 {CHART_WIDTH} {CHART_HEIGHT}' role='img' aria-label='Fiyat geçmişi' "
+        f"data-points='{hover}' data-top='{pad['top']}' data-bottom='{floor}'>"
         f"{grid}<line x1='{pad['left']}' x2='{CHART_WIDTH - pad['right']}' y1='{target_y:.1f}' y2='{target_y:.1f}' "
         "stroke='#b6ff3b' stroke-dasharray='6 5' stroke-width='1.5'/>"
         f"<path class='ov-fade' d='{area}' fill='currentColor' fill-opacity='.22'/>"
         f"<path class='ov-draw' pathLength='1' d='{steps}' fill='none' stroke='currentColor' stroke-width='3' "
-        f"stroke-linejoin='round' stroke-linecap='round'/>{dots}{labels}</svg>"
+        f"stroke-linejoin='round' stroke-linecap='round'/>{dots}{labels}"
+        "<line class='ov-cross' x1='0' x2='0' stroke='rgba(255,255,255,.35)' stroke-dasharray='3 3' opacity='0'/>"
+        "<circle class='ov-cross-dot' r='6' fill='currentColor' stroke='#fff' stroke-width='2' opacity='0'/></svg>"
     )
 
 

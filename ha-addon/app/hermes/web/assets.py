@@ -378,7 +378,7 @@ body.ov a { color:inherit; }
 .ov-tile { position:relative; display:flex; align-items:center; gap:12px; padding:14px; border-radius:20px; cursor:pointer; overflow:hidden; background:var(--glass); border:1px solid var(--edge); transition:transform .25s,border-color .25s; } .ov-tile:hover { transform:translateY(-4px); border-color:color-mix(in srgb,var(--c) 60%,transparent); } .ov-tile::after { content:""; position:absolute; inset:0; pointer-events:none; background:radial-gradient(240px 90px at 50% 0,color-mix(in srgb,var(--c) 26%,transparent),transparent); opacity:0; transition:opacity .3s; } .ov-tile:hover::after { opacity:1; }
 .ov-av { flex:none; display:grid; place-items:center; width:44px; height:44px; border-radius:15px; color:#0b0916; font:800 17px var(--display); background:linear-gradient(135deg,var(--c),color-mix(in srgb,var(--c) 45%,#fff)); }
 .ov-tx { position:relative; z-index:1; flex:1; min-width:0; } .ov-tx h4 { margin:0; color:#d9d5f5; font:500 13.5px/1.3 var(--body); display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; } .ov-tile:has(.ov-vars) .ov-tx h4 { -webkit-line-clamp:2; } .ov-tx .ov-price { margin-top:3px; font:800 20px var(--display); letter-spacing:-.04em; }
-.ov-vars { display:flex; flex-wrap:wrap; gap:5px; margin-top:5px; } .ov-vars em { max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding:2px 8px; border-radius:99px; font:700 11px var(--display); font-style:normal; background:color-mix(in srgb,var(--c) 22%,transparent); color:color-mix(in srgb,var(--c) 55%,#fff); }
+.ov-vars { display:flex; flex-wrap:wrap; gap:5px; margin-top:5px; } .ov-vars em { max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding:2px 8px; border-radius:99px; font:600 11px var(--display); font-style:normal; background:#1d1b2b; border:1px solid rgba(255,255,255,.07); color:#a39fbe; }
 .ov-side { position:relative; z-index:1; flex:none; text-align:right; } .ov-side .ov-spark { display:block; width:64px; height:30px; margin:0 0 5px auto; color:var(--c); } .ov-side .ov-ago { display:block; margin-top:5px; }
 .ov-chg { display:inline-block; padding:3px 8px; border-radius:99px; font:700 12px var(--display); } .ov-chg.down { background:rgba(182,255,59,.14); color:var(--lime); } .ov-chg.up { background:rgba(255,61,154,.15); color:#ff7ab8; } .ov-chg.flat { background:var(--glass2); color:var(--mute); }
 .ov-rows { display:grid; gap:10px; margin:0; padding:0; list-style:none; } .ov-row { display:flex; align-items:center; gap:14px; padding:14px 16px; border-radius:18px; background:var(--glass); border:1px solid var(--edge); } .ov-row .ov-tx h4 { -webkit-line-clamp:2; } .ov-row .ov-tx a:hover { text-decoration:underline; } .ov-row .ov-tx span { display:block; margin-top:2px; font-size:12.5px; color:var(--mute); } .ov-row .ov-tx p { margin-top:4px; font-size:12.5px; color:#c4bfe0; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
@@ -394,10 +394,11 @@ body.ov a { color:inherit; }
 .ov-d-price { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin:12px 0 4px; } .ov-d-price b { font:800 38px/1 var(--display); letter-spacing:-.05em; } .ov-d-price small { color:var(--mute); }
 .ov-meter { margin-top:10px; } .ov-meter-track { height:10px; border-radius:99px; background:var(--glass2); overflow:hidden; } .ov-meter-fill { height:100%; border-radius:99px; background:linear-gradient(90deg,var(--c),var(--lime)); animation:ov-fill 1.2s .3s cubic-bezier(.2,1,.3,1) backwards; } @keyframes ov-fill { from { width:0; } } .ov-meter p { display:flex; justify-content:space-between; margin-top:7px; font-size:12.5px; color:var(--mute); }
 .ov-facts { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin:12px 0; } .ov-fact { padding:8px 11px; border-radius:16px; background:var(--glass); border:1px solid var(--edge); } .ov-fact span { display:block; font-size:11px; color:var(--mute); } .ov-fact b { font:700 14px var(--display); letter-spacing:-.02em; } .ov-fact .priority-dot { margin-right:6px; }
-.ov-chartbox { padding:8px; border-radius:20px; background:rgba(0,0,0,.28); border:1px solid var(--edge); color:var(--c); } .ov-chart { display:block; width:100%; height:auto; max-height:calc(94vh - 340px); min-height:40px; } .ov-note { padding:18px; text-align:center; color:var(--mute); }
+.ov-chartbox { position:relative; padding:8px; border-radius:20px; background:rgba(0,0,0,.28); border:1px solid var(--edge); color:var(--c); } .ov-chart { display:block; width:100%; height:auto; max-height:calc(94vh - 340px); min-height:40px; } .ov-note { padding:18px; text-align:center; color:var(--mute); }
 .ov-first .ov-tile { opacity:0; transform:translateY(16px); animation:ov-rise .6s cubic-bezier(.2,.9,.3,1) forwards; } .ov-first .ov-tile:nth-child(n) { animation-delay:calc(var(--n,0) * 35ms); } @keyframes ov-rise { to { opacity:1; transform:none; } }
 .ov-sheet .ov-draw, .ov-first .ov-draw { stroke-dasharray:1; stroke-dashoffset:1; animation:ov-draw 1.4s .15s ease forwards; } @keyframes ov-draw { to { stroke-dashoffset:0; } }
 .ov-sheet .ov-fade, .ov-first .ov-fade { opacity:0; animation:ov-fi .8s .9s forwards; } @keyframes ov-fi { to { opacity:1; } }
+.ov-chart { touch-action:pan-y; cursor:crosshair; } .ov-tip { position:absolute; z-index:2; pointer-events:none; padding:7px 11px; border-radius:12px; background:rgba(10,8,20,.94); border:1px solid var(--edge); box-shadow:0 8px 24px rgba(0,0,0,.5); font:600 13px var(--display); white-space:nowrap; transform:translate(-50%,-100%); } .ov-tip small { display:block; font:500 11px var(--body); color:var(--mute); } .ov-tip[hidden] { display:none; }
 @media (max-width:820px) { .ov-hero { flex-direction:column; align-items:flex-start; } .ov-facts { grid-template-columns:repeat(3,1fr); } }
 @media (max-width:560px) { body.ov main { padding:0 14px 60px; } body.ov.public .hero { padding:0; } .ov-nums { gap:8px; width:100%; } .ov-num { flex:1; min-width:0; padding:12px; } .ov-num b { font-size:26px; } .ov-deal .ov-price { font-size:28px; } .ov-sheet { padding:16px 14px 14px; } .ov-d-price b { font-size:32px; } .ov-fact b { font-size:13px; } .ov-chart { max-height:calc(94vh - 400px); } .ov-status { margin-left:0; } }
 @media (prefers-reduced-motion:reduce) { body.ov *, body.ov::before, body.ov::after { animation-duration:.01s !important; animation-delay:0s !important; } }
@@ -507,6 +508,40 @@ OVERVIEW_SCRIPT = """
     if (event.key === 'Escape' && !modal.hidden) close();
     if ((event.key === 'Enter' || event.key === ' ') && event.target.matches && event.target.matches('[data-open]')) { event.preventDefault(); open(event.target); }
   });
+  const fmtPrice = (value) => `${Math.round(value).toLocaleString('tr-TR')} TL`;
+  const fmtDate = (seconds) => new Date(seconds * 1000).toLocaleString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  // Hovering (or dragging a finger over) the chart shows the price that held at that moment.
+  const probe = (event) => {
+    const chart = event.target.closest && event.target.closest('.ov-chart');
+    const box = sheet.querySelector('.ov-chartbox');
+    const tip = box && box.querySelector('.ov-tip');
+    if (!chart || !box) { if (tip) tip.hidden = true; sheet.querySelectorAll('.ov-cross,.ov-cross-dot').forEach((item) => item.setAttribute('opacity', '0')); return; }
+    const points = JSON.parse(chart.dataset.points || '[]');
+    if (!points.length) return;
+    const rect = chart.getBoundingClientRect();
+    const scale = chart.viewBox.baseVal.width / rect.width;
+    const x = (event.clientX - rect.left) * scale;
+    let hit = points[0];
+    for (const point of points) { if (point[0] <= x) hit = point; }
+    const cross = chart.querySelector('.ov-cross');
+    const dot = chart.querySelector('.ov-cross-dot');
+    const moment = Math.max(points[0][2], Math.min(points[points.length - 1][2], points[0][2] + (points[points.length - 1][2] - points[0][2]) * ((x - points[0][0]) / ((points[points.length - 1][0] - points[0][0]) || 1))));
+    cross.setAttribute('x1', x); cross.setAttribute('x2', x);
+    cross.setAttribute('y1', chart.dataset.top); cross.setAttribute('y2', chart.dataset.bottom);
+    dot.setAttribute('cx', x); dot.setAttribute('cy', hit[1]);
+    cross.setAttribute('opacity', '1'); dot.setAttribute('opacity', '1');
+    let bubble = tip;
+    if (!bubble) { bubble = document.createElement('div'); bubble.className = 'ov-tip'; box.appendChild(bubble); }
+    bubble.hidden = false;
+    bubble.innerHTML = `${fmtPrice(hit[3])}<small>${fmtDate(moment)}</small>`;
+    const boxRect = box.getBoundingClientRect();
+    const left = Math.max(70, Math.min(boxRect.width - 70, event.clientX - boxRect.left));
+    bubble.style.left = `${left}px`;
+    bubble.style.top = `${hit[1] / scale + (rect.top - boxRect.top) - 12}px`;
+  };
+  sheet.addEventListener('pointermove', probe);
+  sheet.addEventListener('pointerdown', probe);
+  sheet.addEventListener('pointerleave', () => probe({ target: document.body }));
   document.addEventListener('hermes-live', apply);
   apply();
   // The entrance animation plays once; later in-place refreshes must not replay it.

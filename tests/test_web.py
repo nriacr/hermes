@@ -408,6 +408,9 @@ class DashboardTests(DataFilesMixin, unittest.TestCase):
         self.data.write_summary({"rows": [price_row(price="14.000 TL", tracking_id="card1")]})
         html = self.live()
         self.assertIn("class='ov-chart'", html)
+        self.assertIn("data-points='[[", html)  # [x, y, epoch, price] per stored change, for the hover bubble
+        self.assertIn(", 16000]", html)
+        self.assertIn("class='ov-cross'", html)
         self.assertIn("<span class='ov-chg down' title='İlk kayıtlı fiyata göre (", html)  # 16.000 -> 14.000
         self.assertIn("▼ %12,5</span>", html)
         self.assertIn("<span>İlk kayıtlı fiyat</span><b>16.000 TL</b>", html)
@@ -458,7 +461,7 @@ class DashboardTests(DataFilesMixin, unittest.TestCase):
 
     def test_the_home_screen_keeps_its_state_across_in_place_refreshes(self):
         script = self.router_get("/overview.js")
-        for text in ("hermes-live", "data-tab", "data-filter", "data-open", "ov-first", "Escape", "overflow"):
+        for text in ("pointermove", "ov-tip", "ov-cross", "tr-TR", "hermes-live", "data-tab", "data-filter", "data-open", "ov-first", "Escape", "overflow"):
             self.assertIn(text, script)
         self.assertIn("hermes-live", self.router_get("/live.js"))
 

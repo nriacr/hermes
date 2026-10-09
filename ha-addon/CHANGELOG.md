@@ -1,5 +1,12 @@
 # Değişiklik günlüğü
 
+## 3.15.2
+
+- Ayrıntı penceresindeki fiyat grafiğinde fare (telefonda parmak) bir noktanın üstüne gelince o andaki fiyat
+  ve tarih-saat bir balonda görünür; grafikte dikey çizgi ve nokta izler.
+- "DEPO" etiketi sarı kalır; varyant etiketleri (512 GB, renk) karışmasın diye arka plana yakın koyu gri
+  antrasit tonda ve daha sönük.
+
 ## 3.15.1
 
 - Amazon Depo teklifleri artık kartların üzerinde de "DEPO" etiketiyle görünür (fırsat kartlarında site adının
