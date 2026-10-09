@@ -22,7 +22,11 @@ if ! "$SSH_HELPER" 'ha store reload'; then
   printf 'Mağaza yenilemesi hata bildirdi; Hermes sürümü ayrıca doğrulanıyor.\n'
 fi
 "$SSH_HELPER" "ha apps info $APP_SLUG --raw-json | jq -e --arg expected '$EXPECTED_VERSION' '.data.version_latest == \$expected' >/dev/null"
-"$SSH_HELPER" "ha apps update $APP_SLUG --no-progress"
+if "$SSH_HELPER" "ha apps info $APP_SLUG --raw-json | jq -e --arg expected '$EXPECTED_VERSION' '.data.version == \$expected and .data.state == \"started\"' >/dev/null"; then
+  printf 'Beklenen sürüm zaten çalışıyor; canlı doğrulama yapılıyor.\n'
+else
+  "$SSH_HELPER" "ha apps update $APP_SLUG --no-progress"
+fi
 "$SSH_HELPER" "ha apps info $APP_SLUG --raw-json | jq -e --arg expected '$EXPECTED_VERSION' '.data.version == \$expected and .data.state == \"started\"' >/dev/null"
 # Basic health is insufficient: require a completed new-version read, preserved history, and queue counts.
 RUNTIME_COMMAND="$(cat <<'REMOTE'
