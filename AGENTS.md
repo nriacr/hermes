@@ -162,6 +162,13 @@ of each site are described in `docs/ARCHITECTURE.md`.
     or SSH keys into this repository. If installation or verification fails,
     report it clearly and do not claim the release is installed.
 
+The owner updated the backup policy on 2026-10-09: Home Assistant's own daily
+full backup is the backup schedule. Do not schedule backups or backup checks
+from Codex, and do not create a new backup for each update. Before installation,
+verify and reuse the newest available full backup containing Hermes. Create an
+additional backup only when the owner explicitly asks. Restoring a daily backup
+also restores its code and data; changes since that backup are lost.
+
 Documentation-only changes do not require an add-on version bump.
 
 ## Definition of done

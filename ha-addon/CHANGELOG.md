@@ -8,6 +8,11 @@
   Eski kayıtlar korunuyor; bilinmeyen ürün adı başka bir varyanttan tahmin edilmiyor.
 - Amazon davranışı değişmedi.
 
+### 4.0.1 yayın araçları
+
+- Güncellemeler yeni yedek oluşturmuyor; Home Assistant'ın günlük, tam kapsamlı yedeği doğrulanıp kullanılıyor.
+  İstenirse ayrıca yedek alınabilir. Geri dönüş aracı şifreli günlük yedekleri de destekliyor.
+
 ## 4.0.0
 
 - İzleme çekirdeği; site planlama, ürün değerlendirme, kalıcı kayıt, bildirim gönderimi ve teşhis olarak ayrıldı.

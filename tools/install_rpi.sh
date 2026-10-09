@@ -10,13 +10,17 @@ BACKUP="${HERMES_BACKUP_SLUG:-}"
 [ -x "$SSH_HELPER" ] && [ -n "$EXPECTED_VERSION" ]
 # Fail on missing management/backup access before tests or any live mutation.
 HA_SSH_HELPER="$SSH_HELPER" "${PYTHON:-python3}" "$SCRIPT_DIR/check_access.py" --homeassistant-only
-# Always check before mutating the live system. Supplying a backup only reuses a verified full backup.
+# Reuse Home Assistant's existing daily full backup; updates never create another backup.
 (cd "$REPO_DIR" && sh tools/check.sh)
 if [ -z "$BACKUP" ]; then
-  BACKUP="$("$SSH_HELPER" "ha backups new --name 'Hermes $EXPECTED_VERSION öncesi tam yedek' --no-progress --raw-json | jq -er '.data.slug'")"
+  BACKUP="$(HA_SSH_HELPER="$SSH_HELPER" "${PYTHON:-python3}" "$SCRIPT_DIR/backup_rpi.py")"
+fi
+if [ -z "$BACKUP" ]; then
+  printf 'Doğrulanabilir tam yedek bulunamadı; kurulum durduruldu.\n' >&2
+  exit 1
 fi
 case "$BACKUP" in *[!a-zA-Z0-9_-]*) printf 'Geçersiz yedek kodu.\n' >&2; exit 1;; esac
-"$SSH_HELPER" "ha backups info '$BACKUP' --raw-json | jq -e '.data.type == \"full\" and any(.data.addons[]; .slug == \"$APP_SLUG\")' >/dev/null"
+HA_SSH_HELPER="$SSH_HELPER" "${PYTHON:-python3}" "$SCRIPT_DIR/backup_rpi.py" --backup "$BACKUP" >/dev/null
 printf 'Doğrulanan tam yedek: %s\n' "$BACKUP"
 "$SSH_HELPER" 'ha core check --no-progress'
 # Some unrelated store repositories can fail refresh; require Hermes's own exact version independently.

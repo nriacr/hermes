@@ -245,3 +245,12 @@ and a completed 4.0 read through `/runtime`. Record live memory/CPU, migration c
 states. Use `sh tools/rollback_rpi.sh BACKUP_SLUG` for a single-command Hermes-only restoration; the rest of HA
 is not restored. The backup contains the pre-migration code and data together, avoiding mixed-version recovery.
 Do not declare speed or reliability gains from one short observation window.
+
+Home Assistant's native daily full backup owns the schedule. Updates reuse the newest full backup
+(or the explicitly supplied backup) and verify that it contains Hermes; they do not create a new backup.
+Only an explicit owner request creates an extra backup. A restoration returns code and data to that
+backup's time, so subsequent changes are lost. Do not add a Codex backup schedule or monitoring task.
+HA's native backup API labels automatic backups `partial` even when every component is selected.
+`tools/backup_rpi.py` checks their contents: HA, Hermes, share, SSL and media must be included.
+The native daily plan includes every app, the database and all four optional folders. The restore
+tool supports the existing encrypted daily backups, keeping the configured key in memory only.
