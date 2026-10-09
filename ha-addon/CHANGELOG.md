@@ -1,5 +1,10 @@
 # Değişiklik günlüğü
 
+## 3.15.1
+
+- Amazon Depo teklifleri artık kartların üzerinde de "DEPO" etiketiyle görünür (fırsat kartlarında site adının
+  yanında, takipteki küçük kartlarda fiyatın üstünde); eskiden etiket yalnız açılan pencerede vardı.
+
 ## 3.15.0
 
 - Tüm sayfalar aynı tasarım dilinde: İstatistik ve "yeniden başlatılıyor" sayfaları da Özet Tablo ve

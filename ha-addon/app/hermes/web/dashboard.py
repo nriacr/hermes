@@ -210,7 +210,8 @@ def ago_html(value: str) -> str:
 
 
 def site_dot(offer: Offer) -> str:
-    return f"<span class='ov-site'>{escape(offer.seller)}</span>"
+    depo = "<span class='ov-depo'>DEPO</span>" if offer.warehouse else ""
+    return f"<span class='ov-site'>{escape(offer.seller)}</span>{depo}"
 
 
 def detail_html(offer: Offer) -> str:
@@ -254,7 +255,7 @@ def render_deal(offer: Offer) -> str:
     share = float(-offer.gap_share * 100)
     return (
         f"<article class='ov-deal {offer.site}' {card_attributes(offer)}>"
-        f"<div class='ov-deal-top'>{site_dot(offer)}{ago_html(offer.checked_at)}</div>"
+        f"<div class='ov-deal-top'><span class='ov-deal-who'>{site_dot(offer)}</span>{ago_html(offer.checked_at)}</div>"
         f"<h3 title='{escape(offer.title, quote=True)}'>{escape(offer.title)}</h3>"
         f"<div class='ov-deal-foot'><div class='ov-price'>{price_parts(offer.price)}</div>"
         f"<div class='ov-deal-side'>{sparkline(offer.points, SPOT_SIZE)}"
@@ -264,7 +265,8 @@ def render_deal(offer: Offer) -> str:
 
 
 def render_tile(offer: Offer, tags: Optional[List[str]] = None, index: int = 0) -> str:
-    tag_html = f"<div class='ov-vars'>{''.join(f'<em>{escape(tag)}</em>' for tag in tags)}</div>" if tags else ""
+    depo = "<span class='ov-depo'>DEPO</span>" if offer.warehouse else ""
+    tag_html = f"<div class='ov-vars'>{depo}{''.join(f'<em>{escape(tag)}</em>' for tag in tags or [])}</div>" if tags or depo else ""
     return (
         f"<article class='ov-tile {offer.site}' data-site='{offer.site}' style='--n:{index}' {card_attributes(offer)}>"
         f"<div class='ov-av'>{escape(offer.seller[:1].upper())}</div>"

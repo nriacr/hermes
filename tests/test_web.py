@@ -368,6 +368,11 @@ class DashboardTests(DataFilesMixin, unittest.TestCase):
         html = self.live()
         self.assertIn("<span class='ov-depo'>DEPO</span>", html)
         self.assertNotIn("Tarama sıklığı", html)
+        self.assertIn("<span class='ov-depo'>DEPO</span>", html.split("<div class='ov-detail'")[0])  # on the visible card
+        self.data.write_summary({"rows": [price_row(is_warehouse=True, price="14.000 TL")]})
+        self.assertIn("<div class='ov-vars'><span class='ov-depo'>DEPO</span></div>", self.live().split("<div class='ov-detail'")[0])
+        self.data.write_summary({"rows": [price_row(price="14.000 TL")]})
+        self.assertNotIn("DEPO", self.live())
 
     def test_detail_shows_one_of_five_priority_dots(self):
         for priority, label in (("cycle", "Her çevrimde fiyat taranır"), ("30m", "30 dk'da bir taranır"),
