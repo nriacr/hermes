@@ -363,9 +363,10 @@ def _channel_label(event) -> str:
 
 def _send_keyword_notification(notifier: Pushover, event, channel_name: str, keyword: str, text: str) -> None:
     message_url = _telegram_message_link(event)
-    notifier.send("Telegram keyword alarmı", _message_preview(text), message_url, url_title="Telegram'da aç")
-    _record_recent_notification(channel_name, keyword, message_url, text)
-    log(f"Telegram bildirimi gönderildi: kanal={channel_name} | keyword={keyword}")
+    notifier.send("Telegram keyword alarmı", _message_preview(text), message_url, url_title="Telegram'da aç",
+                  event_id="telegram:" + _message_key(event),
+                  metadata={"telegram": [channel_name, keyword, message_url, _message_preview(text, 180)]})
+    log(f"Telegram bildirimi kuyruğa alındı: kanal={channel_name} | keyword={keyword}")
 
 
 # -- connection ---------------------------------------------------------------------
@@ -441,13 +442,14 @@ async def _listen(config: HermesConfig, notifier: Pushover) -> None:
         async def handle_message(event) -> None:
             text = event.raw_text or ""
             _update_status(last_check=_now_text(), telegram_state="Dinleniyor")
-            if not _first_time_seen(_message_key(event)):
+            if _message_key(event) in load_json(TELEGRAM_SEEN_MESSAGES_PATH, {}):
                 return
             if saved_messages_chat is not None and str(getattr(event, "chat_id", "")) == str(getattr(saved_messages_chat, "id", "")):
                 # Only messages the user writes in Saved Messages start or answer a flow.
                 if getattr(event, "out", False):
                     try:
                         await _handle_saved_message_quick_add(event)
+                        _first_time_seen(_message_key(event))
                     except Exception as exc:  # noqa: BLE001
                         record_telegram_error(f"Kayıtlı Mesajlar ile takip eklenemedi: {exc}", "Telegram hızlı ekleme")
                 return
@@ -459,6 +461,7 @@ async def _listen(config: HermesConfig, notifier: Pushover) -> None:
                 return
             try:
                 _send_keyword_notification(notifier, event, _channel_label(event), keyword, text)
+                _first_time_seen(_message_key(event))
             except Exception as exc:  # noqa: BLE001
                 record_telegram_error(f"Pushover bildirimi gönderilemedi: {exc}", "Telegram bildirim")
 
@@ -476,7 +479,7 @@ async def _listen(config: HermesConfig, notifier: Pushover) -> None:
         await client.disconnect()
 
 
-def run_telegram_listener(config: HermesConfig, stop: Optional[threading.Event] = None) -> None:
+def run_telegram_listener(config: HermesConfig, stop: Optional[threading.Event] = None, notifier=None) -> None:
     stop = stop or threading.Event()
     if not config.telegram.enabled:
         _update_status(telegram_enabled=False, telegram_state="Pasif", telegram_channels=0, telegram_keywords=0,
@@ -486,7 +489,8 @@ def run_telegram_listener(config: HermesConfig, stop: Optional[threading.Event] 
     if TelegramClient is None or events is None:
         record_telegram_error("Telethon paketi bulunamadı. Add-on imajı yeniden kurulmalı.")
         return
-    notifier = Pushover(config.pushover_user_key, config.pushover_api_token, config.request_timeout_seconds)
+    if notifier is None:
+        raise RuntimeError("Telegram bildirim kuyruğu yapılandırılmadı.")
     while not stop.is_set():
         try:
             asyncio.run(_listen(config, notifier))
@@ -498,10 +502,10 @@ def run_telegram_listener(config: HermesConfig, stop: Optional[threading.Event] 
         stop.wait(RECONNECT_DELAY_SECONDS)
 
 
-def start_telegram_listener(config: HermesConfig, stop: Optional[threading.Event] = None) -> Optional[threading.Thread]:
+def start_telegram_listener(config: HermesConfig, stop: Optional[threading.Event] = None, notifier=None) -> Optional[threading.Thread]:
     if not config.telegram.enabled:
-        run_telegram_listener(config, stop)
+        run_telegram_listener(config, stop, notifier)
         return None
-    thread = threading.Thread(target=run_telegram_listener, args=(config, stop), name="telegram-listener", daemon=True)
+    thread = threading.Thread(target=run_telegram_listener, args=(config, stop, notifier), name="telegram-listener", daemon=True)
     thread.start()
     return thread

@@ -329,7 +329,7 @@ class MonitorHistoryTests(HistoryCase):
             rows = db.execute("SELECT outcome, detail, cpu_percent, memory_mb FROM reads ORDER BY rowid").fetchall()
         self.assertEqual(rows, [("timeout", "Amazon gerçek tarayıcı sayfası okunamadı (TimeoutException).", 92, 640),
                                 ("ok", "", None, None)])
-        self.assertTrue(any(line.endswith("(TimeoutException). | işlemci %92 · boş bellek 640 MB") for line in LOG_LINES))
+        self.assertTrue(any(line.endswith("(TimeoutException). | sistem yükü %92 · boş bellek 640 MB") for line in LOG_LINES))
 
     def test_amazon_requests_reach_the_database(self):
         rule = watch("iPhone", AMAZON, target="100")

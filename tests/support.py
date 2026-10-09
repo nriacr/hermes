@@ -18,6 +18,7 @@ if str(APP_PATH) not in sys.path:
 
 from hermes import logging_utils  # noqa: E402
 from hermes.history import History  # noqa: E402
+from hermes.storage import save_json  # noqa: E402
 from hermes.models import HermesConfig, TelegramConfig, WatchRule  # noqa: E402
 from hermes.monitor.cycle import DataFiles, Monitor  # noqa: E402
 from hermes.monitor.state import watch_key  # noqa: E402
@@ -87,13 +88,13 @@ class TempData:
         self._dir.cleanup()
 
     def write_state(self, state: Dict[str, Any]) -> None:
-        self.files.state.write_text(json.dumps(state), encoding="utf-8")
+        save_json(self.files.state, state)
 
     def state(self) -> Dict[str, Any]:
         return json.loads(self.files.state.read_text(encoding="utf-8")) if self.files.state.exists() else {}
 
     def write_summary(self, summary: Dict[str, Any]) -> None:
-        self.files.summary.write_text(json.dumps(summary), encoding="utf-8")
+        save_json(self.files.summary, summary)
 
     def summary(self) -> Dict[str, Any]:
         return json.loads(self.files.summary.read_text(encoding="utf-8")) if self.files.summary.exists() else {}

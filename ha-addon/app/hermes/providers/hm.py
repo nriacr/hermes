@@ -11,7 +11,8 @@ from ..errors import HermesError, OutOfStockHermesError
 from ..logging_utils import log
 from ..models import OfferResult
 from ..utils import build_headers, normalize_offer_text, parse_decimal, repair_mojibake
-from .base import Provider, extract_jsonld_product, extract_price_from_meta, iter_json_objects, soup_from_html
+from .base import Provider, extract_title, iter_json_objects, soup_from_html
+from .product_page import product_json, explicit_price, visible_price, scoped_soup
 from .http import HtmlResponse, curl_requests, read_site_html
 
 OUT_OF_STOCK_MARKERS = (
@@ -127,7 +128,7 @@ def _price_from_value(value: Any) -> Decimal | None:
     if isinstance(value, list):
         candidates = [_price_from_value(item) for item in value]
         candidates = [item for item in candidates if item is not None]
-        return min(candidates) if candidates else None
+        return candidates[0] if len(set(candidates)) == 1 else None
     if isinstance(value, dict):
         for key in (
             "formattedValue",
@@ -268,9 +269,11 @@ def _offers_from_data(data: dict, source_url: str, requested_size: str = "") -> 
 
 
 def _fallback_offer(html: str, source_url: str) -> OfferResult | None:
-    soup = soup_from_html(html)
-    title, jsonld_price = extract_jsonld_product(soup)
-    price = jsonld_price or extract_price_from_meta(soup) or _fallback_text_price(html)
+    soup = scoped_soup(soup_from_html(html))
+    title = extract_title(soup) or ""
+    product = product_json(soup, title, source_url)
+    jsonld_price = explicit_price(product) if product else None
+    price = jsonld_price or visible_price(soup, ["head meta[property='product:price:amount']", "head meta[property='og:price:amount']"]) or _fallback_text_price(str(soup))
     if price is None:
         return None
     title = title or _clean(soup.find("h1").get_text(" ", strip=True) if soup.find("h1") else "H&M ürünü")
@@ -289,7 +292,7 @@ def _fallback_text_price(html: str) -> Decimal | None:
             candidates.append(parse_decimal(match.group(1)))
         except HermesError:
             continue
-    return min(candidates) if candidates else None
+    return candidates[0] if len(set(candidates)) == 1 else None
 
 
 def extract_offers(html: str, source_url: str = "", size: str = "") -> List[OfferResult]:

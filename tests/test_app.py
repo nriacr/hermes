@@ -132,7 +132,7 @@ class TelegramConnectionTests(unittest.TestCase):
         with (patch.object(telegram, "TelegramClient", object), patch.object(telegram, "events", object()),
               patch.object(telegram, "_listen", side_effect=listen), patch.object(telegram, "record_telegram_error") as record,
               patch.object(telegram, "RECONNECT_DELAY_SECONDS", 0)):
-            telegram.run_telegram_listener(cfg, stop)
+            telegram.run_telegram_listener(cfg, stop, Mock(configured=True))
         self.assertEqual(len(attempts), 2)
         self.assertEqual(record.call_count, 2)
 
@@ -141,7 +141,7 @@ class TelegramConnectionTests(unittest.TestCase):
         cfg.telegram.enabled = True
         with (patch.object(telegram, "TelegramClient", object), patch.object(telegram, "events", object()),
               patch.object(telegram, "_listen", side_effect=telegram.WaitingForUser()) as listen):
-            telegram.run_telegram_listener(cfg, threading.Event())
+            telegram.run_telegram_listener(cfg, threading.Event(), Mock(configured=True))
         listen.assert_called_once()
 
     def test_seen_messages_are_handled_once_across_restarts(self):
@@ -240,7 +240,7 @@ class EndToEndTests(unittest.TestCase):
         rule = watch("Çanta", "https://nordbron.com/canta", target="5000")
         cfg = config([rule], interval_seconds=3600)
         runtime = hermes_app.HermesRuntime(cfg, files=data.files)
-        runtime.service.monitor.notifier = Mock(configured=True)
+        runtime.service.monitor.delivery.transport = Mock(configured=True)
         reads = []
 
         def read(rule, ctx, outcome):
@@ -263,7 +263,10 @@ class EndToEndTests(unittest.TestCase):
                     page = response.read().decode()
                 self.assertIn("Stark Sırt Çantası", page)
                 self.assertIn("class='ov-deal ", page)
-                runtime.service.monitor.notifier.send.assert_called_once()
+                deadline = time.monotonic() + 5
+                while not runtime.service.monitor.delivery.transport.send.called and time.monotonic() < deadline:
+                    time.sleep(0.02)
+                runtime.service.monitor.delivery.transport.send.assert_called_once()
                 ok, message = runtime.reset_notifications()
                 self.assertTrue(ok, message)
                 while len(reads) < 2 and time.monotonic() < deadline:
@@ -289,9 +292,9 @@ class StorageTests(unittest.TestCase):
             save_json(path, {"a": 1})
             save_json(path, {"a": 2})
             self.assertEqual(load_json(path, {}), {"a": 2})
-            self.assertEqual([item.name for item in data.root.iterdir()], ["state.json"])
+            self.assertFalse(any(item.suffix == ".tmp" for item in data.root.iterdir()))
             path.write_text("{broken", encoding="utf-8")
-            self.assertEqual(load_json(path, {"default": True}), {"default": True})
+            self.assertEqual(load_json(path, {"default": True}), {"a": 2})  # authoritative snapshot survives broken export
         finally:
             data.cleanup()
 

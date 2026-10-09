@@ -97,3 +97,27 @@ def read_site_html(response, label: str, is_challenge=has_generic_challenge, mes
     if is_challenge(html):
         raise BotProtectionHermesError(message or bot_protection_message(label))
     return html
+
+
+class MeasuredSession(requests.Session):
+    """Persistent connections with one measurement for every actual request attempt."""
+
+    def __init__(self, measure):
+        super().__init__()
+        self.measure = measure
+
+    def request(self, method, url, **kwargs):
+        started = time.monotonic()
+        outcome = "error"
+        try:
+            response = super().request(method, url, **kwargs)
+            outcome = f"http_{response.status_code}" if response.status_code >= 400 else "ok"
+            return response
+        except requests.Timeout:
+            outcome = "timeout"
+            raise
+        except requests.ConnectionError:
+            outcome = "connection"
+            raise
+        finally:
+            self.measure("requests", method.lower(), outcome, round((time.monotonic() - started) * 1000))

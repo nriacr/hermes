@@ -575,7 +575,7 @@ class StatisticsPageTests(DataFilesMixin, unittest.TestCase):
         end_text = f"{end:%H:%M}" if end.date() == start.date() else f"{end:%d.%m %H:%M}"
         self.assertIn(f"<strong>{start:%d.%m %H:%M}–{end_text} · Amazon</strong>", rows[2])
         self.assertIn("<span>4 okuma · Zaman aşımı 3, Sayfa okunamadı 1</span>", rows[2])
-        self.assertIn("<small>Amazon gerçek tarayıcı sayfası okunamadı (TimeoutException). · Pi: işlemci %160 · "
+        self.assertIn("<small>Amazon gerçek tarayıcı sayfası okunamadı (TimeoutException). · Pi: sistem yükü %160 · "
                       "boş bellek 400 MB</small>", rows[2])
         self.assertNotIn(url, spells)
 
@@ -739,7 +739,8 @@ class SettingsTests(DataFilesMixin, unittest.TestCase):
                 "watches_1_target_price": ["1.500"], "watches_1_url_1": ["https://www.zara.com/tr/tr/ornek-p03166301.html"],
                 "watches_1_active": ["1"]})
             self.assertIn("güncellendi", message)
-            self.assertEqual(options["takip_edilenler"][0], source["takip_edilenler"][0])
+            self.assertEqual({k:v for k,v in options["takip_edilenler"][0].items() if k != "id"}, source["takip_edilenler"][0])
+            self.assertTrue(options["takip_edilenler"][0]["id"])
             self.assertEqual((options["takip_edilenler"][1]["group"], options["takip_edilenler"][1]["target_price"]), ("Teknoloji", 1500))
 
     def test_new_card_additions_and_a_cached_mislabeled_form(self):

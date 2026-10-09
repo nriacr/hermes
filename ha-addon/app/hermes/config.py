@@ -16,7 +16,7 @@ from .constants import (
     normalize_priority,
 )
 from .errors import HermesError
-from .logging_utils import log
+from .logging_utils import log, configure_secrets
 from .models import HermesConfig, TelegramConfig, WatchRule
 from .storage import load_json
 from .utils import detect_site_from_url, normalize_item_key, parse_bool, parse_decimal, watch_name_required_for_url
@@ -72,6 +72,21 @@ def options_with_defaults(options: Any) -> Dict[str, Any]:
     saved = deepcopy(options) if isinstance(options, dict) else {}
     for key, value in OPTION_DEFAULTS.items():
         saved.setdefault(key, deepcopy(value))
+    for item in saved.get("takip_edilenler", []):
+        if isinstance(item, dict) and not item.get("id"):
+            try:
+                target = parse_decimal(str(item.get("target_price") or "0"))
+            except HermesError:
+                target = str(item.get("target_price") or "")
+            supported = []
+            for url in watch_urls(item):
+                try:
+                    detect_site_from_url(url)
+                    supported.append(url)
+                except HermesError:
+                    pass
+            item["id"] = tracking_card_id(str(item.get("name") or "").strip(), target,
+                str(item.get("size") or "").strip(), supported)
     return saved
 
 
@@ -172,56 +187,66 @@ def tracking_card_id(name: str, target_price: Decimal, size: str, urls: List[str
     return normalize_item_key("tracking_card", name, str(target_price), size, "|".join(sorted(urls)))
 
 
-def prepare_watches(raw_watches: object) -> List[WatchRule]:
-    watches: List[WatchRule] = []
-    if not isinstance(raw_watches, list):
-        return watches
-    for item in raw_watches:
+def _prepare_watch(item):
+    watches = []
+    if not parse_bool(item.get("active"), default=True):
+        return []
+    urls = watch_urls(item)
+    if not urls:
+        return []
+    name = str(item.get("name") or "").strip()
+    context_name = name or "adsız ürün"
+    supported_urls = _supported_watch_urls(urls, context_name)
+    if not supported_urls:
+        return []
+    if not name and any(watch_name_required_for_url(url) for url, _ in supported_urls):
+        raise HermesError("Arama linkleri için name alanı zorunlu. Ürün linklerinde boş bırakılabilir.")
+    target_price = parse_decimal(_required_value(item, "target_price", f"Takip edilen ({context_name})"))
+    minimum_price = _optional_price(item, "minimum_price")
+    if minimum_price is not None and minimum_price > target_price:
+        raise HermesError(f"Takip edilen ({context_name}) için minimum fiyat hedef fiyattan büyük olamaz.")
+    # Pre-3.12 cards (high/medium/low or none) are read every 6 hours until they are saved again.
+    priority = normalize_priority(item.get("priority"))
+    size = str(item.get("size") or "").strip()
+    # A card may contain several links, but all of them belong to the same
+    # tracking rule. This keeps their results separate from another card.
+    tracking_id = str(item.get("id") or tracking_card_id(name, target_price, size, [url for url, _ in supported_urls]))
+    for url, site in supported_urls:
+        watches.append(
+            WatchRule(
+                name=name,
+                site=site,
+                url=url,
+                target_price=target_price,
+                minimum_price=minimum_price,
+                excluded_terms=string_list(item.get("exclude_terms")),
+                group=watch_group(item),
+                size=size,
+                include_variations=parse_bool(item.get("include_variations"), default=False),
+                priority=priority,
+                official_seller_only=parse_bool(item.get("official_seller_only"), default=False),
+                check_now_token=str(item.get("check_now_token") or "").strip(),
+                max_items_to_scan=SEARCH_RESULT_LIMIT,
+                notify_once_in_24h=parse_bool(item.get("notify_once_in_24H"), default=True),
+                active=True,
+                tracking_id=tracking_id,
+            )
+        )
+    return watches
+
+def prepare_watches(raw_watches: object, errors=None) -> List[WatchRule]:
+    watches = []
+    for item in raw_watches if isinstance(raw_watches, list) else []:
         if not isinstance(item, dict):
             continue
-        if not parse_bool(item.get("active"), default=True):
-            continue
-        urls = watch_urls(item)
-        if not urls:
-            continue
-        name = str(item.get("name") or "").strip()
-        context_name = name or "adsız ürün"
-        supported_urls = _supported_watch_urls(urls, context_name)
-        if not supported_urls:
-            continue
-        if not name and any(watch_name_required_for_url(url) for url, _ in supported_urls):
-            raise HermesError("Arama linkleri için name alanı zorunlu. Ürün linklerinde boş bırakılabilir.")
-        target_price = parse_decimal(_required_value(item, "target_price", f"Takip edilen ({context_name})"))
-        minimum_price = _optional_price(item, "minimum_price")
-        if minimum_price is not None and minimum_price > target_price:
-            raise HermesError(f"Takip edilen ({context_name}) için minimum fiyat hedef fiyattan büyük olamaz.")
-        # Pre-3.12 cards (high/medium/low or none) are read every 6 hours until they are saved again.
-        priority = normalize_priority(item.get("priority"))
-        size = str(item.get("size") or "").strip()
-        # A card may contain several links, but all of them belong to the same
-        # tracking rule. This keeps their results separate from another card.
-        tracking_id = tracking_card_id(name, target_price, size, [url for url, _ in supported_urls])
-        for url, site in supported_urls:
-            watches.append(
-                WatchRule(
-                    name=name,
-                    site=site,
-                    url=url,
-                    target_price=target_price,
-                    minimum_price=minimum_price,
-                    excluded_terms=string_list(item.get("exclude_terms")),
-                    group=watch_group(item),
-                    size=size,
-                    include_variations=parse_bool(item.get("include_variations"), default=False),
-                    priority=priority,
-                    official_seller_only=parse_bool(item.get("official_seller_only"), default=False),
-                    check_now_token=str(item.get("check_now_token") or "").strip(),
-                    max_items_to_scan=SEARCH_RESULT_LIMIT,
-                    notify_once_in_24h=parse_bool(item.get("notify_once_in_24H"), default=True),
-                    active=True,
-                    tracking_id=tracking_id,
-                )
-            )
+        try:
+            watches.extend(_prepare_watch(item))
+        except HermesError as exc:
+            if errors is None:
+                raise
+            message = f"{str(item.get('name') or 'Adsız takip')}: {exc}"
+            errors.append(message)
+            log(f"Hatalı takip atlandı: {message}")
     return watches
 
 
@@ -240,9 +265,10 @@ def prepare_telegram_config(payload: Dict[str, object]) -> TelegramConfig:
     )
 
 
-def load_config(payload: Optional[Dict[str, Any]] = None) -> HermesConfig:
+def load_config(payload: Optional[Dict[str, Any]] = None, *, tolerant=False) -> HermesConfig:
     if payload is None:
         payload = read_options()
+    configure_secrets(payload.get(key) for key in ("pushover_user_key", "pushover_api_token", "api_hash", "phone_number", "verification_code", "public_dashboard_token"))
     interval_seconds = _bounded_integer(payload, "interval_seconds", DEFAULT_INTERVAL_SECONDS, 1, 86400)
     request_delay_min_seconds = _bounded_integer(
         payload, "request_delay_min_seconds", DEFAULT_REQUEST_DELAY_MIN_SECONDS, 0, 120
@@ -255,7 +281,8 @@ def load_config(payload: Optional[Dict[str, Any]] = None) -> HermesConfig:
 
     user_key = str(payload.get("pushover_user_key", "")).strip()
     api_token = str(payload.get("pushover_api_token", "")).strip()
-    watches = prepare_watches(payload.get("takip_edilenler", []))
+    config_errors = []
+    watches = prepare_watches(payload.get("takip_edilenler", []), config_errors if tolerant else None)
     telegram = prepare_telegram_config(payload)
 
     if not watches and not telegram.enabled:
@@ -279,4 +306,5 @@ def load_config(payload: Optional[Dict[str, Any]] = None) -> HermesConfig:
         pushover_api_token=api_token,
         watches=watches,
         telegram=telegram,
+        config_errors=config_errors,
     )

@@ -77,6 +77,9 @@ class OfferResult:
     stock_quantity: Optional[int] = None
     # Set only on an offer a provider replays from memory: when it was really read (ISO, UTC).
     checked_at: Optional[str] = None
+    source: str = ""
+    currency: str = "TRY"
+    conditions: str = ""
 
 
 @dataclass
@@ -103,3 +106,4 @@ class HermesConfig:
     pushover_api_token: str
     watches: List[WatchRule]
     telegram: TelegramConfig
+    config_errors: List[str] = field(default_factory=list)

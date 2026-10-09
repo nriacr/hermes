@@ -28,14 +28,6 @@ PRICE_META_SELECTORS = [
     ("meta", {"name": "twitter:data1"}, "content"),
 ]
 
-SCRIPT_PRICE_PATTERNS = [
-    re.compile(
-        r'"(?:price|sellingPrice|discountedPrice|currentPrice|amount)"\s*:\s*"?(?P<price>\d+(?:[.,]\d{1,2})?)"?',
-        re.IGNORECASE,
-    ),
-    re.compile(r"(?P<price>\d{1,3}(?:\.\d{3})*,\d{2})\s*TL", re.IGNORECASE),
-]
-
 
 def soup_from_html(html: str) -> BeautifulSoup:
     return BeautifulSoup(html, "html.parser")
@@ -79,19 +71,6 @@ def extract_price_from_selectors(soup: BeautifulSoup, selectors: list[str]):
                 return parse_decimal(text)
             except HermesError:
                 continue
-    return None
-
-
-def extract_price_from_scripts(html: str):
-    for pattern in SCRIPT_PRICE_PATTERNS:
-        candidates = []
-        for match in pattern.finditer(html):
-            try:
-                candidates.append(parse_decimal(match.group("price")))
-            except HermesError:
-                continue
-        if candidates:
-            return min(candidates)
     return None
 
 
@@ -220,6 +199,7 @@ class WatchRead:
 
     # Positively unavailable variants: {"product_title", "product_url", "reason"}.
     unavailable: List[dict] = field(default_factory=list)
+    errors: List[str] = field(default_factory=list)
     # An access block that stopped further requests after partial results.
     blocked: Optional[BaseException] = None
     # ISO time before which a new read cannot change the result.
@@ -230,6 +210,7 @@ class Provider:
     """One commerce site. Fetching and parsing stay inside the site's module."""
 
     site = ""
+    progress_timeout_seconds = 300
     # Notify when a previously out-of-stock product returns.
     notifies_stock_return = False
     # Include the offer's seller in opportunity notifications.

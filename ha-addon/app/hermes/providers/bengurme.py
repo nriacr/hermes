@@ -9,7 +9,7 @@ import json
 import re
 from decimal import Decimal
 from typing import Any, Dict, Iterable, List, Optional
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 
 import requests
 
@@ -20,15 +20,12 @@ from ..models import OfferResult
 from ..utils import build_headers, normalize_offer_text, parse_decimal, referer_for_url, repair_mojibake
 from .base import (
     Provider,
-    extract_jsonld_product,
-    extract_price_from_meta,
-    extract_price_from_scripts,
-    extract_price_from_selectors,
     extract_title,
     iter_json_objects,
     soup_from_html,
 )
 from .http import curl_requests, decode_response_text, read_site_html
+from .product_page import product_json, explicit_price, visible_price, scoped_soup, is_product_scope
 from .size_availability import size_matches
 
 
@@ -84,6 +81,8 @@ def _product_payloads(html: str) -> List[dict]:
 
     soup = soup_from_html(html)
     for script in soup.find_all("script"):
+        if not is_product_scope(script):
+            continue
         raw = (script.string or script.get_text(" ", strip=True) or "").strip()
         if not raw:
             continue
@@ -153,6 +152,16 @@ def _title_for_variant(product: dict, variant: dict) -> str:
     return title
 
 
+def _variant_url(source_url, variant):
+    identity = variant.get("id")
+    if not source_url or not identity:
+        return source_url
+    parsed = urlsplit(source_url)
+    query = dict(parse_qsl(parsed.query))
+    query["variant"] = str(identity)
+    return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, urlencode(query), parsed.fragment))
+
+
 def _offers_from_payload(product: dict, source_url: str, requested_size: str) -> List[OfferResult]:
     offers: List[OfferResult] = []
     candidates = [variant for variant in product.get("variants", []) if isinstance(variant, dict)]
@@ -183,24 +192,25 @@ def _offers_from_payload(product: dict, source_url: str, requested_size: str) ->
                 title=_title_for_variant(product, variant),
                 price=price,
                 seller="Ben Gurme",
-                url=source_url,
+                url=_variant_url(source_url, variant),
+                source="shopify-product-variant",
             )
         )
     return offers
 
 
 def _fallback_offer(html: str, source_url: str) -> OfferResult:
-    soup = soup_from_html(html)
-    title, jsonld_price = extract_jsonld_product(soup)
-    title = title or extract_title(soup) or "Ben Gurme ürünü"
+    soup = scoped_soup(soup_from_html(html))
+    title = extract_title(soup) or ""
+    product = product_json(soup, title, source_url)
+    jsonld_price = explicit_price(product) if product else None
+    title = title or (product or {}).get("name") or "Ben Gurme ürünü"
     normalized = normalize_offer_text(soup.get_text(" ", strip=True))
     if any(marker in normalized for marker in OUT_OF_STOCK_MARKERS):
         raise OutOfStockHermesError("Ben Gurme ürünü stokta değil.", title, source_url)
     for price in (
         jsonld_price,
-        extract_price_from_meta(soup),
-        extract_price_from_selectors(soup, FALLBACK_PRICE_SELECTORS),
-        extract_price_from_scripts(html),
+        visible_price(soup, FALLBACK_PRICE_SELECTORS + ["head meta[property='product:price:amount']", "head meta[property='og:price:amount']"]),
     ):
         if price is not None:
             return OfferResult(title=title, price=price, seller="Ben Gurme", url=source_url)
@@ -214,6 +224,13 @@ def extract_offers(html: str, source_url: str = "", size: str = "") -> List[Offe
     if not payloads:
         return [_fallback_offer(html, source_url)]
 
+    title = extract_title(soup_from_html(html)) or ""
+    if title:
+        payloads = [item for item in payloads if normalize_offer_text(item.get("title") or item.get("name") or "") == normalize_offer_text(title)]
+    elif len(payloads) != 1:
+        raise HermesError("Ben Gurme ürün kimliği belirsiz.")
+    if not payloads:
+        raise HermesError("Ben Gurme sayfasındaki ürün kimliği doğrulanamadı.")
     offers: List[OfferResult] = []
     out_of_stock: OutOfStockHermesError | None = None
     seen = set()

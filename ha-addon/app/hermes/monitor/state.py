@@ -5,6 +5,7 @@ the other's `state.json`.
 """
 
 import math
+import uuid
 from datetime import timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any, Dict
@@ -144,6 +145,9 @@ def clear_price_history(state: Dict[str, Any]) -> int:
 def should_alert(state_entry: Dict[str, Any], current_price: Decimal, target_price: Decimal, repeat_after_24h: bool) -> bool:
     if current_price > target_price:
         return False
+    pending = state_decimal(state_entry.get("pending_alert_price"))
+    if pending is not None and current_price >= pending:
+        return False
     last_alerted_price = state_entry.get("last_alerted_price")
     if last_alerted_price is None:
         return True
@@ -175,10 +179,11 @@ def reset_alert_after_missing(state_entry: Dict[str, Any], seller: str, product_
 
 def clear_notification_suppression(state: Dict[str, Any]) -> int:
     """Make qualifying opportunities notify once more and read every watch now."""
+    meta(state)["notification_generation"] = uuid.uuid4().hex
     reset_count = 0
     for _key, entry in entries(state):
         changed = False
-        for field_name in ("last_alerted_price", "last_alerted_at", "last_checked_at"):
+        for field_name in ("last_alerted_price", "last_alerted_at", "last_checked_at", "pending_alert_price"):
             if field_name in entry:
                 entry.pop(field_name, None)
                 changed = True

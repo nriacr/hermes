@@ -1,5 +1,24 @@
 # Değişiklik günlüğü
 
+## 4.0.0
+
+- İzleme çekirdeği; site planlama, ürün değerlendirme, kalıcı kayıt, bildirim gönderimi ve teşhis olarak ayrıldı.
+  Bir sitenin uzun turu diğer sitelerin sonraki kontrolünü bekletmiyor; aynı siteye sıralı erişim korunuyor.
+- Fiyat, stok ve Telegram bildirimleri ortak kalıcı kuyrukta gönderiliyor. Geçici kesintiler sınırlı tekrar deneniyor;
+  gönderilmeden önce fırsatın güncelliği kontrol ediliyor. Bildirim hafızası servis kabul ettikten sonra işleniyor.
+- Çalışma hafızası, fiyat gözlemi ve bildirim niyeti tek SQLite işleminde tutuluyor. Eski geçmiş/kimlikler korunuyor;
+  JSON dosyaları geri dönüş için dışa aktarılıyor. Bozuk kritik kayıt sessizce boş hafızaya çevrilmiyor.
+- Kartlara kalıcı kimlik veriliyor; ad/hedef düzenlemesi geçmişi ayırmıyor. Bir hatalı kart geçerli takipleri durdurmuyor.
+- Ürünle ilişkisi doğrulanmamış genel script fiyatı yolları kaldırıldı; öneri/kampanya bölümleri doğru kapsamda okunuyor.
+  Belirsiz fiyat tahmin edilmiyor; kaynak, para birimi, koşul ve okuma zamanı kaydediliyor.
+- İş/istek ilişkisi, sürüm, planlanan başlangıç, gecikme, süreler ve toparlanma sonucu kaydediliyor;
+  kritik gönderim/çalışma sorunları panelde ve Home Assistant kalıcı bildiriminde görünür.
+- Ortak web/mobil arayüzün stil, script ve sayfa şablonu ayrı dosyalara taşındı; kullanılan görünüm korundu,
+  kullanılmayan eski stil sınıfları temizlendi. Sistem yükü ölçümü doğru adlandırıldı.
+- Yayın aracı tam yedek, kalite/config kontrolü, kurulum, yeni sürümde tamamlanan okuma ve geri dönüşü doğruluyor.
+  Bağımsız Home Assistant durma uyarısı tanımı eklendi.
+- Amazon davranışı değişmedi.
+
 ## 3.15.4
 
 - Takipteki Depo kartları da (fırsat olmayanlar) tamamen sarı; yazılar, etiketler, fiyat çizgisi ve değişim

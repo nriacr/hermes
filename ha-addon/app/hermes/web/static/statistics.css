@@ -1,0 +1,22 @@
+body.ov { --ok:#b6ff3b; --warn:#ffc857; --head:rgba(255,255,255,.07); }
+.ov .summary-panel { margin-top:16px; padding:18px; border-radius:22px; border:1px solid var(--edge); background:var(--glass); backdrop-filter:blur(10px); }
+.ov .summary-head { align-items:center; } .ov .summary-head h2 { margin:0; font:700 13px var(--display); letter-spacing:.14em; text-transform:uppercase; color:var(--mute); } .ov .summary-head span { color:var(--mute); }
+.ov .statistics-intro { max-width:640px; font-size:14px; }
+.ov .statistics-top { margin-top:6px; } .ov .statistics-top .page-heading { margin:0; }
+.ov .period-switch .button[aria-current='page'] { border-color:transparent; }
+.ov .stat-tile { padding:14px 16px; border-radius:20px; border:1px solid var(--edge); background:var(--glass); backdrop-filter:blur(10px); }
+.ov .stat-tile span { font:600 11px var(--body); letter-spacing:.08em; } .ov .stat-tile strong { font:800 28px/1.05 var(--display); letter-spacing:-.04em; } .ov .stat-tile small { color:var(--mute); }
+.ov .stat-tile-alert strong { color:#ff7ab8; }
+.ov .statistics-chart { border:1px solid var(--edge); border-radius:18px; background:rgba(0,0,0,.28); }
+.ov .statistics-chart .grid-line { stroke:rgba(255,255,255,.08); } .ov .statistics-chart .axis-line { stroke:rgba(255,255,255,.2); }
+.ov .statistics-chart .check-bar { fill:#7be0ff; } .ov .statistics-chart .failure-count { fill:#ff7ab8; }
+.ov .legend-bar { background:#7be0ff; } .ov .legend-count { color:#ff7ab8; }
+.ov .site-health { padding:14px 16px; border-radius:18px; border:1px solid var(--edge); background:rgba(255,255,255,.045); }
+.ov .site-health header strong { font:700 15px var(--display); } .ov .health-bar { height:9px; border-radius:99px; background:var(--glass2); }
+.ov .health-ok { background:linear-gradient(95deg,var(--lime),var(--cyan)); } .ov .health-blocked { background:var(--warn); } .ov .health-error { background:#ff3d9a; }
+.ov .site-health dd { font-family:var(--display); } .ov .site-health dd.bad, .ov .measure-table td.bad { color:#ff7ab8; } .ov .statistics-good { color:var(--lime); }
+.ov .table-wrap, .ov .measure-wrap { border:1px solid var(--edge); border-radius:18px; } .ov th { background:rgba(255,255,255,.07); color:var(--mute); font-family:var(--body); } .ov td { border-bottom-color:var(--edge); }
+.ov .daily-history { margin-top:16px; padding:14px 18px; border-radius:22px; border:1px solid var(--edge); background:var(--glass); } .ov .daily-history summary { font:700 14px var(--display); }
+.ov .error-spells li { border-radius:16px; border:1px solid rgba(255,61,154,.28); border-left:3px solid #ff3d9a; background:rgba(255,61,154,.07); } .ov .error-spells li span { color:#ff7ab8; }
+.ov .spell-title { font:700 13px var(--display); letter-spacing:.14em; text-transform:uppercase; color:var(--mute); }
+.ov .statistics-empty { color:var(--mute); }

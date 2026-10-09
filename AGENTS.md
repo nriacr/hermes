@@ -26,7 +26,9 @@ of each site are described in `docs/ARCHITECTURE.md`.
   `providers/registry.py`; never add site-specific logic to `monitor/`.
   Site differences the monitor needs are provider attributes (for example
   `backs_off_on_protection`, `notifies_stock_return`, `keeps_offer`).
-- One cycle lives in `monitor/cycle.py`, the loop and panel commands in
+- Each site's monitoring round lives in `monitor/cycle.py`, offer evaluation in
+  `monitor/results.py`, durable transactions in `database.py`, delivery in
+  `delivery.py`, diagnostics in `diagnostics.py`, and the loop and panel commands in
   `monitor/runner.py`, scheduling/state/summary/alerts in their `monitor/`
   modules, shared HTTP helpers in `providers/http.py`, persistence in
   `storage.py`, and every panel page in `web/` behind one router.
@@ -63,7 +65,9 @@ of each site are described in `docs/ARCHITECTURE.md`.
 
 - Never commit `/data/options.json`, Telegram sessions, Pushover credentials,
   tunnel tokens, public dashboard tokens, or captured authenticated pages.
-- `/data/state.json` contains notification suppression and price history.
+- In 4.0, `hermes.db` is authoritative for notification suppression, price history,
+  runtime snapshots and the outbox; `/data/state.json` is the compatible export.
+  Preserve both.
   Do not delete or reset it unless the user explicitly requests that action.
 - Min/max history is persistent and user-owned. Notification reset and min/max
   reset are distinct, confirmed, explicit operations.
@@ -120,8 +124,9 @@ of each site are described in `docs/ARCHITECTURE.md`.
   within one site. Shared cycle state is changed only under the monitor lock.
 - The container runs one process (`python -m hermes`): the monitor loop in the
   main thread; the ingress (8099) and public (8100) servers and Telegram in
-  threads. While it runs, only the monitor writes `state.json`; panel actions
-  (resets) are queued commands applied between cycles.
+  threads. A single coordinator schedules independent site rounds and one durable
+  notification consumer. Shared state is changed under the monitor lock, including
+  delivery acknowledgement. Panel resets are queued at a barrier between active rounds.
 - `/health` reports the monitor: it fails when the loop has stopped or a cycle
   hangs, and the Supervisor watchdog then restarts Hermes. With invalid
   settings the panel stays up (health ok) and shows the error.
@@ -137,7 +142,8 @@ of each site are described in `docs/ARCHITECTURE.md`.
 4. Make the smallest coherent architectural change; remove superseded logic.
 5. Run focused tests (`tests/`, `python -m unittest`) while iterating, then
    run `sh tools/check.sh` before release.
-6. For runtime behavior changes, bump the version as the owner asked
+6. The owner explicitly approved the 4.0.0 architecture migration on 2026-10-09.
+   For subsequent runtime behavior changes, bump the version as the owner asked
    (2026-10-03): a major change raises X in 3.X.Y and resets Y (3.2.1 → 3.3.0);
    a minor change raises Y (3.2.1 → 3.2.2). Never guess the version from
    conversation history.

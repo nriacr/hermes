@@ -102,6 +102,7 @@ def offers_from_search_results(results: List[SearchResultItem], product_name: st
 
 class AmazonProvider(Provider):
     site = SITE_AMAZON
+    progress_timeout_seconds = 3 * 3600
     alert_shows_seller = False
     backs_off_on_protection = True
     spaces_own_requests = True
@@ -644,6 +645,7 @@ class AmazonProvider(Provider):
         log(f"Amazon varyasyon taraması: {watch.name or watch.url} | varyant={len(pending)} | teklif={found} | "
             f"hatalı={len(errors)} | varyant_keşif_sayfası={discovery_pages} | "
             f"hariç_nedeniyle_fiyat_okuması_atlandı={excluded_reads} | hariç_nedeniyle_istek_atlandı={skipped_excluded}")
+        outcome.errors.extend(errors)
         if found:
             return
         if outcome.blocked:

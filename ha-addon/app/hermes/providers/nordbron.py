@@ -1,43 +1,31 @@
+"""Nordbron: selected-product prices with explicit provenance."""
+
 from ..constants import SITE_NORDBRON
-from ..errors import HermesError
+from ..errors import PriceUnavailableHermesError, OutOfStockHermesError
 from ..models import OfferResult
-from .base import (
-    Provider,
-    extract_jsonld_product,
-    extract_price_from_meta,
-    extract_price_from_scripts,
-    extract_price_from_selectors,
-    extract_title,
-    soup_from_html,
-)
-from .http import fetch_with_retries, has_generic_challenge, read_site_html
+from .base import Provider, extract_title, soup_from_html
+from .http import fetch_with_retries, read_site_html, has_generic_challenge
+from .product_page import explicit_price, product_json, visible_price, unavailable
 
-NORDBRON_SELECTORS = [
-    "[class*='product-detail_price']",
-    "[class*='price']",
-    "[itemprop='price']",
-]
+SELECTORS = ("[class*=product-detail_price]", "head meta[property=\"product:price:amount\"]", "head meta[property=\"og:price:amount\"]")
 
-
-def extract_offer(html: str) -> OfferResult:
+def extract_offer(html: str, url: str = "") -> OfferResult:
     soup = soup_from_html(html)
-    jsonld_title, jsonld_price = extract_jsonld_product(soup)
-    title = jsonld_title or extract_title(soup) or "Nordbron ürünü"
-
-    for price in (
-        jsonld_price,
-        extract_price_from_meta(soup),
-        extract_price_from_selectors(soup, NORDBRON_SELECTORS),
-        extract_price_from_scripts(html),
-    ):
-        if price is not None:
-            return OfferResult(title=title, price=price, seller=None)
-
-    raise HermesError("Nordbron sayfasından fiyat bulunamadı.")
+    title = extract_title(soup) or ""
+    product = product_json(soup, title, url)
+    if product and unavailable(product):
+        raise OutOfStockHermesError("Ürün stokta yok.", title or product.get("name", ""), url)
+    price = explicit_price(product) if product else None
+    source = "product-jsonld"
+    if price is None:
+        price = visible_price(soup, SELECTORS)
+        source = "selected-product-price"
+    if price is None or not (title or product):
+        raise PriceUnavailableHermesError("Nordbron ürününe ait fiyat doğrulanamadı.")
+    return OfferResult(title=title or product["name"], price=price, url=url or None, source=source)
 
 
 def is_challenge_page(html: str) -> bool:
-    # Nordbron product pages can mention captcha scripts next to a real price.
     return has_generic_challenge(html) and "product-detail_price" not in html.lower()
 
 
@@ -46,4 +34,4 @@ class NordbronProvider(Provider):
 
     def read(self, watch, ctx, outcome):
         response = fetch_with_retries(ctx.session, watch.url, ctx.timeout)
-        return [extract_offer(read_site_html(response, "Nordbron", is_challenge_page))]
+        return [extract_offer(read_site_html(response, "Nordbron", is_challenge_page), watch.url)]

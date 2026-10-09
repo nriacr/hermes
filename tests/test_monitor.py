@@ -17,7 +17,7 @@ from hermes.constants import SEARCH_ERROR_NOTIFICATION_HOUR
 from hermes.errors import BotProtectionHermesError, EmptySearchResultsHermesError, HermesError, HttpStatusHermesError, OutOfStockHermesError
 from hermes.models import OfferResult, PriceSummaryRow, StockSummaryRow
 from hermes.monitor import alerts, runner, scheduling, state as state_ops, summary
-from hermes.monitor.cycle import skipped_offer_reason
+from hermes.monitor.results import skipped_offer_reason
 from hermes.providers.amazon import AmazonProvider, WatchRhythm
 from hermes.providers.bengurme import BenGurmeProvider
 from hermes.providers.hepsiburada import HepsiburadaProvider
@@ -147,20 +147,26 @@ class NotificationTests(CycleTestCase):
         self.assertEqual(self.notify.send.call_count, 5)
         self.assertIn("Hermes arama erişim uyarısı", self.titles_sent())
 
-    def test_opportunity_is_notified_and_saved_before_the_next_variant_is_read(self):
+    def test_opportunity_is_queued_and_saved_before_the_next_variant_is_read(self):
         rule = watch(url=AMAZON, target="100000", include_variations=True)
         events = []
 
         def stream(rule, ctx, outcome):
             yield OfferResult("iPhone Gümüş 256 GB", Decimal("89040.87"), "Amazon Depo", rule.url, True)
             events.append("second")
-            self.assertTrue(self.data.state())  # state was saved after the notification
+            saved = self.data.state()
+            self.assertTrue(any(item.get("pending_alert_price") for item in saved.values() if isinstance(item, dict)))
+            from hermes.database import Database
+            with Database.at(self.data.files.database).lock:
+                pending = Database.at(self.data.files.database).connect().execute(
+                    "SELECT count(*) FROM outbox WHERE state='pending'").fetchone()[0]
+            self.assertEqual(pending, 1)
             yield OfferResult("iPhone Abis 512 GB", Decimal("132000"), url="https://www.amazon.com.tr/dp/B000000002")
 
         self.notify.send.side_effect = lambda *_args, **_kwargs: events.append("notify")
         with patch.object(AmazonProvider, "read", side_effect=stream):
             self.run_cycle(config([rule]))
-        self.assertEqual(events, ["notify", "second"])
+        self.assertEqual(events, ["second", "notify"])
         self.assertIn("Depo", self.notify.send.call_args.args[0])
         self.assertIn("Amazon Depo", self.notify.send.call_args.args[1])
 
@@ -174,6 +180,8 @@ class NotificationTests(CycleTestCase):
             offer_key = state[key(rule)]["offer_keys"][0]
             self.assertNotIn("last_alerted_price", state[offer_key])
             self.notify.send.side_effect = None
+            from hermes.database import Database
+            Database.at(self.data.files.database).transaction([("UPDATE outbox SET due=0", ())])
             state = self.run_later(config([rule]))
         self.assertEqual(self.notify.send.call_count, 2)
         self.assertEqual(state[offer_key]["last_alerted_price"], "900")
@@ -609,7 +617,7 @@ class ReplayedOfferTests(CycleTestCase):
         hermes_monitor = monitor(config([rule]), self.data, self.notify)
         try:
             with patch.object(AmazonProvider, "read", side_effect=reader([fresh, replayed])):
-                with patch.object(hermes_monitor.history, "record_price") as record_price:
+                with patch.object(hermes_monitor.history, "price_statement", wraps=hermes_monitor.history.price_statement) as record_price:
                     hermes_monitor.run_cycle()
         finally:
             hermes_monitor.close()
@@ -763,8 +771,8 @@ class SiteQueueTests(CycleTestCase):
         rule = watch("Çanta", "https://nordbron.com/canta")
         hermes_monitor = monitor(config([rule]), self.data, self.notify)
         with (patch.object(NordbronProvider, "read", side_effect=reader([OfferResult("x", Decimal("1"))])),
-              patch.object(hermes_monitor, "_record_success", side_effect=OSError("disk full")),
-              patch.object(hermes_monitor, "_record_failure", side_effect=OSError("disk full"))):
+              patch.object(hermes_monitor.results, "_record_success", side_effect=OSError("disk full")),
+              patch.object(hermes_monitor.results, "_record_failure", side_effect=OSError("disk full"))):
             with self.assertRaises(OSError):
                 hermes_monitor.run_cycle()
         hermes_monitor.close()
@@ -1067,7 +1075,7 @@ class PanelCommandTests(CycleTestCase):
         service = runner.MonitorService(config([rule], interval_seconds=1), self.data.files, notifier=self.notify)
         runs = []
 
-        def run_cycle():
+        def run_cycle(site=None):
             runs.append(1)
             if len(runs) == 1:
                 raise OSError("disk full")

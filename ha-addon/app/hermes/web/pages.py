@@ -1,10 +1,14 @@
 """Page shell shared by every screen: head, navigation and notices."""
 
 from html import escape
+from pathlib import Path
+from string import Template
 from typing import Optional
 
 from ..constants import APP_VERSION
 from .icons import render_web_app_head
+
+PAGE_TEMPLATE = Template((Path(__file__).with_name("templates") / "page.html").read_text(encoding="utf-8"))
 
 # The top bar carries only the logo (home) and the settings gear; İstatistik is
 # reached from the button row at the bottom of the settings page.
@@ -77,14 +81,9 @@ def render_page(base: str, current: str, title: str, body: str, *, body_class: s
     # fallback for a browser without JavaScript.
     refresh = (f"<noscript><meta http-equiv='refresh' content='{int(refresh_seconds)}'></noscript>"
                if refresh_seconds else "")
-    html = (
-        "<!doctype html><html lang='tr'><head><meta charset='utf-8'>"
-        "<meta name='viewport' content='width=device-width, initial-scale=1, viewport-fit=cover'>"
-        "<meta name='theme-color' content='#111315'><meta name='apple-mobile-web-app-capable' content='yes'>"
-        "<meta name='apple-mobile-web-app-title' content='Hermes'>"
-        f"{render_web_app_head(base)}{refresh}<title>{escape(title)}</title>"
-        f"<link rel='stylesheet' href='{escape(link(base, 'app.css'), quote=True)}?v={escape(APP_VERSION)}'></head>"
-        f"<body class='{escape(body_class, quote=True)}'><main><div class='hero'>"
-        f"{render_topbar(base, current)}{body}</div></main>{after_main}{scripts}</body></html>"
-    )
+    html = PAGE_TEMPLATE.substitute(
+        head=render_web_app_head(base), refresh=refresh, title=escape(title),
+        stylesheet=escape(link(base, "app.css"), quote=True) + "?v=" + escape(APP_VERSION),
+        body_class=escape(body_class, quote=True), topbar=render_topbar(base, current),
+        body=body, after_main=after_main, scripts=scripts)
     return html.encode("utf-8")

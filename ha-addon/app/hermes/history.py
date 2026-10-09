@@ -20,11 +20,12 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-from .logging_utils import log
+from .logging_utils import log, redact
+from .database import Database
 from .storage import load_json
 from .utils import SystemLoad, parse_iso_datetime
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS cycles (checked_at TEXT NOT NULL, duration_seconds REAL NOT NULL);
@@ -84,13 +85,16 @@ class History:
     @classmethod
     def at(cls, path: Path) -> "History":
         with cls._instances_guard:
-            return cls._instances.setdefault(Path(path), cls(Path(path)))
+            path = Path(path)
+            if path not in cls._instances:
+                cls._instances[path] = cls(path)
+            return cls._instances[path]
 
     def __init__(self, path: Path) -> None:
         self.path = Path(path)
-        self._lock = threading.Lock()
+        self.database = Database.at(self.path)
+        self._lock = self.database.lock
         self._connection: Optional[sqlite3.Connection] = None
-        self._last_prices: Dict[str, str] = {}
         self._last_prune = 0.0
         self._failed = False
 
@@ -99,11 +103,9 @@ class History:
     def _db(self) -> sqlite3.Connection:
         if self._connection is None:
             self.path.parent.mkdir(parents=True, exist_ok=True)
-            connection = sqlite3.connect(self.path, timeout=10, check_same_thread=False, isolation_level=None)
-            connection.execute("PRAGMA journal_mode=WAL")
-            # With WAL, NORMAL syncs at checkpoints only; a power cut may lose the
-            # last few rows but never corrupts the file.
-            connection.execute("PRAGMA synchronous=NORMAL")
+            connection = self.database.connect()
+            # Commit each observation durably, including sudden power loss.
+            connection.execute("PRAGMA synchronous=FULL")
             connection.executescript(SCHEMA)
             # Version 2 (3.4): which watch was read and its priority. Version 3
             # (3.10): why a read failed and how busy the Pi was. Older rows keep
@@ -112,6 +114,9 @@ class History:
             for column, definition in READ_COLUMNS:
                 if column not in columns:
                     connection.execute(f"ALTER TABLE reads ADD COLUMN {column} {definition}")
+            request_columns = {row[1] for row in connection.execute("PRAGMA table_info(requests)")}
+            if "job_id" not in request_columns:
+                connection.execute("ALTER TABLE requests ADD COLUMN job_id TEXT NOT NULL DEFAULT ''")
             connection.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
             self._connection = connection
         return self._connection
@@ -143,9 +148,8 @@ class History:
             if History._instances.get(self.path) is self:
                 del History._instances[self.path]
         with self._lock:
-            if self._connection is not None:
-                self._connection.close()
-                self._connection = None
+            self.database.close()
+            self._connection = None
 
     # -- writes -------------------------------------------------------------------
 
@@ -173,34 +177,23 @@ class History:
         self._write("okuma", [("INSERT INTO reads (at, site, outcome, duration_ms, watch_key, priority, detail, cpu_percent, "
                                "memory_mb) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                                (_at(), site, outcome, max(0, int(duration_ms)), watch_key, priority,
-                                str(detail or "")[:DETAIL_MAX_CHARS], load.cpu_percent, load.memory_mb))])
+                                redact(str(detail or ""))[:DETAIL_MAX_CHARS], load.cpu_percent, load.memory_mb))])
 
-    def record_request(self, site: str, method: str, kind: str, outcome: str, duration_ms: int) -> None:
+    def record_request(self, site: str, method: str, kind: str, outcome: str, duration_ms: int, job_id: str = "") -> None:
         """One network request of a site that reports them (Amazon)."""
-        self._write("istek", [("INSERT INTO requests VALUES (?, ?, ?, ?, ?, ?)",
-                              (_at(), site, method, kind, outcome, max(0, int(duration_ms))))])
+        self._write("istek", [("INSERT INTO requests(at,site,method,kind,outcome,duration_ms,job_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                              (_at(), site, method, kind, outcome, max(0, int(duration_ms)), job_id))])
+
+    def price_statement(self, offer_key, site, title, price, checked_at=None):
+        # The price and its durable notification intent can share one transaction.
+        return ("INSERT INTO prices SELECT ?,?,?,?,? WHERE COALESCE((SELECT price FROM prices "
+                "WHERE offer_key=? ORDER BY checked_at DESC,rowid DESC LIMIT 1),'') != ?",
+                (offer_key, site, title, str(price), _at(checked_at), offer_key, str(price)))
 
     def record_price(self, offer_key: str, site: str, title: str, price: Decimal, checked_at: Optional[datetime] = None) -> None:
-        """A price point, only when the offer's price differs from its last recorded one."""
-        text = str(price)
-        with self._lock:
-            if offer_key not in self._last_prices:
-                try:
-                    row = self._db().execute(
-                        "SELECT price FROM prices WHERE offer_key = ? ORDER BY checked_at DESC, rowid DESC LIMIT 1", (offer_key,)
-                    ).fetchone()
-                except sqlite3.Error:
-                    row = None
-                self._last_prices[offer_key] = row[0] if row else ""
-            if self._last_prices[offer_key] == text:
-                return
-        if self._write("fiyat", [("INSERT INTO prices VALUES (?, ?, ?, ?, ?)", (offer_key, site, title, text, _at(checked_at)))]):
-            with self._lock:
-                self._last_prices[offer_key] = text
+        self._write("fiyat", [self.price_statement(offer_key, site, title, price, checked_at)])
 
     def clear_prices(self) -> None:
-        with self._lock:
-            self._last_prices.clear()
         self._write("fiyat sıfırlama", [("DELETE FROM prices", ())])
 
     def clear_errors(self) -> int:

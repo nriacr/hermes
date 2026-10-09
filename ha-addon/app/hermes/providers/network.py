@@ -9,13 +9,11 @@ from ..utils import parse_decimal
 from .base import (
     Provider,
     extract_jsonld_product,
-    extract_price_from_meta,
-    extract_price_from_scripts,
-    extract_price_from_selectors,
     extract_title,
     soup_from_html,
 )
 from .http import fetch_with_retries, read_site_html
+from .product_page import product_json, explicit_price, visible_price, scoped_soup
 from .size_availability import requested_size_state, size_matches
 
 NETWORK_SELECTORS = [
@@ -97,19 +95,22 @@ def _network_requested_size_state(html: str, requested_size: str) -> tuple[bool,
 
 
 def extract_offer(html: str, source_url: str = "") -> OfferResult:
-    soup = soup_from_html(html)
-    jsonld_title, jsonld_price = extract_jsonld_product(soup)
-    title = jsonld_title or extract_title(soup) or "Network urunu"
+    soup = scoped_soup(soup_from_html(html))
+    title = extract_title(soup) or ""
+    product = product_json(soup, title, source_url)
+    jsonld_price = explicit_price(product) if product else None
+    title = title or (product or {}).get("name") or "Network urunu"
 
     for price in (
         _extract_basket_price(soup),
         jsonld_price,
-        extract_price_from_meta(soup),
-        extract_price_from_selectors(soup, NETWORK_SELECTORS),
-        extract_price_from_scripts(html),
+        visible_price(soup, NETWORK_SELECTORS + ["head meta[property='product:price:amount']", "head meta[property='og:price:amount']"]),
     ):
         if price is not None:
-            return OfferResult(title=title, price=price, seller=None)
+            campaign = _extract_basket_price(soup) == price
+            return OfferResult(title=title, price=price, seller=None, url=source_url or None,
+                source="product-campaign" if campaign else "selected-product-price",
+                conditions="Üründe gösterilen sepet/adet kampanyası" if campaign else "")
 
     raise HermesError("Network sayfasindan fiyat bulunamadi.")
 

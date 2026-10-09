@@ -5,7 +5,8 @@ import signal
 import threading
 from typing import Optional, Tuple
 
-from .config import load_config
+from .config import load_config, read_options
+from .supervisor import migrate_card_ids
 from .constants import APP_VERSION, INGRESS_PORT, PUBLIC_PORT
 from .logging_utils import log
 from .models import HermesConfig
@@ -26,14 +27,31 @@ class HermesRuntime:
         self.config_error = config_error
         self.files = files or DataFiles()
         self.stop_event = threading.Event()
-        self.service: Optional[MonitorService] = MonitorService(config, self.files) if config else None
+        self.runtime_error = ""
+        try:
+            self.service: Optional[MonitorService] = MonitorService(config, self.files) if config else None
+        except Exception as exc:  # noqa: BLE001 - preserve data, keep recovery panel available
+            self.service = None
+            self.runtime_error = "Takip hafızası açılamadı; mevcut veriler korunuyor."
+            self.config_error = self.runtime_error
+            log(f"İzleyici başlatılamadı: {type(exc).__name__}")
 
     def health(self) -> Tuple[bool, str]:
+        if self.runtime_error:
+            return False, self.runtime_error
         if self.service is None:
             # Monitoring is stopped on purpose until the settings are fixed;
             # the panel itself is healthy so the user can correct them.
             return True, "ayar hatası"
         return self.service.health()
+
+    def metrics(self):
+        from .diagnostics import runtime_metrics
+        result = runtime_metrics(self.files.database)
+        result.update(version=APP_VERSION, healthy=self.health()[0],
+                      active_watches=len(self.config.watches) if self.config else 0,
+                      active_cards=len({watch.tracking_id or watch.name for watch in self.config.watches}) if self.config else 0)
+        return result
 
     def _action(self, name: str, apply, done_message: str, queued_message: str) -> Tuple[bool, str]:
         try:
@@ -80,7 +98,12 @@ class HermesRuntime:
 def main() -> int:
     log(f"Hermes v{APP_VERSION} başlatılıyor.")
     try:
-        config, config_error = load_config(), ""
+        options = read_options()
+        config, config_error = load_config(options, tolerant=True), ""
+        try:
+            migrate_card_ids(options)
+        except Exception:
+            config.config_errors.append("Kalıcı takip kimlikleri seçeneklere kaydedilemedi. Ayarlar sayfasından yeniden uygula.")
     except Exception as exc:  # noqa: BLE001
         config, config_error = None, str(exc)
         log(f"Ayar hatası, izleme başlatılmadı; panel açık: {exc}")
@@ -95,8 +118,8 @@ def main() -> int:
     signal.signal(signal.SIGTERM, request_stop)
     signal.signal(signal.SIGINT, request_stop)
     try:
-        if config is not None:
-            start_telegram_listener(config, runtime.stop_event)
+        if runtime.service is not None:
+            start_telegram_listener(config, runtime.stop_event, runtime.service.monitor.delivery)
             runtime.service.run()
         else:
             runtime.stop_event.wait()

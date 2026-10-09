@@ -1,0 +1,23 @@
+{
+  "id": "hermes_availability_watch",
+  "alias": "Hermes bağımsız çalışma uyarısı",
+  "description": "Hermes tamamen durduğunda uyarıyı Home Assistant verir; Hermes'in çalışmasına bağlı değildir.",
+  "mode": "single",
+  "triggers": [
+    {"trigger": "state", "entity_id": "binary_sensor.hermes_calisiyor", "to": "off", "for": "00:02:00"},
+    {"trigger": "state", "entity_id": "binary_sensor.hermes_calisiyor", "to": "unavailable", "for": "00:02:00"},
+    {"trigger": "state", "entity_id": "binary_sensor.hermes_calisiyor", "to": "on", "for": "00:00:30"},
+    {"trigger": "time_pattern", "minutes": "/5"}
+  ],
+  "actions": [
+    {"choose": [
+      {"conditions": [{"condition": "state", "entity_id": "binary_sensor.hermes_calisiyor", "state": "on"}],
+       "sequence": [{"action": "persistent_notification.dismiss", "data": {"notification_id": "hermes_unavailable"}}]},
+      {"conditions": [{"condition": "template", "value_template": "{{ states('binary_sensor.hermes_calisiyor') in ['off', 'unavailable'] and (now() - states.binary_sensor.hermes_calisiyor.last_changed).total_seconds() >= 120 }}"}],
+       "sequence": [{"action": "persistent_notification.create", "data": {
+         "notification_id": "hermes_unavailable", "title": "Hermes çalışmıyor",
+         "message": "Hermes en az 2 dakikadır çalışmıyor. Fiyat ve Telegram takibi durmuş olabilir. Home Assistant içindeki Hermes uygulamasını kontrol et. Bu uyarıyı bağımsız olarak Home Assistant oluşturdu."
+       }}]}
+    ]}
+  ]
+}

@@ -16,7 +16,7 @@ from typing import Callable, Dict, List, Optional, Protocol, Tuple
 
 from ..config import read_options
 from ..constants import APP_VERSION
-from ..logging_utils import log
+from ..logging_utils import log, redact
 from ..notifier import Pushover
 from ..utils import parse_bool
 from . import assets
@@ -108,8 +108,9 @@ def send_test_notification() -> Tuple[bool, str]:
         notifier.send("Hermes test", "Hermes test bildirimi. Ayarlar sağlıklı görünüyor.")
         return True, "Pushover test bildirimi gönderildi."
     except Exception as exc:  # noqa: BLE001
-        detail = getattr(getattr(exc, "response", None), "text", "") or str(exc)
-        return False, f"Pushover test bildirimi gönderilemedi: {detail[:180]}"
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+        detail = f"HTTP {status}" if status else type(exc).__name__
+        return False, f"Pushover test bildirimi gönderilemedi: {redact(detail)}. Anahtarları ve bağlantıyı kontrol et."
 
 
 ASSETS: Dict[str, Callable[[Request], Response]] = {
@@ -148,6 +149,9 @@ class Router:
         if path == "/health":
             ok, detail = self.runtime.health()
             return Response(200 if ok else 503, f"{'ok' if ok else detail}\n".encode("utf-8"))
+        if path == "/runtime":
+            return Response(200, json.dumps(self.runtime.metrics(), ensure_ascii=False).encode("utf-8"),
+                            "application/json; charset=utf-8")
         if path in LIVE_PARTS:
             # The fragment is shown on a top-level page, so its ingress links are relative to ".".
             page_base = request.base if request.base.startswith("/") else "."
@@ -194,6 +198,8 @@ class Router:
             return NOT_FOUND
         _, action = actions[path]
         ok, message = action()
+        if ok and path == "/test-pushover" and getattr(self.runtime, "service", None):
+            self.runtime.service.monitor.delivery.retry_failed()
         return redirect(request, "settings", saved="ok" if ok else "fail", msg=message)
 
 
@@ -201,10 +207,22 @@ def make_handler(router: Router, public_only: bool):
     class Handler(BaseHTTPRequestHandler):
         server_version = f"Hermes/{APP_VERSION}"
 
+        def setup(self):
+            super().setup()
+            self.connection.settimeout(15)
+
         def _respond(self, method: str) -> None:
             body = b""
             if method == "POST":
-                body = self.rfile.read(int(self.headers.get("Content-Length", "0") or 0))
+                try:
+                    length = int(self.headers.get("Content-Length", "0") or 0)
+                    if not 0 <= length <= 1024 * 1024:
+                        self.send_error(413)
+                        return
+                except ValueError:
+                    self.send_error(400)
+                    return
+                body = self.rfile.read(length)
             request = split_request(self.path, method, body, public_only)
             try:
                 response = router.handle(request) if request else NOT_FOUND

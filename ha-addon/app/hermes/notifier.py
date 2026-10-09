@@ -35,3 +35,8 @@ class Pushover:
             timeout=self.timeout,
         )
         response.raise_for_status()
+        if response.json().get("status") != 1:
+            raise requests.HTTPError("Pushover bildirimi kabul etmedi.", response=response)
+
+    def close(self):
+        self.session.close()

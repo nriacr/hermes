@@ -39,7 +39,7 @@ class SystemLoad:
     def text(self) -> str:
         parts = []
         if self.cpu_percent is not None:
-            parts.append(f"işlemci %{self.cpu_percent}")
+            parts.append(f"sistem yükü %{self.cpu_percent}")
         if self.memory_mb is not None:
             parts.append(f"boş bellek {self.memory_mb} MB")
         return " · ".join(parts)

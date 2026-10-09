@@ -1,6 +1,8 @@
 """Settings page: tracking cards, Telegram and timing options, saved once with one restart."""
 
 import re
+import sqlite3
+import uuid
 import urllib.parse
 from html import escape
 from typing import Any, Dict, List, Optional
@@ -101,13 +103,16 @@ def stored_watch_titles() -> Dict[str, str]:
             for key in _url_keys(url):
                 titles.setdefault(key, title)
 
-    summary = load_json(SUMMARY_PATH, {})
+    try:
+        summary = load_json(SUMMARY_PATH, {})
+        state = load_json(STATE_PATH, {})
+    except (RuntimeError, sqlite3.Error):
+        return titles
     if isinstance(summary, dict):
         for row_set in (summary.get("rows"), summary.get("stock_rows")):
             for row in _as_list(row_set):
                 if isinstance(row, dict):
                     remember(row.get("product_url"), row.get("product_title"))
-    state = load_json(STATE_PATH, {})
     if isinstance(state, dict):
         for entry in state.values():
             if isinstance(entry, dict):
@@ -175,6 +180,7 @@ def watch_form(item: Dict[str, Any], index: int, is_new: bool = False, groups=No
     else:
         actions = "<div class='watch-actions'><button class='button danger' type='button' data-delete-watch>Sil</button></div>"
     inner = (
+        f"<input type='hidden' name='{escape(prefix + 'id', quote=True)}' value='{escape(str(item.get('id') or ''), quote=True)}'>"
         f"<input type='hidden' name='{escape(prefix + 'delete', quote=True)}' value='0' data-delete-flag>"
         "<div class='watch-layout'><div class='watch-top'>"
         f"{_select(prefix, 'group', 'Grup', selected_group, group_choices)}"
@@ -371,6 +377,7 @@ def build_watch(form: Dict[str, List[str]], index: int) -> Optional[Dict[str, An
         raise ValueError(f"{context}: bu bağlantı bir arama sayfası. Arama sonuçlarını doğru filtrelemek için "
                          "Ad alanı zorunlu; örneğin ürün modelini yazmalısın.")
     item: Dict[str, Any] = {
+        "id": _first(form, prefix + "id") or uuid.uuid4().hex,
         "name": name,
         "group": group or watch_group({f"url_{number}": url for number, url in enumerate(urls, start=1)}),
         "target_price": _price_from_form(target),
@@ -422,7 +429,7 @@ def _update_telegram_options(options: Dict[str, Any], form) -> None:
 
 def apply_settings_operation(existing_options: Dict[str, Any], form: Dict[str, List[str]]):
     """Return the complete new option set and a message for the user."""
-    source = existing_options if isinstance(existing_options, dict) else {}
+    source = options_with_defaults(existing_options if isinstance(existing_options, dict) else {})
     existing_watches = [dict(item) for item in _as_list(source.get("takip_edilenler")) if isinstance(item, dict)]
     options = options_with_defaults(source)
     operation = _first(form, "operation", "update_existing")
@@ -457,12 +464,22 @@ def apply_settings_operation(existing_options: Dict[str, Any], form: Dict[str, L
         updated = build_watch(form, index)
         if not updated:
             raise ValueError(f"Takip {index + 1}: hedef fiyat ve en az bir link alanı zorunlu.")
+        updated["id"] = existing_watches[index]["id"]
         updated["check_now_token"] = utc_now()
         existing_watches[index] = updated
         options["takip_edilenler"] = existing_watches
         return options, f"{watch_display_name(updated, index, {})} takip kaydı güncellendi."
     if operation == "update_existing":
-        options["takip_edilenler"] = build_watches(form)
+        built = []
+        for index in range(int(_first(form, "watches_count", "0") or 0)):
+            if _first(form, f"watches_{index}_delete") in {"1", "true", "on", "yes"}:
+                continue
+            item = build_watch(form, index)
+            if item:
+                if index < len(existing_watches):
+                    item["id"] = existing_watches[index]["id"]
+                built.append(item)
+        options["takip_edilenler"] = built
         _update_telegram_options(options, form)
         _update_timing_options(options, form)
         return options, "Ayarlar kaydedildi."

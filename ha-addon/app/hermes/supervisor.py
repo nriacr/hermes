@@ -46,8 +46,7 @@ def _post(path: str, payload: Any = None, timeout: int = 8) -> bytes:
         with urllib.request.urlopen(request, timeout=timeout) as response:
             return response.read()
     except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace").strip()
-        raise RuntimeError(f"Supervisor API hata verdi: {exc.code} {detail[:240]}") from exc
+        raise RuntimeError(f"Supervisor API hata verdi: HTTP {exc.code}. Ayarları ve bağlantıyı kontrol et.") from exc
     except urllib.error.URLError as exc:
         raise RuntimeError(f"Supervisor API bağlantısı kurulamadı: {exc.reason}") from exc
 
@@ -87,3 +86,13 @@ def save_options_and_restart(options: Dict[str, Any], restart_delay_seconds: flo
     save_json(OPTIONS_PATH, saved_options)
     schedule_restart(restart_delay_seconds)
     return saved_options
+
+
+def migrate_card_ids(options):
+    cards = options.get("takip_edilenler", [])
+    if not any(isinstance(item, dict) and not item.get("id") for item in cards):
+        return
+    saved = options_with_defaults(options)
+    if os.getenv("SUPERVISOR_TOKEN"):
+        _post(_addon_path("options"), {"options": saved})
+    save_json(OPTIONS_PATH, saved)

@@ -81,6 +81,15 @@ class HomeAssistantBridge:
 
     # -- Hermes data ---------------------------------------------------------------
 
+    def persistent_problem(self, identity, message):
+        return self._post("/services/persistent_notification/create", {
+            "notification_id": "hermes_" + identity.replace(":", "_"),
+            "title": "Hermes takip uyarısı", "message": message})
+
+    def clear_problem(self, identity):
+        return self._post("/services/persistent_notification/dismiss", {
+            "notification_id": "hermes_" + identity.replace(":", "_")})
+
     def publish_opportunity(self, watch: WatchRule, offer: OfferResult, title: str, url: str) -> bool:
         return self.fire_event(OPPORTUNITY_EVENT, {
             "site": site_label(watch.site),

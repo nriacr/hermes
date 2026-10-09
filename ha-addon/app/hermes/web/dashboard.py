@@ -1,6 +1,7 @@
 """The Özet Tablo home screen: deal cards, price tiles with history, stock list, Telegram and errors."""
 
 import re
+import sqlite3
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from decimal import ROUND_DOWN, Decimal, InvalidOperation
@@ -19,6 +20,7 @@ from ..constants import (
     normalize_priority,
 )
 from ..storage import load_json
+from ..diagnostics import Diagnostics
 from ..utils import PROCESS_STARTED_AT, format_tl, is_search_url, parse_bool, parse_iso_datetime, repair_mojibake, site_label
 from .pages import link, render_notice, render_page
 from .pricechart import SPOT_SIZE, detail_chart, load_histories, offer_index, sparkline, with_current
@@ -498,12 +500,23 @@ def live_region(base: str, endpoint: str, html: str) -> str:
 
 def dashboard_live_html(base: str) -> str:
     """Everything on the summary page that changes while it is open."""
-    payload = load_json(SUMMARY_PATH, {})
-    state = load_json(STATE_PATH, {})
+    try:
+        payload = load_json(SUMMARY_PATH, {})
+        state = load_json(STATE_PATH, {})
+    except (RuntimeError, sqlite3.Error):
+        error = {"title": "Takip hafızası okunamadı", "meta": "Mevcut kayıtlar korunuyor",
+                 "message": "Takip hafızasının incelenmesi gerekiyor. Ayarlar sayfası açık.",
+                 "url": "", "failed_links": [], "checked_at": datetime.now().astimezone()}
+        return render_summary({}, {}, {}, [error])
     telegram_status = load_json(TELEGRAM_STATUS_PATH, {})
     state = state if isinstance(state, dict) else {}
+    errors = collect_errors(state)
+    for item in Diagnostics(DATABASE_PATH).active():
+        errors.append({"title": "Hermes çalışma uyarısı", "meta": item["recovery"],
+            "message": clean_error_message(item["detail"]), "url": "", "failed_links": [],
+            "checked_at": datetime.fromtimestamp(item["updated"]).astimezone()})
     return render_summary(payload if isinstance(payload, dict) else {}, state,
-                          telegram_status if isinstance(telegram_status, dict) else {}, collect_errors(state))
+                          telegram_status if isinstance(telegram_status, dict) else {}, errors)
 
 
 def render_dashboard_page(base: str, params: Dict[str, List[str]], config_error: str = "") -> bytes:
