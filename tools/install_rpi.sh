@@ -25,7 +25,6 @@ fi
 "$SSH_HELPER" "ha apps update $APP_SLUG --no-progress"
 "$SSH_HELPER" "ha apps info $APP_SLUG --raw-json | jq -e --arg expected '$EXPECTED_VERSION' '.data.version == \$expected and .data.state == \"started\"' >/dev/null"
 # Basic health is insufficient: require a completed new-version read, preserved history, and queue counts.
-"$SSH_HELPER" 'curl --fail --silent --max-time 15 http://192.168.1.143:8100/health'
 RUNTIME_COMMAND="$(cat <<'REMOTE'
 ha apps info 769724e3_hermes --raw-json | jq -r '.data.options | "url = " + (("http://192.168.1.143:8100/public/" + .public_dashboard_token + "/runtime") | @json)' | curl --fail --silent --max-time 25 --config -
 REMOTE
@@ -43,4 +42,5 @@ if [ "$attempt" -eq 36 ]; then
   printf 'Canlı ürün okuması doğrulanamadı. Geri dönüş: sh tools/rollback_rpi.sh %s\n' "$BACKUP" >&2
   exit 1
 fi
+"$SSH_HELPER" 'curl --fail --silent --max-time 15 http://192.168.1.143:8100/health'
 printf 'Hermes %s kuruldu. Geri dönüş: sh tools/rollback_rpi.sh %s\n' "$EXPECTED_VERSION" "$BACKUP"
