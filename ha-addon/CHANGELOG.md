@@ -1,5 +1,13 @@
 # Değişiklik günlüğü
 
+## 4.0.1
+
+- Hata kayıtları ürünün tam adını, kapasite/renk seçeneğini ve doğrudan hatalı varyant bağlantısını koruyor.
+  Panel bu bilgileri son hata zamanı ile gösteriyor; hangi ürünün etkilendiği açıkça anlaşılabiliyor.
+- Aynı hata çalışma hafızası ve teşhis kaydında bulunuyorsa panelde iki kez gösterilmiyor.
+  Eski kayıtlar korunuyor; bilinmeyen ürün adı başka bir varyanttan tahmin edilmiyor.
+- Amazon davranışı değişmedi.
+
 ## 4.0.0
 
 - İzleme çekirdeği; site planlama, ürün değerlendirme, kalıcı kayıt, bildirim gönderimi ve teşhis olarak ayrıldı.

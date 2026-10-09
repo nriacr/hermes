@@ -9,6 +9,14 @@ from .database import Database
 from .logging_utils import redact
 
 
+def _clean_context(value):
+    if isinstance(value, dict):
+        return {redact(str(key)): _clean_context(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_clean_context(item) for item in value]
+    return redact(value) if isinstance(value, str) else value
+
+
 class Diagnostics:
     def __init__(self, path):
         self.db = Database.at(path)
@@ -33,15 +41,16 @@ class Diagnostics:
                               (time.time(), outcome, duration_ms, redact(str(detail))[:2000],
                                redact(json.dumps(evidence or {}, ensure_ascii=False)), job))])
 
-    def incident(self, component, kind, detail, recovery=""):
+    def incident(self, component, kind, detail, recovery="", context=None):
         identity = f"{component}:{kind}"
         now = time.time()
-        self.db.transaction([("INSERT INTO incidents(id,component,kind,detail,opened,updated,recovery) VALUES (?,?,?,?,?,?,?) "
+        self.db.transaction([("INSERT INTO incidents(id,component,kind,detail,opened,updated,recovery,context) VALUES (?,?,?,?,?,?,?,?) "
                               "ON CONFLICT(id) DO UPDATE SET detail=excluded.detail,updated=excluded.updated,"
                               "count=CASE WHEN incidents.resolved IS NULL THEN incidents.count+1 ELSE 1 END,"
                               "opened=CASE WHEN incidents.resolved IS NULL THEN incidents.opened ELSE excluded.opened END,"
-                              "resolved=NULL,recovery=excluded.recovery",
-                              (identity, component, kind, redact(str(detail))[:2000], now, now, recovery))])
+                              "resolved=NULL,recovery=excluded.recovery,context=excluded.context",
+                              (identity, component, kind, redact(str(detail))[:2000], now, now, recovery,
+                               json.dumps(_clean_context(context or {}), ensure_ascii=False)))])
 
     def recover(self, component, recovery):
         self.db.transaction([("UPDATE incidents SET resolved=?,recovery=? WHERE component=? AND resolved IS NULL",
@@ -50,10 +59,17 @@ class Diagnostics:
     def active(self):
         with self.db.lock:
             rows = self.db.connect().execute(
-                "SELECT id,component,kind,detail,opened,updated,count,recovery FROM incidents WHERE resolved IS NULL "
+                "SELECT id,component,kind,detail,opened,updated,count,recovery,context FROM incidents WHERE resolved IS NULL "
                 "ORDER BY updated DESC").fetchall()
-        fields = ("id", "component", "kind", "detail", "opened", "updated", "count", "recovery")
-        return [dict(zip(fields, row)) for row in rows]
+        fields = ("id", "component", "kind", "detail", "opened", "updated", "count", "recovery", "context")
+        items = [dict(zip(fields, row)) for row in rows]
+        for item in items:
+            try:
+                context = json.loads(item["context"])
+            except (ValueError, TypeError):
+                context = {}
+            item["context"] = context if isinstance(context, dict) else {}
+        return items
 
     def prune(self):
         cutoff = time.time() - 30 * 86400

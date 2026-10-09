@@ -372,6 +372,40 @@ class AmazonLaneTests(AmazonTestCase):
 
 
 class AmazonProductTests(AmazonTestCase):
+    def test_failed_variant_keeps_model_capacity_color_and_its_own_url_when_cached(self):
+        rule = watch(url=ROOT, include_variations=True, priority="60m")
+        variations = [amazon_parser.AmazonProductVariation("Gümüş Rengi", ROOT),
+                      amazon_parser.AmazonProductVariation("Gümüş Rengi", CHILD)]
+        missing = ('<span id="productTitle">iPhone Pro Max 512 GB</span>'
+                   '<div id="variation_color_name"><span class="selection">Gümüş Rengi</span></div>'
+                   '<div id="variation_size_name"><span class="selection">512 GB</span></div>')
+        with (self.serve({ROOT: missing, CHILD: priced(title="iPhone Pro Max 1 TB Gümüş Rengi")}),
+              patch.object(amazon_parser, "extract_product_variations", return_value=variations)):
+            for _ in range(2):
+                self.provider.begin_cycle()
+                outcome = WatchRead()
+                offers = self.read(rule, outcome)
+                self.assertEqual([offer.url for offer in offers], [CHILD])
+                self.assertEqual(len(outcome.error_details), 1)
+                failure = outcome.error_details[0]
+                self.assertEqual(failure["product_url"], ROOT)
+                self.assertIn("512 GB", failure["product_title"])
+                self.assertIn("Gümüş Rengi", failure["product_title"])
+                self.assertNotIn("1 TB", failure["product_title"])
+                self.assertIn("512 GB", failure["variant"])
+        self.assertEqual(self.fetched.count(ROOT), 1)
+
+    def test_fetch_failure_never_borrows_previous_variants_product_title(self):
+        variations = [amazon_parser.AmazonProductVariation("Gümüş", ROOT),
+                      amazon_parser.AmazonProductVariation("Burgonya", CHILD)]
+        outcome = WatchRead()
+        with (self.serve({ROOT: priced(title="iPhone 512 GB Gümüş"), CHILD: HermesError("Bağlantı kesildi")}),
+              patch.object(amazon_parser, "extract_product_variations", return_value=variations)):
+            self.assertEqual(len(self.read(watch(url=ROOT, include_variations=True), outcome)), 1)
+        self.assertEqual(outcome.error_details[0]["product_title"], "")
+        self.assertEqual(outcome.error_details[0]["product_url"], CHILD)
+        self.assertEqual(outcome.error_details[0]["variant"], "Burgonya")
+
     def test_missing_root_price_still_visits_all_discovered_variants(self):
         rule = watch(url=ROOT, include_variations=True)
         variations = [amazon_parser.AmazonProductVariation("Gümüş", ROOT), amazon_parser.AmazonProductVariation("Turuncu", CHILD)]

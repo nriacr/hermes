@@ -536,6 +536,8 @@ class AmazonProvider(Provider):
                 if snapshot is not None:
                     self._remember_page(cache_key, snapshot)
             page_was_reused = snapshot is not None
+            page_title = str(snapshot.get("product_title") or "") if snapshot else ""
+            selected_label = str(snapshot.get("label") or variation.label) if snapshot else variation.label
             remembered = self._remembered_exclusion(cache_key, watch) if snapshot is None and follow_variations else None
             if remembered is not None:
                 # Excluded by title and read recently: its neighbours are known, the page is not needed.
@@ -579,6 +581,7 @@ class AmazonProvider(Provider):
                             offer_error = exc
                             page_offers = []
                     page_state = {
+                        "product_title": page_title,
                         "offers": page_offers,
                         "offer_error": offer_error,
                         "offers_skipped_by_exclusion": bool(exclusion_term),
@@ -588,6 +591,7 @@ class AmazonProvider(Provider):
                         snapshot = {"label": selected_label or variation.label, "variations": discovered, **page_state}
                         self._remember_page(cache_key, snapshot)
                     else:
+                        snapshot["product_title"] = page_title
                         snapshot["variations"] = discovered
                         if snapshot.get("offers") is None or needs_offer_upgrade:
                             snapshot.update(page_state)
@@ -621,7 +625,11 @@ class AmazonProvider(Provider):
                     log(f"Amazon varyantı stokta yok: {title} | {variation.url}")
                 continue
             except Exception as exc:  # noqa: BLE001
-                errors.append(f"{variation.label or variation.url} | {exc}")
+                variant = selected_label or variation.label
+                title = parser.title_with_variation(page_title, variant) if page_title else ""
+                outcome.error_details.append({"product_title": title, "product_url": variation.url,
+                                              "variant": variant, "reason": str(exc)})
+                errors.append(f"{title or variant or 'Ürün adı bu okumada alınamadı'} | {variation.url} | {exc}")
                 if not page_was_reused:
                     log(f"Amazon varyasyonu okunamadı: {errors[-1]}")
                 if self._remember_block(outcome, exc):

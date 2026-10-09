@@ -450,19 +450,23 @@ class Monitor:
         result = "ok"
         failure: Optional[BaseException] = None
         load: Optional[SystemLoad] = None
+        incident_context = {"site": watch.site, "watch_name": watch.name, "watch_url": watch.url,
+                            "failures": outcome.error_details}
         try:
             ctx.pace(f"{seller} | {(watch.name or watch.url)[:64]}")
             offers = (offer for offer in provider.read(watch, ctx, outcome) if provider.keeps_offer(watch, offer))
             recorded = self.results._record_offers(run, provider, watch, entry, seller, offers)
             if outcome.errors:
-                self.diagnostics.incident(key, "partial", "; ".join(outcome.errors), "Diğer varyantlar okunmaya devam etti")
+                self.diagnostics.incident(key, "partial", "; ".join(outcome.errors),
+                                          "Diğer varyantlar okunmaya devam etti", context=incident_context)
             else:
                 self.diagnostics.recover(key, "Okuma tamamlandı")
             if outcome.blocked:
                 failure = outcome.blocked
                 result = read_outcome(provider, failure)
                 load = system_load()
-                self.diagnostics.incident(key, "read", str(failure), f"{seller}: mevcut erişim kuralı uygulanıyor")
+                self.diagnostics.incident(key, "read", str(failure), f"{seller}: mevcut erişim kuralı uygulanıyor",
+                                          context=incident_context)
             with self._lock:
                 self.results._record_success(run, provider, watch, key, seller, recorded, outcome)
         except OutOfStockHermesError as exc:
@@ -478,7 +482,8 @@ class Monitor:
                 failure = outcome.blocked or exc
                 result = read_outcome(provider, failure)
                 load = system_load()
-                self.diagnostics.incident(key, "read", str(failure), f"{seller}: sonraki planlı okumada tekrar denenecek")
+                self.diagnostics.incident(key, "read", str(failure), f"{seller}: sonraki planlı okumada tekrar denenecek",
+                                          context=incident_context)
             with self._lock:
                 self.results._record_failure(run, provider, watch, key, entry, seller, outcome, exc, load)
         finally:

@@ -364,8 +364,12 @@ def render_errors(errors: List[Dict[str, Any]]) -> str:
         )
         open_link = (f"<a href='{escape(detail['url'], quote=True)}' target='_blank' rel='noopener noreferrer'>Linki aç</a>"
                      if detail["url"] else "")
+        checked_at = detail.get("checked_at")
+        timestamp = (f"<time datetime='{escape(checked_at.isoformat(), quote=True)}'>"
+                     f"Son hata: {checked_at.astimezone().strftime('%d.%m.%Y %H:%M:%S')}</time>"
+                     if isinstance(checked_at, datetime) else "")
         items.append(f"<li><strong>{escape(detail['title'])}</strong><span>{escape(detail['meta'])}</span>"
-                     f"<em>Hata: {escape(detail['message'])}</em>{links}{open_link}</li>")
+                     f"<em>Hata: {escape(detail['message'])}</em>{timestamp}{links}{open_link}</li>")
     return (f"<section class='ov-errors'><h2 class='ov-sec'>Hatalar <small>son 24 saat · {len(errors)}</small></h2>"
             f"<ul>{''.join(items)}</ul></section>")
 
@@ -455,6 +459,7 @@ def collect_errors(state: Dict[str, Any], hours: int = 24) -> List[Dict[str, Any
         if name and is_search_url(url):
             meta += f" · Aranan keyword: {name}"
         detail = {
+            "component": key,
             "title": f"{site_label(site) if site else 'Ürün kontrolü'}: {display_name}",
             "meta": meta,
             "message": clean_error_message(entry.get("last_error")),
@@ -467,6 +472,35 @@ def collect_errors(state: Dict[str, Any], hours: int = 24) -> List[Dict[str, Any
             seen.add(identity)
             errors.append(detail)
     return sorted(errors, key=lambda item: item["checked_at"], reverse=True)
+
+
+def incident_errors(item: Dict[str, Any], state: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Display identities captured by the failing reader; never infer from sibling prices."""
+    context = item.get("context") or {}
+    entry = state.get(item["component"], {})
+    if not isinstance(entry, dict):
+        entry = {}
+    site = str(context.get("site") or entry.get("site") or "")
+    watch_name = str(context.get("watch_name") or entry.get("watch_name") or "")
+    watch_url = str(context.get("watch_url") or entry.get("configured_url") or "")
+    failures = [failure for failure in context.get("failures", []) if isinstance(failure, dict)]
+    if not failures:
+        fallback_title = watch_name or ("Ürün adı bu kayıtta alınmamış" if site else "Hermes çalışma uyarısı")
+        failures = [{"product_title": fallback_title, "product_url": watch_url, "reason": item["detail"]}]
+    errors = []
+    for failure in failures:
+        title = str(failure.get("product_title") or "Ürün adı bu okumada alınamadı")
+        variant = str(failure.get("variant") or "")
+        url = str(failure.get("product_url") or "")
+        if not url.startswith(("https://", "http://")):
+            url = ""
+        meta = " · ".join(value for value in (f"Varyant: {variant}" if variant else "", item["recovery"]) if value)
+        errors.append({"component": item["component"],
+            "title": f"{site_label(site)}: {title}" if site else title, "meta": meta,
+            "message": clean_error_message(failure.get("reason") or item["detail"]),
+            "url": url, "failed_links": [],
+            "checked_at": datetime.fromtimestamp(item["updated"]).astimezone()})
+    return errors
 
 
 def telegram_error_count_24h() -> int:
@@ -510,11 +544,18 @@ def dashboard_live_html(base: str) -> str:
         return render_summary({}, {}, {}, [error])
     telegram_status = load_json(TELEGRAM_STATUS_PATH, {})
     state = state if isinstance(state, dict) else {}
-    errors = collect_errors(state)
-    for item in Diagnostics(DATABASE_PATH).active():
-        errors.append({"title": "Hermes çalışma uyarısı", "meta": item["recovery"],
-            "message": clean_error_message(item["detail"]), "url": "", "failed_links": [],
-            "checked_at": datetime.fromtimestamp(item["updated"]).astimezone()})
+    active = Diagnostics(DATABASE_PATH).active()
+    # One failing watch may exist both in state and in durable diagnostics.
+    diagnosed = {item["component"] for item in active if item["kind"] in {"read", "partial"}}
+    errors = [error for error in collect_errors(state) if error["component"] not in diagnosed]
+    for item in active:
+        errors.extend(incident_errors(item, state))
+    unique = {}
+    for error in errors:
+        identity = (error["component"], error["title"], error["url"], error["message"])
+        if identity not in unique or unique[identity]["checked_at"] < error["checked_at"]:
+            unique[identity] = error
+    errors = sorted(unique.values(), key=lambda error: error["checked_at"], reverse=True)
     return render_summary(payload if isinstance(payload, dict) else {}, state,
                           telegram_status if isinstance(telegram_status, dict) else {}, errors)
 

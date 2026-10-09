@@ -200,6 +200,8 @@ class WatchRead:
     # Positively unavailable variants: {"product_title", "product_url", "reason"}.
     unavailable: List[dict] = field(default_factory=list)
     errors: List[str] = field(default_factory=list)
+    # Failed variants retain their own identity, independent of successful siblings.
+    error_details: List[dict] = field(default_factory=list)
     # An access block that stopped further requests after partial results.
     blocked: Optional[BaseException] = None
     # ISO time before which a new read cannot change the result.

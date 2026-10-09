@@ -16,7 +16,7 @@ CREATE INDEX IF NOT EXISTS outbox_due ON outbox(state,due);
 CREATE TABLE IF NOT EXISTS incidents(
  id TEXT PRIMARY KEY, component TEXT NOT NULL, kind TEXT NOT NULL, detail TEXT NOT NULL,
  opened REAL NOT NULL, updated REAL NOT NULL, count INTEGER NOT NULL DEFAULT 1,
- resolved REAL, recovery TEXT NOT NULL DEFAULT '');
+ resolved REAL, recovery TEXT NOT NULL DEFAULT '', context TEXT NOT NULL DEFAULT '{}');
 CREATE TABLE IF NOT EXISTS jobs(
  id TEXT PRIMARY KEY, site TEXT NOT NULL, watch_key TEXT NOT NULL, version TEXT NOT NULL,
  started REAL NOT NULL, planned REAL, delay_ms INTEGER NOT NULL DEFAULT 0, finished REAL, outcome TEXT, duration_ms INTEGER,
@@ -51,6 +51,9 @@ class Database:
                     db.execute("PRAGMA journal_mode=WAL")
                     db.execute("PRAGMA synchronous=FULL")
                     db.executescript(SCHEMA)
+                    incident_columns = {row[1] for row in db.execute("PRAGMA table_info(incidents)")}
+                    if "context" not in incident_columns:
+                        db.execute("ALTER TABLE incidents ADD COLUMN context TEXT NOT NULL DEFAULT '{}'")
                     columns = {row[1] for row in db.execute("PRAGMA table_info(jobs)")}
                     for name, definition in (("planned", "REAL"), ("delay_ms", "INTEGER NOT NULL DEFAULT 0")):
                         if name not in columns:

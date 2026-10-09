@@ -15,6 +15,7 @@ from support import TempData
 from hermes.config import prepare_watches
 from hermes import history as history_module
 from hermes.history import History
+from hermes.diagnostics import Diagnostics
 from hermes.utils import SystemLoad, parse_decimal, utc_now
 from hermes.web import assets, dashboard, server, settings
 from hermes.web import statistics as statistics_page
@@ -274,6 +275,37 @@ class LiveServerTests(DataFilesMixin, unittest.TestCase):
 
 
 class DashboardTests(DataFilesMixin, unittest.TestCase):
+    def test_failed_variants_show_exact_identity_link_time_and_no_duplicate_watch_error(self):
+        self.data.write_state({"watch": {"site": "amazon", "watch_name": "Telefon", "last_error": "Fiyat yok",
+                                        "last_checked_at": utc_now()}})
+        context = {"site": "amazon", "watch_name": "Telefon", "watch_url": "https://example.test/root", "failures": [
+            {"product_title": "iPhone Pro Max 512 GB / Gümüş Rengi", "variant": "512 GB / Gümüş Rengi",
+             "product_url": "https://example.test/silver", "reason": "Fiyat yok"},
+            {"product_title": "iPhone Pro 256 GB / Burgonya", "variant": "256 GB / Burgonya",
+             "product_url": "https://example.test/burgundy", "reason": "Stok doğrulanamadı"}]}
+        diagnostics = Diagnostics(self.data.files.database)
+        for kind in ("partial", "read"):
+            diagnostics.incident("watch", kind, "Fiyat yok", "Diğer varyantlar okunuyor", context=context)
+        for base in (".", "/public/test-access"):
+            html = dashboard.dashboard_live_html(base)
+            self.assertIn("son 24 saat · 2", html)
+            self.assertIn("iPhone Pro Max 512 GB / Gümüş Rengi", html)
+            self.assertIn("iPhone Pro 256 GB / Burgonya", html)
+            self.assertIn("href='https://example.test/silver'", html)
+            self.assertIn("href='https://example.test/burgundy'", html)
+            self.assertEqual(html.count("Son hata:"), 2)
+            self.assertNotIn("href='https://example.test/root'", html)
+
+    def test_unknown_error_identity_is_not_inferred_and_unsafe_links_are_not_rendered(self):
+        diagnostic = Diagnostics(self.data.files.database)
+        diagnostic.incident("watch", "partial", "Fiyat yok", context={"site": "amazon", "failures": [
+            {"product_title": "", "variant": "Burgonya", "product_url": "javascript:alert(1)", "reason": "<script>"}]})
+        html = self.live()
+        self.assertIn("Ürün adı bu okumada alınamadı", html)
+        self.assertIn("Varyant: Burgonya", html)
+        self.assertIn("&lt;script&gt;", html)
+        self.assertNotIn("javascript:", html)
+
     def test_site_theme_classes_are_distinct(self):
         expected = {"Amazon": "site-amazon", "Hepsiburada": "site-hepsiburada", "Trendyol": "site-trendyol",
                     "Network": "site-network", "Beymen Club": "site-beymenclub", "Nordbron": "site-nordbron",

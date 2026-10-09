@@ -24,6 +24,7 @@ from hermes.models import OfferResult
 from hermes.monitor.runner import MonitorService
 from hermes.monitor.state import watch_key
 from hermes.providers import nordbron, trendyol, network, beymenclub, bengurme, hm
+from hermes.providers.amazon import AmazonProvider
 from hermes.storage import load_json
 from hermes.web.settings import apply_settings_operation
 
@@ -267,6 +268,52 @@ class RuntimeSafetyTests(unittest.TestCase):
         self.assertEqual(diagnostic.active()[0]["count"], 2)
         diagnostic.recover("site", "Okuma düzeldi")
         self.assertEqual(diagnostic.active(), [])
+
+    def test_old_incident_schema_is_upgraded_without_losing_records(self):
+        with sqlite3.connect(self.data.files.database) as connection:
+            connection.execute("CREATE TABLE incidents(id TEXT PRIMARY KEY, component TEXT NOT NULL, kind TEXT NOT NULL, "
+                               "detail TEXT NOT NULL, opened REAL NOT NULL, updated REAL NOT NULL, count INTEGER DEFAULT 1, "
+                               "resolved REAL, recovery TEXT NOT NULL DEFAULT '')")
+            connection.execute("INSERT INTO incidents(id,component,kind,detail,opened,updated) VALUES (?,?,?,?,?,?)",
+                               ("old:partial", "old", "partial", "Eski kayıt", 10, 20))
+        diagnostic = Diagnostics(self.data.files.database)
+        self.assertEqual(diagnostic.active()[0]["detail"], "Eski kayıt")
+        self.assertEqual(diagnostic.active()[0]["context"], {})
+        context = {"failures": [{"product_title": "iPhone 512 GB", "product_url": "https://example.test/x"}]}
+        diagnostic.incident("old", "partial", "Yeni kayıt", context=context)
+        diagnostic.db.close()
+        self.assertEqual(Diagnostics(self.data.files.database).active()[0]["context"], context)
+
+    def test_structured_error_redaction_preserves_valid_json(self):
+        configure_secrets(["synthetic-context-secret"])
+        context = {"failures": [{"product_url": "https://example.test/x?token=synthetic-context-secret",
+                                 "reason": "password=synthetic-context-secret"}]}
+        diagnostic = Diagnostics(self.data.files.database)
+        diagnostic.incident("test", "partial", "Hata", context=context)
+        stored = diagnostic.active()[0]["context"]
+        self.assertIn("failures", stored)
+        self.assertNotIn("synthetic-context-secret", json.dumps(stored))
+
+    def test_partial_reader_failure_reaches_durable_identity(self):
+        rule = watch(target="100", include_variations=True)
+        failure = {"product_title": "iPhone 512 GB / Gümüş", "variant": "512 GB / Gümüş",
+                   "product_url": "https://www.amazon.com.tr/dp/B000000002", "reason": "Fiyat bulunamadı"}
+
+        def read(_watch, _ctx, outcome):
+            yield OfferResult("iPhone 1 TB", Decimal("500"), url=rule.url)
+            outcome.errors.append("Fiyat bulunamadı")
+            outcome.error_details.append(failure)
+
+        instance = monitor(config([rule], pushover=False), self.data, notifier(False))
+        try:
+            with patch.object(AmazonProvider, "read", side_effect=read):
+                instance.run_cycle()
+        finally:
+            instance.close()
+        item = Diagnostics(self.data.files.database).active()[0]
+        self.assertEqual(item["component"], watch_key(rule))
+        self.assertEqual(item["context"]["failures"], [failure])
+        self.assertEqual(item["context"]["watch_url"], rule.url)
 
     def test_secrets_are_removed_before_persistent_diagnostics(self):
         configure_secrets(["synthetic-private-value"])
