@@ -1,5 +1,10 @@
 # Değişiklik günlüğü
 
+## 3.15.3
+
+- Depo fırsat kartları tamamen sarı (DEPO etiketiyle aynı sarı); yazılar, fiyat çizgisi ve etiket koyu antrasit,
+  böylece Depo fırsatları diğerlerinden bir bakışta ayrılır.
+
 ## 3.15.2
 
 - Ayrıntı penceresindeki fiyat grafiğinde fare (telefonda parmak) bir noktanın üstüne gelince o andaki fiyat

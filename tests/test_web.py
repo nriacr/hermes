@@ -369,6 +369,10 @@ class DashboardTests(DataFilesMixin, unittest.TestCase):
         self.assertIn("<span class='ov-depo'>DEPO</span>", html)
         self.assertNotIn("Tarama sıklığı", html)
         self.assertIn("<span class='ov-depo'>DEPO</span>", html.split("<div class='ov-detail'")[0])  # on the visible card
+        self.data.write_summary({"rows": [price_row(is_warehouse=True), price_row(product_url="https://example.test/n")]})
+        deals = self.live()
+        self.assertEqual(deals.count("ov-deal-depo"), 1)  # only the Depo deal card turns yellow
+        self.assertIn(".ov-deal-depo", APP_CSS)
         self.data.write_summary({"rows": [price_row(is_warehouse=True, price="14.000 TL")]})
         self.assertIn("<div class='ov-vars'><span class='ov-depo'>DEPO</span></div>", self.live().split("<div class='ov-detail'")[0])
         self.data.write_summary({"rows": [price_row(price="14.000 TL")]})

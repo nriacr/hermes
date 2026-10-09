@@ -254,7 +254,7 @@ def card_attributes(offer: Offer) -> str:
 def render_deal(offer: Offer) -> str:
     share = float(-offer.gap_share * 100)
     return (
-        f"<article class='ov-deal {offer.site}' {card_attributes(offer)}>"
+        f"<article class='ov-deal {offer.site}{' ov-deal-depo' if offer.warehouse else ''}' {card_attributes(offer)}>"
         f"<div class='ov-deal-top'><span class='ov-deal-who'>{site_dot(offer)}</span>{ago_html(offer.checked_at)}</div>"
         f"<h3 title='{escape(offer.title, quote=True)}'>{escape(offer.title)}</h3>"
         f"<div class='ov-deal-foot'><div class='ov-price'>{price_parts(offer.price)}</div>"
