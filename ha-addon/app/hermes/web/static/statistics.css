@@ -20,3 +20,4 @@ body.ov { --ok:#b6ff3b; --warn:#ffc857; --head:rgba(255,255,255,.07); }
 .ov .error-spells li { border-radius:16px; border:1px solid rgba(255,61,154,.28); border-left:3px solid #ff3d9a; background:rgba(255,61,154,.07); } .ov .error-spells li span { color:#ff7ab8; }
 .ov .spell-title { font:700 13px var(--display); letter-spacing:.14em; text-transform:uppercase; color:var(--mute); }
 .ov .statistics-empty { color:var(--mute); }
+.ov .health-partial { background:#bc9ce6; }

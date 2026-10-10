@@ -104,6 +104,7 @@ class MonitorService:
     def stop(self) -> None:
         self._stop.set()
         self._wake.set()
+        self.monitor.delivery.stop()
 
     def health(self) -> tuple[bool, str]:
         if self.finished:
@@ -195,10 +196,8 @@ class MonitorService:
                 if now >= diagnostics_at:
                     active = self.monitor.diagnostics.active()
                     bridge = self.monitor.home_assistant
-                    critical = {item["id"]: item for item in active if
-                        (item["component"] == "delivery" and item["recovery"] == "Müdahale gerekli")
-                        or (item["kind"] == "round" and item["count"] >= 3)
-                        or (item["kind"] == "read" and item["count"] >= 3 and item["updated"]-item["opened"] >= 600)}
+                    critical = {item["id"]: item for item in active
+                                if self.monitor.diagnostics.needs_attention(item)}
                     if bridge and bridge.enabled:
                         for identity, item in critical.items():
                             if communicated.get(identity) == item["opened"]:
@@ -208,8 +207,11 @@ class MonitorService:
                                 if item["component"] == "delivery" else
                                 "Bir sitenin kontrolü tekrar tekrar tamamlanamadı. Diğer siteler çalışmaya devam ediyor. "
                                 "Sınırlı yeniden deneme yapıldı; kayıt geliştirici incelemesi için saklandı.")
-                            if item["kind"] == "read":
-                                message = "Bir takip en az 10 dakikadır tekrar tekrar okunamadı. " + item["recovery"] + ". Ayrıntı Hermes panelinde; kontrol edilmesi gerekiyor."
+                            if item["kind"] in {"read", "partial"}:
+                                failure = next(iter(item.get("context", {}).get("failures") or []), {})
+                                name = str(failure.get("product_title") or item.get("context", {}).get("watch_name") or "Ürün")[:100]
+                                variant = str(failure.get("variant") or "")
+                                message = f"{name} {variant}: en az 10 dakikadır tekrar tekrar okunamadı. Ayrıntı Hermes panelinde."
                             if item["kind"] == "round":
                                 self.monitor.delivery.send("Hermes takip uyarısı", message,
                                     event_id=f"incident:{identity}:{item['opened']}")
@@ -235,8 +237,20 @@ class MonitorService:
                 self._wake.clear()
         finally:
             self.finished = True
-            for thread in workers.values():
-                thread.join(timeout=25)
-            if not any(thread.is_alive() for thread in workers.values()):
-                self.monitor.close()
+            self._shutdown(list(workers.values()))
             log("İzleyici durdu.")
+
+    def _shutdown(self, workers, budget=60):
+        """One deadline for readers and cleanup, below Supervisor's 90-second limit."""
+        self.stop()
+        deadline = time.monotonic() + budget
+        for thread in workers:
+            thread.join(timeout=max(0, deadline-time.monotonic()))
+        if any(thread.is_alive() for thread in workers):
+            log("Kapanış süresi doldu; bitmemiş işler sonraki açılışta toparlanacak, kayıtlar korundu.")
+            return
+        cleanup = threading.Thread(target=self.monitor.close, kwargs={"shutdown": True}, daemon=True)
+        cleanup.start()
+        cleanup.join(timeout=max(0, deadline-time.monotonic()))
+        if cleanup.is_alive():
+            log("Kapanış temizliği süre sınırında; kalıcı bildirim kuyruğu korundu.")

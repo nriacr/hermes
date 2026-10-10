@@ -351,27 +351,56 @@ def render_telegram_pane(status: Dict[str, Any]) -> str:
     return f"<ul class='ov-rows'>{''.join(rows)}</ul>" if rows else "<p class='ov-empty'>Henüz Telegram bildirimi yok.</p>"
 
 
+def short_product_name(title, variant="") -> str:
+    text = repair_mojibake(title or "Ürün adı alınamadı").strip()
+    text = re.sub(r"^(?:Amazon|Hepsiburada|Network|Ürün kontrolü):\s*", "", text, flags=re.I)
+    text = re.split(r"[:;]|, (?=[A-ZÇĞİÖŞÜ])", text, maxsplit=1)[0]
+    text = re.sub(r"^Apple\s+(?=iPhone)", "", text)
+    for part in re.split(r"[,/;]", str(variant)):
+        if part.strip():
+            text = re.sub(re.escape(part.strip()), "", text, flags=re.I)
+    text = re.sub(r"\bRengi\b", "", text)
+    text = re.sub(r"\s+", " ", text).strip(" ,/-")
+    return text[:44].rsplit(" ", 1)[0] + "…" if len(text) > 44 else text
+
+
+def short_error_reason(message) -> str:
+    text = str(message).casefold()
+    if "captcha" in text:
+        return "Bot koruması"
+    http = re.search(r"(?:http[ _:]*)?(50[0-9]|429)\b", text)
+    if http:
+        return "HTTP " + http.group(1)
+    if "fiyat" in text and any(word in text for word in ("belirsiz", "okunamad", "bulunamad", "yok")):
+        return "Fiyat belirsiz"
+    if "stok" in text and any(word in text for word in ("belirsiz", "doğrulanamad")):
+        return "Stok belirsiz"
+    if "timeout" in text or "zaman aş" in text or "timed out" in text:
+        return "Zaman aşımı"
+    if any(word in text for word in ("bağlantı", "connection", "dns", "networkerror")):
+        return "Bağlantı hatası"
+    return "Okuma hatası"
+
+
+def compact_error_row(detail) -> str:
+    variant = str(detail.get("variant") or "")
+    if not variant and str(detail.get("meta") or "").startswith("Varyant: "):
+        variant = detail["meta"][9:].split(" · ")[0]
+    variant = variant.replace(" Rengi", "")
+    name = short_product_name(detail.get("title"), variant)
+    url = str(detail.get("url") or "")
+    open_link = (f"<a href='{escape(url, quote=True)}' target='_blank' rel='noopener noreferrer' aria-label='Ürün linki'>↗</a>"
+                 if url.startswith(("https://", "http://")) else "")
+    variant_html = f"<span class='problem-variant'>{escape(variant)}</span>" if variant else ""
+    return (f"<li class='problem-row'><strong>{escape(name)}</strong>{variant_html}"
+            f"<em>{escape(short_error_reason(detail.get('message')))}</em>{open_link}</li>")
+
+
 def render_errors(errors: List[Dict[str, Any]]) -> str:
     if not errors:
-        return "<div class='ov-ok'>✓ Son 24 saatte hata yok</div>"
-    items = []
-    for detail in errors:
-        links = "".join(
-            "<div class='ov-failed'><span>Hatalı link</span>"
-            f"<a href='{escape(item['url'], quote=True)}' target='_blank' rel='noopener noreferrer'>{escape(item['url'][:93] + '...' if len(item['url']) > 96 else item['url'])}</a>"
-            f"<em>{escape(item['message'])}</em></div>"
-            for item in detail["failed_links"]
-        )
-        open_link = (f"<a href='{escape(detail['url'], quote=True)}' target='_blank' rel='noopener noreferrer'>Linki aç</a>"
-                     if detail["url"] else "")
-        checked_at = detail.get("checked_at")
-        timestamp = (f"<time datetime='{escape(checked_at.isoformat(), quote=True)}'>"
-                     f"Son hata: {checked_at.astimezone().strftime('%d.%m.%Y %H:%M:%S')}</time>"
-                     if isinstance(checked_at, datetime) else "")
-        items.append(f"<li><strong>{escape(detail['title'])}</strong><span>{escape(detail['meta'])}</span>"
-                     f"<em>Hata: {escape(detail['message'])}</em>{timestamp}{links}{open_link}</li>")
-    return (f"<section class='ov-errors'><h2 class='ov-sec'>Hatalar <small>son 24 saat · {len(errors)}</small></h2>"
-            f"<ul>{''.join(items)}</ul></section>")
+        return "<div class='ov-ok'>✓ Şu anda açık sorun yok</div>"
+    return (f"<section class='ov-errors'><h2 class='ov-sec'>Açık sorunlar <small>{len(errors)}</small></h2>"
+            f"<ul>{''.join(compact_error_row(detail) for detail in errors)}</ul></section>")
 
 
 def render_summary(payload: Dict[str, Any], state: Dict[str, Any], telegram_status: Dict[str, Any], errors: List[Dict[str, Any]]) -> str:
@@ -448,12 +477,14 @@ def collect_errors(state: Dict[str, Any], hours: int = 24) -> List[Dict[str, Any
     for key, entry in state.items() if isinstance(state, dict) else []:
         if key == "_meta" or not isinstance(entry, dict) or not entry.get("last_error"):
             continue
+        if str(entry.get("last_error")) in {"Ürün son okumada bulunamadı.", "Ürün stokta yok."}:
+            continue
         checked_at = parse_iso_datetime(entry.get("last_checked_at"))
         if not checked_at or checked_at.astimezone() < cutoff:
             continue
         name = str(entry.get("watch_name") or "").strip()
         url = str(entry.get("configured_url") or entry.get("url") or "").strip()
-        display_name = name or url or "Takip"
+        display_name = str(entry.get("title") or name or "Ürün adı alınamadı")
         site = str(entry.get("site") or "").strip()
         meta = f"Takip edilen: {display_name}"
         if name and is_search_url(url):
@@ -496,7 +527,7 @@ def incident_errors(item: Dict[str, Any], state: Dict[str, Any]) -> List[Dict[st
             url = ""
         meta = " · ".join(value for value in (f"Varyant: {variant}" if variant else "", item["recovery"]) if value)
         errors.append({"component": item["component"],
-            "title": f"{site_label(site)}: {title}" if site else title, "meta": meta,
+            "title": f"{site_label(site)}: {title}" if site else title, "meta": meta, "variant": variant,
             "message": clean_error_message(failure.get("reason") or item["detail"]),
             "url": url, "failed_links": [],
             "checked_at": datetime.fromtimestamp(item["updated"]).astimezone()})

@@ -126,6 +126,7 @@ def main() -> int:
     finally:
         for server in servers:
             server.shutdown()
+            server.server_close()
     return 0
 
 

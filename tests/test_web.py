@@ -288,12 +288,15 @@ class DashboardTests(DataFilesMixin, unittest.TestCase):
             diagnostics.incident("watch", kind, "Fiyat yok", "Diğer varyantlar okunuyor", context=context)
         for base in (".", "/public/test-access"):
             html = dashboard.dashboard_live_html(base)
-            self.assertIn("son 24 saat · 2", html)
-            self.assertIn("iPhone Pro Max 512 GB / Gümüş Rengi", html)
-            self.assertIn("iPhone Pro 256 GB / Burgonya", html)
+            self.assertIn("Açık sorunlar <small>2", html)
+            self.assertIn("<strong>iPhone Pro Max</strong>", html)
+            self.assertIn("512 GB / Gümüş", html)
+            self.assertIn("<strong>iPhone Pro</strong>", html)
+            self.assertIn("256 GB / Burgonya", html)
             self.assertIn("href='https://example.test/silver'", html)
             self.assertIn("href='https://example.test/burgundy'", html)
-            self.assertEqual(html.count("Son hata:"), 2)
+            self.assertEqual(html.count("class='problem-row'"), 2)
+            self.assertNotIn("Son hata:", html)
             self.assertNotIn("href='https://example.test/root'", html)
 
     def test_unknown_error_identity_is_not_inferred_and_unsafe_links_are_not_rendered(self):
@@ -302,8 +305,9 @@ class DashboardTests(DataFilesMixin, unittest.TestCase):
             {"product_title": "", "variant": "Burgonya", "product_url": "javascript:alert(1)", "reason": "<script>"}]})
         html = self.live()
         self.assertIn("Ürün adı bu okumada alınamadı", html)
-        self.assertIn("Varyant: Burgonya", html)
-        self.assertIn("&lt;script&gt;", html)
+        self.assertIn("Burgonya</span>", html)
+        self.assertIn("Okuma hatası", html)
+        self.assertNotIn("<script>", html)
         self.assertNotIn("javascript:", html)
 
     def test_site_theme_classes_are_distinct(self):
@@ -322,12 +326,12 @@ class DashboardTests(DataFilesMixin, unittest.TestCase):
         })
         self.data.write_summary({"rows": [price_row()]})
         html = dashboard.render_dashboard_page(".", {}).decode()
-        self.assertIn("Hatalar <small>son 24 saat · 2</small>", html)
-        self.assertIn("Amazon: iPhone", html)
+        self.assertIn("Açık sorunlar <small>2</small>", html)
+        self.assertIn("<strong>iPhone</strong>", html)
         self.assertNotIn("Eski", html)
-        self.assertGreater(html.index("Hatalar <small>"), html.index("Özet Tablo"))
+        self.assertGreater(html.index("Açık sorunlar <small>"), html.index("Özet Tablo"))
         self.data.write_state({})
-        self.assertIn("Son 24 saatte hata yok", dashboard.render_dashboard_page(".", {}).decode())
+        self.assertIn("Şu anda açık sorun yok", dashboard.render_dashboard_page(".", {}).decode())
 
     def test_error_links_of_variants_are_listed(self):
         details = dashboard.error_link_details("https://www.hepsiburada.com/a-p-1 | Fiyat yok; https://www.hepsiburada.com/b-p-2 | Erişim yok")
@@ -575,10 +579,10 @@ class StatisticsPageTests(DataFilesMixin, unittest.TestCase):
         self.read(5, site="hepsiburada", key="zeytin", ms=30000)
         self.store.record_request("amazon", "curl", "ürün", "bot_korumasi", 300)
         html = self.page()
-        self.assertIn("<span>Başarı</span><strong>%33</strong>", html)
-        self.assertIn("<strong>4</strong><small>2 engel · 2 hata</small>", html)
+        self.assertIn("<span>Başarı</span><strong>%33,3</strong>", html)
+        self.assertIn("<strong>4</strong><small>0 kısmi · 2 engel · 2 hata</small>", html)
         amazon = html.split("<strong>Amazon</strong>")[1].split("</article>")[0]
-        self.assertIn("4 okuma · %25 başarılı", amazon)
+        self.assertIn("4 okuma · %25,0 başarılı", amazon)
         self.assertIn("class='health-ok' style='flex-grow:1'", amazon)
         self.assertIn("class='health-blocked' style='flex-grow:2'", amazon)
         self.assertIn("1 ağ isteği · 1 captcha", amazon)

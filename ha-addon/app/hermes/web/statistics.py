@@ -13,11 +13,12 @@ from datetime import datetime, timedelta
 from html import escape
 from typing import Dict, List, Optional, Tuple
 
-from ..constants import DATABASE_PATH, DEFAULT_PRIORITY, SUMMARY_PATH
+from ..constants import DATABASE_PATH, DEFAULT_PRIORITY, SUMMARY_PATH, STATE_PATH
 from ..history import BLOCKED_OUTCOMES, SUCCESS_OUTCOMES, Read, read_reads, read_site_requests
 from ..storage import load_json
+from ..diagnostics import Diagnostics
 from ..utils import SystemLoad, site_label
-from .dashboard import clean_error_message, duration_text, live_region, live_script_tag, relative_time_text, site_theme_class
+from .dashboard import compact_error_row, incident_errors, clean_error_message, duration_text, live_region, live_script_tag, relative_time_text, site_theme_class
 from .pages import CONFIRM_SCRIPT, link, render_notice, render_page
 
 PERIODS = {"24h": ("Son 24 saat", timedelta(hours=24)), "7d": ("Son 7 gün", timedelta(days=7))}
@@ -36,6 +37,8 @@ ERROR_LABELS = {
     "connection": "Bağlantı hatası",
     "unreadable": "Sayfa okunamadı",
     "error": "Diğer",
+    "partial": "Kısmen okundu",
+    "interrupted": "Durduruldu",
 }
 
 
@@ -70,6 +73,7 @@ class SiteFigures:
     ok: int = 0
     blocked: int = 0
     errors: int = 0
+    partial: int = 0
     durations: List[int] = field(default_factory=list)
     gaps: List[float] = field(default_factory=list)
     last_read: Optional[datetime] = None
@@ -119,6 +123,8 @@ def site_figures(reads: List[Read], gaps: List[Tuple[Read, float]]) -> List[Site
         if not is_failure(item.outcome):
             figures.ok += 1
             figures.durations.append(item.duration_ms)
+        elif item.outcome == "partial":
+            figures.partial += 1
         elif is_blocked(item.outcome):
             figures.blocked += 1
         else:
@@ -172,7 +178,7 @@ def _ms_text(value: Optional[float]) -> str:
 
 
 def _percent(part: int, whole: int) -> str:
-    return f"%{round(100 * part / whole)}" if whole else "-"
+    return (f"%{min(99.9, 100 * part / whole):.1f}".replace(".", ",") if part != whole else "%100") if whole else "-"
 
 
 def render_period_switch(base: str, period: str) -> str:
@@ -189,6 +195,7 @@ def render_tiles(reads: List[Read], gaps) -> str:
     summary = summary if isinstance(summary, dict) else {}
     failures = sum(is_failure(item.outcome) for item in reads)
     blocked = sum(is_blocked(item.outcome) for item in reads)
+    partial = sum(item.outcome == "partial" for item in reads)
     check = statistics.median([seconds for _item, seconds in gaps]) if gaps else None
     last_cycle = relative_time_text(summary.get("checked_at"))
     cycle_length = duration_text(summary.get("cycle_duration_seconds"), "-")
@@ -196,7 +203,7 @@ def render_tiles(reads: List[Read], gaps) -> str:
         ("Kontrol sıklığı", _short_duration(check), "yüksek öncelikli bir ürün tipik olarak bu aralıkla okunuyor"),
         ("Son tur", last_cycle, f"süresi {cycle_length}"),
         ("Başarı", _percent(len(reads) - failures, len(reads)), f"{len(reads)} okumadan {len(reads) - failures} başarılı"),
-        ("Engel ve hata", str(failures), f"{blocked} engel · {failures - blocked} hata"),
+        ("Engel ve hata", str(failures), f"{partial} kısmi · {blocked} engel · {failures - blocked - partial} hata"),
     )
     alert = " stat-tile-alert" if failures else ""
     return "<div class='stat-tiles'>" + "".join(
@@ -243,7 +250,7 @@ def render_chart(slots: List[Bucket], period: str) -> str:
 
 
 def render_health_bar(figures: SiteFigures) -> str:
-    segments = ((figures.ok, "ok", "başarılı"), (figures.blocked, "blocked", "engel"), (figures.errors, "error", "hata"))
+    segments = ((figures.ok, "ok", "başarılı"), (figures.blocked, "blocked", "engel"), (figures.errors, "error", "hata"), (figures.partial, "partial", "kısmi"))
     bars = "".join(f"<i class='health-{css}' style='flex-grow:{count}' title='{count} {label}'></i>"
                    for count, css, label in segments if count)
     return f"<div class='health-bar' aria-hidden='true'>{bars}</div>"
@@ -265,6 +272,7 @@ def render_sites(figures_list: List[SiteFigures], requests_by_site: Dict[str, st
             f"<div><dt>Kontrol sıklığı</dt><dd>{escape(_short_duration(figures.check_seconds))}</dd></div>"
             f"<div><dt>Okuma süresi</dt><dd>{escape(_ms_text(figures.typical_ms))}</dd></div>"
             f"<div><dt>Engel</dt><dd class='{'bad' if figures.blocked else 'zero'}'>{figures.blocked}</dd></div>"
+            f"<div><dt>Kısmi okuma</dt><dd>{figures.partial}</dd></div>"
             f"<div><dt>Hata</dt><dd class='{'bad' if figures.errors else 'zero'}'>{figures.errors}</dd></div>"
             f"<div><dt>Son okuma</dt><dd>{escape(relative_time_text(figures.last_read.isoformat()) if figures.last_read else '-')}</dd></div>"
             "</dl>"
@@ -399,6 +407,7 @@ def statistics_live_html(base: str, params: Optional[Dict[str, List[str]]] = Non
     now = datetime.now().astimezone().replace(second=0, microsecond=0)
     since = now - span
     week = read_reads(DATABASE_PATH, now - timedelta(days=7) - MAX_CHECK_GAP)
+    week = [item for item in week if item.outcome != "interrupted"]
     reads = [item for item in week if item.at >= since]
     gaps = check_gaps(week, since)
     requests_by_site = {
@@ -415,6 +424,7 @@ def statistics_live_html(base: str, params: Optional[Dict[str, List[str]]] = Non
         f"<section class='summary-panel'><div class='summary-head'><h2>Engel ve hata türleri</h2><span>{escape(label)}</span></div>"
         f"{render_error_types(reads)}{render_spells(reads)}</section>"
         f"{render_daily_history(week, now)}"
+        f"{render_problem_history(span)}"
     )
 
 
@@ -438,3 +448,20 @@ def render_reset_errors(base: str) -> str:
             f"action='{escape(link(base, 'reset-errors'), quote=True)}' data-confirm='İstatistikteki tüm engel ve hata "
             "kayıtları kalıcı olarak silinecek; sayaçlar sıfırdan başlayacak. Başarılı okumalar kalır. Devam etmek istiyor musun?'>"
             "<button class='button secondary' type='submit'>Hata kayıtlarını sıfırla</button></form></div>")
+
+
+def render_problem_history(span):
+    state = load_json(STATE_PATH, {})
+    records = Diagnostics(DATABASE_PATH).recent(span.total_seconds()/3600)
+    items = []
+    for item in records:
+        status = "Düzeldi" if item["resolved"] is not None else "Açık"
+        first = datetime.fromtimestamp(item["opened"]).astimezone().strftime("%d.%m %H:%M")
+        last = datetime.fromtimestamp(item["resolved"] or item["updated"]).astimezone().strftime("%d.%m %H:%M")
+        successful = item.get("last_successful_read")
+        success = datetime.fromtimestamp(successful).astimezone().strftime("%d.%m %H:%M") if successful else "Henüz kayıt yok"
+        rows = "".join(compact_error_row(detail) for detail in incident_errors(item, state))
+        items.append("<section class='ov-errors'><ul>" + rows + "</ul></section>" +
+                     f"<p>{status} · {item['count']} tekrar · {first} → {last} · Son tam okuma: {success}</p>")
+    return ("<details class='summary-panel problem-history' data-key='problem-history'><summary>Sorun geçmişi</summary>"
+            + ("".join(items) or "<p>Bu dönemde kayıt yok.</p>") + "</details>")

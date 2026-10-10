@@ -21,7 +21,7 @@ from ...constants import (
     normalize_priority,
 )
 from ...errors import EmptySearchResultsHermesError, HermesError, OutOfStockHermesError, PriceUnavailableHermesError
-from ...logging_utils import log
+from ...logging_utils import log, ProblemLog
 from ...models import OfferResult, SearchResultItem, WatchRule
 from ...utils import extract_asin_from_url, is_amazon_search_url, log_cell, normalize_offer_text
 from ..base import DEPO_LANE, Provider, ReadContext, WatchRead, excluded_term_in_title
@@ -110,6 +110,7 @@ class AmazonProvider(Provider):
 
     def __init__(self, client: Optional[AmazonClient] = None) -> None:
         self.client = client or AmazonClient(access=AmazonAccess(AMAZON_ACCESS_PATH), cookies_path=AMAZON_COOKIES_PATH)
+        self.problem_log = ProblemLog()
         self.rhythms: Dict[Tuple, WatchRhythm] = {}
         self.read_seconds: Dict[str, Deque[float]] = {"ana": deque(maxlen=20), "tarama": deque(maxlen=20)}
         # Watches being read right now (by either lane thread) and the gaps between main-page reads.
@@ -529,6 +530,7 @@ class AmazonProvider(Provider):
                     pending.append(item)
 
         for variation in pending:
+            ctx.pace("Amazon varyant kontrolü")
             identity = extract_asin_from_url(variation.url) or variation.url
             cache_key = str(variation.url or "").strip()
             snapshot = self.pages.get(cache_key)
@@ -621,6 +623,7 @@ class AmazonProvider(Provider):
                 )
                 if excluded_term_in_title(watch, title):
                     continue
+                self.problem_log.recovered(variation.url)
                 outcome.unavailable.append({"product_title": title, "product_url": variation.url, "reason": str(exc)})
                 if not page_was_reused:
                     log(f"Amazon varyantı stokta yok: {title} | {variation.url}")
@@ -632,11 +635,12 @@ class AmazonProvider(Provider):
                                               "variant": variant, "reason": str(exc)})
                 errors.append(f"{title or variant or 'Ürün adı bu okumada alınamadı'} | {variation.url} | {exc}")
                 if not page_was_reused:
-                    log(f"Amazon varyasyonu okunamadı: {errors[-1]}")
+                    self.problem_log.failure(variation.url, f"Amazon varyasyonu okunamadı: {errors[-1]}")
                 if self._remember_block(outcome, exc):
                     # Keep offers already yielded, then pause this watch.
                     break
                 continue
+            self.problem_log.recovered(variation.url)
             # Yield outside the fetch handler: notification failures belong to
             # the caller, not to the provider's parsing/error handling.
             for offer in sorted(page_offers, key=lambda item: (not item.is_warehouse, item.price)):

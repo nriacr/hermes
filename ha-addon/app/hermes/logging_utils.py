@@ -1,4 +1,6 @@
 import threading
+import time
+from collections import OrderedDict
 import re
 from datetime import datetime
 from typing import Callable
@@ -36,3 +38,37 @@ def log(message: str) -> None:
     # Monitor, web and Telegram threads share stdout; keep each line intact.
     with _PRINT_LOCK:
         _output(f"[{now}] {redact(message)}")
+
+
+class ProblemLog:
+    """Bounded per-identity summaries; full incidents remain in the durable store."""
+    def __init__(self, emit=log, clock=time.monotonic, interval=300, limit=512):
+        self.emit, self.clock, self.interval, self.limit = emit, clock, interval, limit
+        self.entries = OrderedDict()
+        self.lock = threading.Lock()
+
+    def failure(self, key, message):
+        with self.lock:
+            now = self.clock()
+            previous = self.entries.pop(key, None)
+            if previous is None:
+                self.emit(message)
+                self.entries[key] = (now, 0, message)
+            else:
+                started, repeats, _ = previous
+                repeats += 1
+                if now - started >= self.interval:
+                    self.emit(f"{message} | {repeats} tekrar / {round(now-started)} sn")
+                    started, repeats = now, 0
+                self.entries[key] = (started, repeats, message)
+            while len(self.entries) > self.limit:
+                _, (started, repeats, message) = self.entries.popitem(last=False)
+                if repeats:
+                    self.emit(f"{message} | {repeats} tekrar / {round(now-started)} sn")
+
+    def recovered(self, key):
+        with self.lock:
+            previous = self.entries.pop(key, None)
+            if previous:
+                _, repeats, message = previous
+                self.emit(f"Sorun düzeldi: {message} | {repeats} ek tekrar")

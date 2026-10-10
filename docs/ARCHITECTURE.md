@@ -37,6 +37,9 @@ Round exceptions affect that site's deadline only (bounded delay, up to 300 seco
 is distinct from operational failure. Each ordinary provider has a progress deadline; Amazon retains a three-hour
 allowance for its existing budget waits. Requests carry finite transport timeouts. Python threads cannot be
 forcibly terminated safely: when progress is lost, Supervisor's `/health` watchdog restarts the whole process.
+Shutdown uses one 60-second budget shared by readers and cleanup beneath Supervisor’s 90-second timeout.
+Readers check cancellation before new requests; completed observations remain durable. Unsent outbox jobs are
+left for the next startup rather than drained during shutdown. Active writers are never closed underneath.
 Separate reader processes and an autonomous code-writing AI are not part of this architecture.
 
 ## Durable data and migration

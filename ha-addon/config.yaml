@@ -1,5 +1,5 @@
 name: Hermes
-version: "4.0.3"
+version: "4.1.0"
 slug: hermes
 description: Takip edilen linkleri ve Telegram fırsat kanallarını Pushover bildirimiyle izler.
 url: https://github.com/nriacr/hermes
@@ -15,7 +15,7 @@ ingress_port: 8099
 # Supervisor restarts Hermes when its monitor stops or a cycle hangs.
 watchdog: "http://[HOST]:[PORT:8099]/health"
 # Time for a clean shutdown (Chromium, state file) before the container is killed.
-timeout: 20
+timeout: 90
 hassio_api: true
 hassio_role: manager
 # Publishes Hermes sensors and the hermes_firsat event to Home Assistant.

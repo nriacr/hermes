@@ -1,5 +1,15 @@
 # Değişiklik günlüğü
 
+## 4.1.0
+
+- Açık sorunlar tek satırda kısa ürün adı, varyant, kısa hata türü ve ürün bağlantısıyla gösteriliyor.
+  Kapanan sorunlar ve tekrar sayıları İstatistik sayfasındaki Sorun geçmişinde saklanıyor.
+- Kısmi okumalar tam başarıdan ayrılıyor; normal stok yokluğu hata sayılmıyor.
+  Uzun süren ürün/varyant sorunları Home Assistant üzerinden bildiriliyor.
+- Kapanış bütün çalışanlar için ortak süreyle yönetiliyor; yeni istekler duruyor, bekleyen bildirimler korunuyor.
+- Tekrarlanan varyant hata günlükleri özetleniyor; ayrıntılı olay kayıtları korunuyor.
+- Amazon davranışı değişmedi.
+
 ## 4.0.3
 
 - Uygulamanın bildirdiği sürüm kurulum sürümüyle eşitlendi; canlı kurulum doğrulaması tamamlanabiliyor.

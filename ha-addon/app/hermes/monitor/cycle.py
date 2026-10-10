@@ -81,6 +81,10 @@ def read_outcome(provider: Provider, exc: BaseException) -> str:
     return "error"
 
 
+class ReadCancelled(BaseException):
+    """Cooperative stop, intentionally outside provider Exception recovery."""
+
+
 @dataclass
 class CycleRun:
     """Everything one cycle collects while it reads watches."""
@@ -145,11 +149,12 @@ class Monitor:
         for provider in self.providers:
             provider.restore_requests(read_requests(self.files.database, provider.site, since))
 
-    def close(self) -> None:
+    def close(self, shutdown=False) -> None:
         self.delivery.close()
         if self.delivery.thread is not None and self.delivery.thread.is_alive():
             return  # In-flight send retains its DB; process shutdown owns final termination.
-        self.delivery.drain()
+        if not shutdown:
+            self.delivery.drain()
         self.providers.close()
         self.notifier.close()
         self.history.close()
@@ -288,16 +293,22 @@ class Monitor:
         self._jobs.request_count = getattr(self._jobs, "request_count", 0) + 1
         self.history.record_request(site, method, kind, outcome, duration_ms, getattr(self._jobs, "current", ""))
 
+    def _check_stopping(self):
+        if self.should_stop():
+            raise ReadCancelled()
+
     def _site_pace(self, site: str) -> Callable[[str], None]:
         """The random delay, then the site's minimum gap since its previous request start."""
         if self.providers[site].spaces_own_requests:
-            # The provider waits before each of its own requests (Amazon, see set_request_delay).
-            return lambda _label: None
+            return lambda _label: self._check_stopping()
         spacing = self._spacing.setdefault(site, RequestSpacing(SITE_MIN_REQUEST_GAP_SECONDS.get(site, 0), sleep=self.sleep))
 
         def pace(label: str) -> None:
+            self._check_stopping()
             self.pace(label)
+            self._check_stopping()
             waited = spacing.wait()
+            self._check_stopping()
             if waited >= 0.05:
                 log(f"{site_label(site)} istek aralığı için {waited:.1f} sn ek bekleme.")
 
@@ -339,6 +350,8 @@ class Monitor:
                             stopped.set()
                             return
                         self.check_watch(run, ctx, watch)
+            except ReadCancelled:
+                stopped.set()
             except BaseException as exc:  # noqa: BLE001 - re-raised in the cycle's own thread
                 failures.append(exc)
             finally:
@@ -363,6 +376,8 @@ class Monitor:
                             return
                         if not progressed:
                             sweep_done.wait(DEPO_LANE_POLL_SECONDS)
+            except ReadCancelled:
+                stopped.set()
             except BaseException as exc:  # noqa: BLE001 - re-raised in the cycle's own thread
                 failures.append(exc)
 
@@ -450,16 +465,19 @@ class Monitor:
         result = "ok"
         failure: Optional[BaseException] = None
         load: Optional[SystemLoad] = None
-        incident_context = {"site": watch.site, "watch_name": watch.name, "watch_url": watch.url,
+        with self.diagnostics.db.lock:
+            previous_success = self.diagnostics.db.connect().execute("SELECT at FROM successful_reads WHERE component=?", (key,)).fetchone()
+        incident_context = {"last_successful_read": previous_success[0] if previous_success else None, "site": watch.site, "watch_name": watch.name, "watch_url": watch.url,
                             "failures": outcome.error_details}
         try:
             ctx.pace(f"{seller} | {(watch.name or watch.url)[:64]}")
             offers = (offer for offer in provider.read(watch, ctx, outcome) if provider.keeps_offer(watch, offer))
             recorded = self.results._record_offers(run, provider, watch, entry, seller, offers)
-            if outcome.errors:
+            if outcome.errors and not outcome.blocked:
+                result = "partial"
                 self.diagnostics.incident(key, "partial", "; ".join(outcome.errors),
                                           "Diğer varyantlar okunmaya devam etti", context=incident_context)
-            else:
+            elif not outcome.blocked:
                 self.diagnostics.recover(key, "Okuma tamamlandı")
             if outcome.blocked:
                 failure = outcome.blocked
@@ -469,6 +487,9 @@ class Monitor:
                                           context=incident_context)
             with self._lock:
                 self.results._record_success(run, provider, watch, key, seller, recorded, outcome)
+        except ReadCancelled:
+            result = "interrupted"
+            raise
         except OutOfStockHermesError as exc:
             result = "stock"
             self.diagnostics.recover(key, "Stok durumu doğrulandı")
@@ -499,6 +520,8 @@ class Monitor:
                                          "conditions": run.state.get(item, {}).get("conditions"),
                                          "checked_at": run.state.get(item, {}).get("last_price_checked_at")}
                                         for item in run.state.get(key, {}).get("offer_keys", [])]})
+            if result in {"ok", "stock", "empty"}:
+                self.diagnostics.db.transaction([("INSERT OR REPLACE INTO successful_reads VALUES (?,?)", (key, time.time()))])
             self.history.record_read(watch.site, result, round((time.monotonic() - started_at) * 1000), key,
                                      scheduling.watch_priority(watch), str(failure) if failure else "", load)
 

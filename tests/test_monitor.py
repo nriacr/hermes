@@ -1087,7 +1087,11 @@ class PanelCommandTests(CycleTestCase):
         with patch.object(NordbronProvider, "read", side_effect=read):
             service.run()
         self.assertEqual(len(cycles), 2)  # the reset started a new cycle immediately
-        self.assertEqual(self.notify.send.call_count, 2)  # suppression was reset in between
+        self.assertIn(self.notify.send.call_count, (1, 2))  # in-flight delivery may finish; new sends stop
+        with service.monitor.diagnostics.db.lock:
+            rows = service.monitor.diagnostics.db.connect().execute("SELECT state FROM outbox").fetchall()
+        self.assertEqual(len(rows), 2)  # reset generated a distinct durable intent
+        self.assertTrue(all(row[0] in {"sent", "pending"} for row in rows))
         self.assertTrue(service.finished)
         self.assertFalse(service.health()[0])
 

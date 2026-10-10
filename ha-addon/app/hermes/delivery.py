@@ -145,9 +145,12 @@ class DeliveryQueue:
         while time.monotonic() < deadline and self.deliver_one():
             pass
 
-    def close(self):
+    def stop(self):
         self._stop.set()
         self._wake.set()
+
+    def close(self):
+        self.stop()
         if self.thread is not None:
             self.thread.join(timeout=25)
 
