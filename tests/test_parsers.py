@@ -1,6 +1,7 @@
 import json
 import unittest
 from decimal import Decimal
+from unittest.mock import patch
 
 from support import APP_PATH  # noqa: F401 - puts the add-on on sys.path
 
@@ -58,6 +59,40 @@ def official_seller_filter(watch, offers):
 
 
 class AmazonParserTests(unittest.TestCase):
+    def test_amazon_high_price_warning_skips_all_price_sources(self):
+        url = "https://www.amazon.com.tr/dp/B000000001"
+        for container in ("desktop_buybox", "buybox", "fodcx_feature_div", "corePrice_feature_div", "availability"):
+            html = (f'<span id="productTitle">iPhone Gümüş</span><div id="{container}">'
+                    'Normalden <span>yüksek fiyat</span></div>'
+                    '<meta property="product:price:amount" content="1000">')
+            with (self.subTest(container=container),
+                  patch.object(amazon_parser, "_extract_visible_primary_price") as visible,
+                  patch.object(amazon_parser, "extract_jsonld_product", return_value=(None, None)) as jsonld,
+                  patch.object(amazon_parser, "extract_price_from_meta") as meta,
+                  patch.object(amazon_parser, "extract_verified_warehouse_offers_from_listing", return_value=[]) as warehouse):
+                with self.assertRaises(OutOfStockHermesError) as caught:
+                    extract_amazon_offers(html, url)
+                self.assertEqual(caught.exception.product_title, "iPhone Gümüş")
+                self.assertEqual(caught.exception.product_url, url)
+                self.assertIn("Normalden yüksek fiyat", str(caught.exception))
+                for price_reader in (visible, jsonld, meta, warehouse):
+                    price_reader.assert_not_called()
+
+    def test_amazon_high_price_warning_outside_selected_offer_is_ignored(self):
+        priced = ('<span id="productTitle">iPhone</span><div id="corePrice_feature_div">'
+                  '<span class="a-price"><span class="a-offscreen">100,00 TL</span></span></div>')
+        for extra in (
+            '<div id="recommendations">Normalden yüksek fiyat</div>',
+            '<div id="customerReviews">Normalden yüksek fiyat</div>',
+            '<div id="buybox"><script>"Normalden yüksek fiyat"</script></div>',
+            '<div id="buybox"><!-- Normalden yüksek fiyat --></div>',
+            '<div id="buybox"><span class="aok-hidden">Normalden yüksek fiyat</span></div>',
+            '<div id="buybox"><span style="display: none">Normalden yüksek fiyat</span></div>',
+            '<div id="buybox"><div id="usedBuySection">Normalden yüksek fiyat</div></div>',
+        ):
+            with self.subTest(extra=extra):
+                self.assertEqual(extract_amazon_offers(priced + extra)[0].price, Decimal("100"))
+
     def test_amazon_stock_absence_is_not_a_price_parser_failure(self):
         html = '<span id="productTitle">iPhone Gümüş</span><div id="availability">Şu anda mevcut değil.</div>'
         with self.assertRaises(OutOfStockHermesError) as caught:

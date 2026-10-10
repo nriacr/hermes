@@ -212,6 +212,11 @@ extra frontend service or external font request is required.
   yielded before the next variant is read.
 - An explicitly unavailable or unpriced variant is not requested again for
   five minutes (process-wide, at most 512 entries); prices are never cached.
+- By owner policy, `Normalden yüksek fiyat` in the selected product's purchase
+  area is treated as unavailable before reading any price or used-offer listing.
+  It creates no read error; sibling discovery continues and normal scheduled
+  probes resume price monitoring after the warning disappears. Hidden/script
+  text and unrelated recommendation/review sections do not trigger this rule.
 - Search pages stop at "All Departments / Tüm Kategoriler içindeki sonuçlar",
   match the card name as a phrase, give overlapping models to the most specific
   card, and inspect matching product pages for verified Depo offers.

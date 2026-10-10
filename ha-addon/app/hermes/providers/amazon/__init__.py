@@ -324,6 +324,7 @@ class AmazonProvider(Provider):
         listing only when needed; both paths verify condition and seller together.
         """
         soup = soup or parser.parse_product_page(html)
+        parser.raise_if_high_price(soup, url)
         counters = self.client.access
         counters.count("depo_sayfa")
         # Capture the link before extract_offers removes the used accordion from the shared tree.

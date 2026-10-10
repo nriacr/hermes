@@ -372,6 +372,37 @@ class AmazonLaneTests(AmazonTestCase):
 
 
 class AmazonProductTests(AmazonTestCase):
+    def test_high_price_warning_becomes_stock_absence_without_errors_or_depot_request(self):
+        variations = [amazon_parser.AmazonProductVariation("Gümüş", ROOT),
+                      amazon_parser.AmazonProductVariation("Turuncu", CHILD)]
+        high_price = (priced(title="iPhone Gümüş") + '<div id="desktop_buybox">Normalden yüksek fiyat</div>'
+                      '<a href="/gp/offer-listing/B000000001?condition=used">Kullanılmış teklifler</a>')
+        with (self.serve({ROOT: high_price, CHILD: priced(title="iPhone Turuncu")}),
+              patch.object(amazon_parser, "extract_product_variations", return_value=variations)):
+            for _ in range(2):
+                self.provider.begin_cycle()
+                outcome = WatchRead()
+                offers = self.read(watch(url=ROOT, include_variations=True, priority="60m"), outcome)
+                self.assertEqual([offer.url for offer in offers], [CHILD])
+                self.assertEqual(outcome.errors, [])
+                self.assertEqual(outcome.error_details, [])
+                self.assertIsNone(outcome.blocked)
+                self.assertEqual(outcome.unavailable[0]["product_url"], ROOT)
+                self.assertIn("Gümüş", outcome.unavailable[0]["product_title"])
+        self.assertEqual(self.fetched, [ROOT, CHILD, CHILD])
+
+    def test_high_price_warning_is_rechecked_and_price_returns_when_warning_disappears(self):
+        pages = {ROOT: '<span id="productTitle">iPhone</span><div id="buybox">Normalden yüksek fiyat</div>'}
+        with self.serve(pages):
+            outcome = WatchRead()
+            with self.assertRaises(OutOfStockHermesError):
+                self.read(watch(url=ROOT, priority="cycle"), outcome)
+            self.assertEqual(outcome.errors, [])
+            pages[ROOT] = priced("90,00")
+            self.provider.begin_cycle()
+            self.assertEqual(self.read(watch(url=ROOT, priority="cycle"))[0].price, Decimal("90"))
+        self.assertEqual(self.fetched, [ROOT, ROOT])
+
     def test_failed_variant_keeps_model_capacity_color_and_its_own_url_when_cached(self):
         rule = watch(url=ROOT, include_variations=True, priority="60m")
         variations = [amazon_parser.AmazonProductVariation("Gümüş Rengi", ROOT),

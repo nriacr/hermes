@@ -20,6 +20,7 @@ from ..base import (
     extract_title,
     soup_from_html,
 )
+from .common import visible_text_nodes
 
 AMAZON_PRODUCT_SELECTORS = [
     "#corePriceDisplay_desktop_feature_div .a-price .a-offscreen",
@@ -82,6 +83,11 @@ AMAZON_LOW_STOCK_SELECTORS = (
     "#outOfStock",
 )
 AMAZON_LOW_STOCK_PATTERN = re.compile(r"stokta\s+sadece\s+(?P<quantity>\d+)\s+adet\s+kaldi")
+AMAZON_HIGH_PRICE_SELECTORS = (
+    "#desktop_buybox", "#buybox", "#apex_desktop", "#fodcx_feature_div",
+    "#corePriceDisplay_desktop_feature_div", "#corePrice_feature_div",
+    "#price", "#priceInsideBuyBox_feature_div", *AMAZON_LOW_STOCK_SELECTORS,
+)
 
 
 @dataclass(frozen=True)
@@ -571,6 +577,18 @@ def extract_verified_warehouse_offers_from_listing(html: str, source_url: str, s
     return offers
 
 
+def raise_if_high_price(soup, source_url: str = "") -> None:
+    """Treat the selected offer's high-price warning as stock absence by user policy."""
+    for container in soup.select(", ".join(AMAZON_HIGH_PRICE_SELECTORS)):
+        text = " ".join(str(node).strip() for node in visible_text_nodes(container) if not _is_in_used_offer(node.parent))
+        if "normalden yuksek fiyat" in normalize_offer_text(text):
+            raise OutOfStockHermesError(
+                'Stokta yok kabul edildi; Amazon bu ürün için "Normalden yüksek fiyat" uyarısı gösteriyor.',
+                product_title=extract_title(soup) or "Amazon ürünü",
+                product_url=source_url,
+            )
+
+
 def selected_product_unavailable_reason(soup) -> str:
     """Require a selected-product availability signal, never whole-page text."""
     for node in soup.select("#availability, #availabilityInsideBuyBox_feature_div, #availability_feature_div, #outOfStock"):
@@ -588,6 +606,7 @@ def selected_product_unavailable_reason(soup) -> str:
 def extract_offers(html: str, source_url: str = "", soup=None) -> list[OfferResult]:
     """Extract normal and used offers separately when Amazon shows both on one page."""
     soup = soup or parse_product_page(html)
+    raise_if_high_price(soup, source_url)
     warehouse_offers = extract_verified_warehouse_offers_from_listing(html, source_url, soup=soup)
     primary_seller = extract_primary_seller(soup)
     # Amazon repeats corePrice IDs inside the USED accordion. Its form amount

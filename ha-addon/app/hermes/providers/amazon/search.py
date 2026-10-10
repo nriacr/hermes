@@ -4,12 +4,13 @@ from decimal import Decimal
 from typing import Any, List, Optional
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from bs4 import BeautifulSoup, Comment
+from bs4 import BeautifulSoup
 
 from ...errors import EmptySearchResultsHermesError, HermesError
 from ...models import SearchResultItem
 from ...utils import canonical_amazon_product_url, make_amazon_absolute_url, normalize_offer_text, parse_decimal, repair_mojibake
 from .common import extract_verified_secondary_offer_price, has_explicit_used_offer_evidence
+from .common import is_hidden_element as _is_hidden_element, visible_text_nodes as _visible_search_text_nodes
 
 AMAZON_SEARCH_CARD_SELECTORS = [
     "div.s-main-slot div[data-component-type='s-search-result'][data-asin]",
@@ -154,34 +155,9 @@ def _extract_card_url(card: BeautifulSoup, fallback_asin: str = ""):
     return urlunsplit(("https", "www.amazon.com.tr", urlsplit(canonical_url).path, urlencode(variation_params), ""))
 
 
-def _is_hidden_element(element: Any) -> bool:
-    current = element
-    while current is not None and getattr(current, "name", None):
-        classes = set(current.get("class", []) or [])
-        style = str(current.get("style", "")).casefold()
-        if (
-            current.get("aria-hidden") == "true"
-            or "aok-hidden" in classes
-            or "display:none" in style.replace(" ", "")
-            or "visibility:hidden" in style.replace(" ", "")
-        ):
-            return True
-        current = current.parent
-    return False
-
-
 def _is_stop_section_text(value: str) -> bool:
     normalized = normalize_offer_text(value)
     return any(marker in normalized for marker in AMAZON_SEARCH_STOP_SECTION_MARKERS)
-
-
-def _visible_search_text_nodes(soup: BeautifulSoup):
-    for node in soup.find_all(string=True):
-        if isinstance(node, Comment) or _is_hidden_element(node.parent):
-            continue
-        if any(parent.name in {"script", "style", "template", "noscript"} for parent in node.parents):
-            continue
-        yield node
 
 
 def _find_no_results_notice(soup: BeautifulSoup) -> str:

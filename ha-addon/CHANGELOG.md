@@ -1,5 +1,11 @@
 # Değişiklik günlüğü
 
+## 4.0.2
+
+- Amazon ürününün satın alma alanında "Normalden yüksek fiyat" uyarısı varsa ürün stokta yok kabul ediliyor.
+  Fiyat ve Depo teklifleri okunmuyor; bu durum okuma hatası oluşturmuyor. Diğer varyantların taraması devam ediyor.
+- Uyarı kalktığında ürün sonraki planlı kontrolde yeniden fiyat takibine giriyor.
+
 ## 4.0.1
 
 - Hata kayıtları ürünün tam adını, kapasite/renk seçeneğini ve doğrudan hatalı varyant bağlantısını koruyor.

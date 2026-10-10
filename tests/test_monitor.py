@@ -227,6 +227,27 @@ class NotificationTests(CycleTestCase):
 
 
 class EmptyAndStockTests(CycleTestCase):
+    def test_amazon_high_price_warning_clears_previous_read_error_and_publishes_stock(self):
+        rule = watch(url=AMAZON, priority="cycle")
+        cfg = config([rule])
+        with patch.object(AmazonProvider, "fetch", return_value='<span id="productTitle">iPhone Gümüş</span>'):
+            state = self.run_cycle(cfg)
+        self.assertTrue(state[key(rule)]["last_error"])
+        self.notify.reset_mock()
+        html = '<span id="productTitle">iPhone Gümüş</span><div id="buybox">Normalden yüksek fiyat</div>'
+        with patch.object(AmazonProvider, "fetch", return_value=html):
+            state = self.run_later(cfg, seconds=60)
+        self.assertIsNone(state[key(rule)]["last_error"])
+        self.assertEqual(self.published_rows(), [])
+        self.assertEqual([row["product_url"] for row in self.published_stock()], [AMAZON])
+        self.assertIn("Normalden yüksek fiyat", self.published_stock()[0]["reason"])
+        self.notify.send.assert_not_called()
+        hermes_monitor = monitor(cfg, self.data, self.notify)
+        try:
+            self.assertEqual(hermes_monitor.diagnostics.active(), [])
+        finally:
+            hermes_monitor.close()
+
     def test_explicit_no_results_notice_is_a_normal_stock_row_read_at_most_every_five_minutes(self):
         rule = watch("Juo 240W", "https://www.amazon.com.tr/s?k=juo+240w&i=warehouse-deals")
         error = EmptySearchResultsHermesError("Aranan ürün bulunamadı: Amazon Depo içinde juo 240w için sonuç bulunamadı",

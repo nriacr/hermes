@@ -1,6 +1,8 @@
 import re
 from typing import Any
 
+from bs4 import Comment
+
 from ...errors import HermesError
 from ...utils import normalize_offer_text, parse_decimal
 
@@ -15,6 +17,31 @@ AMAZON_SECONDARY_OFFER_PRICE_PATTERN = re.compile(
     r"diger\s+satin\s+alma\s+secenekleri\s+"
     r"(?P<price>\d{1,3}(?:\.\d{3})*,\d{2}|\d+(?:,\d{2})?)\s*tl"
 )
+
+
+def is_hidden_element(element: Any) -> bool:
+    current = element
+    while current is not None and getattr(current, "name", None):
+        classes = set(current.get("class", []) or [])
+        style = str(current.get("style", "")).casefold()
+        if (
+            current.get("aria-hidden") == "true"
+            or "aok-hidden" in classes
+            or "display:none" in style.replace(" ", "")
+            or "visibility:hidden" in style.replace(" ", "")
+        ):
+            return True
+        current = current.parent
+    return False
+
+
+def visible_text_nodes(soup):
+    for node in soup.find_all(string=True):
+        if isinstance(node, Comment) or is_hidden_element(node.parent):
+            continue
+        if any(parent.name in {"script", "style", "template", "noscript"} for parent in node.parents):
+            continue
+        yield node
 
 
 def has_secondary_offer_text(text: str) -> bool:
