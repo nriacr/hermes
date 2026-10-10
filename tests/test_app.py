@@ -5,6 +5,7 @@ import json
 import threading
 import unittest
 from decimal import Decimal
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -17,11 +18,17 @@ from hermes.models import OfferResult
 from hermes.monitor import runner
 from hermes.providers.nordbron import NordbronProvider
 from hermes import supervisor
+from hermes.constants import APP_VERSION
 from hermes.storage import load_json, save_json
 from hermes.telegram import listener as telegram
 
 
 class ConfigTests(unittest.TestCase):
+    def test_installed_and_reported_versions_match_for_release_verification(self):
+        config_path = Path(__file__).resolve().parents[1] / "ha-addon" / "config.yaml"
+        version_line = next(line for line in config_path.read_text().splitlines() if line.startswith("version:"))
+        self.assertEqual(APP_VERSION, version_line.split(":", 1)[1].strip().strip('"'))
+
     def options(self, **fields):
         base = {"pushover_user_key": "user", "pushover_api_token": "token",
                 "takip_edilenler": [{"name": "Test", "target_price": 100, "url_1": "https://www.amazon.com.tr/dp/B000000001"}]}

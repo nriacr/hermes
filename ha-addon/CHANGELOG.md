@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.0.3
+
+- Uygulamanın bildirdiği sürüm kurulum sürümüyle eşitlendi; canlı kurulum doğrulaması tamamlanabiliyor.
+
 ## 4.0.2
 
 - Amazon ürününün satın alma alanında "Normalden yüksek fiyat" uyarısı varsa ürün stokta yok kabul ediliyor.
