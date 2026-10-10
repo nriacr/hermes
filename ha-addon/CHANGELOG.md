@@ -1,5 +1,11 @@
 # Değişiklik günlüğü
 
+## 4.1.2
+
+- Hermes her yeniden açılışta bütün aktif takip kartlarını öncelik süresini beklemeden bir kez tarıyor; sonraki kontroller normal öncelik düzeninde devam ediyor.
+- Açılış taramasının başlatılan, tamamlanan ve bekleyen kart sayıları ölçülüyor; fiyat geçmişi ve bildirim hafızası korunuyor.
+- Amazon davranışı değişmedi.
+
 ## 4.1.1
 
 - İstatistik geçmişini sil butonu başarılı ve başarısız okumaları, ağ ölçümlerini, tur sürelerini ve kapanmış sorun geçmişini birlikte temizliyor.

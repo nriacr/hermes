@@ -237,6 +237,13 @@ class RuntimeTests(unittest.TestCase):
         self.assertIn("tarama biter bitmez", message)
         self.assertFalse(command.done.is_set())
 
+    def test_runtime_exposes_startup_coverage_without_watch_identity(self):
+        rule = watch("Kart", "https://nordbron.com/x", priority="6h")
+        runtime = hermes_app.HermesRuntime(config([rule]), files=self.data.files)
+        self.assertEqual(runtime.metrics()["startup_scan"],
+                         {"total": 1, "pending": 1, "started": 0, "completed": 0, "successful": 0})
+        runtime.service.monitor.close()
+
     def test_stuck_cycle_fails_health(self):
         service = runner.MonitorService(config([watch("x", "https://nordbron.com/x")]), self.data.files, notifier=Mock())
         self.assertTrue(service.health()[0])

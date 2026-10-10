@@ -728,6 +728,147 @@ class SchedulingTests(CycleTestCase):
         self.assertIn(key(rules[0]), self.data.state())
 
 
+class StartupScanTests(CycleTestCase):
+    def service(self, rules):
+        service = runner.MonitorService(config(rules, interval_seconds=60), self.data.files,
+                                        notifier=self.notify, home_assistant=Mock(enabled=False))
+        service.monitor.sleep = lambda _seconds: None
+        self.addCleanup(service.monitor.close)
+        return service
+
+    def recently_checked(self, rules):
+        self.data.write_state({key(rule): {"last_checked_at": utc_now(), "offer_keys": []} for rule in rules})
+
+    def test_every_priority_is_read_once_after_restart_then_normal_deadlines_resume(self):
+        priorities = ("cycle", "30m", "60m", "3h", "6h")
+        rules = [watch(p, f"https://nordbron.com/{p}", priority=p, target="1") for p in priorities]
+        inactive = watch("Kapalı", "https://nordbron.com/kapali", active=False)
+        self.recently_checked(rules)
+        service = self.service([*rules, inactive])
+        calls = []
+
+        def read(rule, ctx, outcome):
+            calls.append(rule.priority)
+            return [OfferResult(rule.name, Decimal("100"), url=rule.url)]
+
+        with patch.object(NordbronProvider, "read", side_effect=read):
+            service.monitor.run_cycle()
+            self.assertCountEqual(calls, priorities)
+            service.monitor.run_cycle()
+            self.assertEqual(len(calls), 5)
+            service.monitor.close()
+            restarted = self.service([*rules, inactive])
+            restarted.monitor.run_cycle()
+            self.assertEqual(len(calls), 10)
+        self.assertEqual(restarted.monitor.startup_scan_metrics(),
+                         {"total": 5, "pending": 0, "started": 5, "completed": 5, "successful": 5})
+        self.assertEqual(service.monitor.startup_scan_metrics()["total"], 5)
+
+    def test_site_specific_round_does_not_consume_other_sites_startup_intent(self):
+        amazon = watch("Arama", "https://www.amazon.com.tr/s?k=kulaklik", priority="6h", target="1")
+        other = watch("Çanta", "https://nordbron.com/canta", priority="3h", target="1")
+        self.recently_checked([amazon, other])
+        service = self.service([amazon, other])
+        with patch.object(AmazonProvider, "read", return_value=[]) as amazon_read, patch.object(NordbronProvider, "read", return_value=[]) as other_read:
+            service.monitor.run_cycle("nordbron")
+            other_read.assert_called_once()
+            amazon_read.assert_not_called()
+            self.assertEqual(service.monitor.startup_scan_metrics()["pending"], 1)
+            service.monitor.run_cycle("amazon")
+            amazon_read.assert_called_once()
+            self.assertEqual(service.monitor.startup_scan_metrics()["pending"], 0)
+
+    def test_main_page_only_lane_gets_the_startup_read_even_when_recent(self):
+        rule = watch("Ürün", AMAZON, priority="6h", include_variations=False, target="1")
+        self.recently_checked([rule])
+        service = self.service([rule])
+        with patch.object(AmazonProvider, "read", return_value=[]) as read:
+            service.monitor.run_cycle("amazon")
+            service.monitor.run_cycle("amazon")
+        read.assert_called_once()
+        self.assertEqual(service.monitor.startup_scan_metrics()["completed"], 1)
+
+    def test_deferred_card_keeps_startup_intent_until_provider_can_read(self):
+        rule = watch("Arama", "https://www.amazon.com.tr/s?k=saat", priority="6h")
+        self.recently_checked([rule])
+        service = self.service([rule])
+        with patch.object(AmazonProvider, "read", return_value=[]) as read:
+            with patch.object(AmazonProvider, "read_due", return_value=False):
+                service.monitor.run_cycle("amazon")
+            read.assert_not_called()
+            self.assertEqual(service.monitor.startup_scan_metrics()["pending"], 1)
+            service.monitor.run_cycle("amazon")
+        read.assert_called_once()
+        self.assertEqual(service.monitor.startup_scan_metrics()["pending"], 0)
+
+    def test_existing_site_pause_is_preserved_and_startup_read_runs_after_it(self):
+        rule = watch("Arama", "https://www.amazon.com.tr/s?k=saat", priority="6h")
+        self.recently_checked([rule])
+        state = self.data.state()
+        site_key = state_ops.site_guard_key("amazon")
+        state_ops.note_guard(state, site_key, "test", BotProtectionHermesError("test"))
+        self.data.write_state(state)
+        service = self.service([rule])
+        with patch.object(AmazonProvider, "read", return_value=[]) as read:
+            service.monitor.run_cycle("amazon")
+            read.assert_not_called()
+            self.assertEqual(service.monitor.startup_scan_metrics()["pending"], 1)
+            self.assertIn(site_key, self.data.state()["_meta"]["amazon_protection"])
+            service.monitor._state["_meta"]["amazon_protection"][site_key]["retry_after"] = (datetime.now(timezone.utc)-timedelta(seconds=1)).isoformat()
+            state_ops.clear_guard(service.monitor._state, site_key)
+            service.monitor.run_cycle("amazon")
+        read.assert_called_once()
+        self.assertEqual(service.monitor.startup_scan_metrics()["pending"], 0)
+
+    def test_previous_empty_result_retry_does_not_skip_the_startup_scan(self):
+        rule = watch("Arama", "https://www.amazon.com.tr/s?k=saat", priority="6h")
+        self.recently_checked([rule])
+        state = self.data.state()
+        state[key(rule)]["amazon_no_offer_retry_after"] = (datetime.now(timezone.utc)+timedelta(hours=1)).isoformat()
+        self.data.write_state(state)
+        service = self.service([rule])
+        with patch.object(AmazonProvider, "read", return_value=[]) as read:
+            service.monitor.run_cycle("amazon")
+            read.assert_called_once()
+            service.monitor.run_cycle("amazon")
+        read.assert_called_once()
+        self.assertEqual(service.monitor.startup_scan_metrics()["pending"], 0)
+
+    def test_failure_consumes_only_one_startup_attempt_and_does_not_repeat_each_cycle(self):
+        rule = watch("Kart", "https://nordbron.com/x", priority="6h")
+        self.recently_checked([rule])
+        service = self.service([rule])
+        with patch.object(NordbronProvider, "read", side_effect=HermesError("test")) as read:
+            service.monitor.run_cycle()
+            service.monitor.run_cycle()
+        read.assert_called_once()
+        self.assertEqual(service.monitor.startup_scan_metrics(),
+                         {"total": 1, "pending": 0, "started": 1, "completed": 1, "successful": 0})
+
+    def test_initialization_keeps_history_and_suppression_and_jobs_label_startup(self):
+        import json
+        from hermes.history import History
+        rule = watch("Kart", "https://nordbron.com/x", priority="6h")
+        offer_key = "existing-offer"
+        state = {key(rule): {"last_checked_at": utc_now(), "offer_keys": [offer_key]},
+                 offer_key: {"last_price": "50", "min_price": "40", "max_price": "80", "last_alerted_at": utc_now(),
+                             "last_alerted_price": "50"}, "_meta": {"notification_generation": "keep"}}
+        self.data.write_state(state)
+        history = History.at(self.data.files.database)
+        history.record_price(offer_key, "nordbron", "Kart", Decimal("50"))
+        history.database.snapshot("state.json", state)
+        service = self.service([rule])
+        self.assertEqual(self.data.state()[offer_key], state[offer_key])
+        self.assertEqual(service.monitor.history._db().execute("SELECT count(*) FROM prices").fetchone()[0], 1)
+        self.assertEqual(self.data.state()["_meta"]["notification_generation"], "keep")
+        with patch.object(NordbronProvider, "read", return_value=[]):
+            service.monitor.run_cycle()
+        db = service.monitor.history._db()
+        row = db.execute("SELECT delay_ms,evidence FROM jobs ORDER BY started DESC LIMIT 1").fetchone()
+        self.assertEqual(row[0], 0)
+        self.assertTrue(json.loads(row[1])["startup_scan"])
+
+
 class SiteQueueTests(CycleTestCase):
     def test_a_slow_amazon_read_does_not_delay_other_sites(self):
         amazon = watch(url=AMAZON)

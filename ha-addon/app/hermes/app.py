@@ -51,6 +51,8 @@ class HermesRuntime:
         result.update(version=APP_VERSION, healthy=self.health()[0],
                       active_watches=len(self.config.watches) if self.config else 0,
                       active_cards=len({watch.tracking_id or watch.name for watch in self.config.watches}) if self.config else 0)
+        if self.service is not None:
+            result["startup_scan"] = self.service.monitor.startup_scan_metrics()
         return result
 
     def _action(self, name: str, apply, done_message: str, queued_message: str) -> Tuple[bool, str]:

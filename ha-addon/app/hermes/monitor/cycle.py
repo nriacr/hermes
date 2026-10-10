@@ -25,7 +25,7 @@ from ..constants import (
     SUMMARY_PATH,
 )
 from ..errors import BotProtectionHermesError, HermesError, OutOfStockHermesError, error_status
-from ..history import History, read_requests
+from ..history import History, SUCCESS_OUTCOMES, read_requests
 from ..delivery import DeliveryQueue
 from ..diagnostics import Diagnostics
 from ..homeassistant import HomeAssistantBridge
@@ -106,7 +106,8 @@ class Monitor:
 
     def __init__(self, config: HermesConfig, providers: Optional[ProviderSet] = None, notifier: Optional[Pushover] = None,
                  files: Optional[DataFiles] = None, sleep: Callable[[float], None] = time.sleep,
-                 should_stop: Callable[[], bool] = lambda: False, home_assistant: Optional[HomeAssistantBridge] = None) -> None:
+                 should_stop: Callable[[], bool] = lambda: False, home_assistant: Optional[HomeAssistantBridge] = None,
+                 startup_scan: bool = False) -> None:
         self.config = config
         self.home_assistant = home_assistant
         self.should_stop = should_stop
@@ -119,6 +120,11 @@ class Monitor:
         # Site queues run in parallel; every change to the cycle's shared
         # state, summary and files happens under this lock.
         self._lock = threading.RLock()
+        # Each running process reads every active card once before normal priority deadlines.
+        # This intent is separate from durable price/notification/scheduling state.
+        self._startup_watches = {make_watch_key(watch) for watch in config.watches if watch.active} if startup_scan else set()
+        self._startup_pending = set(self._startup_watches)
+        self._startup_outcomes: Dict[str, str] = {}
         # Minimum gaps between request starts per site; they span cycles.
         self._spacing: Dict[str, RequestSpacing] = {}
         self._jobs = threading.local()
@@ -179,6 +185,15 @@ class Monitor:
             else:
                 save_json(self.files.state, state)
 
+    def startup_scan_metrics(self):
+        """Numerical startup coverage, including deferred cards; never URLs or identities."""
+        with self._lock:
+            outcomes = list(self._startup_outcomes.values())
+            return {"total": len(self._startup_watches), "pending": len(self._startup_pending),
+                    "started": len(self._startup_watches)-len(self._startup_pending),
+                    "completed": sum(outcome != "interrupted" for outcome in outcomes),
+                    "successful": sum(outcome in SUCCESS_OUTCOMES for outcome in outcomes)}
+
     def _watch_names(self) -> Dict[str, List[str]]:
         names: Dict[str, List[str]] = {}
         for watch in self.config.watches:
@@ -203,7 +218,7 @@ class Monitor:
             self.providers[site].begin_cycle()
         queues: Dict[str, List[WatchRule]] = {}
         for watch in self.config.watches:
-            if site is not None and watch.site != site:
+            if not watch.active or (site is not None and watch.site != site):
                 continue
             with self._lock:
                 if self._plan(run, watch):
@@ -424,10 +439,11 @@ class Monitor:
         entry = entry if isinstance(entry, dict) else {}
         seller = site_label(watch.site)
         retry_after = parse_iso_datetime(entry.get("amazon_no_offer_retry_after"))
-        absence_deferred = (not scheduling.manually_due(watch, entry) and retry_after is not None
+        absence_deferred = (key not in self._startup_pending and not scheduling.manually_due(watch, entry) and retry_after is not None
                             and datetime.now(timezone.utc) < retry_after)
         if (absence_deferred or not provider.read_due(watch)
-                or not scheduling.watch_check_due(watch, entry, self.config.interval_seconds)):
+                or (key not in self._startup_pending
+                    and not scheduling.watch_check_due(watch, entry, self.config.interval_seconds))):
             if not scheduling.manually_due(watch, entry) or absence_deferred:
                 run.priority_scope[priority]["deferred"] += 1
                 self.results._begin_rows(run, key)
@@ -458,8 +474,13 @@ class Monitor:
         started_at = time.monotonic()
         previous_check = parse_iso_datetime(entry.get("last_checked_at"))
         interval = max(self.config.interval_seconds, PRIORITY_INTERVAL_SECONDS.get(scheduling.watch_priority(watch), 0))
-        planned = previous_check.timestamp() + interval if previous_check and not scheduling.manually_due(watch, entry) else None
+        with self._lock:
+            startup_read = key in self._startup_pending
+        planned = previous_check.timestamp() + interval if previous_check and not startup_read and not scheduling.manually_due(watch, entry) else None
         job = self.diagnostics.start(watch.site, key, planned)
+        if startup_read:
+            with self._lock:
+                self._startup_pending.discard(key)
         self._jobs.current = job
         self._jobs.request_ms = self._jobs.request_count = self._jobs.persist_ms = 0
         result = "ok"
@@ -510,7 +531,7 @@ class Monitor:
         finally:
             elapsed = round((time.monotonic() - started_at) * 1000)
             self.diagnostics.finish(job, watch.site, result, elapsed, str(failure) if failure else "",
-                                    {"unavailable": len(outcome.unavailable), "partial_errors": outcome.errors,
+                                    {"startup_scan": startup_read, "unavailable": len(outcome.unavailable), "partial_errors": outcome.errors,
                                      "requests": self._jobs.request_count, "request_ms": self._jobs.request_ms,
                                      "persist_ms": self._jobs.persist_ms,
                                      "provider_and_wait_ms": max(0, elapsed-self._jobs.request_ms-self._jobs.persist_ms),
@@ -520,6 +541,9 @@ class Monitor:
                                          "conditions": run.state.get(item, {}).get("conditions"),
                                          "checked_at": run.state.get(item, {}).get("last_price_checked_at")}
                                         for item in run.state.get(key, {}).get("offer_keys", [])]})
+            if startup_read:
+                with self._lock:
+                    self._startup_outcomes[key] = result
             if result in {"ok", "stock", "empty"}:
                 self.diagnostics.db.transaction([("INSERT OR REPLACE INTO successful_reads VALUES (?,?)", (key, time.time()))])
             self.history.record_read(watch.site, result, round((time.monotonic() - started_at) * 1000), key,
@@ -535,5 +559,6 @@ class Monitor:
                 return False
             entry = run.state.get(make_watch_key(watch), {})
             entry = entry if isinstance(entry, dict) else {}
-            due = scheduling.watch_check_due(watch, entry, self.config.interval_seconds)
+            due = (make_watch_key(watch) in self._startup_pending
+                   or scheduling.watch_check_due(watch, entry, self.config.interval_seconds))
         return due and provider.next_read_is_main(watch) and provider.read_due(watch)

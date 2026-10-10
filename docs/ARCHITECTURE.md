@@ -22,7 +22,17 @@ The owner approved this migration on 2026-10-09. `AGENTS.md` is the development 
 ## Runtime and scheduling
 
 The main thread coordinates a sequential queue for each active site. Completion starts that site's interval;
-other sites do not wait for it. Existing provider priority and due rules are authoritative. The finite
+other sites do not wait for it. `MonitorService` enables a process-local startup scan: all active
+watch URLs are due once regardless of their last check and priority interval, including product,
+search and main-page-only lane watches. The intent is consumed only when the diagnostic job starts;
+previous empty-result retry timestamps do not defer that one startup check.
+Provider readiness, site pauses and request pacing remain authoritative. Deferred cards retain
+startup intent until allowed. Finite standalone cycle callers keep ordinary scheduling unless
+explicitly enabling this startup intent; `RUN_ONCE` uses the same `MonitorService` initialization.
+After that single attempt the regular priority deadlines apply, also following failed/empty/stock reads.
+No timestamps, price history, notification suppression, request window or guards are reset.
+`runtime.startup_scan` exposes total/pending/started/completed/successful counts without card identities;
+job evidence labels startup reads for verification. Existing provider priority order is retained. The finite
 `run_cycle()` diagnostic uses the same round implementation; it is not a second scheduler.
 Amazon's own two lanes, serialization, budgets, visitor handling, variant parsing and rhythm remain intact.
 Long variant streams commit and publish each validated opportunity as it arrives.

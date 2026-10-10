@@ -86,7 +86,7 @@ class MonitorService:
         self._wake = threading.Event()
         self._stop = threading.Event()
         self.monitor = Monitor(config, providers=providers, notifier=notifier, files=self.files, sleep=self._sleep,
-                               should_stop=self._stop.is_set,
+                               should_stop=self._stop.is_set, startup_scan=True,
                                home_assistant=home_assistant if home_assistant is not None else HomeAssistantBridge())
         # Set when the loop has ended; until then panel actions are queued.
         self.finished = False
