@@ -52,6 +52,13 @@ Readers check cancellation before new requests; completed observations remain du
 left for the next startup rather than drained during shutdown. Active writers are never closed underneath.
 Separate reader processes and an autonomous code-writing AI are not part of this architecture.
 
+Completed watch results publish their stock rows immediately, including mixed available/unavailable
+variants. The site's stock list is derived from all active watch states under the monitor lock, rather
+than accumulating summary-only variants. Watches not read yet retain their previous positive stock
+evidence and original timestamps; other sites remain untouched. Site-round publication uses the same
+state-derived list so obsolete variants cannot return at round end. Price history and suppression are
+not reset, and provider fetching/parsing semantics are unchanged.
+
 ## Durable data and migration
 
 `/data/hermes.db` is authoritative for state/summary snapshots, observations, jobs, incidents and notification intent.

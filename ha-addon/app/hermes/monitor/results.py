@@ -16,7 +16,7 @@ from ..errors import HermesError, EmptySearchResultsHermesError, OutOfStockHerme
 from ..logging_utils import log
 from ..models import OfferResult, PriceSummaryRow, WatchRule
 from ..providers.base import Provider, WatchRead, excluded_term_in_title
-from ..utils import SystemLoad, canonical_tracking_url, format_tl, local_now, parse_iso_datetime, utc_now
+from ..utils import SystemLoad, canonical_tracking_url, format_tl, local_now, parse_iso_datetime, site_label, utc_now
 from . import alerts, state as state_ops, summary
 from .state import offer_key as make_offer_key, watch_key as make_watch_key
 
@@ -253,6 +253,15 @@ class ResultRecorder:
         }
 
 
+    def _publish_completed(self, run: "CycleRun", watch: WatchRule, removed_price_ids=None) -> None:
+        # Rebuild this site's stock from all active watch states. Other cards keep
+        # their last positive evidence; obsolete summary-only variants cannot survive.
+        stocks = summary.current_stock_rows(self.config.watches, run.state, watch.site)
+        summary.save_incremental_summary(self.files.summary, run.summary_rows, stocks,
+                                         removed_price_ids=removed_price_ids,
+                                         replaced_stock_sellers={site_label(watch.site)})
+
+
     def _record_success(self, run: "CycleRun", provider: Provider, watch: WatchRule, key: str, seller: str,
                         recorded: "RecordedOffers", outcome: WatchRead) -> None:
         disappeared = set(recorded.entry.get("offer_keys") or []) - set(recorded.offer_keys)
@@ -279,9 +288,6 @@ class ResultRecorder:
             "unavailable_checked_at": utc_now(),
         }
         stale_ids = summary.cached_offer_ids(watch, key, {**run.state, key: recorded.entry}, seller)
-        if stale_ids:
-            summary.save_incremental_summary(self.files.summary, run.summary_rows, run.stock_rows,
-                removed_price_ids=stale_ids)
         if returned_at and provider.notifies_stock_return and recorded.offer_keys:
             available = [run.state[item] for item in recorded.offer_keys]
             lowest = min(available, key=lambda item: Decimal(item["last_price"]))
@@ -293,6 +299,7 @@ class ResultRecorder:
                 "generation": run.state.get("_meta", {}).get("notification_generation")},
                 hashlib.sha256(f"stock:{key}:{returned_at}".encode()).hexdigest(), run.state)
         self._add_rows(run, key, (), summary.cached_stock_rows(watch, run.state[key], seller))
+        self._publish_completed(run, watch, stale_ids)
         if not provider.backs_off_on_protection:
             return
         if outcome.blocked:
@@ -336,7 +343,7 @@ class ResultRecorder:
         if provider.backs_off_on_protection:
             state_ops.clear_guard(run.state, state_ops.site_guard_key(watch.site), seller)
         # A missing item must not keep its previous price visible until the cycle ends.
-        summary.save_incremental_summary(self.files.summary, [], stock_rows, removed_price_ids=stale_ids)
+        self._publish_completed(run, watch, stale_ids)
 
 
     def _record_failure(self, run: "CycleRun", provider: Provider, watch: WatchRule, key: str, entry: Dict[str, Any],
@@ -403,4 +410,4 @@ class ResultRecorder:
             self._add_rows(run, key, summary.cached_summary_rows(watch, key, run.state, seller))
             return
         # The dashboard may still show the last successful cycle; remove only this watch's stale rows now.
-        summary.save_incremental_summary(self.files.summary, [], stock_rows, removed_price_ids=stale_ids)
+        self._publish_completed(run, watch, stale_ids)

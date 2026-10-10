@@ -1,5 +1,11 @@
 # Değişiklik günlüğü
 
+## 4.1.3
+
+- Stokta yok listesi her kartın tamamlanan okumasıyla hemen yenileniyor; eski ve artık geçerli olmayan varyant satırları birikmiyor.
+- Sırası gelmeyen kartların stok bilgisi ve gerçek kontrol saati, diğer siteler, fiyat geçmişi ve bildirim hafızası korunuyor.
+- Amazon davranışı değişmedi.
+
 ## 4.1.2
 
 - Hermes her yeniden açılışta bütün aktif takip kartlarını öncelik süresini beklemeden bir kez tarıyor; sonraki kontroller normal öncelik düzeninde devam ediyor.

@@ -19,10 +19,11 @@ from ..utils import (
     log_cell,
     normalize_item_key,
     parse_decimal,
+    site_label,
     tracking_offer_identity,
     tracking_offer_title_identity,
 )
-from .state import sanitized_price_bounds, state_decimal
+from .state import sanitized_price_bounds, state_decimal, watch_key
 
 # The log repeats an unchanged table at most this often; idle cycles run every
 # few seconds and would otherwise fill the log with identical tables.
@@ -106,6 +107,18 @@ def cached_stock_rows(watch: WatchRule, entry: Dict[str, Any], seller: str) -> L
         for item in unavailable
         if isinstance(item, dict) and item.get("product_title") and item.get("product_url")
     ]
+
+
+def current_stock_rows(watches: List[WatchRule], state: Dict[str, Any], site: str | None = None) -> List[StockSummaryRow]:
+    """Derive stock from current watch state, including unchanged watches still waiting to be read."""
+    rows = []
+    for watch in watches:
+        if not watch.active or (site is not None and watch.site != site):
+            continue
+        entry = state.get(watch_key(watch), {})
+        if isinstance(entry, dict):
+            rows.extend(cached_stock_rows(watch, entry, site_label(watch.site)))
+    return rows
 
 
 def price_row_identity(row: PriceSummaryRow) -> str:
@@ -274,7 +287,8 @@ def _row_urls(rows) -> set[str]:
 
 
 def save_incremental_summary(path: Path, fresh_rows: List[PriceSummaryRow], fresh_stock_rows: List[StockSummaryRow] | None = None,
-                             removed_price_ids: set[str] | None = None) -> None:
+                             removed_price_ids: set[str] | None = None,
+                             replaced_stock_sellers: set[str] | None = None) -> None:
     """Publish fresh rows immediately without hiding rows pending later in the cycle."""
     previous = load_json(path, {})
     previous = previous if isinstance(previous, dict) else {}
@@ -283,6 +297,7 @@ def save_incremental_summary(path: Path, fresh_rows: List[PriceSummaryRow], fres
     fresh_price_urls = _row_urls(fresh_rows)
     fresh_stock_urls = _row_urls(fresh_stock_rows)
     removed = {str(item) for item in (removed_price_ids or set()) if item}
+    replaced = replaced_stock_sellers or set()
     merged_rows = [
         row for row in rows_from_payload(previous)
         if price_row_identity(row) not in fresh_ids
@@ -291,7 +306,8 @@ def save_incremental_summary(path: Path, fresh_rows: List[PriceSummaryRow], fres
     ] + list(fresh_rows)
     merged_stock = [
         row for row in stock_rows_from_payload(previous)
-        if canonical_tracking_url(row.product_url) not in fresh_price_urls
+        if row.seller not in replaced
+        and canonical_tracking_url(row.product_url) not in fresh_price_urls
         and canonical_tracking_url(row.product_url) not in fresh_stock_urls
     ] + list(fresh_stock_rows)
     save_price_summary(path, merged_rows, merged_stock)

@@ -18,6 +18,8 @@ from hermes.errors import BotProtectionHermesError, EmptySearchResultsHermesErro
 from hermes.models import OfferResult, PriceSummaryRow, StockSummaryRow
 from hermes.monitor import alerts, runner, scheduling, state as state_ops, summary
 from hermes.monitor.results import skipped_offer_reason
+from hermes.monitor.cycle import CycleRun
+from hermes.providers.base import ReadContext
 from hermes.providers.amazon import AmazonProvider, WatchRhythm
 from hermes.providers.bengurme import BenGurmeProvider
 from hermes.providers.hepsiburada import HepsiburadaProvider
@@ -1083,6 +1085,83 @@ class SummaryAlertTests(CycleTestCase):
         with patch.object(alerts, "local_now", return_value=datetime(2026, 10, 2, 23, tzinfo=timezone.utc)):
             alerts.maybe_alert_summary_drop(state, [], cfg, notify)
         notify.send.assert_not_called()
+
+
+class StockPublicationTests(CycleTestCase):
+    OLD = "2026-10-01T10:00:00+00:00"
+
+    def prepare(self):
+        first = watch("İlk kart", AMAZON, include_variations=True)
+        waiting = watch("Bekleyen kart", "https://www.amazon.com.tr/dp/B000000002", priority="6h")
+        inactive = watch("Kapalı", "https://www.amazon.com.tr/dp/B000000003", active=False)
+        old_variant = "https://www.amazon.com.tr/dp/B000000004"
+        def entry(title, url):
+            return {"unavailable_variants": [{"product_title": title, "product_url": url, "reason": "Stokta yok"}],
+                    "unavailable_checked_at": self.OLD, "offer_keys": [], "last_checked_at": self.OLD}
+        self.data.write_state({key(first): entry("Eski varyant", old_variant),
+                               key(waiting): entry("Bekleyen", waiting.url), key(inactive): entry("Kapalı", inactive.url)})
+        summary.save_price_summary(self.data.files.summary, [], [
+            StockSummaryRow("Amazon", "Eski varyant", old_variant, Decimal("1000"), "Stokta yok", self.OLD),
+            StockSummaryRow("Amazon", "Bekleyen", waiting.url, Decimal("1000"), "Stokta yok", self.OLD),
+            StockSummaryRow("Amazon", "Sahipsiz eski satır", "https://www.amazon.com.tr/dp/B000000005", Decimal("1000"), "Stokta yok", self.OLD),
+            StockSummaryRow("Zara", "Başka site", "https://www.zara.com/tr/tr/polo-p01234567.html", Decimal("1000"), "Stokta yok", self.OLD)])
+        instance = monitor(config([first, waiting, inactive]), self.data, self.notify)
+        self.addCleanup(instance.close)
+        run = CycleRun(instance._state)
+        ctx = ReadContext(timeout=10, session=Mock(), pace=lambda _reason: None)
+        return first, waiting, instance, run, ctx
+
+    def test_completed_mixed_read_publishes_stock_immediately_and_preserves_waiting_cards(self):
+        first, waiting, instance, run, ctx = self.prepare()
+        def mixed(rule, context, outcome):
+            outcome.unavailable.append({"product_title": "Güncel varyant", "product_url": first.url, "reason": "Stokta yok"})
+            return [OfferResult("Mevcut varyant", Decimal("2000"), url="https://www.amazon.com.tr/dp/B000000006")]
+        with patch.object(instance.providers["amazon"], "read", side_effect=mixed):
+            instance.check_watch(run, ctx, first)
+        rows = {row["product_title"]: row for row in self.data.summary()["stock_rows"]}
+        self.assertEqual(set(rows), {"Güncel varyant", "Bekleyen", "Başka site"})
+        self.assertNotEqual(rows["Güncel varyant"]["checked_at"], self.OLD)
+        self.assertEqual(rows["Bekleyen"]["checked_at"], self.OLD)
+        self.assertEqual(rows["Başka site"]["checked_at"], self.OLD)
+        self.assertEqual(run.state[key(waiting)]["unavailable_checked_at"], self.OLD)
+
+    def test_completed_read_without_stock_removes_old_variants_before_round_finishes(self):
+        first, waiting, instance, run, ctx = self.prepare()
+        with patch.object(instance.providers["amazon"], "read", side_effect=reader([
+                OfferResult("Mevcut", Decimal("2000"), url="https://www.amazon.com.tr/dp/B000000006")])):
+            instance.check_watch(run, ctx, first)
+        self.assertEqual({row["product_title"] for row in self.data.summary()["stock_rows"]}, {"Bekleyen", "Başka site"})
+
+    def test_stock_only_and_empty_results_replace_old_stock_scope(self):
+        for result, expected in ((OutOfStockHermesError("Stokta yok", "Güncel", AMAZON), {"Güncel", "Bekleyen", "Başka site"}),
+                                 (EmptySearchResultsHermesError("Sonuç yok"), {"Bekleyen", "Başka site"})):
+            with self.subTest(result=type(result).__name__):
+                first, waiting, instance, run, ctx = self.prepare()
+                with patch.object(instance.providers["amazon"], "read", side_effect=reader(result)):
+                    instance.check_watch(run, ctx, first)
+                self.assertEqual({row["product_title"] for row in self.data.summary()["stock_rows"]}, expected)
+                instance.close()
+
+
+    def test_access_failure_keeps_prior_positive_stock_evidence_and_its_age(self):
+        first, waiting, instance, run, ctx = self.prepare()
+        with patch.object(instance.providers["amazon"], "read", side_effect=reader(BotProtectionHermesError("Koruma sayfası"))):
+            instance.check_watch(run, ctx, first)
+        row = next(row for row in self.data.summary()["stock_rows"] if row["product_title"] == "Eski varyant")
+        self.assertEqual(row["checked_at"], self.OLD)
+        self.assertEqual(run.state[key(waiting)]["unavailable_checked_at"], self.OLD)
+
+    def test_site_round_end_cannot_restore_summary_only_stock_variants(self):
+        first, waiting, instance, run, ctx = self.prepare()
+        def reading(rule, context, outcome):
+            if rule is waiting:
+                raise OutOfStockHermesError("Stokta yok", "Bekleyen", waiting.url)
+            return [OfferResult("Mevcut", Decimal("2000"), url="https://www.amazon.com.tr/dp/B000000006")]
+        with patch.object(instance.providers["amazon"], "read", side_effect=reading):
+            instance.run_cycle(site="amazon")
+        rows = {row["product_title"]: row for row in self.data.summary()["stock_rows"]}
+        self.assertEqual(set(rows), {"Bekleyen", "Başka site"})
+        self.assertEqual(rows["Başka site"]["checked_at"], self.OLD)
 
 
 class SummaryFileTests(CycleTestCase):

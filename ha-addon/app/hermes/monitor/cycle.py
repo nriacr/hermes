@@ -249,12 +249,14 @@ class Monitor:
                 rows = summary.deduplicate_summary_rows(run.summary_rows)
                 if site is not None:
                     with self._lock:
-                        summary.save_incremental_summary(self.files.summary, rows, run.stock_rows)
+                        summary.save_incremental_summary(self.files.summary, rows,
+                            summary.current_stock_rows(self.config.watches, run.state, site),
+                            replaced_stock_sellers={site_label(site)})
                         previous = load_json(self.files.summary, {})
                         rows = summary.rows_from_payload(previous)
                         stock = summary.stock_rows_from_payload(previous)
                 else:
-                    stock = run.stock_rows
+                    stock = summary.current_stock_rows(self.config.watches, run.state)
                 summary.publish_price_summary(self.files.summary, rows, stock,
                                               cycle_seconds if run.read_started else None,
                                               scan_seconds if run.read_started else None)
