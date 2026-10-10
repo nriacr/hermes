@@ -185,16 +185,115 @@ class SchemaUpgradeTests(HistoryCase):
                          [("error", "", SystemLoad()), ("timeout", "Zaman aşımı", SystemLoad(150, 300))])
 
 
-class ErrorResetTests(HistoryCase):
-    def test_reset_removes_only_failed_reads_and_keeps_the_request_log(self):
-        for outcome in ("ok", "empty", "stock", "captcha", "timeout", "unreadable", "http_503"):
+class StatisticsResetTests(HistoryCase):
+    def test_reset_clears_every_outcome_measurement_and_resolved_problem(self):
+        from hermes.diagnostics import Diagnostics, runtime_metrics
+        for outcome in ("ok", "empty", "stock", "captcha", "timeout", "unreadable", "http_503", "partial", "interrupted"):
             self.history.record_read("amazon", outcome, 100)
         self.history.record_request("amazon", "curl", "ürün", "bot_korumasi", 300)
-        self.assertEqual(runner.reset_error_history(self.data.files), 4)
-        rows = history_module.read_reads(self.data.files.database, datetime.now(timezone.utc) - timedelta(hours=1))
-        self.assertEqual([row.outcome for row in rows], ["ok", "empty", "stock"])
-        self.assertEqual(read_site_requests(self.data.files.database, datetime.now(timezone.utc) - timedelta(hours=1))[0].captcha, 1)
-        self.assertTrue(any("hata kayıtları sıfırlandı: okuma=4" in line for line in LOG_LINES))
+        self.history.record_cycle(20)
+        diagnostics = Diagnostics(self.data.files.database)
+        completed = diagnostics.start("amazon", "watch")
+        diagnostics.finish(completed, "amazon", "ok", 100)
+        running = diagnostics.start("togg", "watch")
+        diagnostics.incident("amazon", "read", "Kapandı")
+        diagnostics.recover("amazon", "Düzeldi")
+        diagnostics.incident("togg", "read", "Açık")
+        self.assertEqual(runner.reset_statistics(self.data.files), 9)
+        db = self.history._db()
+        for table in ("reads", "requests", "cycles"):
+            self.assertEqual(db.execute(f"SELECT count(*) FROM {table}").fetchone()[0], 0)
+        self.assertEqual(db.execute("SELECT id FROM jobs").fetchall(), [(running,)])
+        self.assertEqual(len(diagnostics.active()), 1)
+        self.assertEqual(diagnostics.recent(), [])
+        receipt = runtime_metrics(self.data.files.database)["statistics_reset"]
+        self.assertEqual(receipt["cleared"], {"reads": 9, "requests": 1, "cycles": 1, "jobs": 1, "incidents": 1})
+        self.assertTrue(all(value == 0 for value in receipt["remaining"].values()))
+        self.assertTrue(any("İstatistik geçmişi sıfırlandı: okuma=9" in line for line in LOG_LINES))
+        diagnostics.incident("togg", "read", "Yeni olay")
+        self.assertEqual(len(diagnostics.recent()), 1)
+
+    def test_reset_preserves_prices_snapshots_notification_and_operational_state_exactly(self):
+        from hermes.diagnostics import Diagnostics
+        state = realistic_state()
+        self.data.write_state(state)
+        self.data.write_summary({"rows": [{"price": "100", "min_price": "80"}], "cycle_duration_seconds": 30})
+        self.history.migrate_json(self.data.files.state, self.data.files.cycle_history)
+        self.history.database.snapshot("state.json", state)
+        self.history.database.snapshot("summary.json", self.data.summary())
+        db = self.history._db()
+        db.execute("INSERT INTO outbox(id,payload,due,created) VALUES ('pending','{}',1,1)")
+        db.execute("INSERT INTO successful_reads VALUES ('watch',1)")
+        Diagnostics(self.data.files.database).incident("delivery", "send", "Bekliyor", "Müdahale gerekli")
+        protected = ("prices", "snapshots", "outbox", "successful_reads", "incidents", "request_window")
+        before = {table: db.execute(f"SELECT * FROM {table}").fetchall() for table in protected}
+        files = {p: p.read_bytes() for p in (self.data.files.state, self.data.files.summary)}
+        self.history.clear_statistics()
+        self.assertEqual(before, {table: db.execute(f"SELECT * FROM {table}").fetchall() for table in protected})
+        self.assertEqual(files, {p: p.read_bytes() for p in files})
+
+    def test_new_statistics_accumulate_and_reset_stays_empty_after_restart(self):
+        self.data.files.cycle_history.write_text(json.dumps(realistic_cycles(datetime.now(timezone.utc))))
+        self.history.migrate_json(self.data.files.state, self.data.files.cycle_history)
+        self.history.record_read("amazon", "ok", 10)
+        self.history.clear_statistics()
+        self.history.close()
+        self.history = History.at(self.data.files.database)
+        self.history.migrate_json(self.data.files.state, self.data.files.cycle_history)
+        self.assertEqual(read_cycles(self.data.files.database, datetime(2020,1,1,tzinfo=timezone.utc)), [])
+        self.history.record_read("amazon", "timeout", 10)
+        self.history.record_read("amazon", "ok", 20)
+        self.assertEqual(len(history_module.read_reads(self.data.files.database, datetime(2020,1,1,tzinfo=timezone.utc))), 2)
+        self.history.clear_statistics()
+        self.assertEqual(self.history._db().execute("SELECT count(*) FROM reads").fetchone()[0], 0)
+
+    def test_reset_is_atomic_if_any_delete_fails(self):
+        self.history.record_read("amazon", "ok", 10)
+        self.history.record_request("amazon", "curl", "ürün", "ok", 10)
+        db = self.history._db()
+        db.execute("CREATE TRIGGER reject_reset BEFORE DELETE ON requests BEGIN SELECT RAISE(ABORT,'test'); END")
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.history.clear_statistics()
+        self.assertEqual(db.execute("SELECT count(*) FROM reads").fetchone()[0], 1)
+        self.assertEqual(db.execute("SELECT count(*) FROM requests").fetchone()[0], 1)
+        self.assertIsNone(db.execute("SELECT value FROM meta WHERE key='statistics_reset'").fetchone())
+
+    def test_operational_window_survives_reset_restart_and_is_bounded(self):
+        from hermes.providers.amazon.access import AmazonAccess
+        now = datetime.now(timezone.utc)
+        with patch.object(history_module, "_at", return_value=(now-timedelta(minutes=10)).isoformat()):
+            self.history.record_request("amazon", "curl", "ürün", "http_503", 100)
+        self.history.clear_statistics()
+        self.history.close()
+        self.history = History.at(self.data.files.database)
+        self.history._db()
+        rows = history_module.read_requests(self.data.files.database, "amazon", now-timedelta(hours=1))
+        access = AmazonAccess()
+        access.restore(rows)
+        self.assertEqual(access.window_count(), 1)
+        self.assertEqual(len(access.events), 1)
+        self.assertTrue(access.events[0][1])
+        # An older operational sample is pruned, independently of the statistical log.
+        self.history._db().execute("INSERT INTO request_window VALUES (?,?,?,?)", ((now-timedelta(hours=2)).isoformat(),"amazon",1,"ok"))
+        self.history.record_request("amazon", "curl", "ürün", "ok", 200)
+        self.assertEqual(self.history._db().execute("SELECT count(*) FROM request_window").fetchone()[0], 2)
+        self.assertEqual(self.history._db().execute("SELECT count(*) FROM requests").fetchone()[0], 1)
+
+    def test_older_request_log_seeds_operational_window_once(self):
+        self.history.close()
+        now = datetime.now(timezone.utc)
+        with sqlite3.connect(self.data.files.database) as db:
+            db.execute("CREATE TABLE requests(at TEXT, site TEXT, method TEXT, kind TEXT, outcome TEXT,duration_ms INTEGER)")
+            for stamp in (now-timedelta(minutes=5), now-timedelta(hours=2)):
+                db.execute("INSERT INTO requests VALUES (?,?,?,?,?,?)", (stamp.isoformat(), "amazon","curl","ürün","ok",100))
+        self.history = History.at(self.data.files.database)
+        self.history._db()
+        self.assertEqual(len(history_module.read_requests(self.data.files.database,"amazon",now-timedelta(hours=1))), 1)
+        self.history.clear_statistics()
+        self.history.close()
+        self.history = History.at(self.data.files.database)
+        self.history._db()
+        self.assertEqual(len(history_module.read_requests(self.data.files.database,"amazon",now-timedelta(hours=1))), 1)
 
 
 class WriteTests(HistoryCase):

@@ -25,7 +25,7 @@ from .database import Database
 from .storage import load_json
 from .utils import SystemLoad, parse_iso_datetime
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS cycles (checked_at TEXT NOT NULL, duration_seconds REAL NOT NULL);
@@ -45,6 +45,11 @@ CREATE TABLE IF NOT EXISTS requests (
     duration_ms INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS requests_at ON requests (at);
+CREATE TABLE IF NOT EXISTS request_window (
+    at TEXT NOT NULL, site TEXT NOT NULL, duration_ms INTEGER NOT NULL, outcome TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS request_window_at ON request_window (at);
+
 """
 READ_COLUMNS = (
     ("watch_key", "TEXT NOT NULL DEFAULT ''"), ("priority", "TEXT NOT NULL DEFAULT ''"),
@@ -117,7 +122,19 @@ class History:
             request_columns = {row[1] for row in connection.execute("PRAGMA table_info(requests)")}
             if "job_id" not in request_columns:
                 connection.execute("ALTER TABLE requests ADD COLUMN job_id TEXT NOT NULL DEFAULT ''")
-            connection.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
+            # This bounded operational window survives a statistics reset and a restart.
+            # Seed older databases once; never reimport erased statistical history.
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                if not connection.execute("SELECT 1 FROM meta WHERE key='request_window_migrated_at'").fetchone():
+                    connection.execute("INSERT INTO request_window SELECT at,site,duration_ms,outcome FROM requests WHERE at>=?",
+                                       (_at(datetime.now(timezone.utc)-timedelta(hours=1)),))
+                    connection.execute("INSERT INTO meta VALUES ('request_window_migrated_at',?)", (_at(),))
+                connection.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
+                connection.execute("COMMIT")
+            except BaseException:
+                connection.execute("ROLLBACK")
+                raise
             self._connection = connection
         return self._connection
 
@@ -181,8 +198,15 @@ class History:
 
     def record_request(self, site: str, method: str, kind: str, outcome: str, duration_ms: int, job_id: str = "") -> None:
         """One network request of a site that reports them (Amazon)."""
-        self._write("istek", [("INSERT INTO requests(at,site,method,kind,outcome,duration_ms,job_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                              (_at(), site, method, kind, outcome, max(0, int(duration_ms)), job_id))])
+        now = datetime.now(timezone.utc)
+        at = _at()
+        duration = max(0, int(duration_ms))
+        self._write("istek", [
+            ("INSERT INTO requests(at,site,method,kind,outcome,duration_ms,job_id) VALUES (?,?,?,?,?,?,?)",
+             (at, site, method, kind, outcome, duration, job_id)),
+            ("INSERT INTO request_window VALUES (?,?,?,?)", (at, site, duration, outcome)),
+            ("DELETE FROM request_window WHERE at<?", (_at(now-timedelta(hours=1)),)),
+        ])
 
     def price_statement(self, offer_key, site, title, price, checked_at=None):
         # The price and its durable notification intent can share one transaction.
@@ -196,21 +220,37 @@ class History:
     def clear_prices(self) -> None:
         self._write("fiyat sıfırlama", [("DELETE FROM prices", ())])
 
-    def clear_errors(self) -> int:
-        """Remove every failed read ("İstatistik > Sıfırla"); successful reads and the request log stay.
+    def clear_statistics(self) -> int:
+        """Reset statistical observations atomically, retaining live operational state.
 
-        The `requests` table is kept on purpose: Amazon's back-off window is restored from it.
+        Panel commands run between active rounds. Unfinished jobs and open incidents
+        are operational state, not archived history. Prices, snapshots, outbox,
+        notification suppression and the bounded request window are untouched.
         """
-        failed = ", ".join("?" * len(SUCCESS_OUTCOMES))
+        import json
         with self._lock:
+            db = self._db()
+            db.execute("BEGIN IMMEDIATE")
             try:
-                count = self._db().execute(f"SELECT COUNT(*) FROM reads WHERE outcome NOT IN ({failed})",
-                                           SUCCESS_OUTCOMES).fetchone()[0]
-            except sqlite3.Error:
-                count = 0
-        if not self._write("hata sıfırlama", [(f"DELETE FROM reads WHERE outcome NOT IN ({failed})", SUCCESS_OUTCOMES)]):
-            raise RuntimeError("veritabanına yazılamadı")
-        return count
+                targets = {"reads": "", "requests": "", "cycles": "",
+                           "jobs": " WHERE finished IS NOT NULL",
+                           "incidents": " WHERE resolved IS NOT NULL"}
+                cleared = {}
+                for table, condition in targets.items():
+                    cleared[table] = db.execute(f"SELECT count(*) FROM {table}{condition}").fetchone()[0]
+                    db.execute(f"DELETE FROM {table}{condition}")
+                at = time.time()
+                receipt = {"at": at, "cleared": cleared,
+                           "remaining": {table: db.execute(f"SELECT count(*) FROM {table}{condition}").fetchone()[0]
+                                         for table, condition in targets.items()},
+                           "price_points": db.execute("SELECT count(*) FROM prices").fetchone()[0],
+                           "open_incidents": db.execute("SELECT count(*) FROM incidents WHERE resolved IS NULL").fetchone()[0]}
+                db.execute("INSERT OR REPLACE INTO meta VALUES ('statistics_reset',?)", (json.dumps(receipt),))
+                db.execute("COMMIT")
+            except BaseException:
+                db.execute("ROLLBACK")
+                raise
+        return cleared["reads"]
 
     # -- first start ----------------------------------------------------------------
 
@@ -333,8 +373,8 @@ def read_prices_by_key(path: Path, offer_keys: List[str]) -> Dict[str, List[Tupl
 
 
 def read_requests(path: Path, site: str, since: datetime) -> List[Tuple[datetime, int, str]]:
-    """(finished at, duration ms, outcome) of one site's network requests since a moment, oldest first."""
-    rows = _read(path, "SELECT at, duration_ms, outcome FROM requests WHERE site = ? AND at >= ? ORDER BY at, rowid",
+    """Bounded operational request window for restoring a provider after restart."""
+    rows = _read(path, "SELECT at, duration_ms, outcome FROM request_window WHERE site = ? AND at >= ? ORDER BY at, rowid",
                  (site, _at(since)))
     return [(parse_iso_datetime(at), int(ms), outcome) for at, ms, outcome in rows]
 

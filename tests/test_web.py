@@ -36,9 +36,9 @@ class FakeRuntime:
         self.resets.append("notifications")
         return True, "Bildirimler sıfırlandı."
 
-    def reset_error_history(self):
-        self.resets.append("errors")
-        return True, "Hata kayıtları silindi (3 kayıt)."
+    def reset_statistics(self):
+        self.resets.append("statistics")
+        return True, "İstatistik geçmişi silindi (3 okuma)."
 
     def reset_price_history(self):
         self.resets.append("history")
@@ -59,7 +59,6 @@ class DataFilesMixin:
             patch.object(dashboard, "STATE_PATH", self.data.files.state),
             patch.object(dashboard, "DATABASE_PATH", self.data.files.database),
             patch.object(statistics_page, "DATABASE_PATH", self.data.files.database),
-            patch.object(statistics_page, "SUMMARY_PATH", self.data.files.summary),
             patch.object(dashboard, "TELEGRAM_STATUS_PATH", root / "status.json"),
             patch.object(dashboard, "TELEGRAM_ERROR_EVENTS_PATH", root / "error_events.json"),
             patch.object(settings, "SUMMARY_PATH", self.data.files.summary),
@@ -618,15 +617,24 @@ class StatisticsPageTests(DataFilesMixin, unittest.TestCase):
     def test_reset_button_asks_first_and_returns_to_statistics_with_the_result(self):
         html = self.page("7d")
         form = html.split("statistics-reset")[1].split("</form>")[0]
-        self.assertIn("action='./reset-errors'", form)
-        self.assertIn("data-confirm='İstatistikteki tüm engel ve hata kayıtları kalıcı olarak silinecek", form)
+        self.assertIn("action='./reset-statistics'", form)
+        self.assertIn("data-confirm='Başarılı ve başarısız tüm okumalar, süre ölçümleri ve kapanmış sorun kayıtları kalıcı olarak silinecek", form)
         self.assertIn("form[data-confirm]", html)  # the confirm script is on the page
-        response = self.request_post("/reset-errors")
+        response = self.request_post("/reset-statistics")
         self.assertEqual(response.status, 303)
         self.assertTrue(response.headers["Location"].startswith("./statistics?saved=ok&msg="))
-        self.assertEqual(self.runtime.resets, ["errors"])
+        self.assertEqual(self.runtime.resets, ["statistics"])
         notice = self.request("/statistics?saved=ok&msg=Hata+kay%C4%B1tlar%C4%B1+silindi+%283+kay%C4%B1t%29.").payload.decode()
         self.assertIn("<p class='notice notice-ok'>Hata kayıtları silindi (3 kayıt).</p>", notice)
+
+    def test_statistics_reset_alias_and_public_button_share_the_action(self):
+        self.write_options({"public_dashboard_enabled": True, "public_dashboard_token": TOKEN})
+        html = self.request(f"/public/{TOKEN}/statistics", public_only=True).payload.decode()
+        self.assertIn(f"action='/public/{TOKEN}/reset-statistics'", html)
+        self.assertIn("İstatistik geçmişini sil", html)
+        for path in ("/reset-errors", f"/public/{TOKEN}/reset-statistics"):
+            self.assertEqual(self.request_post(path).status, 303)
+        self.assertEqual(self.runtime.resets, ["statistics", "statistics"])
 
     def test_period_switch_drives_the_whole_page(self):
         self.read(3 * 24 * 60, outcome="captcha")
@@ -644,10 +652,14 @@ class StatisticsPageTests(DataFilesMixin, unittest.TestCase):
         self.assertIn(f"href='/public/{TOKEN}/statistics?p=24h'", public)
         self.assertIn(f"data-live-url='/public/{TOKEN}/live/statistics?p=7d'", public)
 
-    def test_last_cycle_tile_uses_the_published_summary(self):
+    def test_last_cycle_tile_uses_resettable_measurements_and_preserves_price_summary(self):
         self.data.write_summary({"checked_at": (self.now - timedelta(minutes=3)).strftime("%Y-%m-%d %H:%M:%S"),
                                  "cycle_duration_seconds": 270})
+        self.store.record_cycle(270, self.now-timedelta(minutes=3))
         self.assertIn("<small>süresi 4 dk 30 sn</small>", self.page())
+        self.store.clear_statistics()
+        self.assertNotIn("süresi 4 dk 30 sn", self.page())
+        self.assertEqual(self.data.summary()["cycle_duration_seconds"], 270)
 
 
 class SettingsTests(DataFilesMixin, unittest.TestCase):

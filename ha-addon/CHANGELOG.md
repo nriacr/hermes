@@ -1,5 +1,11 @@
 # Değişiklik günlüğü
 
+## 4.1.1
+
+- İstatistik geçmişini sil butonu başarılı ve başarısız okumaları, ağ ölçümlerini, tur sürelerini ve kapanmış sorun geçmişini birlikte temizliyor.
+- Fiyat geçmişi, takipler, bildirim hafızası ve açık sorunlar korunuyor; yeni istatistikler sıfırdan birikiyor.
+- Amazon davranışı değişmedi.
+
 ## 4.1.0
 
 - Açık sorunlar tek satırda kısa ürün adı, varyant, kısa hata türü ve ürün bağlantısıyla gösteriliyor.

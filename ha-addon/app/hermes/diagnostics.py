@@ -109,7 +109,13 @@ class Diagnostics:
         return self._records("resolved IS NULL")
 
     def recent(self, hours=24):
-        return self._records("updated>=? OR resolved>=?", (time.time()-hours*3600, time.time()-hours*3600))
+        with self.db.lock:
+            connection = self.db.connect()
+            has_meta = connection.execute("SELECT 1 FROM sqlite_master WHERE name='meta' AND type='table'").fetchone()
+            reset = connection.execute("SELECT value FROM meta WHERE key='statistics_reset'").fetchone() if has_meta else None
+        reset_at = json.loads(reset[0])["at"] if reset else 0
+        cutoff = max(time.time()-hours*3600, reset_at)
+        return self._records("updated>=? OR resolved>=?", (cutoff, cutoff))
 
     @staticmethod
     def needs_attention(item):
@@ -143,6 +149,10 @@ def runtime_metrics(path):
         result["current_process_completed_jobs"] = sum(count for outcome, count in current if outcome != "interrupted")
         result["current_process_successful_jobs"] = sum(count for outcome, count in current
                                                        if outcome in {"ok", "stock", "empty", "partial"})
+        reset = connection.execute("SELECT value FROM meta WHERE key='statistics_reset'").fetchone() if "meta" in tables else None
+        result["statistics_reset"] = json.loads(reset[0]) if reset else None
+        result["requests"] = connection.execute("SELECT count(*) FROM requests").fetchone()[0] if "requests" in tables else 0
+        result["cycles"] = connection.execute("SELECT count(*) FROM cycles").fetchone()[0] if "cycles" in tables else 0
         migration = connection.execute("SELECT value FROM meta WHERE key='v4_migration'").fetchone() if "meta" in tables else None
         result["migration"] = json.loads(migration[0]) if migration else None
         row = connection.execute("SELECT payload FROM snapshots WHERE name='state.json'").fetchone()

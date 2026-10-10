@@ -227,6 +227,16 @@ class RuntimeTests(unittest.TestCase):
         self.assertTrue(ok)
         self.assertIn("tarama sürüyor", message)
 
+    def test_statistics_reset_uses_the_command_barrier_and_reports_queued_state(self):
+        runtime = hermes_app.HermesRuntime(config([watch("x", "https://nordbron.com/x")]), files=self.data.files)
+        command = runner.Command("reset_statistics", runner.reset_statistics)
+        with patch.object(runtime.service, "submit", return_value=command) as submit, patch.object(hermes_app, "ACTION_WAIT_SECONDS", 0):
+            ok, message = runtime.reset_statistics()
+        submit.assert_called_once_with("reset_statistics")
+        self.assertTrue(ok)
+        self.assertIn("tarama biter bitmez", message)
+        self.assertFalse(command.done.is_set())
+
     def test_stuck_cycle_fails_health(self):
         service = runner.MonitorService(config([watch("x", "https://nordbron.com/x")]), self.data.files, notifier=Mock())
         self.assertTrue(service.health()[0])

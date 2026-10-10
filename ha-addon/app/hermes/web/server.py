@@ -44,7 +44,7 @@ class Runtime(Protocol):
 
     def reset_price_history(self) -> Tuple[bool, str]: ...
 
-    def reset_error_history(self) -> Tuple[bool, str]: ...
+    def reset_statistics(self) -> Tuple[bool, str]: ...
 
 
 @dataclass
@@ -186,8 +186,8 @@ class Router:
         if path == "/restart":
             ok, message = handle_restart()
             return redirect(request, "restarting", msg=message) if ok else redirect(request, "settings", saved="fail", msg=message)
-        if path == "/reset-errors":
-            ok, message = self.runtime.reset_error_history()
+        if path in {"/reset-statistics", "/reset-errors"}:
+            ok, message = self.runtime.reset_statistics()
             return redirect(request, "statistics", saved="ok" if ok else "fail", msg=message)
         actions = {
             "/test-pushover": ("test", send_test_notification),

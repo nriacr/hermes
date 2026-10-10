@@ -170,7 +170,7 @@ extra frontend service or external font request is required.
   request gap doubles for an hour, and for ten minutes after every start. Limit,
   threshold and slow start survive restarts in `amazon_access.json`; since
   3.5.1 the window itself and the last hour's requests and blocks are rebuilt
-  at start from the `requests` table of `hermes.db` (`AmazonAccess.restore`;
+  at start from the bounded `request_window` table of `hermes.db` (`AmazonAccess.restore`;
   the Depo lane's share starts unused) (schema 2; a
   3.3.0 file is ignored and the limit starts at 300); cookies in
   `amazon_cookies.json`. Every ten minutes (checked at every fetch
@@ -262,3 +262,23 @@ HA's native backup API labels automatic backups `partial` even when every compon
 `tools/backup_rpi.py` checks their contents: HA, Hermes, share, SSL and media must be included.
 The native daily plan includes every app, the database and all four optional folders. The restore
 tool supports the existing encrypted daily backups, keeping the configured key in memory only.
+
+## Statistical reset
+
+`POST /reset-statistics` clears all successful/failed/partial/interrupted reads, request
+measurements, cycles, finished jobs and resolved incidents in one durable transaction
+at the command barrier. `/reset-errors` remains a compatible alias for this same action.
+The button confirms the complete scope; it is shared by ingress/public/mobile.
+`meta.statistics_reset` records the timestamp, actual cleared counts and zero remaining
+counts at commit, so a queued reset can be verified while new reads accumulate.
+
+Prices, min/max, state/summary snapshots and JSON exports, watches, outbox/suppression,
+unfinished jobs, last successful read state and open incidents remain intact. Active
+incidents predating the reset stay in the dashboard; statistical problem history starts
+with events updated/resolved after the reset. The last-cycle tile reads statistical
+`cycles`, never the retained price summary.
+
+`request_window` is the bounded last hour of operational request times/durations/outcomes,
+seeded once from existing request measurements and committed/pruned with each request.
+It is independent of erasable statistics so reset/restart preserves provider pacing.
+It contains no product URL, watch identity, price or credentials.

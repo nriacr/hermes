@@ -9,12 +9,12 @@ drives the whole page.
 import statistics
 from collections import Counter
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from html import escape
 from typing import Dict, List, Optional, Tuple
 
-from ..constants import DATABASE_PATH, DEFAULT_PRIORITY, SUMMARY_PATH, STATE_PATH
-from ..history import BLOCKED_OUTCOMES, SUCCESS_OUTCOMES, Read, read_reads, read_site_requests
+from ..constants import DATABASE_PATH, DEFAULT_PRIORITY, STATE_PATH
+from ..history import BLOCKED_OUTCOMES, SUCCESS_OUTCOMES, Read, read_cycles, read_reads, read_site_requests
 from ..storage import load_json
 from ..diagnostics import Diagnostics
 from ..utils import SystemLoad, site_label
@@ -191,14 +191,14 @@ def render_period_switch(base: str, period: str) -> str:
 
 
 def render_tiles(reads: List[Read], gaps) -> str:
-    summary = load_json(SUMMARY_PATH, {})
-    summary = summary if isinstance(summary, dict) else {}
+    cycles = read_cycles(DATABASE_PATH, datetime.now(timezone.utc)-timedelta(days=90))
+    last_at, last_duration = cycles[-1] if cycles else (None, None)
     failures = sum(is_failure(item.outcome) for item in reads)
     blocked = sum(is_blocked(item.outcome) for item in reads)
     partial = sum(item.outcome == "partial" for item in reads)
     check = statistics.median([seconds for _item, seconds in gaps]) if gaps else None
-    last_cycle = relative_time_text(summary.get("checked_at"))
-    cycle_length = duration_text(summary.get("cycle_duration_seconds"), "-")
+    last_cycle = relative_time_text(last_at.isoformat() if last_at else None)
+    cycle_length = duration_text(last_duration, "-")
     tiles = (
         ("Kontrol sıklığı", _short_duration(check), "yüksek öncelikli bir ürün tipik olarak bu aralıkla okunuyor"),
         ("Son tur", last_cycle, f"süresi {cycle_length}"),
@@ -437,17 +437,17 @@ def render_statistics_page(base: str, params: Optional[Dict[str, List[str]]] = N
     body = (f"<div class='statistics-top'><h2 class='page-heading'>İstatistik</h2>{render_period_switch(base, period)}</div>"
             f"{notice}{intro}"
             + live_region(base, f"live/statistics?p={period}", statistics_live_html(base, params))
-            + render_reset_errors(base))
+            + render_reset_statistics(base))
     return render_page(base, "statistics", "Hermes İstatistik", body, body_class="public ov", refresh_seconds=60,
                        scripts=CONFIRM_SCRIPT + live_script_tag(base))
 
 
-def render_reset_errors(base: str) -> str:
-    """Confirmed delete of every failed read; the counters start again from zero."""
+def render_reset_statistics(base: str) -> str:
+    """Confirmed reset of all statistical history, independent of price history."""
     return (f"<div class='actions tool-actions statistics-reset'><form class='inline-form' method='post' "
-            f"action='{escape(link(base, 'reset-errors'), quote=True)}' data-confirm='İstatistikteki tüm engel ve hata "
-            "kayıtları kalıcı olarak silinecek; sayaçlar sıfırdan başlayacak. Başarılı okumalar kalır. Devam etmek istiyor musun?'>"
-            "<button class='button secondary' type='submit'>Hata kayıtlarını sıfırla</button></form></div>")
+            f"action='{escape(link(base, 'reset-statistics'), quote=True)}' data-confirm='Başarılı ve başarısız tüm okumalar, süre ölçümleri ve kapanmış sorun "
+            "kayıtları kalıcı olarak silinecek. Fiyat geçmişi, takipler ve bildirim hafızası korunacak. Devam etmek istiyor musun?'>"
+            "<button class='button secondary' type='submit'>İstatistik geçmişini sil</button></form></div>")
 
 
 def render_problem_history(span):
