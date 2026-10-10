@@ -142,25 +142,30 @@ of each site are described in `docs/ARCHITECTURE.md`.
 4. Make the smallest coherent architectural change; remove superseded logic.
 5. Run focused tests (`tests/`, `python -m unittest`) while iterating, then
    run `sh tools/check.sh` before release.
-6. The owner explicitly approved the 4.0.0 architecture migration on 2026-10-09.
-   For subsequent runtime behavior changes, bump the version as the owner asked
-   (2026-10-03): a major change raises X in 3.X.Y and resets Y (3.2.1 → 3.3.0);
-   a minor change raises Y (3.2.1 → 3.2.2). Never guess the version from
-   conversation history.
+6. The owner activated the shared Home Assistant release coordinator on
+   2026-10-10. Develop each topic in a separate Git worktree. Development chats
+   do not assign versions, publish main, or install/restart/restore the live app.
+   Submit only your own immutable base/head commits, tests and existing human
+   authorization to `/Users/nuriacar/Documents/Home Assistant/bin/ha-release`.
+   The coordinator assigns minor (4.0.3 → 4.0.4) or major (4.0.3 → 4.1.0)
+   versions from the latest release and reservations, synchronizes config/runtime,
+   integrates onto current main and reruns checks before a serialized release.
 7. Update README/docs when behavior, options, providers, or operations change.
 8. Review the diff for secrets, unrelated changes, stale code, and compatibility.
-   Enable the repository's access guard once per checkout with
-   `git config --local core.hooksPath .githooks`. The pre-push hook checks GitHub
+   The shared repository hook configured by the coordinator checks GitHub
    publishing access and requires the existing credential's `workflow` scope
    when automation files change. Do not skip a rejected access guard; repair the
    authorized credential. Never echo credential-helper output or raw API errors.
-9. Commit intentionally and push to `main` so Home Assistant receives the update.
-10. After a successful push, run `sh tools/install_rpi.sh` to refresh the
-    configured Hermes repository, install its latest add-on version on the
-    Raspberry Pi, and verify the installed version is running. The script uses
-    the parent Home Assistant workspace's `bin/ha-ssh`; never copy credentials
-    or SSH keys into this repository. If installation or verification fails,
-    report it clearly and do not claim the release is installed.
+9. Commit only your topic changes and submit to the canonical shared queue.
+   Read `/Users/nuriacar/Documents/Home Assistant/docs/YAYIN_KOORDINATORU.md`.
+   Never change `core.hooksPath`/`homeassistant.coordinator`, skip hooks, create a
+   second queue in a worktree, or bypass the coordinator via direct SSH/API.
+10. Only the coordinator chat `01a12434-45a6-72d2-bb48-42c7f2f4959d` may approve,
+    publish and install. It uses a shared lock and the exact tested commit; the
+    install script verifies the Pi version/state/health and current live reads.
+    Existing user approval remains valid; do not ask for it again. Analysis-only
+    requests remain pending. Failure stops later installations. Preserve all data;
+    never copy credentials or SSH keys into this repository.
 
 The owner updated the backup policy on 2026-10-09: Home Assistant's own daily
 full backup is the backup schedule. Do not schedule backups or backup checks
@@ -169,7 +174,7 @@ verify and reuse the newest available full backup containing Hermes. Create an
 additional backup only when the owner explicitly asks. Restoring a daily backup
 also restores its code and data; changes since that backup are lost.
 
-Documentation-only changes do not require an add-on version bump.
+Documentation and deployment-tool-only changes do not require an add-on version bump.
 
 ## Definition of done
 
