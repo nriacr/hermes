@@ -19,6 +19,7 @@ from hermes.diagnostics import Diagnostics
 from hermes.utils import SystemLoad, parse_decimal, utc_now
 from hermes.web import assets, dashboard, server, settings
 from hermes.web import statistics as statistics_page
+from hermes.web.access import WebAccess
 
 TOKEN = "t" * 32
 
@@ -54,6 +55,7 @@ class DataFilesMixin:
         self.options_path = root / "options.json"
         self.options_path.write_text(json.dumps({"takip_edilenler": []}), encoding="utf-8")
         self.patches = [
+            patch("hermes.web.access.ACCESS_PATH", root / "web_access.json"),
             patch("hermes.config.OPTIONS_PATH", self.options_path),
             patch.object(dashboard, "SUMMARY_PATH", self.data.files.summary),
             patch.object(dashboard, "STATE_PATH", self.data.files.state),
@@ -75,6 +77,20 @@ class DataFilesMixin:
     def write_options(self, options):
         self.options_path.write_text(json.dumps(options), encoding="utf-8")
 
+    def authorized_request(self, router, path, method="GET", body=b"", public_only=False):
+        request = server.split_request(path, method, body, public_only)
+        if not request:
+            return server.NOT_FOUND
+        sessions = getattr(router, "_test_sessions", {})
+        if request.scope not in sessions:
+            sessions[request.scope] = router.access.create_session(request.scope, authenticated=True)
+            router._test_sessions = sessions
+        token, session = sessions[request.scope]
+        request.cookie = f"hermes_session={token}"
+        if method == "POST":
+            request.body = body + (b"&" if body else b"") + f"csrf_token={session.csrf}".encode()
+        return router.handle(request)
+
 
 def price_row(**fields):
     row = {"seller": "Amazon", "product_title": "Ürün", "product_url": "https://www.amazon.com.tr/dp/B000000001",
@@ -90,8 +106,7 @@ class RouterTests(DataFilesMixin, unittest.TestCase):
         self.router = server.Router(self.runtime)
 
     def request(self, path, method="GET", body=b"", public_only=False):
-        request = server.split_request(path, method, body, public_only)
-        return self.router.handle(request) if request else server.NOT_FOUND
+        return self.authorized_request(self.router, path, method, body, public_only)
 
     def test_ingress_pages_and_assets_are_served(self):
         for path in ("/", "/statistics", "/settings", "/restarting"):
@@ -243,7 +258,9 @@ class LiveServerTests(DataFilesMixin, unittest.TestCase):
         import urllib.request
 
         runtime = FakeRuntime()
-        httpd = server.start_server(server.Router(runtime), 0, public_only=False)
+        access = WebAccess(self.data.root / "web_access.json")
+        token, session = access.create_session("/", authenticated=True)
+        httpd = server.start_server(server.Router(runtime, access), 0, public_only=False)
         base = f"http://127.0.0.1:{httpd.server_address[1]}"
         try:
             with urllib.request.urlopen(f"{base}/health", timeout=5) as response:
@@ -263,7 +280,8 @@ class LiveServerTests(DataFilesMixin, unittest.TestCase):
 
             opener = urllib.request.build_opener(NoRedirect)
             with self.assertRaises(urllib.error.HTTPError) as caught:
-                opener.open(urllib.request.Request(f"{base}/reset-notifications", data=b"", method="POST"), timeout=5)
+                opener.open(urllib.request.Request(f"{base}/reset-notifications", data=f"csrf_token={session.csrf}".encode(),
+                                                   headers={"Cookie": f"hermes_session={token}"}, method="POST"), timeout=5)
             caught.exception.close()
             self.assertEqual(caught.exception.code, 303)
             self.assertTrue(caught.exception.headers["Location"].startswith("./settings?saved=ok"))
@@ -480,7 +498,7 @@ class DashboardTests(DataFilesMixin, unittest.TestCase):
     def test_every_page_wears_the_same_skin(self):
         router = server.Router(FakeRuntime())
         for path in ("/", "/settings", "/statistics", "/restarting"):
-            page = router.handle(server.split_request(path, "GET", b"", False)).payload.decode()
+            page = self.authorized_request(router, path).payload.decode()
             self.assertIn("<body class='public ov", page, path)
         for text in (".ov .stat-tile", ".ov .summary-panel", ".ov .site-health", ".ov .health-ok"):
             self.assertIn(text, self.router_get("/app.css"))
@@ -516,7 +534,7 @@ class DashboardTests(DataFilesMixin, unittest.TestCase):
             self.assertIn(f"fonts/{name}", APP_CSS)
 
     def router_get(self, path):
-        response = server.Router(FakeRuntime()).handle(server.split_request(path, "GET", b"", False))
+        response = self.authorized_request(server.Router(FakeRuntime()), path)
         return response.payload.decode()
 
     def test_telegram_notifications_are_listed(self):
@@ -540,8 +558,8 @@ class StatisticsPageTests(DataFilesMixin, unittest.TestCase):
         self.now = datetime.now().astimezone()
         self.runtime = FakeRuntime()
         router = server.Router(self.runtime)
-        self.request = lambda path, public_only=False: router.handle(server.split_request(path, "GET", b"", public_only))
-        self.request_post = lambda path: router.handle(server.split_request(path, "POST", b"", False))
+        self.request = lambda path, public_only=False: self.authorized_request(router, path, public_only=public_only)
+        self.request_post = lambda path: self.authorized_request(router, path, method="POST")
 
     def read(self, minutes_ago, site="amazon", outcome="ok", key="w1", priority="cycle", ms=2000, detail="", load=None):
         moment = self.now - timedelta(minutes=minutes_ago)

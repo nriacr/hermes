@@ -8,6 +8,7 @@
   const newWatchList = document.getElementById('new-watch-list');
   const newWatchTemplate = document.getElementById('new-watch-template');
   let dirty = false;
+  document.addEventListener('hermes-session-locked', () => { dirty = false; });
 
   const refreshWatchList = () => {
     const searchText = normalize(watchSearch?.value.trim());

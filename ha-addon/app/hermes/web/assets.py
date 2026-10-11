@@ -11,7 +11,9 @@ STATIC_DIR = Path(__file__).with_name("static")
 def _asset(name: str) -> str:
     return (STATIC_DIR / name).read_text(encoding="utf-8")
 
-APP_CSS = "\n".join(_asset(name) for name in ("base.css", "overview.css", "settings.css", "statistics.css"))
+APP_CSS = "\n".join(_asset(name) for name in ("base.css", "overview.css", "settings.css", "statistics.css", "pin.css"))
+PIN_SCRIPT = _asset("pin.js")
+SESSION_SCRIPT = _asset("session.js")
 SETTINGS_SCRIPT = _asset("settings.js")
 RESTART_SCRIPT = _asset("restart.js")
 LIVE_SCRIPT = _asset("live.js")

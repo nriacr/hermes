@@ -1,5 +1,12 @@
 # Değişiklik günlüğü
 
+## 4.2.0
+
+- Anasayfa mevcut haliyle açık kalıyor; ayarlar, istatistikler ve tüm değişiklik işlemleri 4 haneli PIN ile korunuyor.
+- Dördüncü rakam girilince PIN otomatik kontrol ediliyor. Yanlış denemeler sınırlanıyor; 15 dakika işlemsizlikte ayarlar kilitleniyor.
+- PIN ilk kez ve unutulduğunda yalnız Home Assistant içinden belirleniyor; PIN değişikliği ve yeniden başlatma açık ayar oturumlarını kapatıyor.
+- Fiyat geçmişi, takipler ve bildirim hafızası korunuyor. Amazon davranışı değişmedi.
+
 ## 4.1.3
 
 - Stokta yok listesi her kartın tamamlanan okumasıyla hemen yenileniyor; eski ve artık geçerli olmayan varyant satırları birikmiyor.

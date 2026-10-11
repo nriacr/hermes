@@ -38,13 +38,9 @@ else
 fi
 "$SSH_HELPER" "ha apps info $APP_SLUG --raw-json | jq -e --arg expected '$EXPECTED_VERSION' '.data.version == \$expected and .data.state == \"started\"' >/dev/null"
 # Basic health is insufficient: require a completed new-version read, preserved history, and queue counts.
-RUNTIME_COMMAND="$(cat <<'REMOTE'
-ha apps info 769724e3_hermes --raw-json | jq -r '.data.options | "url = " + (("http://192.168.1.143:8100/public/" + .public_dashboard_token + "/runtime") | @json)' | curl --fail --silent --max-time 25 --config -
-REMOTE
-)"
 attempt=0
 while [ "$attempt" -lt 36 ]; do
-  if runtime_json="$("$SSH_HELPER" "$RUNTIME_COMMAND")" && printf '%s' "$runtime_json" | jq -e --arg expected "$EXPECTED_VERSION" '.version == $expected and .healthy and .completed_jobs > 0' >/dev/null; then
+  if runtime_json="$(HA_SSH_HELPER="$SSH_HELPER" "${PYTHON:-python3}" "$SCRIPT_DIR/read_runtime.py")" && printf '%s' "$runtime_json" | jq -e --arg expected "$EXPECTED_VERSION" '.version == $expected and .healthy and .completed_jobs > 0' >/dev/null; then
     printf '%s\n' "$runtime_json" | jq '{version,healthy,active_watches,active_cards,state_entries,price_points,reads,jobs,completed_jobs,migration,outbox,open_incidents,delivery_seconds,last_site_read_age_seconds}'
     break
   fi

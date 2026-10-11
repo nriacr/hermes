@@ -80,7 +80,11 @@ so changing to a different product does not merge unrelated product histories. U
 individually. Startup skips a malformed card and reports it; UI save validation is strict.
 
 The existing ports (8099/8100), slug, token-protected public paths, HA sensors/event and options remain.
-`/runtime` is available through ingress or an authenticated public path and returns counts/timing only.
+`/runtime` requires a PIN session on both surfaces and returns counts/timing only.
+Authenticated HA maintenance uses `/internal/runtime`: only the Supervisor peer
+172.30.32.2 with its validated ingress path can reach it, never the public listener.
+Release tools use the existing HA WebSocket helper to create an ingress session;
+the session stays in memory and no public link or owner PIN is used for maintenance.
 `/health` remains a minimal liveness/progress gate. No raw options, messages, URLs or credentials are returned
 by runtime diagnostics.
 
@@ -134,6 +138,28 @@ One responsive panel uses the same router, actions, data and shared styling for 
 Static CSS/JS and the HTML shell are separate files. Appearance is preserved; unused old style classes were
 removed. Form bodies/timeouts are bounded. Destructive actions retain confirmation. No separate mobile UI,
 extra frontend service or external font request is required.
+
+Management authorization is centralized in `web/server.py` with a guest GET allowlist
+(home, home live fragment, static assets and operational health). All other pages
+and all state changes require server authorization. `web/access.py` persists only
+a salted PBKDF2-SHA256 verifier (600,000 iterations) and global attempt limits;
+missing, unsupported, corrupt or unwritable security state never grants access.
+Five failures within a minute lock new login attempts for a minute, including after
+a process restart. Four ASCII digits are required and leading zeroes are preserved.
+The PIN is configured/recovered only from Supervisor-authenticated HA ingress,
+not through the token URL or client-supplied forwarded-IP headers.
+
+Random HttpOnly SameSite=Strict cookies are scoped to the actual public/ingress
+path, marked Secure on HTTPS, and rotated after PIN verification. Sessions and
+CSRF tokens live only in memory, are bounded to 128, and expire after 15 minutes
+without management activity. Anonymous challenges expire after five minutes;
+unauthenticated traffic cannot evict authenticated sessions. Every POST, including
+unlock, recovery and lock, validates the session's CSRF token. Background polling
+does not extend authorization. Client inactivity handling removes sensitive form
+values even when offline; the server independently enforces expiry. All management
+responses are no-store; cookies, PINs and token paths are not written to request logs.
+`web/pin.py`, `static/pin.js` and `static/session.js` implement one shared responsive
+screen: automatic submit after the fourth digit and explicit/manual locking.
 
 ## 8. Sites
 

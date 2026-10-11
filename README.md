@@ -30,3 +30,26 @@ Ayrıntılar: [add-on kılavuzu](ha-addon/README.md),
 dosyasındadır.
 
 Yayın erişimi ve otomatik yetki kontrolü: [yayın erişimi kılavuzu](docs/RELEASE_ACCESS.md).
+
+## Ayarlara PIN ile erişim
+
+Anasayfa, ürün bağlantıları ve fiyat ayrıntıları mevcut haliyle görüntülenir.
+Ayarlar, istatistikler, bildirim testleri, silme işlemleri ve yeniden başlatma
+4 haneli PIN gerektirir. Dördüncü rakam girilince kontrol otomatik yapılır.
+
+İlk kurulumdan sonra Home Assistant'tan Hermes'i aç, Ayarlar simgesine bas ve
+**PIN’i Home Assistant üzerinden değiştir** bağlantısıyla dört rakamı iki kez
+girip kaydet. Ardından PIN ile ayarları aç. PIN henüz belirlenmemişse dış
+bağlantıda yalnız anasayfa kullanılabilir. PIN unutulursa aynı Home Assistant
+bağlantısıyla yeni PIN belirlenir. PIN'i sohbete gönderme.
+
+**Kilitle** düğmesi hemen çıkış yapar. 15 dakika işlem yapılmaması otomatik
+kilitler; fiyat/statistik yenilemeleri süreyi uzatmaz. Beş yanlış denemeden
+sonra giriş 60 saniye bekletilir. Bu sınır tüm oturumlarda ortaktır ve Hermes
+yeniden başlatıldığında da korunur. PIN değişince veya Hermes yeniden başlayınca
+açık ayar oturumları kapanır. Fiyat geçmişi ve takipler etkilenmez.
+
+PIN'in kendisi saklanmaz; tuzlu doğrulayıcı ve deneme sınırı `/data/web_access.json`
+içindedir. Bu dosya kullanıcı güvenlik verisidir; Git'e/rapora kopyalanmamalı ve
+temizlik işleminde silinmemelidir. Günlük Hermes yedeği tarafından korunur.
+Dış bağlantının mevcut HTTPS/tünel koruması kullanılmalıdır.
