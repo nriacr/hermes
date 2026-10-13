@@ -21,6 +21,7 @@ from hermes.errors import HermesError
 from hermes.history import History, read_prices
 from hermes.logging_utils import configure_secrets, redact
 from hermes.models import OfferResult
+from hermes.monitor import scheduling
 from hermes.monitor.runner import MonitorService
 from hermes.monitor.state import watch_key
 from hermes.providers import nordbron, trendyol, network, beymenclub, bengurme, hm
@@ -347,7 +348,11 @@ class RuntimeSafetyTests(unittest.TestCase):
             if len(reads) >= 2:
                 progressed.set()
             return [OfferResult("Hızlı", Decimal("200"), url=fast.url)]
-        with patch.object(network.NetworkProvider, "read", side_effect=fast_read), patch.object(nordbron.NordbronProvider, "read", side_effect=slow_read):
+        # Advance only card deadlines by one minute after each fast read; real
+        # worker timing stays intact so the slow site must still be running.
+        with patch.object(network.NetworkProvider, "read", side_effect=fast_read), \
+                patch.object(nordbron.NordbronProvider, "read", side_effect=slow_read), \
+                patch.object(scheduling, "local_now", side_effect=lambda: datetime.now().astimezone() + timedelta(minutes=len(reads))):
             thread = threading.Thread(target=service.run)
             thread.start()
             try:

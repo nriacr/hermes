@@ -1,5 +1,11 @@
 # Değişiklik günlüğü
 
+## 4.2.1
+
+- Tarama sıklığı 8 kademe oldu: 1 dk, 5 dk, 15 dk, 30 dk, 60 dk, 3 saat, 6 saat ve 12 saat.
+- Her çevrim kaldırıldı; mevcut seçimler 1 dk’ya taşınıyor. Diğer süreler, takipler, fiyat geçmişi ve bildirim hafızası korunuyor.
+- Renkler en sık taramada kırmızıdan en seyrek taramada yeşile ilerliyor; web ve mobil aynı tanımı kullanıyor.
+
 ## 4.2.0
 
 - Anasayfa mevcut haliyle açık kalıyor; ayarlar, istatistikler ve tüm değişiklik işlemleri 4 haneli PIN ile korunuyor.

@@ -104,8 +104,8 @@ def check_gaps(reads: List[Read], since: datetime) -> List[Tuple[Read, float]]:
     previous: Dict[str, Read] = {}
     gaps = []
     for item in reads:
-        # "high" rows were recorded before 3.12, when every-cycle watches were called high priority.
-        if not item.watch_key or item.priority not in (DEFAULT_PRIORITY, "high"):
+        # Keep historical fastest-card samples alongside the new one-minute choice.
+        if not item.watch_key or item.priority not in (DEFAULT_PRIORITY, "cycle", "high"):
             continue
         before = previous.get(item.watch_key)
         previous[item.watch_key] = item

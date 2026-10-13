@@ -31,7 +31,7 @@ def watch_check_due(watch: WatchRule, state_entry: Dict[str, Any], global_interv
 
 
 def priority_order(watches: List[WatchRule], rank: Callable[[WatchRule], int] = lambda _watch: 0) -> List[WatchRule]:
-    """One site's due watches: every cycle first, then 30 min, 60 min, 3 h, 6 h; stable within a tier.
+    """One site's due watches: shortest interval first; stable within a tier.
 
     Inside a tier the provider's `rank` puts quick reads (Amazon's main-page
     reads) before long ones (a whole variant sweep).

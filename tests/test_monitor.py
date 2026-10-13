@@ -62,7 +62,7 @@ class CycleTestCase(unittest.TestCase):
             hermes_monitor.close()
         return self.data.state()
 
-    def run_later(self, cfg, seconds=5):
+    def run_later(self, cfg, seconds=65):
         """Another cycle once a high-priority watch is due again."""
         later = datetime.now().astimezone() + timedelta(seconds=seconds)
         with patch.object(scheduling, "local_now", return_value=later):
@@ -710,7 +710,7 @@ class SchedulingTests(CycleTestCase):
         self.assertEqual({p: rows[p]["price"] for p in rows}, {"60m": "120 TL", "3h": "220 TL", "cycle": "300 TL"})
         self.assertEqual(rows["60m"]["price_checked_at"], now.isoformat())
         coverage = next(line for line in LOG_LINES if "Çevrim öncelik kapsamı:" in line)
-        self.assertIn("Her çevrim=1 başladı, 1 sırası geldi, 0 ertelendi", coverage)
+        self.assertIn("1 dk=1 başladı, 1 sırası geldi, 0 ertelendi", coverage)
         self.assertIn("60 dk=0 başladı, 0 sırası geldi, 1 ertelendi", coverage)
 
     def test_stopping_hermes_ends_the_cycle_between_watches(self):
@@ -742,7 +742,7 @@ class StartupScanTests(CycleTestCase):
         self.data.write_state({key(rule): {"last_checked_at": utc_now(), "offer_keys": []} for rule in rules})
 
     def test_every_priority_is_read_once_after_restart_then_normal_deadlines_resume(self):
-        priorities = ("cycle", "30m", "60m", "3h", "6h")
+        priorities = ("1m", "5m", "15m", "30m", "60m", "3h", "6h", "12h")
         rules = [watch(p, f"https://nordbron.com/{p}", priority=p, target="1") for p in priorities]
         inactive = watch("Kapalı", "https://nordbron.com/kapali", active=False)
         self.recently_checked(rules)
@@ -757,14 +757,14 @@ class StartupScanTests(CycleTestCase):
             service.monitor.run_cycle()
             self.assertCountEqual(calls, priorities)
             service.monitor.run_cycle()
-            self.assertEqual(len(calls), 5)
+            self.assertEqual(len(calls), 8)
             service.monitor.close()
             restarted = self.service([*rules, inactive])
             restarted.monitor.run_cycle()
-            self.assertEqual(len(calls), 10)
+            self.assertEqual(len(calls), 16)
         self.assertEqual(restarted.monitor.startup_scan_metrics(),
-                         {"total": 5, "pending": 0, "started": 5, "completed": 5, "successful": 5})
-        self.assertEqual(service.monitor.startup_scan_metrics()["total"], 5)
+                         {"total": 8, "pending": 0, "started": 8, "completed": 8, "successful": 8})
+        self.assertEqual(service.monitor.startup_scan_metrics()["total"], 8)
 
     def test_site_specific_round_does_not_consume_other_sites_startup_intent(self):
         amazon = watch("Arama", "https://www.amazon.com.tr/s?k=kulaklik", priority="6h", target="1")

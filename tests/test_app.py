@@ -99,7 +99,7 @@ class TelegramQuickAddTests(unittest.TestCase):
         self.assertIn("Paylaşılanlar", saved["gruplar"])
         self.assertEqual(saved["takip_edilenler"][0], {"name": "edifier m60", "group": "Paylaşılanlar", "target_price": 8700.0,
                                                        "url_1": url, "notify_once_in_24H": True, "active": True,
-                                                       "priority": "cycle"})
+                                                       "priority": "1m"})
 
     def test_an_already_watched_link_is_not_added_twice(self):
         url = "https://www.amazon.com.tr/dp/B000000001"

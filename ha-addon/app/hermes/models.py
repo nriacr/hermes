@@ -2,6 +2,8 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import List, Optional
 
+from .constants import DEFAULT_PRIORITY
+
 
 @dataclass
 class WatchRule:
@@ -16,7 +18,7 @@ class WatchRule:
     group: str = ""
     size: str = ""
     include_variations: bool = False
-    priority: str = "cycle"
+    priority: str = DEFAULT_PRIORITY
     official_seller_only: bool = False
     check_now_token: str = ""
     max_items_to_scan: int = 60
@@ -49,7 +51,7 @@ class PriceSummaryRow:
     search_group_label: str = ""
     is_warehouse: bool = False
     tracking_id: str = ""
-    priority: str = "cycle"
+    priority: str = DEFAULT_PRIORITY
     price_checked_at: str = ""
 
     @property

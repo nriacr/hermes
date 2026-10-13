@@ -21,6 +21,14 @@ The owner approved this migration on 2026-10-09. `AGENTS.md` is the development 
 
 ## Runtime and scheduling
 
+Card frequency has eight shared intervals: 1, 5, 15, 30, 60 minutes, 3, 6 and
+12 hours. The old `cycle` key is a read-time alias for `1m`; the existing longer
+choices retain their intervals. The panel emits only current keys on save,
+Telegram quick-add and new model instances default to `1m`. Existing state,
+read records and watch identities are preserved. Historical `cycle` and `high`
+samples still contribute to the fastest-card statistics. All panel dots use
+one CSS color property palette from red to green.
+
 The main thread coordinates a sequential queue for each active site. Completion starts that site's interval;
 other sites do not wait for it. `MonitorService` enables a process-local startup scan: all active
 watch URLs are due once regardless of their last check and priority interval, including product,
@@ -226,15 +234,13 @@ screen: automatic submit after the fourth digit and explicit/manual locking.
   the calm time since the previous block; the day's count survives restarts.
 - One read per watch and round (since 3.9, `WatchRhythm`): a product watch is
   read as a whole, its configured page with the used listing (where Depo offers
-  show) and every variant of its family. An every-cycle (red) watch is read
-  once per search round (`AmazonProvider.read_due` checks `main_cycle`, floor
-  `AMAZON_RED_ROUND_FLOOR_SECONDS`, 20 s), the others every 30 min, 60 min,
-  3 h or 6 h (`AMAZON_PRIORITY_INTERVAL_SECONDS`); the price never changes
-  it. The round lasts as long as its reads and grows when slower cards
-  are due in it, so each red page is read every ~5-6 minutes at the 1-4 s delay
-  (the old fast main-page loop of 3.5-3.8.3 and the replay of remembered variant
-  offers are gone: the main pages took half the requests and the variants went
-  stale for 14 minutes). The work runs in two lanes (since 3.5): the Depo lane
+  show) and every variant of its family. All cards use the shared
+  `PRIORITY_INTERVAL_SECONDS`: 1, 5, 15, 30, 60 minutes, 3, 6 or 12 hours.
+  The former `cycle` choice migrates to `1m` without changing watch identity
+  or rewriting stored history. Unknown pre-3.12 choices stay at 6 hours.
+  A one-minute watch is read at most once per search round; its minimum
+  interval is 60 seconds, and long rounds may extend that interval. Price
+  never changes the chosen interval. The work runs in two lanes (since 3.5): the Depo lane
   thread reads the single-page products (once per round), the sweep thread
   works through the variant families and search pages. Both go through one
   request turn (one request at a time; since 3.8.3 the two lanes alternate when

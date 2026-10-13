@@ -7,7 +7,6 @@ body.ov .page-heading { margin:6px 0 14px; font:800 clamp(28px,4vw,40px)/1.05 va
 .settings-page summary { display:flex; align-items:center; padding:14px 16px; font:600 14px var(--display); letter-spacing:-.01em; color:var(--text); }
 .settings-page summary::before { content:'▸'; flex:none; margin-right:10px; color:var(--mute); transition:transform .2s; }
 .settings-page summary .priority-dot { width:10px; height:10px; margin:0 9px 0 0; box-shadow:0 0 10px currentColor; }
-.settings-page .priority-cycle { color:#ff5c64; } .settings-page .priority-30m { color:#ff9548; } .settings-page .priority-60m { color:#f2c94c; } .settings-page .priority-3h { color:#c4dc4a; } .settings-page .priority-6h { color:#3fbf6a; }
 .settings-page .form-grid { padding:2px 16px 16px; }
 .settings-page label { font:500 12px var(--body); color:var(--mute); }
 .settings-page input[type='text'], .settings-page input[type='number'], .settings-page input[type='url'], .settings-page input[type='search'], .settings-page select, .settings-page textarea, .watch-search input, .watch-priority select { min-height:42px; border-radius:13px; border:1px solid var(--edge); background:rgba(0,0,0,.28); color:var(--text); font:14px var(--body); transition:border-color .2s,box-shadow .2s; }

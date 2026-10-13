@@ -407,7 +407,7 @@ class MonitorHistoryTests(HistoryCase):
             self.run_later(cfg, fail, minutes * 70)
         self.assertEqual(self.reads(), ["captcha", "http_503", "stock", "error", "timeout", "connection", "unreadable"])
         with sqlite3.connect(self.data.files.database) as db:
-            self.assertEqual({row for row in db.execute("SELECT watch_key, priority FROM reads")}, {(key(rule), "cycle")})
+            self.assertEqual({row for row in db.execute("SELECT watch_key, priority FROM reads")}, {(key(rule), "1m")})
 
     def test_a_wrapped_browser_timeout_counts_as_timeout_and_keeps_its_reason_and_the_pi_load(self):
         class TimeoutException(Exception):
@@ -525,7 +525,7 @@ class QuietLogTests(HistoryCase):
         try:
             hermes_monitor.run_cycle()
             LOG_LINES.clear()
-            later = datetime.now().astimezone() + timedelta(seconds=5)
+            later = datetime.now().astimezone() + timedelta(seconds=65)
             with patch.object(scheduling, "local_now", return_value=later):
                 hermes_monitor.run_cycle()  # due again, but the site is paused for 3 minutes
         finally:

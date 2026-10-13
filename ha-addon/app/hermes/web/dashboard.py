@@ -121,7 +121,7 @@ MAX_VARIANT_TAGS = 3
 
 
 def priority_dot(priority) -> str:
-    """Round mark for a card's scan interval: red (every cycle) through orange and yellow to green (6 hours)."""
+    """Shared interval mark: red (1 minute) through orange/yellow to green (12 hours)."""
     key = normalize_priority(priority)
     text = escape(PRIORITY_DESCRIPTIONS[key], quote=True)
     return f'<i class="priority-dot priority-{key}" title="{text}" aria-label="{text}"></i>'

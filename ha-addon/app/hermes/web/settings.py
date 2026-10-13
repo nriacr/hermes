@@ -139,7 +139,7 @@ def watch_display_name(item, index: int, known_titles: Dict[str, str]) -> str:
 
 
 def _card_priority(item: Dict[str, Any], is_new: bool) -> str:
-    """A new card starts at every cycle; a saved card shows its priority (pre-3.12 cards: 6 hours)."""
+    """New cards start at one minute; stored choices use the shared migration."""
     return DEFAULT_PRIORITY if is_new else normalize_priority(item.get("priority"))
 
 
@@ -190,7 +190,7 @@ def watch_form(item: Dict[str, Any], index: int, is_new: bool = False, groups=No
         f"{_field(prefix, 'size', 'Beden', item.get('size', ''))}"
         f"</div><div class='watch-links'>{link_fields}</div>"
         f"<div class='watch-bottom'>{priority_field}{exclude_field}{flags}{actions}"
-        "<p class='watch-hint'>Öncelik, fiyatın ne sıklıkla tarandığıdır: her çevrimde, 30 dk, 60 dk, 3 saat ya da 6 saatte bir. Satıcı filtresi şu an Amazon’da uygulanır; "
+        f"<p class='watch-hint'>Öncelik, fiyatın ne sıklıkla tarandığıdır: {', '.join(PRIORITY_LABELS.values())}. Satıcı filtresi şu an Amazon’da uygulanır; "
         "doğrulanmış Depo teklifleri korunur.</p></div></div>"
     )
     attributes = " data-new-watch='true'" if is_new else (
@@ -364,6 +364,8 @@ def build_watch(form: Dict[str, List[str]], index: int) -> Optional[Dict[str, An
     size = _first(form, prefix + "size")
     exclude_terms = _first(form, prefix + "exclude_terms")
     priority = _first(form, prefix + "priority", DEFAULT_PRIORITY).casefold()
+    if priority == "cycle":  # an already-open pre-update form can still save safely
+        priority = normalize_priority(priority)
     if priority not in PRIORITIES:
         raise ValueError(f"{_card_context(index, name, [])}: öncelik geçersiz.")
     urls = list(dict.fromkeys(url for field in WATCH_URL_FIELDS if (url := _first(form, prefix + field))))

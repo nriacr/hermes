@@ -15,8 +15,8 @@ from ...constants import (
     AMAZON_COOKIES_PATH,
     AMAZON_EXCLUDED_PAGE_REFRESH_SECONDS,
     AMAZON_MAIN_GAPS_KEPT,
-    AMAZON_PRIORITY_INTERVAL_SECONDS,
-    AMAZON_RED_ROUND_FLOOR_SECONDS,
+    DEFAULT_PRIORITY,
+    PRIORITY_INTERVAL_SECONDS,
     SITE_AMAZON,
     normalize_priority,
 )
@@ -46,7 +46,7 @@ class WatchRhythm:
 
     Since 3.9 a watch is read as a whole (its configured page with the used listing, where Amazon Depo
     offers show up, and every variant of its family) once per search round (a cycle) while it is read every
-    cycle (red), and every AMAZON_PRIORITY_INTERVAL_SECONDS (30 min to 6 hours) otherwise. The
+    minute (red), and every PRIORITY_INTERVAL_SECONDS (5 minutes to 12 hours) otherwise. The
     intervals are stretched by the access governor's speed factor after a block wave.
     """
 
@@ -175,7 +175,7 @@ class AmazonProvider(Provider):
         return not self.is_search_url(watch.url) and not watch.include_variations
 
     def needs_sweep(self, watch: WatchRule) -> bool:
-        """Searches and variant families that are due: red ones in every round, the others at their own interval.
+        """Searches and variant families that are due at their selected interval.
 
         A product without variants has nothing to sweep: the Depo lane reads its whole page.
         """
@@ -211,17 +211,17 @@ class AmazonProvider(Provider):
 
     @staticmethod
     def category_interval(watch: WatchRule) -> int:
-        """How often the watch's priority reads it; the priority alone decides (every search round, 30 min ... 6 h)."""
-        return AMAZON_PRIORITY_INTERVAL_SECONDS[normalize_priority(getattr(watch, "priority", None))]
+        """Use the shared card interval, independently of its price or variant count."""
+        return PRIORITY_INTERVAL_SECONDS[normalize_priority(getattr(watch, "priority", None))]
 
     def is_red(self, watch: WatchRule) -> bool:
-        return self.category_interval(watch) <= AMAZON_RED_ROUND_FLOOR_SECONDS
+        return normalize_priority(getattr(watch, "priority", None)) == DEFAULT_PRIORITY
 
     def main_interval(self, watch: WatchRule) -> float:
         return self.category_interval(watch) * self.client.access.speed_factor()
 
     def sweep_interval(self, watch: WatchRule) -> float:
-        """How soon a whole family or search page is read again: the category's interval (red: the floor)."""
+        """How soon a whole family or search page is read again: the card's interval."""
         return self.main_interval(watch)
 
     def read_due(self, watch: WatchRule) -> bool:

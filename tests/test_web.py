@@ -3,7 +3,6 @@
 import gzip
 import json
 import unittest
-from html import escape
 
 from hermes.web.assets import APP_CSS
 from datetime import datetime, timedelta, timezone
@@ -434,19 +433,24 @@ class DashboardTests(DataFilesMixin, unittest.TestCase):
         self.data.write_summary({"rows": [price_row(price="14.000 TL")]})
         self.assertNotIn("DEPO", self.live())
 
-    def test_detail_shows_one_of_five_priority_dots(self):
-        for priority, label in (("cycle", "Her çevrimde fiyat taranır"), ("30m", "30 dk'da bir taranır"),
-                                ("60m", "60 dk'da bir taranır"), ("3h", "3 saatte bir taranır"), ("6h", "6 saatte bir taranır"),
-                                ("high", "6 saatte bir taranır")):  # a row saved before 3.12
+    def test_detail_shows_eight_interval_dots_and_migrates_legacy_rows(self):
+        steps = (("1m", "1 dk"), ("5m", "5 dk"), ("15m", "15 dk"), ("30m", "30 dk"),
+                 ("60m", "60 dk"), ("3h", "3 saat"), ("6h", "6 saat"), ("12h", "12 saat"),
+                 ("cycle", "1 dk"), ("high", "6 saat"))
+        for priority, short in steps:
             with self.subTest(priority=priority):
                 self.data.write_summary({"rows": [price_row(priority=priority)]})
                 html = self.live()
-                short = {"cycle": "Her çevrim", "30m": "30 dk", "60m": "60 dk", "3h": "3 saat", "6h": "6 saat", "high": "6 saat"}[priority]
-                self.assertIn(f"priority-{'6h' if priority == 'high' else priority}", html)
-                self.assertIn(f'title="{escape(label, quote=True)}"', html)
-                self.assertIn(f"</i>{short}</b>", html)  # a short word under "Tarama sıklığı", not a sentence
-        colors = [APP_CSS.split(f".priority-{key} {{ background:")[1].split(";")[0] for key in ("cycle", "30m", "60m", "3h", "6h")]
-        self.assertEqual(colors, ["#ff5c64", "#ff9548", "#f2c94c", "#c4dc4a", "#3fbf6a"])  # red to green
+                expected = {"cycle": "1m", "high": "6h"}.get(priority, priority)
+                self.assertIn(f"priority-{expected}", html)
+                self.assertIn(f'title="{short} arayla taranır"', html)
+                self.assertIn(f"</i>{short}</b>", html)
+        colors = [APP_CSS.split(f".priority-{key} {{ --priority-color:")[1].split(";")[0]
+                  for key, _label in steps[:8]]
+        self.assertEqual(len(set(colors)), 8)
+        self.assertEqual((colors[0], colors[-1]), ("#e30a17", "#3fbf6a"))
+        self.assertIn("background:var(--priority-color)", APP_CSS)
+        self.assertIn("color:var(--priority-color)", APP_CSS)
 
     def test_stock_count_leaves_the_title_and_the_full_detail_is_in_the_sheet(self):
         self.data.write_summary({"rows": [price_row(product_title="Edifier M60 (Stok 5)", price="14.000 TL", min_price="12.000 TL",
@@ -688,13 +692,13 @@ class SettingsTests(DataFilesMixin, unittest.TestCase):
         self.assertEqual(watches[0]["priority"], "3h")
         self.assertTrue(watches[0]["official_seller_only"])
         html = settings.watch_form(watches[0], 0)
-        for text in ("Yalnızca platformun kendi satıcısı", ">Her çevrim</option>", ">30 dk</option>", ">60 dk</option>",
-                     "selected>3 saat</option>", ">6 saat</option>", "<summary><i class=\"priority-dot priority-3h\""):
+        for text in ("Yalnızca platformun kendi satıcısı", ">1 dk</option>", ">5 dk</option>", ">15 dk</option>", ">30 dk</option>", ">60 dk</option>",
+                     "selected>3 saat</option>", ">6 saat</option>", ">12 saat</option>", "<summary><i class=\"priority-dot priority-3h\""):
             self.assertIn(text, html)
         for old in ("Yüksek", "Orta", "Düşük"):
             self.assertNotIn(old, html)
-        # A new card starts at every cycle; a card saved before 3.12 shows 6 hours.
-        self.assertIn("value='cycle' title='Her çevrimde fiyat taranır' selected>", settings.watch_form({}, 0, is_new=True))
+        # A new card starts at one minute; pre-3.12 choices still show six hours.
+        self.assertIn("value='1m' title='1 dk arayla taranır' selected>", settings.watch_form({}, 0, is_new=True))
         self.assertIn("selected>6 saat</option>", settings.watch_form({"name": "Eski", "priority": "high"}, 0))
 
     def test_updating_a_card_keeps_its_variation_setting(self):

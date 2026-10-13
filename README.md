@@ -7,8 +7,11 @@ takip add-on'udur.
   linkten otomatik anlaşılır. Arama linklerinde kart adı aranacak ifadedir.
 - Desteklenen siteler: Amazon, Hepsiburada, Trendyol, Network, Beymen Club,
   Ben Gurme, Nordbron, Zara, H&M, Togg.
-- Öncelik süresiyle seçilir: her çevrim (kırmızı), 30 dk (turuncu), 60 dk (sarı), 3 saat
-  (sarı-yeşil), 6 saat (yeşil); Amazon'da her çevrim kartları her arama turunda: ana sayfa ve tüm varyantlar liste başından sonuna bir kez okunur, sonra tur yeniden başlar (tur süresi sayfa sayısına bağlı, en sık 20 saniyede bir). Tablodaki renkli daire önceliği gösterir.
+- Tarama sıklığı: 1 dk, 5 dk, 15 dk, 30 dk, 60 dk, 3 saat, 6 saat, 12 saat.
+  Renkli nokta en sık kademede kırmızı, en seyrek kademede yeşildir; bütün ekranlar
+  aynı renk tanımını kullanır. Yeni kartlar 1 dk ile başlar. Eski “Her çevrim”
+  seçimi 1 dk olarak okunur; diğer kayıtlı süreler ve fiyat/bildirim geçmişi korunur.
+  Süre dolunca kart ilk uygun sırada taranır; uzun okumalar aralığı uzatabilir.
 - Siteler kendi bağımsız kontrol sıralarında çalışır; bir sitenin uzun turu diğerinin sonraki kontrolünü bekletmez.
 - Bildirimler ortak kalıcı Pushover kuyruğundan gelir. Bağlantı kesintisinde sınırlı yeniden deneme yapılır;
   güncelliğini kaybeden fiyat bildirimi gönderilmez. Kritik sorun panel ve Home Assistant uyarısında görünür.
