@@ -1,6 +1,7 @@
 """Select/restore existing Pi backups without creating backups or exposing secrets."""
 
 import argparse
+from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
@@ -33,6 +34,14 @@ def backup_info(helper, slug):
     return json.loads(capture([helper, f"ha backups info {slug} --raw-json"]))["data"]
 
 
+def backup_age_hours(date, now=None):
+    """Hours since the backup's ISO date; a date without a zone counts as UTC."""
+    moment = datetime.fromisoformat(str(date).replace("Z", "+00:00"))
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    return ((now or datetime.now(timezone.utc)) - moment).total_seconds() / 3600
+
+
 def newest_backup(helper):
     backups = json.loads(capture([helper, "ha backups list --raw-json"]))["data"]["backups"]
     for item in sorted(backups, key=lambda item: item["date"], reverse=True):
@@ -46,6 +55,9 @@ def main():
     parser.add_argument("--backup")
     parser.add_argument("--restore", action="store_true")
     parser.add_argument("--version", action="store_true")
+    parser.add_argument("--date", action="store_true", help="print the backup's date")
+    parser.add_argument("--max-age-hours", type=float,
+                        help="stop when the selected backup is older (rollback would lose newer data)")
     args = parser.parse_args()
     workspace = Path(__file__).resolve().parents[2]
     helper = os.environ.get("HA_SSH_HELPER", str(workspace / "bin/ha-ssh"))
@@ -53,6 +65,13 @@ def main():
     data = backup_info(helper, slug)
     if not valid_backup(data):
         raise ValueError("Yedek tam kapsamlı değil veya Hermes'i içermiyor.")
+    if args.max_age_hours is not None and not args.restore:
+        try:
+            age = backup_age_hours(data["date"])
+        except (KeyError, ValueError):
+            raise ValueError("Yedek tarihi okunamadı.") from None
+        if age > args.max_age_hours:
+            raise ValueError("Yedek çok eski.")
     if args.restore:
         password_arg = ""
         if data.get("protected"):
@@ -63,6 +82,8 @@ def main():
             password_arg = " --password " + shlex.quote(password)
         capture([helper, f"ha backups restore {slug} --app {APP} --homeassistant=false --no-progress{password_arg}"])
         print("Hermes geri yükleme işlemi tamamlandı.")
+    elif args.date:
+        print(data["date"])
     elif args.version:
         print(next(item["version"] for item in data["addons"] if item["slug"] == APP))
     else:
@@ -72,5 +93,8 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-    except (ValueError, KeyError, OSError):
+    except (ValueError, KeyError, OSError) as exc:
+        if str(exc) == "Yedek çok eski.":
+            raise SystemExit("En yeni Hermes yedeği izin verilen süreden eski; kurulum durduruldu. "
+                             "Günlük yedeğin çalıştığını kontrol et.") from None
         raise SystemExit("Yedek doğrulaması veya geri yükleme başarısız; kurulum/geri yükleme durduruldu.") from None

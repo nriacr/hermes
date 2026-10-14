@@ -179,6 +179,15 @@ from Codex, and do not create a new backup for each update. Before installation,
 verify and reuse the newest available full backup containing Hermes. Create an
 additional backup only when the owner explicitly asks. Restoring a daily backup
 also restores its code and data; changes since that backup are lost.
+`tools/install_rpi.sh` therefore refuses to start when the working tree is dirty, when HEAD is not
+exactly origin/main (Home Assistant installs the code on GitHub main), or when the newest
+usable backup is older than 36 hours (`HERMES_BACKUP_MAX_AGE_HOURS`).
+
+Going back from a bad release is a code rollback, not a data restore: run
+`sh tools/prepare_code_rollback.sh <good-commit>`, which republishes the earlier add-on code as a new
+patch version under `bin/ha-exclusive` (it commits only; push and `tools/install_rpi.sh` follow).
+`tools/rollback_rpi.sh` restores Hermes's `/data` from the backup and runs only with the owner's explicit
+approval and `HERMES_CONFIRM_DATA_RESTORE=evet`.
 
 Documentation and deployment-tool-only changes do not require an add-on version bump.
 

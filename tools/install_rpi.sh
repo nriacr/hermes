@@ -13,19 +13,32 @@ APP_SLUG="769724e3_hermes"
 EXPECTED_VERSION="$(sed -n 's/^version: "\([^"]*\)"/\1/p' "$REPO_DIR/ha-addon/config.yaml" | head -n 1)"
 BACKUP="${HERMES_BACKUP_SLUG:-}"
 [ -x "$SSH_HELPER" ] && [ -n "$EXPECTED_VERSION" ]
+# Home Assistant installs the code on GitHub main, so the tested tree must be exactly that code.
+git -C "$REPO_DIR" fetch --quiet origin main
+if [ -n "$(git -C "$REPO_DIR" status --porcelain)" ]; then
+  printf 'Çalışma kopyasında kaydedilmemiş değişiklik var; kurulum durduruldu.\n' >&2
+  exit 1
+fi
+LOCAL_COMMIT="$(git -C "$REPO_DIR" rev-parse HEAD)"
+if [ "$LOCAL_COMMIT" != "$(git -C "$REPO_DIR" rev-parse origin/main)" ]; then
+  printf 'Yerel kayıt GitHub main ile aynı değil (önce yayımla veya birleştir); kurulum durduruldu.\n' >&2
+  exit 1
+fi
+printf 'Kurulacak kayıt: %s\n' "$LOCAL_COMMIT"
+MAX_AGE="${HERMES_BACKUP_MAX_AGE_HOURS:-36}"
 # Fail on missing management/backup access before tests or any live mutation.
 HA_SSH_HELPER="$SSH_HELPER" "${PYTHON:-python3}" "$SCRIPT_DIR/check_access.py" --homeassistant-only
 # Reuse Home Assistant's existing daily full backup; updates never create another backup.
 (cd "$REPO_DIR" && sh tools/check.sh)
 if [ -z "$BACKUP" ]; then
-  BACKUP="$(HA_SSH_HELPER="$SSH_HELPER" "${PYTHON:-python3}" "$SCRIPT_DIR/backup_rpi.py")"
+  BACKUP="$(HA_SSH_HELPER="$SSH_HELPER" "${PYTHON:-python3}" "$SCRIPT_DIR/backup_rpi.py" --max-age-hours "$MAX_AGE")"
 fi
 if [ -z "$BACKUP" ]; then
   printf 'Doğrulanabilir tam yedek bulunamadı; kurulum durduruldu.\n' >&2
   exit 1
 fi
 case "$BACKUP" in *[!a-zA-Z0-9_-]*) printf 'Geçersiz yedek kodu.\n' >&2; exit 1;; esac
-HA_SSH_HELPER="$SSH_HELPER" "${PYTHON:-python3}" "$SCRIPT_DIR/backup_rpi.py" --backup "$BACKUP" >/dev/null
+HA_SSH_HELPER="$SSH_HELPER" "${PYTHON:-python3}" "$SCRIPT_DIR/backup_rpi.py" --backup "$BACKUP" --max-age-hours "$MAX_AGE" >/dev/null
 printf 'Doğrulanan tam yedek: %s\n' "$BACKUP"
 "$SSH_HELPER" 'ha core check --no-progress'
 # Some unrelated store repositories can fail refresh; require Hermes's own exact version independently.

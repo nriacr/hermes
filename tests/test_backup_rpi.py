@@ -6,7 +6,9 @@ import subprocess
 import unittest
 from unittest.mock import patch
 
-from tools.backup_rpi import APP, backup_info, capture, main, newest_backup, valid_backup
+from datetime import datetime, timedelta, timezone
+
+from tools.backup_rpi import APP, backup_age_hours, backup_info, capture, main, newest_backup, valid_backup
 
 
 class BackupPolicyTests(unittest.TestCase):
@@ -69,3 +71,36 @@ class BackupPolicyTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 main()
         self.assertEqual(calls.call_count, 1)
+
+
+class BackupAgeTests(unittest.TestCase):
+    def test_age_counts_hours_and_treats_naive_dates_as_utc(self):
+        now = datetime(2026, 10, 14, 12, tzinfo=timezone.utc)
+        self.assertEqual(backup_age_hours("2026-10-14T00:00:00+00:00", now), 12)
+        self.assertEqual(backup_age_hours("2026-10-13T12:00:00Z", now), 24)
+        self.assertEqual(backup_age_hours("2026-10-14T06:00:00", now), 6)
+
+    def _run(self, hours_old):
+        date = (datetime.now(timezone.utc) - timedelta(hours=hours_old)).isoformat()
+        data = {"type": "full", "addons": [{"slug": APP}], "date": date}
+        with patch("sys.argv", ["backup_rpi", "--backup", "safe_slug", "--max-age-hours", "36"]), \
+             patch("tools.backup_rpi.backup_info", return_value=data), \
+             contextlib.redirect_stdout(io.StringIO()) as output:
+            main()
+        return output.getvalue().strip()
+
+    def test_recent_backup_is_accepted(self):
+        self.assertEqual(self._run(5), "safe_slug")
+
+    def test_stale_backup_stops_the_install(self):
+        with self.assertRaises(ValueError) as caught:
+            self._run(80)
+        self.assertIn("eski", str(caught.exception))
+
+    def test_age_limit_never_blocks_a_restore(self):
+        data = {"type": "full", "addons": [{"slug": APP}], "date": "2020-01-01T00:00:00+00:00"}
+        with patch("sys.argv", ["backup_rpi", "--backup", "safe_slug", "--restore", "--max-age-hours", "1"]), \
+             patch("tools.backup_rpi.backup_info", return_value=data), \
+             patch("tools.backup_rpi.capture", return_value=""), \
+             contextlib.redirect_stdout(io.StringIO()):
+            main()
