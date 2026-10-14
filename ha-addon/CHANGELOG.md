@@ -1,5 +1,13 @@
 # Değişiklik günlüğü
 
+## 4.2.3
+
+- Güvenlik: requests kütüphanesi 2.34.2 sürümüne güncellendi.
+- Kullanılmayan kod temizlendi.
+- Site tespiti yalnız alan adından yapılıyor.
+- Herkese açık panelin başka bir sayfaya gömülmesi engellendi (X-Frame-Options ve CSP frame-ancestors).
+- Fiyat geçmişi, bildirim hafızası ve Amazon davranışı değişmedi.
+
 ## 4.2.2
 
 - Takip kartı silindiğinde, kapatıldığında veya bir bağlantısı kaldırıldığında, o karta ait eski fiyat ve stok satırları Hermes açılışında anasayfa tablosundan temizleniyor. Ayarlardan silmek Hermes'i zaten yeniden başlattığı için tablo bu açılışta güncelleniyor.
