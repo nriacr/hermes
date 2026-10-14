@@ -1,6 +1,6 @@
 # Değişiklik günlüğü
 
-## Bekleyen yayın
+## 4.2.2
 
 - Takip kartı silindiğinde, kapatıldığında veya bir bağlantısı kaldırıldığında, o karta ait eski fiyat ve stok satırları Hermes açılışında anasayfa tablosundan temizleniyor. Ayarlardan silmek Hermes'i zaten yeniden başlattığı için tablo bu açılışta güncelleniyor.
 - Neden: Eski tablo dosyası açılışta olduğu gibi okunuyor ve her turda yeniden birleştiriliyordu; silinen ürünün satırı hiçbir kart onu sahiplenmediği halde kalıyordu.

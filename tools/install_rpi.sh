@@ -2,10 +2,12 @@
 set -eu
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 REPO_DIR="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)"
-COORDINATOR="$(git -C "$REPO_DIR" config --get homeassistant.coordinator)"
-[ -x "$COORDINATOR" ] || { printf 'Ortak yayın koordinatörü bulunamadı.\n' >&2; exit 1; }
-"$COORDINATOR" guard --action install --repo "$REPO_DIR"
-HA_REPO_DIR="$(CDPATH= cd -- "$REPO_DIR/.." && pwd)"
+COMMON_DIR="$(git -C "$REPO_DIR" rev-parse --path-format=absolute --git-common-dir)"
+HA_REPO_DIR="$(CDPATH= cd -- "$COMMON_DIR/../.." && pwd)"
+if [ -z "${HA_DEPLOY_LOCK_PID:-}" ]; then
+  exec "$HA_REPO_DIR/bin/ha-exclusive" sh "$0" "$@"
+fi
+"$HA_REPO_DIR/bin/ha-exclusive" --check
 SSH_HELPER="${HA_SSH_HELPER:-$HA_REPO_DIR/bin/ha-ssh}"
 APP_SLUG="769724e3_hermes"
 EXPECTED_VERSION="$(sed -n 's/^version: "\([^"]*\)"/\1/p' "$REPO_DIR/ha-addon/config.yaml" | head -n 1)"

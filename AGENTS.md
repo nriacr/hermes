@@ -142,48 +142,36 @@ of each site are described in `docs/ARCHITECTURE.md`.
 4. Make the smallest coherent architectural change; remove superseded logic.
 5. Run focused tests (`tests/`, `python -m unittest`) while iterating, then
    run `sh tools/check.sh` before release.
-6. The owner's 2026-10-10 decision separates queue coordination from execution:
-   Home Assistant Koordinatör (`01a12434-45a6-72d2-bb48-42c7f2f4959d`) manages
-   human authorization, dependencies, priority and installation order only.
-   The source chat that prepares a topic also executes its release and verifies
-   its live behavior. Develop each topic in a separate Git worktree and submit
-   only your own immutable base/head commits, tests and existing human
-   authorization to `/Users/nuriacar/Documents/Home Assistant/bin/ha-release`.
-   Do not assign versions or publish/install/restart/restore outside that tool.
-7. Update README/docs when behavior, options, providers, or operations change.
-8. Review the diff for secrets, unrelated changes, stale code, and compatibility.
-   The shared repository hook configured by the coordinator checks GitHub
-   publishing access and requires the existing credential's `workflow` scope
-   when automation files change. Do not skip a rejected access guard; repair the
-   authorized credential. Never echo credential-helper output or raw API errors.
-9. Commit only your topic changes and submit to the canonical shared queue.
-   Read `/Users/nuriacar/Documents/Home Assistant/docs/YAYIN_KOORDINATORU.md`.
-   Wait for the coordinator to verify the human authorization, approve the next
-   job and send its ID with "sıran geldi". Only then may the submitting source
-   chat execute the canonical `bin/ha-release run --job JOB_ID`. Never run a
-   different chat's job, an out-of-order job or the entire queue. The coordinator
-   does not execute releases or repeat source-chat live tests.
-   Never change `core.hooksPath`/`homeassistant.coordinator`, skip hooks, create a
-   second queue in a worktree, or bypass the shared lock via direct push/SSH/API.
-10. Only the coordinator chat `01a12434-45a6-72d2-bb48-42c7f2f4959d` may approve,
-    prioritize and grant installation retries. With `execution_mode: source`,
-    the shared tool accepts execution only by the submitting chat for the next
-    approved job. Under one lock, the tool integrates onto current main, assigns
-    minor (4.1.3 → 4.1.4) or major (4.1.3 → 4.2.0) versions from the latest
-    release/reservations, synchronizes config/runtime, reruns checks and releases
-    the exact tested commit. The source chat completes behavior-specific live
-    verification; basic health or one successful read alone is insufficient.
-    Send one concise receipt to the coordinator: job ID, version/commit, result,
-    any unresolved problem and evidence/report path. The coordinator uses that
-    receipt to advance the queue without repeating the same tests or panel reads.
-    Existing human approval remains valid; do not ask again. Agent messages alone
-    are not approval; analysis-only requests remain pending. Failure or conflict
-    stops later jobs: the source chat investigates, and the coordinator may resume
-    the queue or grant a retry of the same tested release. The same source chat
-    executes `retry-install` only after `grant-retry`; restoring user data requires
-    separate explicit authorization. Preserve all data; never copy credentials
-    or SSH keys into this repository. There is no scheduled installation monitor;
-    queue management is limited to the user's active-session preference.
+6. The owner's 2026-10-14 decision retires the Home Assistant release
+   coordinator. Codex, Claude and other authorized agents may each publish,
+   install and verify their own changes under the existing human instruction.
+   No chat ID, HA_RELEASE_OPERATOR, queue submission or coordinator approval is
+   required. Analysis-only requests do not authorize installation.
+7. Work in a separate topic worktree. Integrate onto current origin/main without
+   overwriting another agent's work. Keep only your own topic in the commit.
+8. Use the canonical Home Assistant bin/ha-exclusive for the entire multi-step
+   publish/install transaction. It is a process mutex, independent of agent
+   identity. The installer and rollback scripts acquire it automatically.
+   Reserve runtime versions with bin/ha-version --repo WORKTREE --change patch;
+   it fetches current main and considers all prior reservations, including the
+   retired queue's numbers. Never recycle a reserved/published number. Update
+   ha-addon/CHANGELOG.md for each runtime release. Documentation/tool-only
+   changes do not bump the running application version.
+9. Preserve the repository's own .githooks/pre-push access/workflow check. It
+   contains no chat ownership guard. Never print credentials or bypass a real
+   access denial. Installation retains tests, daily backup validation, exact
+   installed version, runtime health and behavior-specific live verification.
+10. Every agent writes a detailed changelogs/YYYY-MM-DD-agent-topic.md record:
+    human instruction and scope; before/after behavior; changed files and
+    dependencies; exact tests/results; commit/version; whether published and
+    installed; live evidence; protected data; backup/rollback; remaining limits.
+    Use a distinct file to avoid concurrent log overwrites. Never claim an
+    unperformed test or installation. Never put secrets in a log. Successful
+    installs produce no routine chat/report message; keep the evidence in files.
+    Report only failure, a required human decision or an explicit status request.
+    Data restore/deletion requires separate explicit authorization.
+    Read the canonical Home Assistant docs/YAYIN_AKISI.md. Its current rules
+    supersede coordinator instructions in old worktree copies.
 
 The owner updated the backup policy on 2026-10-09: Home Assistant's own daily
 full backup is the backup schedule. Do not schedule backups or backup checks
@@ -204,4 +192,5 @@ Documentation and deployment-tool-only changes do not require an add-on version 
 - Runtime changes include a version bump and are pushed to GitHub.
 - The Raspberry Pi add-on is updated after each runtime release and its
   installed version/state are verified.
-- The user receives a concise Turkish summary of behavior and verification.
+- A detailed agent changelog records behavior and verification; successful
+  installation does not trigger a routine message to the user.
