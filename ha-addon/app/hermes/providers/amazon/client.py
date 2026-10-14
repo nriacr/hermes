@@ -26,7 +26,7 @@ from ...constants import AMAZON_COOKIE_MAX_AGE_SECONDS
 from ...errors import BotProtectionHermesError, HermesError, error_status
 from ...logging_utils import log
 from ...storage import load_json, save_json
-from ...utils import canonical_amazon_product_url, extract_asin_from_url, normalize_offer_text, repair_mojibake
+from ...utils import canonical_amazon_product_url, extract_asin_from_url, normalize_offer_text
 from ..http import cleaned_html, curl_requests, decode_response_text
 from .access import MAIN_LANE, AmazonAccess
 from .browser import AmazonBrowser
@@ -440,8 +440,3 @@ class AmazonClient:
 
     def _browser_read(self, url: str, timeout: int, expect_search: bool) -> str:
         return checked_html(self.browser.read(url, timeout), expect_search)
-
-
-def short_amazon_url(url: str) -> str:
-    clean = repair_mojibake(str(url or "")).strip()
-    return clean[:117] + "..." if len(clean) > 120 else clean

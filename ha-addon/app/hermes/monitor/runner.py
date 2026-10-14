@@ -91,7 +91,6 @@ class MonitorService:
         # Set when the loop has ended; until then panel actions are queued.
         self.finished = False
         self.cycle_started_at: Optional[float] = None
-        self.last_cycle_finished_at: Optional[float] = None
 
     # -- control from other threads ------------------------------------------
 
@@ -185,7 +184,6 @@ class MonitorService:
                     self.site_started.pop(site, None)
                     failures[site] = min(failures[site] + 1, 6) if error else 0
                     next_due[site] = now + max(self.config.interval_seconds, min(300, 5 * 2 ** failures[site]) if error else 0)
-                    self.last_cycle_finished_at = now
                 # Destructive panel commands never race a reader. Work is deferred briefly to apply them.
                 if not workers and not self._commands.empty():
                     with self.monitor._lock:

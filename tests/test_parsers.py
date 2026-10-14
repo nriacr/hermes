@@ -2261,5 +2261,13 @@ class WatchCardTests(unittest.TestCase):
 
 
 
+class SiteDetectionHostTests(unittest.TestCase):
+    def test_only_the_host_name_selects_the_site(self):
+        self.assertEqual(detect_site_from_url("https://www.amazon.com.tr/dp/B000000000"), "amazon")
+        for url in ("https://amazon@example.test/dp/B000000000", "https://example.test:443/amazon", "https://example.test/?u=amazon.com.tr"):
+            with self.assertRaises(HermesError):
+                detect_site_from_url(url)
+
+
 if __name__ == "__main__":
     unittest.main()

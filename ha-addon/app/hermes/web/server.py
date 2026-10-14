@@ -343,6 +343,8 @@ def make_handler(router: Router, public_only: bool):
                     return
                 body = self.rfile.read(length)
             request = split_request(self.path, method, body, public_only)
+            # The public surface is never meant to be embedded in another page.
+            public_surface = public_only or bool(request and request.base.startswith("/public/"))
             if request:
                 request.cookie = self.headers.get("Cookie", "")
                 ingress_path = self.headers.get("X-Ingress-Path", "")
@@ -369,6 +371,9 @@ def make_handler(router: Router, public_only: bool):
             self.send_header("Cache-Control", headers.pop("Cache-Control", "no-store"))
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("Referrer-Policy", "no-referrer")
+            if public_surface:
+                self.send_header("X-Frame-Options", "DENY")
+                self.send_header("Content-Security-Policy", "frame-ancestors 'none'")
             for name, value in headers.items():
                 self.send_header(name, value)
             self.end_headers()

@@ -15,7 +15,6 @@ from ..constants import (
     PRIORITY_LABELS,
     STATE_PATH,
     SUMMARY_PATH,
-    TELEGRAM_ERROR_EVENTS_PATH,
     TELEGRAM_STATUS_PATH,
     normalize_priority,
 )
@@ -534,20 +533,7 @@ def incident_errors(item: Dict[str, Any], state: Dict[str, Any]) -> List[Dict[st
     return errors
 
 
-def telegram_error_count_24h() -> int:
-    payload = load_json(TELEGRAM_ERROR_EVENTS_PATH, [])
-    cutoff = datetime.now().astimezone() - timedelta(hours=24)
-    count = 0
-    for item in payload if isinstance(payload, list) else []:
-        created = _parse_local_time(item.get("created_at")) if isinstance(item, dict) else None
-        if created and created.astimezone() >= cutoff:
-            count += 1
-    return count
-
-
 # -- pages ----------------------------------------------------------------------------
-
-LIVE_REFRESH_NOTE = "Sayfa açıkken veriler kendiliğinden güncellenir."
 
 
 # Seconds between in-place refreshes; the old full reload was 60 s.

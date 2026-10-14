@@ -61,7 +61,6 @@ class DataFilesMixin:
             patch.object(dashboard, "DATABASE_PATH", self.data.files.database),
             patch.object(statistics_page, "DATABASE_PATH", self.data.files.database),
             patch.object(dashboard, "TELEGRAM_STATUS_PATH", root / "status.json"),
-            patch.object(dashboard, "TELEGRAM_ERROR_EVENTS_PATH", root / "error_events.json"),
             patch.object(settings, "SUMMARY_PATH", self.data.files.summary),
             patch.object(settings, "STATE_PATH", self.data.files.state),
         ]
@@ -288,6 +287,28 @@ class LiveServerTests(DataFilesMixin, unittest.TestCase):
         finally:
             httpd.shutdown()
             httpd.server_close()
+
+
+class FramingTests(DataFilesMixin, unittest.TestCase):
+    def _headers(self, public_only):
+        import urllib.request
+
+        httpd = server.start_server(server.Router(FakeRuntime(), WebAccess(self.data.root / "web_access.json")), 0,
+                                    public_only=public_only)
+        try:
+            with urllib.request.urlopen(f"http://127.0.0.1:{httpd.server_address[1]}/health", timeout=5) as response:
+                return response.headers
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+
+    def test_public_surface_cannot_be_embedded_but_ingress_stays_embeddable(self):
+        public = self._headers(True)
+        self.assertEqual(public["X-Frame-Options"], "DENY")
+        self.assertEqual(public["Content-Security-Policy"], "frame-ancestors 'none'")
+        ingress = self._headers(False)
+        self.assertIsNone(ingress["X-Frame-Options"])
+        self.assertIsNone(ingress["Content-Security-Policy"])
 
 
 class DashboardTests(DataFilesMixin, unittest.TestCase):

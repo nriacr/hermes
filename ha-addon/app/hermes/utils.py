@@ -288,7 +288,8 @@ def tracking_offer_title_identity(
 
 
 def detect_site_from_url(url: str) -> str:
-    host = urlparse(url).netloc.casefold()
+    # The host name only: user info or a port in the address must not match a site.
+    host = (urlparse(url).hostname or "").casefold()
     for marker, site in SITE_HOST_MARKERS:
         if marker in host:
             return site

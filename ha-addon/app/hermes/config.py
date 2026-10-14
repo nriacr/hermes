@@ -140,19 +140,6 @@ def _bounded_integer(payload: Dict[str, object], field_name: str, default: int, 
     return value
 
 
-def _optional_bounded_integer(item: Dict[str, object], field_name: str, minimum: int, maximum: int) -> Optional[int]:
-    raw_value = item.get(field_name)
-    if raw_value is None or str(raw_value).strip() == "":
-        return None
-    try:
-        value = int(raw_value)
-    except (TypeError, ValueError) as exc:
-        raise HermesError(f"{field_name} tam sayı olmalı.") from exc
-    if not minimum <= value <= maximum:
-        raise HermesError(f"{field_name} {minimum} ile {maximum} arasında olmalı.")
-    return value
-
-
 def _optional_int(value: object, field_name: str) -> Optional[int]:
     if value is None or str(value).strip() == "":
         return None

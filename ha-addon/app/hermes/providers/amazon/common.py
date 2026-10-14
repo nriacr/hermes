@@ -44,21 +44,10 @@ def visible_text_nodes(soup):
         yield node
 
 
-def has_secondary_offer_text(text: str) -> bool:
-    normalized = normalize_offer_text(text)
-    return "diger satin alma secenekleri" in normalized
-
-
 def has_explicit_used_offer_evidence(text: str) -> bool:
     """Return true only for Amazon's visible second-hand offer wording."""
     normalized = normalize_offer_text(text)
     return "diger satin alma secenekleri" in normalized and "ikinci el urun" in normalized
-
-
-def has_verified_warehouse_evidence(text: str) -> bool:
-    """Require both Amazon Depo and second-hand evidence before tagging DEPO."""
-    normalized = normalize_offer_text(text)
-    return "ikinci el" in normalized and "amazon depo" in normalized
 
 
 def _price_after_verified_secondary_offer_text(text: str):
