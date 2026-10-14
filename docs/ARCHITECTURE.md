@@ -67,6 +67,11 @@ evidence and original timestamps; other sites remain untouched. Site-round publi
 state-derived list so obsolete variants cannot return at round end. Price history and suppression are
 not reset, and provider fetching/parsing semantics are unchanged.
 
+At startup the published table is reduced to rows owned by active watches (`drop_unconfigured_summary_rows`):
+rows of deleted or paused watches and removed links are dropped. The configuration cannot change while
+Hermes runs, because saving it restarts Hermes. Kept rows, read times, price history and suppression
+are written back unchanged.
+
 ## Durable data and migration
 
 `/data/hermes.db` is authoritative for state/summary snapshots, observations, jobs, incidents and notification intent.

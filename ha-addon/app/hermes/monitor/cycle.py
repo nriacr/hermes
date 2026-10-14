@@ -135,6 +135,9 @@ class Monitor:
         self.history.migrate_json(self.files.state, self.files.cycle_history)
         self.history.drop_idle_cycles(self.config.interval_seconds)
         self._state = self.load_state()
+        # The configuration cannot change while Hermes runs (saving it restarts Hermes), so clean
+        # the table before the panel or any site worker can show results of removed watches.
+        summary.drop_unconfigured_summary_rows(self.files.summary, self.config.watches, self._state)
         with self.history._lock:
             points = self.history._db().execute("SELECT count(*) FROM prices").fetchone()[0]
         migration = {"state_entries": len([key for key in self._state if key != "_meta"]),

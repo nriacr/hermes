@@ -1094,18 +1094,20 @@ class StockPublicationTests(CycleTestCase):
         first = watch("İlk kart", AMAZON, include_variations=True)
         waiting = watch("Bekleyen kart", "https://www.amazon.com.tr/dp/B000000002", priority="6h")
         inactive = watch("Kapalı", "https://www.amazon.com.tr/dp/B000000003", active=False)
+        other = watch("Başka site", "https://www.zara.com/tr/tr/polo-p01234567.html", priority="6h")
         old_variant = "https://www.amazon.com.tr/dp/B000000004"
         def entry(title, url):
             return {"unavailable_variants": [{"product_title": title, "product_url": url, "reason": "Stokta yok"}],
                     "unavailable_checked_at": self.OLD, "offer_keys": [], "last_checked_at": self.OLD}
         self.data.write_state({key(first): entry("Eski varyant", old_variant),
-                               key(waiting): entry("Bekleyen", waiting.url), key(inactive): entry("Kapalı", inactive.url)})
+                               key(waiting): entry("Bekleyen", waiting.url), key(inactive): entry("Kapalı", inactive.url),
+                               key(other): entry("Başka site", other.url)})
         summary.save_price_summary(self.data.files.summary, [], [
             StockSummaryRow("Amazon", "Eski varyant", old_variant, Decimal("1000"), "Stokta yok", self.OLD),
             StockSummaryRow("Amazon", "Bekleyen", waiting.url, Decimal("1000"), "Stokta yok", self.OLD),
             StockSummaryRow("Amazon", "Sahipsiz eski satır", "https://www.amazon.com.tr/dp/B000000005", Decimal("1000"), "Stokta yok", self.OLD),
             StockSummaryRow("Zara", "Başka site", "https://www.zara.com/tr/tr/polo-p01234567.html", Decimal("1000"), "Stokta yok", self.OLD)])
-        instance = monitor(config([first, waiting, inactive]), self.data, self.notify)
+        instance = monitor(config([first, waiting, inactive, other]), self.data, self.notify)
         self.addCleanup(instance.close)
         run = CycleRun(instance._state)
         ctx = ReadContext(timeout=10, session=Mock(), pace=lambda _reason: None)

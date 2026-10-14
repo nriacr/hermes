@@ -1,5 +1,13 @@
 # Değişiklik günlüğü
 
+## Bekleyen yayın
+
+- Takip kartı silindiğinde, kapatıldığında veya bir bağlantısı kaldırıldığında, o karta ait eski fiyat ve stok satırları Hermes açılışında anasayfa tablosundan temizleniyor. Ayarlardan silmek Hermes'i zaten yeniden başlattığı için tablo bu açılışta güncelleniyor.
+- Neden: Eski tablo dosyası açılışta olduğu gibi okunuyor ve her turda yeniden birleştiriliyordu; silinen ürünün satırı hiçbir kart onu sahiplenmediği halde kalıyordu.
+- Kalan satırların okuma saati, fiyat geçmişi, min/maks ve bildirim hafızası olduğu gibi korunuyor. Her aktif kartın açılışta bir kez okunması (4.1.1) değişmedi.
+- Dosyalar: monitor/summary.py (drop_unconfigured_summary_rows), monitor/cycle.py (açılışta çağrı), tests/test_deleted_watch_rows.py, tests/test_monitor.py.
+- Geri alma: önceki sürüme dönüldüğünde tablo dosyası bir sonraki turda kendini yeniden kurar; veri kaybı yok.
+
 ## 4.2.1
 
 - Tarama sıklığı 8 kademe oldu: 1 dk, 5 dk, 15 dk, 30 dk, 60 dk, 3 saat, 6 saat ve 12 saat.

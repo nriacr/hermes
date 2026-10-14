@@ -134,6 +134,45 @@ def cached_offer_ids(watch: WatchRule, key: str, state: Dict[str, Any], seller: 
     return {identity for row in cached_summary_rows(watch, key, state, seller) if (identity := price_row_identity(row))}
 
 
+def drop_unconfigured_summary_rows(path: Path, watches: List[WatchRule], state: Dict[str, Any]) -> None:
+    """At startup, keep only published rows that an active watch still owns.
+
+    Rows of deleted or paused watches and of removed links stay in the durable table
+    otherwise, because incremental publishing merges the previous file. Read times and
+    price history are untouched: kept rows are written back exactly as published.
+    """
+    payload = load_json(path, {})
+    if not isinstance(payload, dict):
+        return
+    active = [watch for watch in watches if watch.active]
+    owned_prices, owned_legacy = set(), set()
+    for watch in active:
+        for row in cached_summary_rows(watch, watch_key(watch), state, site_label(watch.site)):
+            owned_prices.add((row.seller, price_row_identity(row)))
+            owned_legacy.add((row.seller, tracking_offer_identity(row.product_url, row.is_warehouse)))
+    owned_stock = {(row.seller, canonical_tracking_url(row.product_url)) for row in current_stock_rows(watches, state)}
+
+    def kept(items: Any, owned: Any) -> List[Dict[str, Any]]:
+        result = [raw for raw in items if isinstance(raw, dict) and owned(raw)]
+        return [dict(raw, no=number) for number, raw in enumerate(result, start=1)]
+
+    def owns_price(raw: Dict[str, Any]) -> bool:
+        restored = rows_from_payload({"rows": [raw]})
+        if not restored:
+            return False
+        row = restored[0]
+        if row.tracking_id:
+            return (row.seller, price_row_identity(row)) in owned_prices
+        return (row.seller, tracking_offer_identity(row.product_url, row.is_warehouse)) in owned_legacy
+
+    rows = kept(payload.get("rows") if isinstance(payload.get("rows"), list) else [], owns_price)
+    stock = kept(payload.get("stock_rows") if isinstance(payload.get("stock_rows"), list) else [],
+                 lambda raw: (str(raw.get("seller") or ""), canonical_tracking_url(str(raw.get("product_url") or ""))) in owned_stock)
+    cleaned = dict(payload, rows=rows, stock_rows=stock, row_count=len(rows), stock_row_count=len(stock))
+    if cleaned != payload:
+        save_json(path, cleaned)
+
+
 # -- deduplication and ordering -------------------------------------------------
 
 
