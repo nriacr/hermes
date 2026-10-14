@@ -21,11 +21,13 @@
 | Kontrol | Komut/yöntem ve kapsam | Sonuç / kanıt |
 |---|---|---|
 | Yerel test | `tools/check.sh`: ruff + 560 birim test (yeni 2 test dahil), kurulum betiği de yeniden çalıştırır | Geçti (ön çalıştırma); kurulum çıktısı aşağıda |
-| Canlı davranış | Aşağıdaki "Yayın ve kurulum" bölümünde | — |
+| Canlı davranış | `install_rpi.sh` canlı okuma ve `/health` | Geçti (aşağıda) |
 
 ## Yayın ve kurulum
 
-- Doldurulacak: commit, kurulum zamanı, canlı sonuç.
+- Yayımlandı: `origin/main` 926ad1f → 6c4179f (4.2.2), 14 Ekim 2026 ~23:05.
+- Kurulum: `bin/ha-exclusive sh tools/install_rpi.sh`. İlk deneme Home Assistant mağaza yenilemesi zaman aşımı yüzünden durdu (canlıya dokunmadı); aynı komut tekrarlanınca 4.2.2 kuruldu, `/health` ok.
+- Canlı kanıt: Hermes 4.2.2, sağlıklı, 14 aktif kart, 331 durum kaydı, 474 fiyat noktası, 0 açık olay, yeni sürümle tamamlanmış okumalar var. Anasayfa şu an 33 ürün / 6 stokta yok gösteriyor.
 
 ## Veri, yedek ve geri alma
 
@@ -35,4 +37,5 @@
 
 ## Kalan durum
 
-- Doldurulacak.
+- Silinen ürünlerin tablodan gittiğini Nuri anasayfadan gözle doğrulayacak (sahipsiz satırlar listesi canlıda ayrıca okunamadı).
+- `hermes-work` klasöründe `AGENTS.md`, `tools/install_rpi.sh`, `tools/rollback_rpi.sh` commitlenmemiş değişiklik olarak duruyor; içerikleri artık main ile aynı. `git checkout -- <3 dosya>` sonra `git pull` yeterli.
