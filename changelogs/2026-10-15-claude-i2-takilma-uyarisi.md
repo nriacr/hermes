@@ -16,7 +16,7 @@
 | Kontrol | Komut | Sonuç |
 |---|---|---|
 | Yerel test | sh tools/check.sh | ruff + 602 test OK |
-| Canlı | kurulum sonrası eklenir | |
+| Canlı | tools/install_rpi.sh (commit 176f54b) | 4.2.8 started, healthy, completed_jobs>0, price_points/state_entries korundu, tüm sitelerde son okuma yaşı < 6 dk |
 
 ## Veri, yedek ve geri alma
 
