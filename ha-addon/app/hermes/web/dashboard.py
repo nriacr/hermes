@@ -23,7 +23,7 @@ from ..diagnostics import Diagnostics
 from ..utils import PROCESS_STARTED_AT, format_tl, is_search_url, parse_bool, parse_iso_datetime, repair_mojibake, site_label
 from .pages import link, render_notice, render_page
 from ..pricestats import MIN_HISTORY_DAYS, WINDOW_DAYS, window_stats
-from .pricechart import SPOT_SIZE, detail_chart, load_histories, offer_index, sparkline, with_current
+from .pricechart import SPOT_SIZE, load_histories, ranged_chart, offer_index, sparkline, with_current
 
 SITE_THEME_CLASSES = (
     ("amazon", "site-amazon"),
@@ -252,7 +252,8 @@ def detail_html(offer: Offer) -> str:
     if len(offer.points) > 1:
         cells += (f"<div class='ov-fact'><span>İlk kayıtlı fiyat</span><b>{lira(Decimal(str(offer.points[0][1])))}</b></div>"
                   f"<div class='ov-fact'><span>Takip başlangıcı</span><b>{offer.points[0][0].strftime('%d.%m.%Y')}</b></div>")
-    chart = (detail_chart(offer.points, float(offer.target)) if len(offer.points) > 1
+    chart = (ranged_chart(offer.points, float(offer.target), _parse_local_time(offer.checked_at) or datetime.now().astimezone())
+             if len(offer.points) > 1
              else "<p class='ov-note'>Fiyat geçmişi ilk değişiklikten sonra çizilir.</p>")
     product_url = str(offer.row.get("product_url") or "").strip()
     link_html = (f"<a class='ov-d-link' href='{escape(product_url, quote=True)}' target='_blank' rel='noopener noreferrer'>Ürüne git →</a>"

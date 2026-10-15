@@ -23,6 +23,12 @@
   document.addEventListener('click', (event) => {
     const target = event.target;
     if (target === modal || target.closest('[data-close]')) return close();
+    const range = target.closest('#ov-sheet [data-range]');
+    if (range) {
+      sheet.querySelectorAll('[data-range]').forEach((button) => button.setAttribute('aria-pressed', String(button === range)));
+      sheet.querySelectorAll('[data-range-pane]').forEach((pane) => { pane.hidden = pane.dataset.rangePane !== range.dataset.range; });
+      return;
+    }
     if (target.closest('#ov-sheet')) return;
     const tab = target.closest('[data-tab]');
     if (tab) { state.tab = tab.dataset.tab; return apply(); }

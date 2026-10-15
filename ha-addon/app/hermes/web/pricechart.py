@@ -6,7 +6,7 @@ which stores a price only when it changes, so lines are drawn as steps.
 """
 
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any, Dict, List, Sequence, Tuple
 
@@ -139,6 +139,34 @@ def detail_chart(points: List[Point], target: float) -> str:
         "<line class='ov-cross' x1='0' x2='0' stroke='rgba(255,255,255,.35)' stroke-dasharray='3 3' opacity='0'/>"
         "<circle class='ov-cross-dot' r='6' fill='currentColor' stroke='#fff' stroke-width='2' opacity='0'/></svg>"
     )
+
+
+RANGE_DAYS = (7, 30, 90)
+
+
+def window_points(points: List[Point], now: datetime, days: int) -> List[Point]:
+    """The line of the last `days`: it starts at the price that held when the window opened."""
+    start = now - timedelta(days=days)
+    inside = [point for point in points if point[0] >= start]
+    before = [point for point in points if point[0] < start]
+    if before:
+        inside.insert(0, (start, before[-1][1]))
+    return inside
+
+
+def ranged_chart(points: List[Point], target: float, now: datetime) -> str:
+    """The detail chart with a 7/30/90-day/all switch; only windows shorter than the history are offered."""
+    span = (points[-1][0] - points[0][0]).days if points else 0
+    options = [(f"{days} gün", str(days), window_points(points, now, days)) for days in RANGE_DAYS if days < span]
+    if not options:
+        return detail_chart(points, target)
+    options.append(("Tümü", "all", points))
+    default = "all" if span <= RANGE_DAYS[-1] else str(RANGE_DAYS[-1])
+    buttons = "".join(f"<button type='button' class='ov-range' data-range='{key}' aria-pressed='{str(key == default).lower()}'>{label}</button>"
+                      for label, key, _ in options)
+    charts = "".join(f"<div class='ov-chartwrap' data-range-pane='{key}'{'' if key == default else ' hidden'}>"
+                     f"{detail_chart(chosen if len(chosen) > 1 else points, target)}</div>" for _, key, chosen in options)
+    return f"<div class='ov-ranges' role='group' aria-label='Zaman aralığı'>{buttons}</div>{charts}"
 
 
 def _day(moment: datetime) -> str:
