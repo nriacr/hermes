@@ -22,7 +22,8 @@
 
 ## Yayın ve kurulum
 
-- Kurulum sonucu aşağıda eklenir.
+- Yayımlandı: commit 0de07d9 (origin/main), sürüm 4.2.7.
+- Kuruldu: 2026-10-15, sh tools/install_rpi.sh (ha-exclusive altında); check.sh geçti, günlük yedek doğrulandı (b160df65), sürüm 4.2.7 started, runtime healthy, completed_jobs>0, price_points 644 / state_entries 364 korundu, Amazon son okuma yaşı 10 sn.
 
 ## Veri, yedek ve geri alma
 
