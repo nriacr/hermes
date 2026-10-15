@@ -23,17 +23,22 @@
 | Kontrol | Komut/yöntem ve kapsam | Sonuç / kanıt dosyası |
 |---|---|---|
 | Yerel test | `sh tools/check.sh` (pip check, compileall, ruff, 575 unittest; yeni: yüzey ayrımı, kademe/tavan/sıfırlama, eski dosya taşıma, bozuk durum, router süre metni, HTTP uyarısı) | Geçti |
-| Canlı davranış | Kurulum aşamasında doldurulacak | Aşağıya eklenecek |
+| Canlı sürüm/sağlık | `install_rpi.sh` + `tools/read_runtime.py` | 4.2.4 started, healthy, 14 aktif kart, 637 fiyat noktası (kurulum öncesi geçmiş korundu), open_incidents 1 (önceden var), tamamlanan iş okuması sürüyor |
+| Public panel çerçeve koruması | Pi'den `curl` ile public ana sayfa başlıkları | HTTP 200, `X-Frame-Options: DENY`, CSP `frame-ancestors 'none'` |
+| Public ayarlar kilit ekranı | Pi'den public `/settings` | "Ayarlar kilitli" PIN ekranı geliyor; HTTP uyarısı PIN girilmeden görünmez (ayarlar açılınca görünür) |
+| PIN kilit davranışı | Yalnız birim testleri | Canlıda yanlış PIN denenmedi: canlı güvenlik durumunu (kademe sayacı) değiştirirdi; ayrı kovalar ve kademe testlerle doğrulandı |
+| Ek yük imajı | `ha apps update` Pi'de yeni sabit imajı derledi | Başarılı, uygulama started |
 
 ## Yayın ve kurulum
 
-- Kurulum `bin/ha-ssh` ile `sh tools/install_rpi.sh` (Nuri'nin ayrıca yazdığı onayla). Sonuç aşağıda.
+- Yayın: commit `4538c75`, sürüm 4.2.4 (GitHub main).
+- Kuruldu: 2026-10-15, `sh tools/install_rpi.sh` (Nuri'nin yazılı onayıyla; HTTP uyarısı dahil üç madde de kalsın dedi). Sonuç: Hermes 4.2.4 kuruldu, sağlıklı.
 
 ## Veri, yedek ve geri alma
 
 - Kullanıcı verisi: fiyat geçmişi, takipler, bildirim hafızası, SQLite değişmez; yalnız `web_access.json` içine `locks` eklenir (PIN korunur).
-- Yedek: install_rpi.sh'in doğruladığı günlük tam yedek (kod aşağıda).
-- Geri alma: `sh tools/prepare_code_rollback.sh 0b9c9c2` (yalnız kod). Veri geri yükleme ayrı insan yetkisi ister.
+- Yedek: install_rpi.sh'in doğruladığı günlük tam yedek `b160df65` (yeni yedek alınmadı).
+- Geri alma: `sh tools/prepare_code_rollback.sh 0b9c9c2` (yalnız kod); kurulum aracının verdiği yol: `sh tools/rollback_rpi.sh b160df65` (yedekten geri yükleme, veri etkiler, ayrı insan yetkisi ister). Veri geri yükleme ayrı insan yetkisi ister.
 
 ## Kalan durum
 
