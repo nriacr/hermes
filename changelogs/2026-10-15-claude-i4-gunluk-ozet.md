@@ -15,7 +15,7 @@
 | Kontrol | Komut | Sonuç |
 |---|---|---|
 | Yerel test | sh tools/check.sh | ruff + 612 test OK |
-| Canlı | kurulum sonrası aşağıda | |
+| Canlı | tools/install_rpi.sh (commit ab48a01) | 4.4.0 started, healthy, veri korundu, günlükte Traceback yok. Kurulum 22:56'da olduğundan ilk özet 16 Ekim 09:00'dan sonra beklenir; gönderim canlıda henüz görülmedi. |
 
 ## Veri, yedek ve geri alma
 
