@@ -209,11 +209,17 @@ class AuthorizationTests(AccessCase):
             self.assertEqual(self.request("/live/dashboard").status, 200)
         for path in ("/health", "/app.css", "/overview.js", "/icon.png"):
             self.assertEqual(self.request(path).status, 200)
-        for path in ("/settings", "/statistics", "/restarting", "/settings/restarting"):
+        for path in ("/settings", "/statistics"):
             with self.subTest(path=path), patch.object(server, "render_settings_page") as render:
                 response = self.request(path)
                 self.assertIn("Ayarlar kilitli", response.payload.decode())
                 render.assert_not_called()
+        # The progress page after a save holds nothing private; the PIN session is gone once Hermes restarts.
+        for path in ("/restarting", "/settings/restarting"):
+            with self.subTest(path=path):
+                page = self.request(path).payload.decode()
+                self.assertIn("Hermes yeniden başlatılıyor", page)
+                self.assertNotIn("Ayarlar kilitli", page)
         for path in ("/runtime", "/live/statistics", "/future-private-route", "/internal/runtime"):
             self.assertIn(self.request(path).status, (401, 404))
 

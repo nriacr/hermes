@@ -207,6 +207,17 @@ class RouterTests(DataFilesMixin, unittest.TestCase):
         ingress = self.request("/restarting?return_to_main=1").payload.decode()
         self.assertIn("data-health-path='./health'", ingress)
         self.assertIn("data-return-path='./'", ingress)
+        # Saving or restarting returns to the open home page by default: the PIN session ends with the restart.
+        self.assertIn(f"data-return-path='/public/{TOKEN}/'", page)
+        self.assertIn("data-return-path='./'", self.request("/restarting").payload.decode())
+        self.assertIn("data-return-path='./settings'", self.request("/restarting?return_to_main=0").payload.decode())
+
+    def test_save_and_restart_redirect_to_the_page_that_returns_home(self):
+        with patch.object(server, "handle_settings_save", return_value=(True, "Kaydedildi")):
+            response = self.request("/settings/save", "POST", b"x=1")
+        self.assertIn("return_to_main=1", response.headers["Location"])
+        with patch.object(server, "handle_restart", return_value=(True, "Yeniden")):
+            self.assertIn("return_to_main=1", self.request("/restart", "POST").headers["Location"])
 
     def test_live_data_refreshes_in_place_on_both_surfaces(self):
         self.data.write_summary({"rows": [price_row(product_title="Canlı ürün")], "checked_at": "2026-10-03 20:00:00"})

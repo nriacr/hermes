@@ -30,7 +30,7 @@ from .icons import HERMES_ICON_PNG, HERMES_ICON_SVG, render_web_manifest
 from .pages import link
 from .pin import csrf_field, render_configure_page, render_pin_page, render_session_bar
 from .statistics import render_statistics_page, statistics_live_html
-from .settings import handle_restart, handle_settings_save, render_restart_page, render_settings_page, should_return_to_main
+from .settings import handle_restart, handle_settings_save, render_restart_page, render_settings_page
 
 PUBLIC_TOKEN_MIN_LENGTH = 24
 # Text responses above this size are gzip-compressed when the browser accepts it.
@@ -252,7 +252,7 @@ class Router:
     def handle(self, request: Request) -> Response:
         path = request.path.rstrip("/") or "/"
         # An explicit guest allowlist keeps future management routes protected by default.
-        if request.method == "GET" and path in {"/", "/live/dashboard", "/health", *ASSETS}:
+        if request.method == "GET" and path in {"/", "/live/dashboard", "/health", "/restarting", "/settings/restarting", *ASSETS}:
             return self._get(request, path)
         if path == "/internal/runtime":
             # HA-authenticated maintenance only; never accessible on the public surface.
@@ -267,7 +267,7 @@ class Router:
         if request.method == "POST" and path in {"/auth/unlock", "/auth/configure", "/auth/lock", "/auth/touch"}:
             return self._auth_action(request, path, session)
         if not session or not session.authenticated:
-            if request.method == "GET" and path in {"/settings", "/statistics", "/restarting", "/settings/restarting"}:
+            if request.method == "GET" and path in {"/settings", "/statistics"}:
                 return self._pin_reply(request)
             return Response(401, b"PIN required\n")
         if request.method == "GET" and path == "/auth/status":
@@ -322,11 +322,10 @@ class Router:
             refresh_public_options()
             if not ok:
                 return redirect(request, "settings", saved="fail", msg=message)
-            extra = {"return_to_main": "1"} if should_return_to_main(request.body) else {}
-            return redirect(request, "restarting", msg=message, **extra)
+            return redirect(request, "restarting", msg=message, return_to_main="1")
         if path == "/restart":
             ok, message = handle_restart()
-            return redirect(request, "restarting", msg=message) if ok else redirect(request, "settings", saved="fail", msg=message)
+            return redirect(request, "restarting", msg=message, return_to_main="1") if ok else redirect(request, "settings", saved="fail", msg=message)
         if path in {"/reset-statistics", "/reset-errors"}:
             ok, message = self.runtime.reset_statistics()
             return redirect(request, "statistics", saved="ok" if ok else "fail", msg=message)

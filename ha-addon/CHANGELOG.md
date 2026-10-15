@@ -1,5 +1,11 @@
 # Değişiklik günlüğü
 
+## 4.2.6
+
+- Ayar kaydı veya "Hermes'i yeniden başlat" sonrası, Hermes yeniden başlayınca artık PIN kilit ekranı yerine anasayfa açılır (yeniden başlama bellekteki PIN oturumunu sildiği için eski davranış ayarlar sayfasında kilit gösteriyordu).
+- "Yeniden başlatılıyor" ilerleme sayfası PIN istemez (içinde hassas veri yok); Ayarlar ve İstatistik yine PIN ister.
+- Ingress ve herkese açık adres aynı davranır. Takipler, fiyat geçmişi ve bildirim hafızası değişmedi.
+
 ## 4.2.5
 
 - Ayarlar: silme ve güncelleme artık formdaki takip kimliğiyle eşleşir; sayfa eskimişse (liste başka yerde değişmişse) işlem reddedilir ve "sayfayı yenile" denir. Eski sayfa yanlış takibi silemez veya ezemez.

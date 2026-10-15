@@ -329,7 +329,9 @@ def render_settings_page(base: str, params: Dict[str, List[str]], *, access_bar:
 
 def render_restart_page(base: str, params: Dict[str, List[str]]) -> bytes:
     message = params.get("msg", ["Ayarlar kaydedildi. Hermes yeniden başlatılıyor."])[0]
-    return_to_main = params.get("return_to_main", [""])[0] == "1"
+    # After a save or restart the in-memory PIN session is gone, so returning to the settings page would only show
+    # the lock screen. The home page is open to everyone; "return_to_main=0" still selects the settings page.
+    return_to_main = params.get("return_to_main", ["1"])[0] != "0"
     destination = link(base, "") if return_to_main else link(base, "settings")
     body = (
         "<h2 class='page-heading'>Hermes yeniden başlatılıyor</h2>"
@@ -560,8 +562,3 @@ def handle_restart():
         return True, "Hermes yeniden başlatılıyor; ayarlar değişmedi."
     except Exception as exc:  # noqa: BLE001
         return False, f"Hermes yeniden başlatılamadı: {exc}"
-
-
-def should_return_to_main(body: bytes) -> bool:
-    form = urllib.parse.parse_qs(body.decode("utf-8", errors="replace"), keep_blank_values=True)
-    return _first(form, "return_to_main") == "1"
