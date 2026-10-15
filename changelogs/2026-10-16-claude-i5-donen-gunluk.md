@@ -16,8 +16,8 @@
 
 ## Veri, yedek ve geri alma
 
-- Mevcut veri değişmez; yalnız yeni küçük dosya (en çok ~5 MB). Geri alma: {önceki sürüm} kaydıyla prepare_code_rollback.sh.
+- Mevcut veri değişmez; yalnız yeni küçük dosya (en çok ~5 MB). Geri alma: 4.11.0 kaydıyla prepare_code_rollback.sh.
 
 ## Canlı kanıt
 
-- (kurulumdan sonra eklenecek)
+- install_rpi.sh (yedek b160df65): 4.11.1 started, sağlık ok, veri sayıları korundu, günlükte Traceback yok. /data/hermes.log.jsonl dosyasını SSH kabuğundan doğrudan okuyamadım (docker/data yolu yok); yazma yolu testle doğrulandı, canlı dosya sonraki incelemede okunacak.
