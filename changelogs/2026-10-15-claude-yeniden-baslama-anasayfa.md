@@ -17,7 +17,7 @@
 |---|---|---|
 | Yerel | `sh tools/check.sh` (591 test, ruff) | Geçti |
 | Regresyon | ilerleme sayfası oturumsuz açılır, varsayılan dönüş anasayfa (ingress+public), kayıt/yeniden başlat yönlendirmesi, ayarlar/istatistik hâlâ kilitli | Geçti |
-| Canlı | `install_rpi.sh` kurulum, sürüm/sağlık okuması | 4.2.6 started, healthy; davranış (kayıt sonrası anasayfa) Nuri'nin ayar kaydıyla doğrulanacak |
+| Canlı | `install_rpi.sh` kurulum, sürüm/sağlık okuması | 4.2.6 started, healthy; davranış (kayıt sonrası anasayfa) Nuri ayar kaydetti: Hermes yeniden başlayınca kilit ekranı yerine anasayfa açıldı (15 Ekim 2026 ~22:10) |
 
 ## Yayın, veri, geri alma
 
@@ -25,4 +25,4 @@
 
 ## Kalan durum
 
-- Kayıt sonrası anasayfaya dönüşün canlı doğrulaması Nuri'nin bir ayar kaydı yapmasına bağlı.
+- Yok; canlı doğrulama Nuri tarafından yapıldı.
