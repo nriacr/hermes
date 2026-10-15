@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.8.0
+
+- Ayarlar'da toplu kart işlemleri: her kartın başında seçim kutusu; "Toplu işlem" bölümünden seçili kartlar için aktif/pasif yapma, öncelik ve grup atama. İşlem yalnız kart alanlarını doldurur, kalıcı olması için "Değişiklikleri uygula" gerekir (tek yeniden başlatma). Gizli (filtrelenmiş) kartlar seçilmez. Veri ve kayıt yolu değişmedi.
+
 ## 4.7.0
 
 - Kart detayındaki fiyat grafiğine zaman aralığı düğmeleri: 7 gün, 30 gün, 90 gün ve Tümü (yalnız geçmişten kısa aralıklar gösterilir). Hedef fiyat çizgisi her aralıkta durur; pencere açılırken geçerli olan fiyattan başlar. Veri ve bildirimler değişmedi.
