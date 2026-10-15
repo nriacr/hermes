@@ -13,7 +13,7 @@ import traceback
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Optional
 
-from ..constants import APP_VERSION
+from ..constants import APP_VERSION, PRIORITY_INTERVAL_SECONDS
 from ..history import History
 from ..homeassistant import HomeAssistantBridge
 from ..logging_utils import log
@@ -21,7 +21,10 @@ from ..models import HermesConfig
 from ..notifier import Pushover
 from ..providers.registry import ProviderSet
 from ..storage import file_lock, load_json, save_json
-from . import state as state_ops, summary
+from ..utils import local_now, site_label
+from . import scheduling, state as state_ops, summary
+from .alerts import SILENT_GUARD_KINDS, quiet_hours
+from .stall import StallWatch, stall_threshold
 from .cycle import DataFiles, Monitor
 
 # A cycle running longer than this is considered stuck; /health then fails so
@@ -124,6 +127,34 @@ class MonitorService:
             return False, "bildirim göndericisi durdu"
         return True, "ok"
 
+    def _check_stalls(self, stall: StallWatch, sites, now: float) -> None:
+        """Tell the user once when a site reads nothing successfully for a long time (see monitor/stall.py)."""
+        thresholds = {}
+        for site in sites:
+            longest = max((max(self.config.interval_seconds, PRIORITY_INTERVAL_SECONDS.get(scheduling.watch_priority(watch), 0))
+                           for watch in self.config.watches if watch.active and watch.site == site), default=0)
+            thresholds[site] = stall_threshold(longest)
+        with self.monitor._lock:
+            guards = state_ops.guard_store(self.monitor._state)
+            silent = [site for site in sites if (guards.get(state_ops.site_guard_key(site)) or {}).get("kind") in SILENT_GUARD_KINDS]
+        began, recovered = stall.update(now, self.monitor.diagnostics.last_success, thresholds, silent)
+        bridge = self.monitor.home_assistant
+        for site in recovered:
+            log(f"{site} yeniden başarılı okuyor (takılma sona erdi).")
+            if bridge and bridge.enabled:
+                bridge.clear_problem(f"stall:{site}")
+        for site in began:
+            log(f"{site} uzun süredir başarılı okuma yapamıyor (eşik {round(thresholds[site] / 60)} dk).")
+        for site, since in stall.stalled.items():
+            minutes = round((now - since) / 60)
+            message = (f"{site_label(site)} {minutes} dakikadır başarılı okuma yapamıyor. Diğer siteler çalışıyor. "
+                       "Ayrıntı Hermes panelinde (Tanı).")
+            if bridge and bridge.enabled and site in began:
+                bridge.persistent_problem(f"stall:{site}", message)
+            if site not in stall.notified and not quiet_hours(local_now()):
+                self.monitor.delivery.send("Hermes takip uyarısı", message, event_id=f"stall:{site}:{round(time.time() - (now - since))}")
+                stall.notified.add(site)
+
     # -- the loop -------------------------------------------------------------
 
     def _sleep(self, seconds: float) -> None:
@@ -158,6 +189,7 @@ class MonitorService:
         maintenance_at = 0.0
         diagnostics_at = 0.0
         communicated = {}
+        stall = StallWatch(time.monotonic())
 
         def work(site):
             error = None
@@ -217,6 +249,7 @@ class MonitorService:
                         for identity in set(communicated) - set(critical):
                             if bridge.clear_problem(identity):
                                 communicated.pop(identity)
+                    self._check_stalls(stall, sites, now)
                     diagnostics_at = now + 5
                 if now >= maintenance_at:
                     self.monitor.diagnostics.prune()

@@ -9,6 +9,7 @@ from pathlib import Path
 from .constants import APP_VERSION
 from .database import Database
 from .logging_utils import redact
+from .monitor.stall import SUCCESS_OUTCOMES
 from .utils import PROCESS_STARTED_AT
 
 
@@ -24,6 +25,8 @@ class Diagnostics:
     def __init__(self, path):
         self.db = Database.at(path)
         self.progress: dict[str, float] = {}
+        # Last read of a site that ended without an access/read error (monotonic seconds).
+        self.last_success: dict[str, float] = {}
 
     def interrupt_abandoned(self):
         self.db.transaction([("UPDATE jobs SET finished=?,outcome='interrupted',detail=? WHERE finished IS NULL",
@@ -40,6 +43,8 @@ class Diagnostics:
 
     def finish(self, job, site, outcome, duration_ms, detail="", evidence=None):
         self.progress[site] = time.monotonic()
+        if outcome in SUCCESS_OUTCOMES:
+            self.last_success[site] = self.progress[site]
         self.db.transaction([("UPDATE jobs SET finished=?,outcome=?,duration_ms=?,detail=?,evidence=? WHERE id=?",
                               (time.time(), outcome, duration_ms, redact(str(detail))[:2000],
                                redact(json.dumps(evidence or {}, ensure_ascii=False)), job))])

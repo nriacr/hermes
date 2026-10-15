@@ -1,5 +1,11 @@
 # Değişiklik günlüğü
 
+## 4.2.8
+
+- Site başına takılma uyarısı: bir site 45 dakika (veya en uzun takip aralığının 3 katı) boyunca hiç başarılı okuma yapamazsa Pushover (sessiz saatler dışında) ve Home Assistant kalıcı bildirimi bir kez uyarır; site yeniden okuyunca uyarı kapanır. Önceki sağlık denetimi yalnız hiç ilerlemeyen okuyucuyu (Amazon için 3 saat) yakalıyordu.
+- CAPTCHA/HTTP 503 molaları bilerek sessiz kalır; bu uyarıyı tetiklemez. Yeniden başlatma eşiği değişmedi.
+- Takipler, fiyat geçmişi ve bildirim hafızası değişmedi.
+
 ## 4.2.7
 
 - Amazon: DNS/bağlantı hatasında (ağ kesintisi) Chromium yedek okuması artık denenmez; aynı ağ sorunu tarayıcıda da yaşanır ve sadece CPU/süre harcıyordu. Zaman aşımı ve diğer hatalarda tek seferlik tarayıcı yedeği aynen sürer.
