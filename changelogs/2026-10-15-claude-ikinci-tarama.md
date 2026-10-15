@@ -49,7 +49,11 @@ ha-addon/config.yaml, ha-addon/CHANGELOG.md, ha-addon/app/hermes/{config,constan
 
 ## Yayın ve kurulum
 
-(Kurulumdan sonra doldurulur.)
+- Yayın: E+G `fb36dec`, F `5fc03e3`, changelog `a92bb61` (kurulan kayıt). Sürüm 4.2.5.
+- Kurulum: 15 Ekim 2026 ~20:35 (yerel saat), `sh tools/install_rpi.sh` (ha-exclusive altında; Nuri onayı sohbette verildi). Testler, `ha core check`, mağaza sürümü doğrulandı; HA günlük tam yedeği `b160df65` kullanıldı.
+- Canlı kanıt: `ha apps info` → sürüm 4.2.5, durum started, `hassio_role: default`, `hassio_api: true`. `/runtime`: healthy, completed_jobs 16361, state_entries 331, price_points 474, outbox sent 103 / failed 1 (kurulum öncesi de vardı), open_incidents 1. `database_integrity: ok`.
+- T4 ölçümü (yalnız okuma): state.json anlık görüntüsü 738.629 bayt (~721 KB), hermes.db 42.196.992 bayt (~40,2 MB), WAL 2.739.832 bayt (~2,6 MB, açılıştan hemen sonra), shm 32.768 bayt.
+- **Doğrulanamadı:** `/addons/self/options` ve `/addons/self/restart` ucunun varsayılan rolle çalıştığı, panel PIN'i gerektiği için henüz canlıda denenmedi. Nuri panelde "Hermes'i yeniden başlat"a bastığında günlükten doğrulanacak; çalışmazsa 4.2.4'teki manager + slug yoluna dönülecek.
 
 ## Veri, yedek ve geri alma
 
@@ -59,4 +63,5 @@ ha-addon/config.yaml, ha-addon/CHANGELOG.md, ha-addon/app/hermes/{config,constan
 
 ## Kalan durum
 
-(Kurulum sonrası doldurulur.)
+- Self-uç denemesi bekliyor (yukarı bakın). Geri dönüş komutu: `sh tools/prepare_code_rollback.sh b09b365`. Yedek kodu `b160df65` (veri geri yükleme yok).
+- /mnt/project-files/HERMES-DEVIR.md bu makinede yok; güncellenemedi, bu changelog devir için yeterli ayrıntıyı taşır.
