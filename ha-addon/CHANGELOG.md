@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.12.0
+
+- Tüm Hermes verisi artık veritabanında (hermes.db) asıl kaynak: Amazon erişim durumu ve çerezleri ile Telegram durumu, görülen mesajlar, hata olayları, hızlı ekleme ve giriş durumu da takip hafızası ve fiyat özeti gibi tek işlemle veritabanına yazılır; fiyat geçmişi, okumalar ve bildirim kuyruğu zaten oradaydı. İlk açılışta mevcut JSON dosyaları veritabanına alınır. JSON dosyaları eski sürüme geri dönüş için yedek olarak yazılmaya devam eder. Takipler, fiyatlar ve bildirim davranışı değişmedi.
+
 ## 4.11.3
 
 - İç düzenleme: Amazon sağlayıcı dosyası (676 satır) okuma ritmi (rhythm.py), sayfa önbelleği (pagecache.py) ve arama sonucu eşleştirmesi (matching.py) olarak bölündü. Kod satırları aynen taşındı; Amazon okuma zamanlaması, istek sayıları ve takipler değişmedi.

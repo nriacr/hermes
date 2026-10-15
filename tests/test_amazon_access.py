@@ -22,6 +22,7 @@ from hermes.constants import (
     AMAZON_WINDOW_START_LIMIT,
 )
 from hermes.errors import BotProtectionHermesError
+from hermes.storage import save_json
 from hermes import constants as amazon_constants
 from hermes.providers.amazon import access as amazon_access
 from hermes.providers.amazon import client as amazon_client
@@ -504,8 +505,7 @@ class CookieJarTests(unittest.TestCase):
         save_cookies(session, self.path)
         with patch.object(amazon_client.time, "time", return_value=amazon_client.time.time() + 8 * 24 * 3600):
             self.assertEqual(load_cookies(requests.Session(), self.path), 0)
-        self.path.write_text(json.dumps([{"name": "a", "value": "b", "domain": ".amazon.com.tr", "path": "/", "expires": 1}]),
-                             encoding="utf-8")
+        save_json(self.path, [{"name": "a", "value": "b", "domain": ".amazon.com.tr", "path": "/", "expires": 1}])
         self.assertEqual(load_cookies(requests.Session(), self.path), 0)
 
     def test_cookies_saved_before_the_last_block_are_left_behind(self):

@@ -35,3 +35,24 @@ class DiagnosticLogTest(unittest.TestCase):
         logging_utils.enable_file_log("/nonexistent-folder/hermes.log.jsonl")
         self.assertIsNone(logging_utils._file_sink)
         logging_utils.log("devam")
+
+
+class SqlBackedFilesTest(unittest.TestCase):
+    def test_adopt_then_database_is_authoritative(self):
+        from hermes import storage
+        with tempfile.TemporaryDirectory() as folder:
+            data = Path(folder)
+            (data / "amazon_cookies.json").write_text('[{"name": "a"}]', encoding="utf-8")
+            (data / "status.json").write_text('{"ok": 1}', encoding="utf-8")
+            (data / "options.json").write_text('{"x": 1}', encoding="utf-8")
+            self.assertEqual(storage.adopt_json_files(data), ["amazon_cookies.json", "status.json"])
+            self.assertEqual(storage.adopt_json_files(data), [])  # idempotent
+            # a later save updates both; an edited file does not override the database
+            storage.save_json(data / "status.json", {"ok": 2})
+            (data / "status.json").write_text('{"ok": 99}', encoding="utf-8")
+            self.assertEqual(storage.load_json(data / "status.json", {}), {"ok": 2})
+            self.assertEqual(storage.load_json(data / "amazon_cookies.json", []), [{"name": "a"}])
+            # options.json stays a plain file
+            (data / "options.json").write_text('{"x": 2}', encoding="utf-8")
+            self.assertEqual(storage.load_json(data / "options.json", {}), {"x": 2})
+            storage.Database.at(data / "hermes.db").close()
