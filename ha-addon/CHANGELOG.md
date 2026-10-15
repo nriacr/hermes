@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.14.0
+
+- Fiyat grafiğindeki hedef çizgisi artık hedef fiyat değiştikçe basamak yapar: Hermes her kartın hedefini değiştiği anda kaydeder ve yeşil kesikli çizgi o tarihte iner/çıkar. Geçmiş hedef değişiklikleri kayıtlı değildir; kayıt bu sürümle başlar, öncesi için ilk kayıtlı hedef düz devam eder. Hiç değişmeyen hedefte çizgi eskisi gibi düzdür. Takipler, bildirimler ve fiyat verisi değişmedi.
+
 ## 4.13.0
 
 - Ürün ayrıntı penceresindeki fiyat grafiği: aynı üründe hem Yeni hem Depo teklifi takipteyse iki ayrı çizgi çizilir (Yeni mavi, Depo turuncu, açıklamalı); zaman aralığı düğmeleri ikisini birlikte keser, üzerine gelince balon iki fiyatı birden gösterir. Tek teklifli ürünlerde grafik aynı kalır. Veri ve bildirimler değişmedi.
