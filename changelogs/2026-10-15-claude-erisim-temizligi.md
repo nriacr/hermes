@@ -49,3 +49,11 @@ Agent güvenlik ayarı, kimlik bilgisi veya yetki değiştirmediği için şunla
 ## Güncelleme: 4.2.5 ayar kaydı canlıda doğrulandı
 
 15 Ekim 2026 21:47 (yerel): Nuri ayarlardan bir takip kartını sildi. Kanıt: Supervisor günlüğü 21:47:24 uygulamayı durdurup 21:47:25'te 4.2.4 değil 4.2.5 ile yeniden başlattı; Hermes günlüğü 21:46:34 "kapanıyor"; Supervisor'daki seçeneklerde 13 takip kartı, `/runtime` `active_cards: 13`, `healthy: true`, sürüm 4.2.5. Yani `hassio_role: default` ile hem seçenek yazma (`/addons/self/options`) hem yeniden başlatma çalışıyor; manager rolüne dönüş gerekmedi.
+
+## Güncelleme: arşiv temizliği ("hepsini sil", Nuri 15 Ekim 2026)
+
+- Kaldırılan çalışma klasörleri (hepsi temizdi: kaydedilmemiş değişiklik yok): hermes-stock-work, hermes-pi-purchase-test-work, hermes-pin-release-work, hermes-statistics-operation (`git worktree remove`).
+- `.release-state/*/worktree`: 22 eski yayın çalışma kopyası `git worktree remove` ile kaldırıldı (174 MB → 28 MB). Kuyruk klasörleri, `change.patch` kayıtları, `install.lock`, `queue.sqlite` ve `.deploy-state/hermes-version-reservations.json` **silinmedi** (geçmiş kaydı; küçük).
+- **Silinmeyen (Nuri'ye soruluyor):** `.release-state/0d0e029d491b/worktree` ve `.release-state/c4332dc4ba54/worktree` — içinde birleştirilmemiş/değişmiş dosyalar var (örn. deploy/automations/oturma.yaml çakışması, koordinasyon belgeleri, oturma-medya araçları). Zorla silinmedi.
+- Yerel dallar: 10 `codex/*` dalı silindi. Önce `backups/worktree-yedek-20261015.bundle` güncellendi ve doğrulandı (11 dal, `codex/*` + `claude/*`); geri getirme: `git fetch <bundle> 'refs/heads/*:refs/heads/*'`. Uzak depoya dokunulmadı.
+- Dokunulmayanlar: başka ajanların aktif çalışma kopyaları (/private/tmp/ha-*, ~/.codex/worktrees), `feature/*`, `fix/*`, `hermes-3` dalları (birleşmiş), `claude/deleted-watch-summary` (yedekte, silinmedi).
