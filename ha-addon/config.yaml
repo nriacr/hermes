@@ -103,4 +103,5 @@ schema:
       check_interval_minutes: "int(1,1440)?"
       notify_once_in_24H: "bool?"
       notify_90_day_low: "bool?"
+      notify_window: "list(always|daytime|evening|weekend)?"
       active: "bool?"

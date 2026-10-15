@@ -231,6 +231,33 @@ class NotificationTests(CycleTestCase):
                     self.run_later(config([rule]))
                 self.assertEqual(len(self.titles_sent()), 1 if enabled else 0)
 
+    def test_card_notification_window_defers_the_alert_until_it_opens(self):
+        from hermes.monitor import results as results_module
+        rule = watch(url=AMAZON, target="1000", notify_window="weekend")
+        offers = [OfferResult("iPhone", Decimal("900"), url=AMAZON)]
+        wednesday = datetime(2026, 10, 14, 12, 0).astimezone()
+        saturday = datetime(2026, 10, 17, 12, 0).astimezone()
+        with patch.object(AmazonProvider, "read", side_effect=reader(offers)):
+            with patch.object(results_module, "local_now", return_value=wednesday):
+                state = self.run_cycle(config([rule]))
+            self.assertEqual(self.titles_sent(), [])
+            entry = state[state[key(rule)]["offer_keys"][0]]
+            self.assertNotIn("last_alerted_price", entry)
+            with patch.object(results_module, "local_now", return_value=saturday):
+                self.run_later(config([rule]))
+        self.assertEqual(self.titles_sent(), ["Amazon fiyat alarmı"])
+
+    def test_window_open_rules(self):
+        from hermes.monitor.alerts import window_open
+        at = lambda day, hour: datetime(2026, 10, day, hour, 0)  # noqa: E731  (14 Oct 2026 is a Wednesday)
+        self.assertTrue(window_open("always", at(14, 3)))
+        self.assertTrue(window_open("daytime", at(14, 8)))
+        self.assertFalse(window_open("daytime", at(14, 22)))
+        self.assertFalse(window_open("evening", at(14, 17)))
+        self.assertTrue(window_open("evening", at(14, 22)))
+        self.assertFalse(window_open("weekend", at(16, 12)))
+        self.assertTrue(window_open("weekend", at(17, 12)))
+
     def test_stock_return_notifies_once_and_still_records_the_offers(self):
         rule = watch("Kan üzümü", "https://bengurme.com/products/uzum", target="100")
         offers = [OfferResult("Kan üzümü 500 g", Decimal("80"), url=rule.url), OfferResult("Kan üzümü 1 kg", Decimal("150"), url=rule.url + "?v=2")]

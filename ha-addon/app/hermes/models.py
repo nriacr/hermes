@@ -25,6 +25,8 @@ class WatchRule:
     notify_once_in_24h: bool = True
     # Also notify when the price is the lowest of the last 90 days, even above the target.
     notify_on_90_day_low: bool = False
+    # One of constants.NOTIFY_WINDOWS: when this card may send alerts.
+    notify_window: str = "always"
     active: bool = True
     # Shared by every URL in one configured tracking card.
     tracking_id: str = ""

@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional
 
 from ..config import DEFAULT_TELEGRAM_CHANNELS, WATCH_URL_FIELDS, options_with_defaults, read_options, watch_group, watch_urls
 from ..constants import (
-    APP_VERSION, DEFAULT_PRIORITY, PRIORITIES, PRIORITY_DESCRIPTIONS, PRIORITY_LABELS, STATE_PATH, SUMMARY_PATH, normalize_priority,
+    APP_VERSION, DEFAULT_PRIORITY, PRIORITIES, PRIORITY_DESCRIPTIONS, PRIORITY_LABELS, STATE_PATH, NOTIFY_WINDOWS, normalize_notify_window, SUMMARY_PATH, normalize_priority,
 )
 from ..logging_utils import log
 from ..storage import load_json
@@ -169,6 +169,12 @@ def watch_form(item: Dict[str, Any], index: int, is_new: bool = False, groups=No
                   f"{' selected' if priority == value else ''}>{escape(PRIORITY_LABELS[value])}</option>" for value in PRIORITIES)
         + "</select></label>"
     )
+    window_field = (
+        f"<label class='watch-window'>Bildirim zamanı<select name='{escape(prefix + 'notify_window', quote=True)}'>"
+        + "".join(f"<option value='{value}'{' selected' if normalize_notify_window(item.get('notify_window')) == value else ''}>"
+                  f"{escape(label)}</option>" for value, label in NOTIFY_WINDOWS.items())
+        + "</select></label>"
+    )
     exclude_field = _field(prefix, "exclude_terms", "Hariç Tut", exclude_terms).replace("<label>", "<label class='watch-exclude'>", 1)
     flags = "".join([
         _checkbox(prefix, "include_variations", "Varyasyonları ekle", False if is_new else item.get("include_variations", False)),
@@ -192,7 +198,7 @@ def watch_form(item: Dict[str, Any], index: int, is_new: bool = False, groups=No
         f"{_field(prefix, 'minimum_price', 'Hedef Fiyat Min', _price_input_value(item.get('minimum_price', '')))}"
         f"{_field(prefix, 'size', 'Beden', item.get('size', ''))}"
         f"</div><div class='watch-links'>{link_fields}</div>"
-        f"<div class='watch-bottom'>{priority_field}{exclude_field}{flags}{actions}"
+        f"<div class='watch-bottom'>{priority_field}{window_field}{exclude_field}{flags}{actions}"
         f"<p class='watch-hint'>Öncelik, fiyatın ne sıklıkla tarandığıdır: {', '.join(PRIORITY_LABELS.values())}. Satıcı filtresi şu an Amazon’da uygulanır; "
         "doğrulanmış Depo teklifleri korunur.</p></div></div>"
     )
@@ -425,6 +431,7 @@ def build_watch(form: Dict[str, List[str]], index: int) -> Optional[Dict[str, An
         "official_seller_only": prefix + "official_seller_only" in form,
         "notify_once_in_24H": prefix + "notify_once_in_24H" in form,
         "notify_90_day_low": prefix + "notify_90_day_low" in form,
+        "notify_window": normalize_notify_window(_first(form, prefix + "notify_window")),
         "active": prefix + "active" in form,
     }
     if minimum_price:

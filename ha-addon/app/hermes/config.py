@@ -13,6 +13,7 @@ from .constants import (
     FASHION_SITES,
     OPTIONS_PATH,
     SEARCH_RESULT_LIMIT,
+    normalize_notify_window,
     normalize_priority,
 )
 from .errors import HermesError
@@ -217,6 +218,7 @@ def _prepare_watch(item):
                 max_items_to_scan=SEARCH_RESULT_LIMIT,
                 notify_once_in_24h=parse_bool(item.get("notify_once_in_24H"), default=True),
                 notify_on_90_day_low=parse_bool(item.get("notify_90_day_low"), default=False),
+                notify_window=normalize_notify_window(item.get("notify_window")),
                 active=True,
                 tracking_id=tracking_id,
             )
