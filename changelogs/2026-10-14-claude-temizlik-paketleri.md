@@ -33,11 +33,17 @@ Paket D, kısmi (runtime)
 | Yerel test | sh tools/check.sh (bulut, Python 3.13): pip check, derleme, ruff, 566 test | Geçti |
 | Bağımlılık | pip-audit -r ha-addon/app/requirements.txt | Açık yok |
 | Kod geri dönüşü | sim. HA klasörü + gerçek deploy_lock.py/release_version.py ile prepare_code_rollback.sh | 4.2.3 hazırlandı, testler geçti |
-| Canlı davranış | Mac oturumu kurulumdan sonra doldurur | — |
+| Canlı davranış | Kurulum sonrası okuma, aşağıdaki "Yayın ve kurulum" | Geçti |
 
 ## Yayın ve kurulum
 
-Mac oturumu doldurur: commit, sürüm, push, kurulum zamanı, yedek kodu/tarihi, canlı kanıt.
+- Yayın: b6e43e7 (araçlar, AGENTS.md), 6420e45 + 3fac96e (runtime, docs/ui-demo.html silindi), 9313461 (4.2.3 sürümü ve CHANGELOG). Mac'te check.sh: 566 test geçti. origin/main = 9313461.
+- Kurulum: 2026-10-15 tools/install_rpi.sh, önkontroller geçti (temiz ağaç, HEAD == origin/main). Kurulum için .claude/ ve .cursor/permissions.json geçici olarak ~/hermes-gecici altına taşındı, sonra geri konacak.
+- Yedek: b160df65 (Automatic backup 2026.10.1, 2026-10-15T01:49Z), geri dönüş: sh tools/rollback_rpi.sh b160df65 (yalnız veri felaketinde).
+- Canlı kanıt: sürüm 4.2.3, started, healthy true; 14 aktif takip/kart; 364 durum kaydı; 635 fiyat noktası (kurulum öncesi geçmiş 634, düşüş yok); gönderim kuyruğu sent 102, failed 1 (eskiden beri); amazon/hepsiburada/togg son okuma <1 dk.
+- Public panel (8100): GET yanıtında X-Frame-Options: DENY ve Content-Security-Policy: frame-ancestors 'none'. Sunucu HEAD'i desteklemediği için curl -I yerine GET kullanıldı. Ingress (8099) yolu dışarıdan açık değil, bu başlık orada beklenmiyor.
+- Ölçülmedi: "33 ürün gösteriliyor, 6 stokta yok" tablo sayıları bu doğrulamada okunmadı.
+- Amazon ağ sayaçları sıfırlanmadı.
 
 ## Veri, yedek ve geri alma
 
