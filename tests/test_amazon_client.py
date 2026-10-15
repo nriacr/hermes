@@ -141,6 +141,27 @@ class AmazonTransportTests(unittest.TestCase):
         self.assertEqual(curl.calls, 1)
         browser.assert_called_once()
 
+    def test_network_failure_skips_the_browser_fallback(self):
+        class DNSError(requests.ConnectionError):
+            pass
+
+        for failure in (DNSError("could not resolve host"), requests.ConnectionError("refused"), OSError):
+            if failure is OSError:
+                import socket
+                failure = socket.gaierror(-2, "Name or service not known")
+            curl = FakeCurlSession([failure])
+            with (patch.object(amazon_client, "curl_requests", curl_module(curl)), AmazonClient() as client,
+                  patch.object(client.browser, "read") as browser):
+                with self.assertRaises(Exception) as caught:
+                    client.fetch(PRODUCT, 10)
+            self.assertIs(caught.exception, failure)
+            browser.assert_not_called()
+            self.assertEqual(curl.calls, 1)
+
+    def test_read_timeout_still_gets_the_browser_fallback(self):
+        self.assertFalse(amazon_client.is_network_error(requests.exceptions.ReadTimeout("slow")))
+        self.assertFalse(amazon_client.is_network_error(HermesError("parse")))
+
     def test_browser_failure_does_not_start_more_transports(self):
         curl = FakeCurlSession([requests.Timeout("timeout")])
         with (patch.object(amazon_client, "curl_requests", curl_module(curl)), AmazonClient() as client,

@@ -2261,6 +2261,19 @@ class WatchCardTests(unittest.TestCase):
 
 
 
+class HepsiburadaPremiumNoiseTests(unittest.TestCase):
+    def test_unparsed_premium_text_is_logged_once_per_product(self):
+        from hermes.logging_utils import ProblemLog
+        from hermes.providers.hepsiburada import detail
+
+        lines = []
+        html = "<html><body><h1>Kulaklık</h1><div>Premium ile fiyat yakında</div><div>199,90 TL</div></body></html>"
+        with patch.object(detail, "_PREMIUM_PROBLEMS", ProblemLog(emit=lines.append, interval=1800)):
+            for _ in range(5):
+                detail._detail_candidate(soup_from_html(html))
+        self.assertLessEqual(len(lines), 1)
+
+
 class SiteDetectionHostTests(unittest.TestCase):
     def test_only_the_host_name_selects_the_site(self):
         self.assertEqual(detect_site_from_url("https://www.amazon.com.tr/dp/B000000000"), "amazon")

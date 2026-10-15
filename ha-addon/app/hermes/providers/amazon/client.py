@@ -12,6 +12,7 @@ while, and the first request after that starts a new anonymous visitor.
 
 import os
 import random
+import socket
 import threading
 import time
 from contextlib import contextmanager
@@ -149,6 +150,16 @@ def is_protection_error(exc: BaseException) -> bool:
         return True
     message = normalize_offer_text(str(exc))
     return any(marker in message for marker in ("captcha", "robot", "bot korumasi", "koruma sayfasi"))
+
+
+_NETWORK_ERROR_NAMES = {"DNSError", "ConnectionError", "ConnectTimeout", "gaierror"}
+
+
+def is_network_error(exc: BaseException) -> bool:
+    """The connection itself failed (DNS, refused, unreachable). A browser would hit the same wall."""
+    if isinstance(exc, (requests.ConnectionError, socket.gaierror)):
+        return not isinstance(exc, requests.exceptions.ReadTimeout)
+    return any(cls.__name__ in _NETWORK_ERROR_NAMES for cls in type(exc).__mro__)
 
 
 def block_cause(exc: BaseException) -> str:
@@ -333,6 +344,10 @@ class AmazonClient:
             html = self._timed(method, candidate, expect_search, lambda: self._http_read(candidate, timeout, expect_search), on_request)
         except Exception as exc:  # noqa: BLE001
             if is_protection_error(exc):
+                raise
+            if is_network_error(exc):
+                # DNS or connection failure: Chromium would fail the same way and only burn CPU and time.
+                log(f"Amazon {method} bağlantı hatası, tarayıcı yedeği atlandı: {block_reason(exc)} | {_short_url(candidate)}")
                 raise
             log(f"Amazon {method} okuması başarısız, tarayıcıyla bir kez denenecek: {block_reason(exc)} | {_short_url(candidate)}")
             html = self._timed("browser", candidate, expect_search, lambda: self._browser_read(candidate, timeout, expect_search), on_request)

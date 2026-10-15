@@ -4,7 +4,7 @@ import re
 from typing import Iterable, Optional
 
 from ...errors import HermesError
-from ...logging_utils import log
+from ...logging_utils import ProblemLog
 from ...models import OfferResult
 from ...utils import normalize_offer_text, repair_mojibake
 from ..base import extract_price_from_selectors, extract_title, soup_from_html
@@ -122,6 +122,10 @@ def extract_embedded_variant_offer(html: str, source_url: str) -> Optional[Offer
     )
 
 
+# The same page fails the same way every round; one line per product per 30 minutes is enough.
+_PREMIUM_PROBLEMS = ProblemLog(interval=1800)
+
+
 def _detail_candidate(soup) -> Optional[HepsiburadaCandidate]:
     title = extract_title(soup) or "Hepsiburada ürünü"
     lines = _visible_lines_until_details(soup)
@@ -137,7 +141,7 @@ def _detail_candidate(soup) -> Optional[HepsiburadaCandidate]:
         if not premium_prices:
             premium_prices = _premium_prices(readable_source_text)
     if not premium_prices and (_has_premium_marker(line_text) or _has_premium_marker(readable_source_text)):
-        log("Hepsiburada Premium metni bulundu ama fiyat ayrıştırılamadı.")
+        _PREMIUM_PROBLEMS.failure(title, "Hepsiburada Premium metni bulundu ama fiyat ayrıştırılamadı.")
     preferred_prices = [*cart_special_prices, *premium_prices]
     price = min(preferred_prices) if preferred_prices else None
     if price is None:

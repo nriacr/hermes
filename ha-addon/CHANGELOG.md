@@ -1,5 +1,11 @@
 # Değişiklik günlüğü
 
+## 4.2.7
+
+- Amazon: DNS/bağlantı hatasında (ağ kesintisi) Chromium yedek okuması artık denenmez; aynı ağ sorunu tarayıcıda da yaşanır ve sadece CPU/süre harcıyordu. Zaman aşımı ve diğer hatalarda tek seferlik tarayıcı yedeği aynen sürer.
+- Hepsiburada: "Premium metni bulundu ama fiyat ayrıştırılamadı" uyarısı ürün başına 30 dakikada bir yazılır (günde ~3.000 satır gürültü). Fiyat okuma davranışı değişmedi.
+- Takipler, fiyat geçmişi ve bildirim hafızası değişmedi.
+
 ## 4.2.6
 
 - Ayar kaydı veya "Hermes'i yeniden başlat" sonrası, Hermes yeniden başlayınca artık PIN kilit ekranı yerine anasayfa açılır (yeniden başlama bellekteki PIN oturumunu sildiği için eski davranış ayarlar sayfasında kilit gösteriyordu).
