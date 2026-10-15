@@ -23,7 +23,7 @@ from ..diagnostics import Diagnostics
 from ..utils import PROCESS_STARTED_AT, format_tl, is_search_url, parse_bool, parse_iso_datetime, repair_mojibake, site_label
 from .pages import link, render_notice, render_page
 from ..pricestats import MIN_HISTORY_DAYS, WINDOW_DAYS, window_stats
-from .pricechart import SPOT_SIZE, load_histories, ranged_chart, offer_index, sparkline, with_current
+from .pricechart import SPOT_SIZE, load_histories, load_targets, ranged_chart, offer_index, sparkline, with_current
 
 SITE_THEME_CLASSES = (
     ("amazon", "site-amazon"),
@@ -143,6 +143,7 @@ class Offer:
     warehouse: bool
     checked_at: str
     points: list = field(default_factory=list)
+    target_points: list = field(default_factory=list)  # recorded target changes of the card, oldest first
     partner_points: list = field(default_factory=list)  # the same product's other offer (Depo <-> new)
 
     @property
@@ -153,8 +154,9 @@ class Offer:
 
 def build_offers(rows: List[Dict[str, Any]], state: Dict[str, Any]) -> List[Offer]:
     histories = load_histories(DATABASE_PATH, offer_index(state), rows)
+    target_lines = load_targets(DATABASE_PATH, rows)
     offers = []
-    for row, points in zip(rows, histories, strict=False):
+    for row, points, target_line in zip(rows, histories, target_lines, strict=False):
         price = parse_turkish_money(row.get("price"))
         if price is None:
             continue
@@ -169,7 +171,7 @@ def build_offers(rows: List[Dict[str, Any]], state: Dict[str, Any]) -> List[Offe
             site=site_theme_class(seller), price=price, target=target,
             low=parse_turkish_money(row.get("min_price")) or price, high=parse_turkish_money(row.get("max_price")) or price,
             hit=is_target_hit(row), warehouse=parse_bool(row.get("is_warehouse"), default=False), checked_at=checked_at,
-            points=with_current(points, price, moment),
+            points=with_current(points, price, moment), target_points=target_line,
         ))
     _pair_partners(offers)
     return offers
@@ -268,7 +270,7 @@ def detail_html(offer: Offer) -> str:
                   f"<div class='ov-fact'><span>Takip başlangıcı</span><b>{offer.points[0][0].strftime('%d.%m.%Y')}</b></div>")
     names = ("Depo", "Yeni") if offer.warehouse else ("Yeni", "Depo")
     chart = (ranged_chart(offer.points, float(offer.target), _parse_local_time(offer.checked_at) or datetime.now().astimezone(),
-                          offer.partner_points, names)
+                          offer.partner_points, names, offer.target_points)
              if len(offer.points) > 1
              else "<p class='ov-note'>Fiyat geçmişi ilk değişiklikten sonra çizilir.</p>")
     product_url = str(offer.row.get("product_url") or "").strip()

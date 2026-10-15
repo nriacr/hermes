@@ -561,6 +561,29 @@ class DashboardTests(DataFilesMixin, unittest.TestCase):
         self.assertNotIn("data-points-b", single)
         self.assertNotIn("ov-legend'", single)
 
+    def test_target_line_follows_recorded_target_changes(self):
+        url = "https://www.amazon.com.tr/dp/B000000001"
+        self.data.write_state({"offer": {"url": url, "tracking_id": "c1", "is_warehouse": False}})
+        store = History.at(self.data.files.database)
+        now = datetime.now(timezone.utc)
+        store.record_price("offer", "amazon", "Ürün", Decimal("16000"), now - timedelta(days=9))
+        store.record_price("offer", "amazon", "Ürün", Decimal("14000"), now - timedelta(days=2))
+        store.record_targets({"c1": Decimal("15000")})
+        store.record_targets({"c1": Decimal("15000")})  # unchanged: nothing new is stored
+        store.record_targets({"c1": Decimal("13000")})
+        store.close()
+        self.assertEqual(len(history_module.read_targets_by_card(self.data.files.database, ["c1"])["c1"]), 2)
+        self.data.write_summary({"rows": [price_row(price="14.000 TL", target="13.000 TL", tracking_id="c1")]})
+        html = self.live()
+        line = html.split("stroke='#b6ff3b'")[0].rsplit("<path d='", 1)[1]
+        self.assertGreaterEqual(line.count(" L"), 2)  # the target moved (15.000 -> 13.000), so the line is not flat
+        self.assertNotEqual(line.split(" L")[1].split()[1], line.split(" L")[-1].split()[1])
+        # a card with no record keeps a flat line at the current target
+        self.data.write_summary({"rows": [price_row(price="14.000 TL", target="13.000 TL", tracking_id="c2")]})
+        self.data.write_state({"offer": {"url": url, "tracking_id": "c2", "is_warehouse": False}})
+        flat = self.live().split("stroke='#b6ff3b'")[0].rsplit("<path d='", 1)[1]
+        self.assertEqual(len({part.split()[1] for part in flat.split("'")[0].replace("M", "").split(" L") if part.strip()}), 1)
+
     def test_price_that_rose_since_the_first_record_is_marked_up(self):
         self.data.write_state({"offer": {"url": "https://www.amazon.com.tr/dp/B000000001", "tracking_id": "", "is_warehouse": False}})
         store = History.at(self.data.files.database)

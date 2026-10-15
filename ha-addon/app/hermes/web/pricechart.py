@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any, Dict, List, Sequence, Tuple
 
-from ..history import read_prices_by_key
+from ..history import read_prices_by_key, read_targets_by_card
 from ..utils import parse_bool
 
 Point = Tuple[datetime, float]
@@ -48,6 +48,26 @@ def load_histories(database_path, index: Dict[tuple, List[str]], rows: Sequence[
         best = max(candidates, key=len, default=[])
         lines.append([(moment, float(price)) for moment, price in best])
     return lines
+
+
+def load_targets(database_path, rows: Sequence[Dict[str, Any]]) -> List[List[Point]]:
+    """The recorded target price changes of each row's tracking card (empty before any was recorded)."""
+    cards = sorted({str(row.get("tracking_id") or "") for row in rows} - {""})
+    stored = read_targets_by_card(database_path, cards) if cards else {}
+    return [[(moment, float(value)) for moment, value in stored.get(str(row.get("tracking_id") or ""), [])] for row in rows]
+
+
+def target_series(targets: List[Point], current: float, start: datetime, end: datetime) -> List[Point]:
+    """The target as a step line over [start, end]: the value in force at `start`, then each change, then `end`.
+
+    Before the first recorded change the first known target applies; without records the current target is flat."""
+    if not targets or abs(targets[-1][1] - current) > 0.5:
+        targets = list(targets) + [(max(end, targets[-1][0]) if targets else start, current)]
+    holding = [value for moment, value in targets if moment <= start]
+    opening = holding[-1] if holding else targets[0][1]
+    inside = [(moment, value) for moment, value in targets if start < moment <= end]
+    series = [(start, opening)] + inside
+    return series + [(end, targets[-1][1])]  # a change after the last price point shows as the final level
 
 
 def with_current(points: List[Point], price: Decimal, checked_at: datetime) -> List[Point]:
@@ -120,7 +140,7 @@ def partner_legend(names: Tuple[str, str]) -> str:
 
 
 def detail_chart(points: List[Point], target: float, other: List[Point] = (),
-                 names: Tuple[str, str] = ("Yeni", "Depo")) -> str:
+                 names: Tuple[str, str] = ("Yeni", "Depo"), targets: List[Point] = ()) -> str:
     """The detail sheet chart: price steps, the target line and the first and last day.
 
     With `other` the second offer of the product (Depo next to new, or the reverse) is a separate amber line."""
@@ -128,8 +148,11 @@ def detail_chart(points: List[Point], target: float, other: List[Point] = (),
     own_color = PAIR_COLORS[names[0]] if other else "currentColor"
     other_color = PAIR_COLORS[names[1]]
     pad = CHART_PAD
+    begin = min([points[0][0]] + [moment for moment, _ in other[:1]])
+    finish = max([points[-1][0]] + [moment for moment, _ in other[-1:]])
+    goal = target_series(list(targets), target, begin, finish)
     x, y, low, high = _scales(points, pad["left"], CHART_WIDTH - pad["right"], pad["top"], CHART_HEIGHT - pad["bottom"],
-                              [target], headroom=0.14, also=other)
+                              [value for _, value in goal], headroom=0.14, also=other)
     floor = CHART_HEIGHT - pad["bottom"]
     grid = "".join(
         f"<line x1='{pad['left']}' x2='{CHART_WIDTH - pad['right']}' y1='{y(level):.1f}' y2='{y(level):.1f}' stroke='rgba(255,255,255,.07)'/>"
@@ -153,14 +176,13 @@ def detail_chart(points: List[Point], target: float, other: List[Point] = (),
                                                         for moment, price in other]) + "'"
     labels = (f"<text x='{x(first):.1f}' y='{CHART_HEIGHT - 7}' font-size='11' fill='#9a95b8'>{_day(first)}</text>"
               f"<text x='{x(last):.1f}' y='{CHART_HEIGHT - 7}' text-anchor='end' font-size='11' fill='#9a95b8'>{_day(last)}</text>")
-    target_y = y(target)
+    goal_path = _steps(goal, x, y) if len(goal) > 1 else f"M{x(begin):.1f} {y(target):.1f}"
     # Each stored change as [x, y, epoch seconds, price]: the page script answers "what was the price then" on hover.
     hover = json.dumps([[round(x(moment), 1), round(y(price), 1), int(moment.timestamp()), round(price)] for moment, price in points])
     return (
         f"<svg class='ov-chart' viewBox='0 0 {CHART_WIDTH} {CHART_HEIGHT}' role='img' aria-label='Fiyat geçmişi' "
         f"data-points='{hover}'{partner_hover} data-top='{pad['top']}' data-bottom='{floor}'>"
-        f"{grid}<line x1='{pad['left']}' x2='{CHART_WIDTH - pad['right']}' y1='{target_y:.1f}' y2='{target_y:.1f}' "
-        "stroke='#b6ff3b' stroke-dasharray='6 5' stroke-width='1.5'/>"
+        f"{grid}<path d='{goal_path}' fill='none' stroke='#b6ff3b' stroke-dasharray='6 5' stroke-width='1.5'/>"
         f"<path class='ov-fade' d='{area}' fill='{own_color}' fill-opacity='.22'/>"
         f"<path class='ov-draw' pathLength='1' d='{steps}' fill='none' stroke='{own_color}' stroke-width='3' "
         f"stroke-linejoin='round' stroke-linecap='round'/>{dots}{partner}{labels}"
@@ -183,7 +205,7 @@ def window_points(points: List[Point], now: datetime, days: int) -> List[Point]:
 
 
 def ranged_chart(points: List[Point], target: float, now: datetime, other: List[Point] = (),
-                 names: Tuple[str, str] = ("Yeni", "Depo")) -> str:
+                 names: Tuple[str, str] = ("Yeni", "Depo"), targets: List[Point] = ()) -> str:
     """The detail chart with a 7/30/90-day/all switch; only windows shorter than the history are offered.
 
     `other` is the product's second offer (see `detail_chart`), `names` the labels of (this line, that line)."""
@@ -194,13 +216,13 @@ def ranged_chart(points: List[Point], target: float, now: datetime, other: List[
     span = (end - start).days if points else 0
     options = [(f"{days} gün", str(days), window_points(points, now, days)) for days in RANGE_DAYS if days < span]
     if not options:
-        return legend + detail_chart(points, target, other, names)
+        return legend + detail_chart(points, target, other, names, targets)
     options.append(("Tümü", "all", points))
     default = "all" if span <= RANGE_DAYS[-1] else str(RANGE_DAYS[-1])
     buttons = "".join(f"<button type='button' class='ov-range' data-range='{key}' aria-pressed='{str(key == default).lower()}'>{label}</button>"
                       for label, key, _ in options)
     charts = "".join(f"<div class='ov-chartwrap' data-range-pane='{key}'{'' if key == default else ' hidden'}>"
-                     f"{detail_chart(chosen if len(chosen) > 1 else points, target, _other_window(other, now, key), names)}</div>"
+                     f"{detail_chart(chosen if len(chosen) > 1 else points, target, _other_window(other, now, key), names, targets)}</div>"
                      for _, key, chosen in options)
     return f"<div class='ov-ranges' role='group' aria-label='Zaman aralığı'>{buttons}</div>{legend}{charts}"
 

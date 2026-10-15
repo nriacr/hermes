@@ -34,6 +34,8 @@ CREATE TABLE IF NOT EXISTS prices (
     offer_key TEXT NOT NULL, site TEXT NOT NULL, title TEXT NOT NULL, price TEXT NOT NULL, checked_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS prices_offer ON prices (offer_key, checked_at);
+CREATE TABLE IF NOT EXISTS targets (card TEXT NOT NULL, target TEXT NOT NULL, at TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS targets_card ON targets (card, at);
 CREATE TABLE IF NOT EXISTS reads (
     at TEXT NOT NULL, site TEXT NOT NULL, outcome TEXT NOT NULL, duration_ms INTEGER NOT NULL,
     watch_key TEXT NOT NULL DEFAULT '', priority TEXT NOT NULL DEFAULT '',
@@ -218,6 +220,14 @@ class History:
     def record_price(self, offer_key: str, site: str, title: str, price: Decimal, checked_at: Optional[datetime] = None) -> None:
         self._write("fiyat", [self.price_statement(offer_key, site, title, price, checked_at)])
 
+    def record_targets(self, targets: Dict[str, Decimal]) -> None:
+        """Remember each card's target price whenever it differs from the last remembered one (chart target line)."""
+        at = _at()
+        self._write("hedef", [
+            ("INSERT INTO targets SELECT ?,?,? WHERE COALESCE((SELECT target FROM targets WHERE card=? "
+             "ORDER BY at DESC,rowid DESC LIMIT 1),'') != ?", (card, str(target), at, card, str(target)))
+            for card, target in targets.items() if card])
+
     def clear_prices(self) -> None:
         self._write("fiyat sıfırlama", [("DELETE FROM prices", ())])
 
@@ -370,6 +380,18 @@ def read_prices_by_key(path: Path, offer_keys: List[str]) -> Dict[str, List[Tupl
                            f"({', '.join('?' * len(chunk))}) ORDER BY checked_at, rowid", tuple(chunk))
         for key, checked_at, price in rows:
             found[key].append((parse_iso_datetime(checked_at).astimezone(), Decimal(price)))
+    return found
+
+
+def read_targets_by_card(path: Path, cards: List[str]) -> Dict[str, List[Tuple[datetime, Decimal]]]:
+    """Target price changes of several cards, oldest first."""
+    found: Dict[str, List[Tuple[datetime, Decimal]]] = {card: [] for card in cards}
+    for start in range(0, len(cards), 200):
+        chunk = cards[start:start + 200]
+        rows = _read(path, f"SELECT card, at, target FROM targets WHERE card IN ({', '.join('?' * len(chunk))}) "
+                           "ORDER BY at, rowid", tuple(chunk))
+        for card, at, target in rows:
+            found[card].append((parse_iso_datetime(at).astimezone(), Decimal(target)))
     return found
 
 

@@ -134,6 +134,7 @@ class Monitor:
         self.history = History.at(self.files.database)
         self.history.migrate_json(self.files.state, self.files.cycle_history)
         self.history.drop_idle_cycles(self.config.interval_seconds)
+        self.history.record_targets({watch.tracking_id: watch.target_price for watch in self.config.watches})
         self._state = self.load_state()
         # The configuration cannot change while Hermes runs (saving it restarts Hermes), so clean
         # the table before the panel or any site worker can show results of removed watches.
