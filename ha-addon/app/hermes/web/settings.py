@@ -111,16 +111,21 @@ def stored_watch_titles() -> Dict[str, str]:
         state = load_json(STATE_PATH, {})
     except (RuntimeError, sqlite3.Error):
         return titles
+    for product_url, title in _learned_titles(summary, state):
+        remember(product_url, title)
+    return titles
+
+
+def _learned_titles(summary, state):
     if isinstance(summary, dict):
         for row_set in (summary.get("rows"), summary.get("stock_rows")):
             for row in _as_list(row_set):
                 if isinstance(row, dict):
-                    remember(row.get("product_url"), row.get("product_title"))
+                    yield row.get("product_url"), row.get("product_title")
     if isinstance(state, dict):
         for entry in state.values():
             if isinstance(entry, dict):
-                remember(entry.get("configured_url"), entry.get("title"))
-    return titles
+                yield entry.get("configured_url"), entry.get("title")
 
 
 def watch_display_name(item, index: int, known_titles: Dict[str, str]) -> str:
@@ -404,6 +409,20 @@ def _card_context(index: int, name: str, urls: List[str]) -> str:
     return f"Takip {index + 1} ({identity[:93] + '...' if len(identity) > 96 else identity})"
 
 
+def _require_valid_card(context: str, name: str, target: str, urls: List[str]) -> None:
+    for url in urls:
+        try:
+            detect_site_from_url(url)
+        except HermesError as exc:
+            raise ValueError(f"{context}: {exc}. Desteklenen siteler: {supported_sites_text()}.") from exc
+    missing = [label for label, value in (("hedef fiyat", target), ("en az bir link", urls)) if not value]
+    if missing:
+        raise ValueError(f"{context}: {', '.join(missing)} alanı zorunlu.")
+    if not name and any(watch_name_required_for_url(url) for url in urls):
+        raise ValueError(f"{context}: bu bağlantı bir arama sayfası. Arama sonuçlarını doğru filtrelemek için "
+                         "Ad alanı zorunlu; örneğin ürün modelini yazmalısın.")
+
+
 def build_watch(form: Dict[str, List[str]], index: int) -> Optional[Dict[str, Any]]:
     prefix = f"watches_{index}_"
     name = _first(form, prefix + "name")
@@ -420,18 +439,7 @@ def build_watch(form: Dict[str, List[str]], index: int) -> Optional[Dict[str, An
     urls = list(dict.fromkeys(url for field in WATCH_URL_FIELDS if (url := _first(form, prefix + field))))
     if not any([name, target, size, *urls]):
         return None
-    context = _card_context(index, name, urls)
-    for url in urls:
-        try:
-            detect_site_from_url(url)
-        except HermesError as exc:
-            raise ValueError(f"{context}: {exc}. Desteklenen siteler: {supported_sites_text()}.") from exc
-    missing = [label for label, value in (("hedef fiyat", target), ("en az bir link", urls)) if not value]
-    if missing:
-        raise ValueError(f"{context}: {', '.join(missing)} alanı zorunlu.")
-    if not name and any(watch_name_required_for_url(url) for url in urls):
-        raise ValueError(f"{context}: bu bağlantı bir arama sayfası. Arama sonuçlarını doğru filtrelemek için "
-                         "Ad alanı zorunlu; örneğin ürün modelini yazmalısın.")
+    _require_valid_card(_card_context(index, name, urls), name, target, urls)
     item: Dict[str, Any] = {
         "id": _first(form, prefix + "id") or uuid.uuid4().hex,
         "name": name,
@@ -534,61 +542,79 @@ def apply_settings_operation(existing_options: Dict[str, Any], form: Dict[str, L
         update_index = _posted_watch_index(form)
 
     if delete_index != "":
-        try:
-            index = int(delete_index)
-        except ValueError as exc:
-            raise ValueError("Silinecek takip kaydı geçersiz.") from exc
-        if not 0 <= index < len(existing_watches):
-            raise ValueError("Silinecek takip kaydı bulunamadı.")
-        _require_matching_id(form, index, existing_watches)
-        removed = existing_watches.pop(index)
-        options["takip_edilenler"] = existing_watches
-        return options, f"{str(removed.get('name') or '').strip() or f'Takip {index + 1}'} takip kaydı silindi."
+        return _delete_watch(options, form, existing_watches, delete_index)
     if update_index != "":
-        try:
-            index = int(update_index)
-        except ValueError as exc:
-            raise ValueError("Güncellenecek takip kaydı geçersiz.") from exc
-        if not 0 <= index < len(existing_watches):
-            raise ValueError("Güncellenecek takip kaydı bulunamadı.")
-        _require_matching_id(form, index, existing_watches)
-        updated = build_watch(form, index)
-        if not updated:
-            raise ValueError(f"Takip {index + 1}: hedef fiyat ve en az bir link alanı zorunlu.")
-        updated["id"] = existing_watches[index]["id"]
-        updated["check_now_token"] = utc_now()
-        existing_watches[index] = updated
-        options["takip_edilenler"] = existing_watches
-        return options, f"{watch_display_name(updated, index, {})} takip kaydı güncellendi."
+        return _update_watch(options, form, existing_watches, update_index)
     if operation == "update_existing":
-        built = []
-        count = _watch_count(form)
-        _require_current_list(form, count, existing_watches)
-        for index in range(count):
-            if _first(form, f"watches_{index}_delete") in {"1", "true", "on", "yes"}:
-                continue
-            item = build_watch(form, index)
-            if item:
-                if index < len(existing_watches):
-                    item["id"] = existing_watches[index]["id"]
-                built.append(item)
-        options["takip_edilenler"] = built
-        _update_telegram_options(options, form)
-        _update_timing_options(options, form)
-        options["daily_summary_enabled"] = "daily_summary_enabled" in form
-        return options, "Ayarlar kaydedildi."
+        return _update_all_watches(options, form, existing_watches)
     if operation == "add_watch":
-        new_watches = build_watches(form)
-        if len(new_watches) != 1:
-            raise ValueError("Yeni takip eklemek için hedef fiyat ve en az bir link alanı zorunlu."
-                             if not new_watches else "Yeni takip ekleme formunda yalnızca bir kayıt bulunmalı.")
-        new_watches[0]["check_now_token"] = utc_now()
-        options["takip_edilenler"] = existing_watches + new_watches
-        return options, "Yeni takip kaydı eklendi."
+        return _add_watch(options, form, existing_watches)
     if operation == "update_telegram":
         _update_telegram_options(options, form)
         return options, "Telegram ayarları güncellendi."
     raise ValueError("Bilinmeyen ayar kaydetme işlemi.")
+
+
+def _watch_position(raw_index: str, existing_watches, invalid: str, missing: str) -> int:
+    try:
+        index = int(raw_index)
+    except ValueError as exc:
+        raise ValueError(invalid) from exc
+    if not 0 <= index < len(existing_watches):
+        raise ValueError(missing)
+    return index
+
+
+def _delete_watch(options, form, existing_watches, delete_index):
+    index = _watch_position(delete_index, existing_watches, "Silinecek takip kaydı geçersiz.",
+                            "Silinecek takip kaydı bulunamadı.")
+    _require_matching_id(form, index, existing_watches)
+    removed = existing_watches.pop(index)
+    options["takip_edilenler"] = existing_watches
+    return options, f"{str(removed.get('name') or '').strip() or f'Takip {index + 1}'} takip kaydı silindi."
+
+
+def _update_watch(options, form, existing_watches, update_index):
+    index = _watch_position(update_index, existing_watches, "Güncellenecek takip kaydı geçersiz.",
+                            "Güncellenecek takip kaydı bulunamadı.")
+    _require_matching_id(form, index, existing_watches)
+    updated = build_watch(form, index)
+    if not updated:
+        raise ValueError(f"Takip {index + 1}: hedef fiyat ve en az bir link alanı zorunlu.")
+    updated["id"] = existing_watches[index]["id"]
+    updated["check_now_token"] = utc_now()
+    existing_watches[index] = updated
+    options["takip_edilenler"] = existing_watches
+    return options, f"{watch_display_name(updated, index, {})} takip kaydı güncellendi."
+
+
+def _update_all_watches(options, form, existing_watches):
+    built = []
+    count = _watch_count(form)
+    _require_current_list(form, count, existing_watches)
+    for index in range(count):
+        if _first(form, f"watches_{index}_delete") in {"1", "true", "on", "yes"}:
+            continue
+        item = build_watch(form, index)
+        if item:
+            if index < len(existing_watches):
+                item["id"] = existing_watches[index]["id"]
+            built.append(item)
+    options["takip_edilenler"] = built
+    _update_telegram_options(options, form)
+    _update_timing_options(options, form)
+    options["daily_summary_enabled"] = "daily_summary_enabled" in form
+    return options, "Ayarlar kaydedildi."
+
+
+def _add_watch(options, form, existing_watches):
+    new_watches = build_watches(form)
+    if len(new_watches) != 1:
+        raise ValueError("Yeni takip eklemek için hedef fiyat ve en az bir link alanı zorunlu."
+                         if not new_watches else "Yeni takip ekleme formunda yalnızca bir kayıt bulunmalı.")
+    new_watches[0]["check_now_token"] = utc_now()
+    options["takip_edilenler"] = existing_watches + new_watches
+    return options, "Yeni takip kaydı eklendi."
 
 
 def handle_settings_save(body: bytes):

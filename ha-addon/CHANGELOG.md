@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.11.2
+
+- İç düzenleme: ayar kaydetme işlemleri (silme, güncelleme, toplu kaydetme, ekleme) ve kart doğrulaması küçük fonksiyonlara ayrıldı. Davranış, mesajlar ve veri aynı; ayarlar tarafındaki karmaşıklık uyarıları kapandı.
+
 ## 4.11.1
 
 - Tanı için dönen günlük dosyası: /data/hermes.log.jsonl (JSON satırları, 5 × 1 MB). Pi günlüğündeki satırlar aynı gizleme kuralıyla (anahtar/token/parola yok) buraya da yazılır; günlük 100 satırı aşınca eski kayıtlar dosyada kalır. Görünür davranış, takipler ve bildirimler değişmedi.
