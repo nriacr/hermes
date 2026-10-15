@@ -88,6 +88,37 @@
     event.returnValue = '';
   });
 
+  const picks = () => [...document.querySelectorAll('[data-watch-card]:not([data-new-watch])')]
+    .filter((card) => !card.hidden && card.querySelector('[data-bulk-pick]')?.checked);
+  const countPicks = () => {
+    const label = document.querySelector('[data-bulk-count]');
+    if (label) label.textContent = `${picks().length} seçili`;
+  };
+  const touch = (field) => { field.dispatchEvent(new Event('input', { bubbles: true })); field.dispatchEvent(new Event('change', { bubbles: true })); };
+  const setPicked = (value) => {
+    document.querySelectorAll('[data-watch-card]:not([data-new-watch])').forEach((card) => {
+      const box = card.querySelector('[data-bulk-pick]');
+      if (box) box.checked = value && !card.hidden;
+    });
+    countPicks();
+  };
+  document.querySelector('[data-bulk-all]')?.addEventListener('click', () => setPicked(true));
+  document.querySelector('[data-bulk-none]')?.addEventListener('click', () => setPicked(false));
+  document.addEventListener('change', (event) => { if (event.target.matches('[data-bulk-pick]')) countPicks(); });
+  const bulk = (selector, value) => {
+    const cards = picks();
+    if (!cards.length) { window.alert('Önce en az bir kart seç.'); return; }
+    cards.forEach((card) => {
+      const field = card.querySelector(selector);
+      if (!field) return;
+      if (field.type === 'checkbox') field.checked = value; else field.value = value;
+      touch(field);
+    });
+  };
+  document.querySelectorAll('[data-bulk-active]').forEach((button) => button.addEventListener('click', () => bulk("input[type='checkbox'][name$='_active']", button.dataset.bulkActive === '1')));
+  document.querySelector('[data-bulk-set-priority]')?.addEventListener('click', () => bulk('[data-watch-priority]', document.querySelector('[data-bulk-priority]').value));
+  document.querySelector('[data-bulk-set-group]')?.addEventListener('click', () => bulk("select[name$='_group']", document.querySelector('[data-bulk-group]').value));
+
   const savingOverlay = document.getElementById('saving-overlay');
   const savingTitle = document.getElementById('saving-title');
   const savingMessage = document.getElementById('saving-message');

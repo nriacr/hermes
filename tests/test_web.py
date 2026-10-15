@@ -155,6 +155,13 @@ class RouterTests(DataFilesMixin, unittest.TestCase):
         self.assertGreater(settings_page.index("Pushover testi"), settings_page.index("Değişiklikleri uygula"))
         self.assertGreater(settings_page.index("tool-actions"), settings_page.index("Değişiklikleri uygula"))
 
+    def test_settings_page_has_bulk_tools_and_one_picker_per_saved_card(self):
+        page = self.request("/settings").payload.decode()
+        self.assertIn("data-bulk-tools", page)
+        self.assertIn("data-bulk-set-priority", page)
+        self.assertNotIn("data-new-watch='true'><summary><input type='checkbox' class='bulk-pick'", page)
+        self.assertNotIn("name='bulk", page)
+
     def test_restart_button_restarts_hermes_through_home_assistant_on_both_surfaces(self):
         self.write_options({"public_dashboard_enabled": True, "public_dashboard_token": TOKEN})
         with patch.object(settings, "schedule_restart") as restart:
@@ -727,7 +734,7 @@ class SettingsTests(DataFilesMixin, unittest.TestCase):
         self.assertTrue(watches[0]["official_seller_only"])
         html = settings.watch_form(watches[0], 0)
         for text in ("Yalnızca platformun kendi satıcısı", ">1 dk</option>", ">5 dk</option>", ">15 dk</option>", ">30 dk</option>", ">60 dk</option>",
-                     "selected>3 saat</option>", ">6 saat</option>", ">12 saat</option>", "<summary><i class=\"priority-dot priority-3h\""):
+                     "selected>3 saat</option>", ">6 saat</option>", ">12 saat</option>", "<i class=\"priority-dot priority-3h\""):
             self.assertIn(text, html)
         for old in ("Yüksek", "Orta", "Düşük"):
             self.assertNotIn(old, html)

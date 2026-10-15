@@ -200,7 +200,8 @@ def watch_form(item: Dict[str, Any], index: int, is_new: bool = False, groups=No
         f" data-watch-group='{escape(group, quote=True)}' data-watch-search='{escape(display_name, quote=True)}'"
     )
     dot = "" if is_new else priority_dot(priority)
-    return f"<details data-watch-card{attributes}><summary>{dot}{escape(title)}</summary><div class='form-grid'>{inner}</div></details>"
+    pick = "" if is_new else "<input type='checkbox' class='bulk-pick' data-bulk-pick aria-label='Toplu işlem için seç'>"
+    return f"<details data-watch-card{attributes}><summary>{pick}{dot}{escape(title)}</summary><div class='form-grid'>{inner}</div></details>"
 
 
 def group_choices(configured_groups, items) -> List[str]:
@@ -288,6 +289,25 @@ def _update_timing_options(options: Dict[str, Any], form) -> None:
 HTTP_WARNING = "Bu adres şifresiz (HTTP). Yalnız güvendiğin ağda ya da HTTPS tünel arkasında kullan."
 
 
+def bulk_toolbar(groups: List[str]) -> str:
+    """Selection controls that only fill the existing card fields; saving stays the single apply step."""
+    priorities = "".join(f"<option value='{value}'>{escape(label)}</option>" for value, label in PRIORITY_LABELS.items())
+    group_options = "".join(f"<option value='{escape(group, quote=True)}'>{escape(group)}</option>" for group in groups)
+    return (
+        "<section class='settings-section bulk-tools' data-bulk-tools><h2>Toplu işlem</h2>"
+        "<div class='bulk-row'><button class='button secondary' type='button' data-bulk-all>Görünenleri seç</button>"
+        "<button class='button secondary' type='button' data-bulk-none>Seçimi kaldır</button>"
+        "<span class='bulk-count' data-bulk-count>0 seçili</span></div>"
+        "<div class='bulk-row'><button class='button secondary' type='button' data-bulk-active='1'>Aktif yap</button>"
+        "<button class='button secondary' type='button' data-bulk-active='0'>Pasif yap</button>"
+        f"<select data-bulk-priority aria-label='Öncelik'>{priorities}</select>"
+        "<button class='button secondary' type='button' data-bulk-set-priority>Önceliği uygula</button>"
+        f"<select data-bulk-group aria-label='Grup'><option value=''>Grup yok</option>{group_options}</select>"
+        "<button class='button secondary' type='button' data-bulk-set-group>Grubu uygula</button></div>"
+        "<p class='watch-hint'>Seçili kartların alanları değişir; kalıcı olması için en altta “Değişiklikleri uygula”ya bas.</p></section>"
+    )
+
+
 def render_settings_page(base: str, params: Dict[str, List[str]], *, access_bar: str = "", open_http: bool = False) -> bytes:
     options = read_options()
     configured_groups = _list_from_text("\n".join(str(group) for group in _as_list(options.get("gruplar"))))
@@ -317,6 +337,7 @@ def render_settings_page(base: str, params: Dict[str, List[str]], *, access_bar:
         "<input id='watch-search' type='search' placeholder='Ürün adında ara' autocomplete='off'></label>"
         f"{filters}"
         "</section>"
+        + bulk_toolbar(groups) +
         "<section class='settings-section'><h2>Takip edilenler</h2>"
         + "".join(watch_form(item if isinstance(item, dict) else {}, index, groups=groups, known_titles=known_titles)
                   for index, item in enumerate(watches))

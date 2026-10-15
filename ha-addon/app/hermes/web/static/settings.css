@@ -28,4 +28,6 @@ body.ov .notice-warn { color:var(--warn); background:rgba(255,200,87,.1); border
 .settings-page .tool-actions { margin-top:22px; }
 body.ov .footer-note { border-left:0; border-radius:16px; background:var(--glass); border:1px solid var(--edge); color:var(--mute); }
 .settings-page .saving-dialog { border-color:var(--edge); border-radius:24px; background:linear-gradient(170deg,#161233,#0a0814); } .settings-page .saving-spinner { border-color:rgba(255,255,255,.14); border-top-color:var(--lime); }
-.settings-page details.is-deleted summary { color:#ff7ab8; }
+.settings-page details.is-deleted summary { color:#ff7ab8; }.settings-page .bulk-row { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-bottom:10px; } .settings-page .bulk-tools select { padding:0 10px; }
+.settings-page .bulk-count { color:var(--mute); font:600 13px var(--display); } .settings-page summary .bulk-pick { flex:none; margin:0 10px 0 0; }
+.settings-page .bulk-tools select { width:auto; min-width:110px; }
