@@ -17,3 +17,7 @@
 ## Veri, yedek ve geri alma
 
 - Yeni seçenek isteğe bağlı; mevcut veri değişmez. Geri alma: 4.8.0 kaydıyla prepare_code_rollback.sh.
+
+## Canlı kanıt
+
+- install_rpi.sh (yedek b160df65): 4.9.0 started, sağlık ok, 13 takip/364 kayıt/644 fiyat noktası korundu, günlükte Traceback yok.
