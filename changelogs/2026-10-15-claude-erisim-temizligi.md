@@ -41,3 +41,7 @@ Agent güvenlik ayarı, kimlik bilgisi veya yetki değiştirmediği için şunla
 ## Güncelleme: Claude'un kendi SSH anahtarı
 
 15 Ekim 2026: Nuri `~/.ssh/homeassistant_claude` (ed25519, 0600) anahtarını kendisi üretti ve Pi'deki SSH eklentisinin `authorized_keys` listesine ekledi (eski anahtar silinmedi). Doğrulama: `HA_AGENT=claude bin/ha-ssh 'echo …'` ve anahtarla doğrudan BatchMode girişi başarılı. Claude bundan sonra `HA_AGENT=claude` kullanır; ChatGPT/Codex eski anahtarla sürer. Özel anahtar hiçbir yere yazılmadı. Geri alma: eklenti yapılandırmasından `claude-mac` satırını sil.
+
+## Güncelleme: 4.2.5 yeniden başlatma ucu canlıda doğrulandı
+
+15 Ekim 2026 21:43 (yerel): Nuri panelde "Hermes'i yeniden başlat"a bastı. Günlük: "Panelden yeniden başlatma istendi" → "Yeniden başlatma isteği Home Assistant'a iletildi; Hermes kapanıyor" (beklenen zaman aşımı yolu) → 21:44:46 "Hermes v4.2.5 başlatılıyor"; ~1 dk sonra `healthy: true`. Yani `hassio_role: default` ile `/addons/self/restart` çalışıyor. Ayar kaydı (`/addons/self/options`) bu denemede çağrılmadı; ilk gerçek ayar kaydında günlükten izlenmeli (hata verirse 4.2.4'teki manager + slug yoluna dön).
