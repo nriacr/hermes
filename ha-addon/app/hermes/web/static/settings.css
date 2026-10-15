@@ -19,7 +19,7 @@ body.ov .button:hover { transform:translateY(-2px); border-color:rgba(255,255,25
 body.ov .button.primary, .period-switch .button[aria-current='page'] { border-color:transparent; background:linear-gradient(95deg,var(--lime),var(--cyan)); color:#07110a; }
 body.ov .button.danger { border-color:transparent; background:linear-gradient(95deg,#ff3d9a,#ff6b6b); color:#fff; }
 body.ov .notice { margin:0 0 12px; border-radius:16px; }
-body.ov .notice-ok { color:var(--lime); background:rgba(182,255,59,.08); border-color:rgba(182,255,59,.25); } body.ov .notice-fail { color:#ffb3d3; background:rgba(255,61,154,.1); border-color:rgba(255,61,154,.3); }
+body.ov .notice-warn { color:var(--warn); background:rgba(255,200,87,.1); border-color:rgba(255,200,87,.3); } body.ov .notice-ok { color:var(--lime); background:rgba(182,255,59,.08); border-color:rgba(182,255,59,.25); } body.ov .notice-fail { color:#ffb3d3; background:rgba(255,61,154,.1); border-color:rgba(255,61,154,.3); }
 .settings-page .watch-search { color:var(--mute); font-weight:500; } .settings-page .watch-search input { background:rgba(0,0,0,.28); }
 .settings-page .watch-group-filter { min-height:36px; padding:0 14px; border-radius:99px; border:1px solid var(--edge); background:var(--glass); color:var(--text); font:600 13px var(--display); transition:transform .2s,background .2s; } .settings-page .watch-group-filter:hover { transform:translateY(-2px); border-color:rgba(255,255,255,.28); }
 .settings-page .watch-group-filter[aria-pressed='true'] { background:rgba(182,255,59,.14); border-color:rgba(182,255,59,.45); } .settings-page .watch-group-filter[aria-pressed='false'] { background:transparent; color:var(--faint); opacity:.8; }

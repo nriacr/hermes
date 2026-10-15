@@ -14,12 +14,19 @@ def csrf_field(token: str) -> str:
     return f"<input type='hidden' name='csrf_token' value='{escape(token, quote=True)}'>"
 
 
+def wait_text(seconds: int) -> str:
+    if seconds < 60:
+        return f"{seconds} saniye"
+    minutes = -(-seconds // 60)
+    return f"{minutes} dakika"
+
+
 def render_pin_page(base: str, csrf: str, *, configured: bool, trusted: bool = False,
                     error: str = "", expired: bool = False, retry_after: int = 0) -> bytes:
     intro = "Oturumun kilitlendi. Devam etmek için PIN’ini gir." if expired else "Devam etmek için 4 haneli PIN’ini gir."
     if not configured:
         intro = "PIN henüz kullanıma hazır değil. Home Assistant üzerinden PIN’ini belirle."
-    message = f"Çok fazla deneme. {retry_after} saniye sonra tekrar dene." if retry_after else error
+    message = f"Çok fazla deneme. {wait_text(retry_after)} sonra tekrar dene." if retry_after else error
     disabled = " disabled" if not configured or retry_after else ""
     recovery = (f"<a href='{escape(link(base, 'auth/configure'), quote=True)}'>PIN’i Home Assistant üzerinden değiştir</a>"
                 if trusted else "PIN’i unuttuysan Home Assistant üzerinden değiştirebilirsin.")

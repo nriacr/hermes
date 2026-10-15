@@ -10,7 +10,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 from hermes.web import server
-from hermes.web.access import CHALLENGE_SECONDS, HASH_ITERATIONS, IDLE_SECONDS, MAX_SESSIONS, WebAccess
+from hermes.web.access import PUBLIC_LOCK_STEPS, CHALLENGE_SECONDS, HASH_ITERATIONS, IDLE_SECONDS, MAX_SESSIONS, WebAccess
 
 
 class AccessCase(unittest.TestCase):
@@ -65,7 +65,7 @@ class VerifierTests(AccessCase):
         self.access.configure("0123")
         self.assertNotEqual(previous, self.access.state["salt"])
 
-    def test_lockout_is_global_restart_safe_and_expires(self):
+    def test_lockout_is_restart_safe_and_expires(self):
         self.access.configure("0123")
         for _ in range(5):
             self.assertFalse(self.access.verify("9999"))
@@ -74,6 +74,104 @@ class VerifierTests(AccessCase):
         self.assertFalse(restarted.verify("0123"))
         self.now += 61
         self.assertTrue(restarted.verify("0123"))
+
+    def fail(self, scope, times=5):
+        for _ in range(times):
+            self.assertFalse(self.access.verify("9999", scope))
+
+    def test_public_attacker_never_locks_ingress(self):
+        self.access.configure("0123")
+        self.fail("public")
+        self.assertEqual(self.access.retry_after("public"), 60)
+        self.assertEqual(self.access.retry_after("ingress"), 0)
+        self.assertFalse(self.access.verify("0123", "public"))
+        self.assertTrue(self.access.verify("0123", "ingress"))
+        restarted = WebAccess(self.path, lambda: self.now)
+        self.assertEqual(restarted.retry_after("public"), 60)
+        self.assertEqual(restarted.retry_after("ingress"), 0)
+
+    def test_ingress_lock_does_not_lock_public_and_stays_flat(self):
+        self.access.configure("0123")
+        for _ in range(3):
+            self.fail("ingress")
+            self.assertEqual(self.access.retry_after("ingress"), 60)
+            self.assertEqual(self.access.retry_after("public"), 0)
+            self.now += 61
+
+    def test_public_lock_escalates_is_capped_and_resets_on_correct_pin(self):
+        self.access.configure("0123")
+        waits = []
+        for _ in range(5):
+            self.fail("public")
+            waits.append(self.access.retry_after("public"))
+            self.now += waits[-1] + 1
+        self.assertEqual(waits, [*PUBLIC_LOCK_STEPS, PUBLIC_LOCK_STEPS[-1], PUBLIC_LOCK_STEPS[-1]])
+        self.assertEqual(PUBLIC_LOCK_STEPS, (60, 300, 1800))
+        self.assertTrue(self.access.verify("0123", "public"))
+        self.fail("public")
+        self.assertEqual(self.access.retry_after("public"), 60)
+
+    def test_correct_pin_on_one_surface_does_not_clear_the_other(self):
+        self.access.configure("0123")
+        self.fail("public")
+        self.fail("ingress")
+        self.now += 61
+        self.fail("public")  # second public lock: 5 minutes
+        self.assertTrue(self.access.verify("0123", "ingress"))
+        self.assertEqual(self.access.retry_after("public"), 300)
+
+    def test_old_single_counter_file_loads_and_is_migrated_without_changing_the_verifier(self):
+        self.access.configure("0123")
+        legacy = json.loads(self.path.read_text())
+        legacy.pop("locks")
+        legacy.update(failures=[self.now - 5] * 5, locked_until=self.now + 40)
+        self.path.write_text(json.dumps(legacy))
+        loaded = WebAccess(self.path, lambda: self.now)
+        self.assertTrue(loaded.configured)
+        self.assertEqual(loaded.retry_after("public"), 40)
+        self.assertEqual(loaded.retry_after("ingress"), 0)
+        self.now += 41
+        self.assertTrue(loaded.verify("0123", "public"))
+        saved = json.loads(self.path.read_text())
+        self.assertEqual((saved["salt"], saved["verifier"], saved["version"]), (legacy["salt"], legacy["verifier"], 1))
+        self.assertEqual((saved["failures"], saved["locked_until"]), ([], 0))  # still readable by 4.2.3
+
+    def test_invalid_lock_state_fails_closed(self):
+        self.access.configure("0123")
+        good = json.loads(self.path.read_text())
+        broken = (
+            {"locks": {"public": {"failures": [], "locked_until": 0, "strikes": 0}}},
+            {"locks": {"ingress": {"failures": [], "locked_until": 0}, "public": {"failures": [1] * 6, "locked_until": 0}}},
+            {"locks": {"ingress": {"failures": [], "locked_until": "x"}, "public": {"failures": [], "locked_until": 0}}},
+            {"locks": {"ingress": {"failures": [], "locked_until": 0, "strikes": -1}, "public": {"failures": [], "locked_until": 0}}},
+            {"locks": []},
+        )
+        for change in broken:
+            with self.subTest(change=change):
+                self.path.write_text(json.dumps({**good, **change}))
+                self.assertFalse(WebAccess(self.path, lambda: self.now).configured)
+
+    def test_router_counts_by_surface_and_shows_the_real_wait(self):
+        self.access.configure("0123")
+        ingress = "/api/hassio_ingress/test"
+        for _ in range(5):
+            cookie, csrf = self.challenge()
+            self.request("/auth/unlock", method="POST", fields={"pin": "9999", "csrf_token": csrf}, cookie=cookie)
+        cookie, csrf = self.challenge()
+        response = self.request("/auth/unlock", method="POST", fields={"pin": "9999", "csrf_token": csrf}, cookie=cookie)
+        self.assertEqual(response.status, 429)
+        self.assertIn("60 saniye sonra", response.payload.decode())
+        cookie, csrf = self.challenge(ingress, trusted=True)
+        response = self.request("/auth/unlock", method="POST", fields={"pin": "0123", "csrf_token": csrf},
+                                cookie=cookie, scope=ingress, trusted=True)
+        self.assertEqual(response.status, 303)
+        self.now += 61
+        for _ in range(5):
+            cookie, csrf = self.challenge()
+            self.request("/auth/unlock", method="POST", fields={"pin": "9999", "csrf_token": csrf}, cookie=cookie)
+        cookie, csrf = self.challenge()
+        response = self.request("/auth/unlock", method="POST", fields={"pin": "9999", "csrf_token": csrf}, cookie=cookie)
+        self.assertIn("5 dakika sonra", response.payload.decode())
 
     def test_spread_out_failures_do_not_accumulate_forever(self):
         self.access.configure("0123")
@@ -265,3 +363,32 @@ class HttpBoundaryTests(AccessCase):
             urllib.request.urlopen(request, timeout=5)
         self.assertEqual(caught.exception.code, 404)
         caught.exception.close()
+
+
+class OpenHttpWarningTests(AccessCase):
+    def settings(self, *, trusted, secure):
+        scope = "/api/hassio_ingress/test" if trusted else "/public/test-link"
+        self.access.configure("0123")
+        cookie, csrf = self.challenge(scope, trusted=trusted)
+        unlocked = self.request("/auth/unlock", method="POST", fields={"pin": "0123", "csrf_token": csrf},
+                                cookie=cookie, scope=scope, trusted=trusted)
+        cookie = unlocked.headers["Set-Cookie"].split(";", 1)[0]
+        request = server.Request("GET", "/settings", scope, {}, cookie=cookie, cookie_path=scope,
+                                 trusted_ingress=trusted, secure=secure)
+        with patch.object(server, "render_settings_page", return_value=b"<body></body>") as render:
+            self.router.handle(request)
+        return render.call_args.kwargs["open_http"]
+
+    def test_warning_only_on_public_http(self):
+        self.assertTrue(self.settings(trusted=False, secure=False))
+        self.assertFalse(self.settings(trusted=False, secure=True))
+        self.assertFalse(self.settings(trusted=True, secure=False))
+
+    def test_warning_text_is_rendered_only_when_requested(self):
+        from hermes.web import settings
+        with patch.object(settings, "read_options", return_value={}), patch.object(settings, "stored_watch_titles", return_value=[]):
+            shown = settings.render_settings_page(".", {}, open_http=True).decode()
+            hidden = settings.render_settings_page(".", {}).decode()
+        self.assertIn("Bu adres şifresiz (HTTP).", shown)
+        self.assertIn("notice-warn", shown)
+        self.assertNotIn("şifresiz (HTTP)", hidden)

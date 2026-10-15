@@ -48,11 +48,17 @@ bağlantısıyla yeni PIN belirlenir. PIN'i sohbete gönderme.
 
 **Kilitle** düğmesi hemen çıkış yapar. 15 dakika işlem yapılmaması otomatik
 kilitler; fiyat/statistik yenilemeleri süreyi uzatmaz. Beş yanlış denemeden
-sonra giriş 60 saniye bekletilir. Bu sınır tüm oturumlarda ortaktır ve Hermes
-yeniden başlatıldığında da korunur. PIN değişince veya Hermes yeniden başlayınca
+sonra giriş bekletilir. Sayaçlar ayrıdır: Home Assistant içinden (ingress)
+girişte her beş yanlışta 60 saniye; public adreste her beş yanlışta sırayla
+60 saniye, 5 dakika, en çok 30 dakika. Public adresteki saldırı Home Assistant
+içinden girişi kilitlemez; doğru PIN o yüzeyin sayacını sıfırlar. Sınırlar
+Hermes yeniden başlatıldığında da korunur. PIN değişince veya Hermes yeniden başlayınca
 açık ayar oturumları kapanır. Fiyat geçmişi ve takipler etkilenmez.
 
 PIN'in kendisi saklanmaz; tuzlu doğrulayıcı ve deneme sınırı `/data/web_access.json`
 içindedir. Bu dosya kullanıcı güvenlik verisidir; Git'e/rapora kopyalanmamalı ve
 temizlik işleminde silinmemelidir. Günlük Hermes yedeği tarafından korunur.
-Dış bağlantının mevcut HTTPS/tünel koruması kullanılmalıdır.
+Dış bağlantının mevcut HTTPS/tünel koruması kullanılmalıdır. Public ayarlar ekranı
+HTTPS olmadan (`X-Forwarded-Proto` https değilse) açılırsa sarı bir uyarı gösterir:
+"Bu adres şifresiz (HTTP). Yalnız güvendiğin ağda ya da HTTPS tünel arkasında kullan."
+Home Assistant içinden açılışta uyarı çıkmaz.

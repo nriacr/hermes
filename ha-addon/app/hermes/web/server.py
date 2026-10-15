@@ -65,6 +65,11 @@ class Request:
     secure: bool = False
 
     @property
+    def lock_scope(self) -> str:
+        """Failed PINs are counted per surface so a public attacker never locks Home Assistant users out."""
+        return "ingress" if self.trusted_ingress else "public"
+
+    @property
     def scope(self) -> str:
         return self.base if self.base.startswith("/public/") else self.cookie_path
 
@@ -167,7 +172,7 @@ class Router:
         else:
             payload = render_pin_page(request.base, session.csrf, configured=self.access.configured,
                                       trusted=request.trusted_ingress, error=error,
-                                      expired=request.params.get("expired") == ["1"], retry_after=self.access.retry_after())
+                                      expired=request.params.get("expired") == ["1"], retry_after=self.access.retry_after(request.lock_scope))
         return Response(status, payload, HTML, headers)
 
     def _decorate(self, request: Request, response: Response, session: Session) -> Response:
@@ -205,8 +210,8 @@ class Router:
             response.headers["Set-Cookie"] = self._cookie(request, "")
             return response
         if path == "/auth/unlock":
-            if not self.access.verify(form.get("pin", [""])[0]):
-                return self._pin_reply(request, status=429 if self.access.retry_after() else 401,
+            if not self.access.verify(form.get("pin", [""])[0], request.lock_scope):
+                return self._pin_reply(request, status=429 if self.access.retry_after(request.lock_scope) else 401,
                                        error="PIN yanlış. Tekrar dene." if self.access.configured else "PIN kullanıma hazır değil.")
             self.access.discard(request.cookie)
             token, _ = self.access.create_session(request.scope, authenticated=True)
@@ -287,7 +292,8 @@ class Router:
             "/": lambda: render_dashboard_page(request.base, request.params, self.runtime.config_error),
             "/statistics": lambda: render_statistics_page(request.base, request.params),
             "/settings": lambda: render_settings_page(request.base, request.params,
-                                                       access_bar=render_session_bar(request.base, request.trusted_ingress)),
+                                                       access_bar=render_session_bar(request.base, request.trusted_ingress),
+                                                       open_http=not request.trusted_ingress and not request.secure),
             "/restarting": lambda: render_restart_page(request.base, request.params),
             "/settings/restarting": lambda: render_restart_page(request.base, request.params),
         }

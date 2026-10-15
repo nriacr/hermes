@@ -276,7 +276,10 @@ def _update_timing_options(options: Dict[str, Any], form) -> None:
     options.update(values)
 
 
-def render_settings_page(base: str, params: Dict[str, List[str]], *, access_bar: str = "") -> bytes:
+HTTP_WARNING = "Bu adres şifresiz (HTTP). Yalnız güvendiğin ağda ya da HTTPS tünel arkasında kullan."
+
+
+def render_settings_page(base: str, params: Dict[str, List[str]], *, access_bar: str = "", open_http: bool = False) -> bytes:
     options = read_options()
     configured_groups = _list_from_text("\n".join(str(group) for group in _as_list(options.get("gruplar"))))
     known_titles = stored_watch_titles()
@@ -291,8 +294,9 @@ def render_settings_page(base: str, params: Dict[str, List[str]], *, access_bar:
     if filters:
         filters = f"<div class='watch-group-filters' aria-label='Takip edilen grup filtreleri'>{filters}</div>"
     notice = render_notice(params.get("saved", [""])[0], params.get("msg", [""])[0])
+    http_notice = render_notice("warn", HTTP_WARNING) if open_http else ""
     body = (
-        f"<h2 class='page-heading'>Ayarlar</h2>{access_bar}{notice}"
+        f"<h2 class='page-heading'>Ayarlar</h2>{access_bar}{http_notice}{notice}"
         f"<form id='settings-form' method='post' action='{escape(link(base, 'settings/save'), quote=True)}' data-settings-save>"
         "<input type='hidden' name='operation' value='update_existing'>"
         f"<input type='hidden' name='watches_count' id='watches-count' value='{new_index + 1}'>"

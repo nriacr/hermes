@@ -1,5 +1,13 @@
 # Değişiklik günlüğü
 
+## 4.2.4
+
+- PIN deneme sınırı yüzeye göre ayrıldı: public adresteki yanlış denemeler Home Assistant içinden girişi kilitlemez.
+- Public adreste kilit süresi kademeli artar (60 sn, 5 dk, 30 dk); doğru PIN sayacı sıfırlar. Ekrandaki bekleme süresi doğru gösterilir.
+- Public ayarlar ekranı HTTP ise sarı uyarı gösterir (Home Assistant içinde gösterilmez).
+- Docker temel imajı sabit sürüme alındı (python 3.12.15-slim).
+- Fiyat geçmişi, takipler ve Amazon davranışı değişmedi.
+
 ## 4.2.3
 
 - Güvenlik: requests kütüphanesi 2.34.2 sürümüne güncellendi.

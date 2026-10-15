@@ -70,9 +70,10 @@ def render_tool_actions(base: str) -> str:
 
 
 def render_notice(status: str, message: str) -> str:
-    if status not in {"ok", "fail"} or not message:
+    if status not in {"ok", "fail", "warn"} or not message:
         return ""
-    return f"<p class='notice {'notice-ok' if status == 'ok' else 'notice-fail'}'>{escape(message)}</p>"
+    style = {"ok": "notice-ok", "fail": "notice-fail", "warn": "notice-warn"}[status]
+    return f"<p class='notice {style}'>{escape(message)}</p>"
 
 
 def render_page(base: str, current: str, title: str, body: str, *, body_class: str = "public",

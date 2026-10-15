@@ -27,6 +27,10 @@ CHALLENGE_SECONDS = 5 * 60
 MAX_SESSIONS = 128
 MAX_FAILURES = 5
 LOCK_SECONDS = 60
+# Public lock escalation: each new lock without a correct PIN in between waits longer.
+PUBLIC_LOCK_STEPS = (60, 5 * 60, 30 * 60)
+SCOPES = ("ingress", "public")
+MAX_STRIKES = 1000
 HASH_ITERATIONS = 600_000
 PIN_PATTERN = re.compile(r"[0-9]{4}\Z")
 
@@ -64,13 +68,45 @@ class WebAccess:
             raise ValueError("invalid verifier")
         if len(bytes.fromhex(state["salt"])) != 16 or len(bytes.fromhex(state["verifier"])) != 32:
             raise ValueError("invalid verifier")
-        failures = state["failures"]
-        if not isinstance(failures, list) or len(failures) > MAX_FAILURES:
-            raise ValueError("invalid attempts")
-        if any(not isinstance(value, (int, float)) or not math.isfinite(value) for value in failures):
-            raise ValueError("invalid attempts")
-        if not isinstance(state["locked_until"], (int, float)) or not math.isfinite(state["locked_until"]):
-            raise ValueError("invalid lock")
+        if "locks" in state:
+            locks = state["locks"]
+            if not isinstance(locks, dict) or set(locks) != set(SCOPES):
+                raise ValueError("invalid locks")
+        else:
+            # Older files carried one global counter; it is kept as the stricter public one.
+            locks = {"ingress": self._new_lock(),
+                     "public": {"failures": state["failures"], "locked_until": state["locked_until"], "strikes": 0}}
+        normalized = {}
+        for scope in SCOPES:
+            lock = locks[scope]
+            failures = lock["failures"]
+            if not isinstance(failures, list) or len(failures) > MAX_FAILURES:
+                raise ValueError("invalid attempts")
+            if any(isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value)
+                   for value in failures):
+                raise ValueError("invalid attempts")
+            until, strikes = lock["locked_until"], lock.get("strikes", 0)
+            if isinstance(until, bool) or not isinstance(until, (int, float)) or not math.isfinite(until):
+                raise ValueError("invalid lock")
+            if isinstance(strikes, bool) or not isinstance(strikes, int) or not 0 <= strikes <= MAX_STRIKES:
+                raise ValueError("invalid lock")
+            normalized[scope] = {"failures": list(failures), "locked_until": until, "strikes": strikes}
+        self.state = {**state, "locks": normalized}
+
+    @staticmethod
+    def _new_lock() -> dict:
+        return {"failures": [], "locked_until": 0, "strikes": 0}
+
+    @staticmethod
+    def _scope(scope: str) -> str:
+        return scope if scope in SCOPES else "public"
+
+    @staticmethod
+    def lock_seconds(scope: str, strikes: int) -> int:
+        """Wait after the strikes-th lock; the ingress surface keeps the flat minute."""
+        if scope != "public":
+            return LOCK_SECONDS
+        return PUBLIC_LOCK_STEPS[min(max(strikes, 1), len(PUBLIC_LOCK_STEPS)) - 1]
 
     @property
     def configured(self) -> bool:
@@ -88,19 +124,21 @@ class WebAccess:
         verifier = hashlib.pbkdf2_hmac("sha256", pin.encode("ascii"), salt, HASH_ITERATIONS)
         with self.lock:
             self._save({"version": 1, "iterations": HASH_ITERATIONS, "salt": salt.hex(),
-                        "verifier": verifier.hex(), "failures": [], "locked_until": 0})
+                        "verifier": verifier.hex(), "failures": [], "locked_until": 0,
+                        "locks": {scope: self._new_lock() for scope in SCOPES}})
             self.sessions.clear()
         return True
 
-    def retry_after(self) -> int:
+    def retry_after(self, scope: str = "public") -> int:
         with self.lock:
             if not self.configured:
                 return 0
-            return max(0, math.ceil(self.state.get("locked_until", 0) - self.clock()))
+            return max(0, math.ceil(self.state["locks"][self._scope(scope)]["locked_until"] - self.clock()))
 
-    def verify(self, pin: str) -> bool:
+    def verify(self, pin: str, scope: str = "public") -> bool:
+        scope = self._scope(scope)
         with self.lock:
-            if not self.configured or self.retry_after():
+            if not self.configured or self.retry_after(scope):
                 return False
             now = self.clock()
             valid = False
@@ -108,13 +146,21 @@ class WebAccess:
                 value = hashlib.pbkdf2_hmac("sha256", pin.encode("ascii"), bytes.fromhex(self.state["salt"]), HASH_ITERATIONS)
                 valid = hmac.compare_digest(value.hex(), self.state["verifier"])
             state = dict(self.state)
+            locks = {name: dict(lock) for name, lock in state["locks"].items()}
+            lock = locks[scope]
             if valid:
-                state.update(failures=[], locked_until=0)
+                locks[scope] = self._new_lock()
             else:
-                failures = [value for value in state["failures"] if now - value < LOCK_SECONDS]
+                failures = [value for value in lock["failures"] if now - value < LOCK_SECONDS]
                 failures.append(now)
-                state.update(failures=failures[-MAX_FAILURES:],
-                             locked_until=now + LOCK_SECONDS if len(failures) >= MAX_FAILURES else 0)
+                failures = failures[-MAX_FAILURES:]
+                if len(failures) >= MAX_FAILURES:
+                    strikes = min(lock["strikes"] + 1, MAX_STRIKES)
+                    locks[scope] = {"failures": failures, "strikes": strikes,
+                                    "locked_until": now + self.lock_seconds(scope, strikes)}
+                else:
+                    lock.update(failures=failures)
+            state.update(locks=locks, failures=[], locked_until=0)
             # Commit the attempt before granting access; an unwritable store fails closed.
             self._save(state)
             return valid
