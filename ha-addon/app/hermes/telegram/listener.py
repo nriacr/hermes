@@ -23,6 +23,7 @@ from ..constants import (
     TELEGRAM_STATUS_HEARTBEAT_SECONDS,
     TELEGRAM_STATUS_PATH,
 )
+from . import commands
 from ..logging_utils import log
 from ..models import HermesConfig, TelegramConfig
 from ..notifier import Pushover
@@ -489,6 +490,11 @@ async def _listen(config: HermesConfig, notifier: Pushover) -> None:
                 # Only messages the user writes in Saved Messages start or answer a flow.
                 if getattr(event, "out", False):
                     try:
+                        command_reply = commands.reply_for(text)
+                        if command_reply is not None:
+                            await event.reply(f"Hermes: {command_reply}")
+                            _first_time_seen(_message_key(event))
+                            return
                         await _handle_saved_message_quick_add(event)
                         _first_time_seen(_message_key(event))
                     except Exception as exc:  # noqa: BLE001

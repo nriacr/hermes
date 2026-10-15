@@ -22,6 +22,7 @@ TELEGRAM_SEEN_MESSAGES_PATH = DATA_DIR / "seen_messages.json"
 TELEGRAM_STATUS_PATH = DATA_DIR / "status.json"
 TELEGRAM_ERROR_EVENTS_PATH = DATA_DIR / "error_events.json"
 TELEGRAM_QUICK_ADD_PATH = DATA_DIR / "telegram_quick_add.json"
+SITE_PAUSE_PATH = DATA_DIR / "site_pauses.json"
 
 INGRESS_PORT = 8099
 PUBLIC_PORT = 8100

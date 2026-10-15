@@ -35,6 +35,7 @@ from ..notifier import Pushover
 from ..providers.base import DEPO_LANE, Provider, ReadContext, RequestSpacing, WatchRead
 from ..providers.registry import ProviderSet
 from ..providers.http import MeasuredSession
+from .. import sitepause
 from ..storage import load_json, save_json, export_json
 from ..utils import SystemLoad, parse_iso_datetime, site_label, system_load, utc_now
 from . import alerts, scheduling, state as state_ops, summary
@@ -446,10 +447,11 @@ class Monitor:
         retry_after = parse_iso_datetime(entry.get("amazon_no_offer_retry_after"))
         absence_deferred = (key not in self._startup_pending and not scheduling.manually_due(watch, entry) and retry_after is not None
                             and datetime.now(timezone.utc) < retry_after)
-        if (absence_deferred or not provider.read_due(watch)
+        paused = sitepause.is_paused(watch.site)
+        if (absence_deferred or paused or not provider.read_due(watch)
                 or (key not in self._startup_pending
                     and not scheduling.watch_check_due(watch, entry, self.config.interval_seconds))):
-            if not scheduling.manually_due(watch, entry) or absence_deferred:
+            if not scheduling.manually_due(watch, entry) or absence_deferred or paused:
                 run.priority_scope[priority]["deferred"] += 1
                 self.results._begin_rows(run, key)
                 self.results._add_rows(run, key, summary.cached_summary_rows(watch, key, run.state, seller),
@@ -463,6 +465,15 @@ class Monitor:
         key = make_watch_key(watch)
         seller = site_label(watch.site)
         outcome = WatchRead()
+        if sitepause.is_paused(watch.site):
+            # Paused from Telegram while the cycle ran: keep the last result on the table.
+            with self._lock:
+                entry = run.state.get(key, {})
+                entry = entry if isinstance(entry, dict) else {}
+                self.results._begin_rows(run, key)
+                self.results._add_rows(run, key, summary.cached_summary_rows(watch, key, run.state, seller),
+                                       summary.cached_stock_rows(watch, entry, seller))
+            return
         with self._lock:
             entry = run.state.get(key, {})
             entry = entry if isinstance(entry, dict) else {}
@@ -556,6 +567,8 @@ class Monitor:
 
     def _depo_lane_due(self, run: CycleRun, provider: Provider, watch: WatchRule) -> bool:
         """True for a watch whose next read is a quick main-page read and whose rhythm and schedule say it is due."""
+        if sitepause.is_paused(watch.site):
+            return False
         with self._lock:
             guard_key = state_ops.site_guard_key(watch.site)
             remaining = state_ops.guard_remaining_seconds(run.state, guard_key)

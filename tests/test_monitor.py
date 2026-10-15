@@ -247,6 +247,20 @@ class NotificationTests(CycleTestCase):
                 self.run_later(config([rule]))
         self.assertEqual(self.titles_sent(), ["Amazon fiyat alarmı"])
 
+    def test_paused_site_is_not_read_and_keeps_its_rows(self):
+        from hermes import sitepause
+        rule = watch(url=AMAZON, target="1000")
+        offers = [OfferResult("iPhone", Decimal("900"), url=AMAZON)]
+        with patch.object(AmazonProvider, "read", side_effect=reader(offers)) as read:
+            self.run_cycle(config([rule]))
+            self.assertEqual(read.call_count, 1)
+            with patch.object(sitepause, "is_paused", return_value=True):
+                self.run_later(config([rule]))
+            self.assertEqual(read.call_count, 1)
+            self.assertEqual(len(self.published_rows()), 1)
+            self.run_later(config([rule]))
+            self.assertEqual(read.call_count, 2)
+
     def test_window_open_rules(self):
         from hermes.monitor.alerts import window_open
         at = lambda day, hour: datetime(2026, 10, day, hour, 0)  # noqa: E731  (14 Oct 2026 is a Wednesday)

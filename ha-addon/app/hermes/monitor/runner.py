@@ -20,6 +20,7 @@ from ..logging_utils import log
 from ..models import HermesConfig
 from ..notifier import Pushover
 from ..providers.registry import ProviderSet
+from .. import sitepause
 from ..storage import file_lock, load_json, save_json
 from ..utils import local_now, site_label
 from . import scheduling, state as state_ops, summary
@@ -150,7 +151,11 @@ class MonitorService:
         with self.monitor._lock:
             guards = state_ops.guard_store(self.monitor._state)
             silent = [site for site in sites if (guards.get(state_ops.site_guard_key(site)) or {}).get("kind") in SILENT_GUARD_KINDS]
-        began, recovered = stall.update(now, self.monitor.diagnostics.last_success, thresholds, silent)
+        # A site paused from Telegram reads nothing on purpose: it is no stall, and its clock restarts when it resumes.
+        paused = [site for site in sites if sitepause.is_paused(site)]
+        for site in paused:
+            self.monitor.diagnostics.last_success[site] = now
+        began, recovered = stall.update(now, self.monitor.diagnostics.last_success, thresholds, [*silent, *paused])
         bridge = self.monitor.home_assistant
         for site in recovered:
             log(f"{site} yeniden başarılı okuyor (takılma sona erdi).")
