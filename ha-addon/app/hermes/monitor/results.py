@@ -233,7 +233,8 @@ class ResultRecorder:
                         # No offer_key: this heads-up never touches the target-price suppression or the
                         # opportunity event; it expires after 24 hours like any other keyless message.
                         identity = hashlib.sha256(json.dumps(["low90", item_key, str(offer.price)]).encode()).hexdigest()
-                        self.notifier.enqueue({"title": title, "message": message, "url": matched_url}, identity, state, price_statements)
+                        self.notifier.enqueue({"title": title, "message": message, "url": matched_url, "price": str(offer.price),
+                                               "target": str(watch.target_price), "kind": "low90"}, identity, state, price_statements)
                     else:
                         self.notifier.db.transaction(price_statements + [
                             ("INSERT OR REPLACE INTO snapshots VALUES (?,?)", ("state.json", json.dumps(state, ensure_ascii=False)))])

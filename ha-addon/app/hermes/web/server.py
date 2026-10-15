@@ -29,6 +29,7 @@ from .dashboard import dashboard_live_html, render_dashboard_page
 from .icons import HERMES_ICON_PNG, HERMES_ICON_SVG, render_web_manifest
 from .pages import link
 from .pin import csrf_field, render_configure_page, render_pin_page, render_session_bar
+from .opportunities import render_opportunities_page
 from .statistics import render_statistics_page, statistics_live_html
 from .settings import handle_restart, handle_settings_save, render_restart_page, render_settings_page
 
@@ -267,7 +268,7 @@ class Router:
         if request.method == "POST" and path in {"/auth/unlock", "/auth/configure", "/auth/lock", "/auth/touch"}:
             return self._auth_action(request, path, session)
         if not session or not session.authenticated:
-            if request.method == "GET" and path in {"/settings", "/statistics"}:
+            if request.method == "GET" and path in {"/settings", "/statistics", "/opportunities"}:
                 return self._pin_reply(request)
             return Response(401, b"PIN required\n")
         if request.method == "GET" and path == "/auth/status":
@@ -306,6 +307,7 @@ class Router:
         pages = {
             "/": lambda: render_dashboard_page(request.base, request.params, self.runtime.config_error),
             "/statistics": lambda: render_statistics_page(request.base, request.params),
+            "/opportunities": lambda: render_opportunities_page(request.base, request.params),
             "/settings": lambda: render_settings_page(request.base, request.params,
                                                        access_bar=render_session_bar(request.base, request.trusted_ingress),
                                                        open_http=not request.trusted_ingress and not request.secure),
