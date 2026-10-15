@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.7.0
+
+- Kart detayındaki fiyat grafiğine zaman aralığı düğmeleri: 7 gün, 30 gün, 90 gün ve Tümü (yalnız geçmişten kısa aralıklar gösterilir). Hedef fiyat çizgisi her aralıkta durur; pencere açılırken geçerli olan fiyattan başlar. Veri ve bildirimler değişmedi.
+
 ## 4.6.0
 
 - Yeni "Fırsat geçmişi" sayfası (Araçlar > Fırsat geçmişi): son 30 günde gönderilen bildirimler, yeniden eskiye; her biri için zaman, fiyat ve ürünün bugünkü fiyatı / hâlâ geçerli olup olmadığı. Veri mevcut bildirim kaydından okunur, yeni tablo yoktur; takipler, fiyat geçmişi ve bildirim davranışı değişmedi.
