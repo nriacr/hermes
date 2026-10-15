@@ -5,7 +5,7 @@ import unittest
 from unittest.mock import patch
 import urllib.error
 
-from tools.check_access import AccessError, capture, github_get, validate_github
+from tools.check_access import AccessError, capture, github_get, is_fine_grained, validate_fine_grained, validate_github
 
 
 class ReleaseAccessTests(unittest.TestCase):
@@ -39,3 +39,29 @@ class ReleaseAccessTests(unittest.TestCase):
                 github_get("/user", "SYNTHETIC_SECRET")
         self.assertIn("401", str(caught.exception))
         self.assertNotIn("SYNTHETIC_SECRET", str(caught.exception))
+
+
+class FineGrainedTokenTests(unittest.TestCase):
+    repo = {"permissions": {"push": True}}
+    headers = {"github-authentication-token-expiration": "2027-01-01 00:00:00 UTC"}
+
+    def test_token_kind_is_recognised_by_prefix(self):
+        self.assertTrue(is_fine_grained("github_pat_SYNTHETIC"))
+        self.assertFalse(is_fine_grained("ghp_SYNTHETIC"))
+
+    def test_single_repository_with_expiry_passes(self):
+        note = validate_fine_grained([{"full_name": "nriacr/hermes"}], self.repo, self.headers, True)
+        self.assertIn("Workflows", note)
+
+    def test_token_reaching_other_repositories_is_rejected(self):
+        with self.assertRaisesRegex(AccessError, "tek depoya|sınırlı değil"):
+            validate_fine_grained([{"full_name": "nriacr/hermes"}, {"full_name": "nriacr/other"}], self.repo, self.headers, False)
+        with self.assertRaises(AccessError):
+            validate_fine_grained([], self.repo, self.headers, False)
+
+    def test_missing_push_or_expiry_is_rejected(self):
+        accessible = [{"full_name": "nriacr/hermes"}]
+        with self.assertRaisesRegex(AccessError, "Contents"):
+            validate_fine_grained(accessible, {"permissions": {"pull": True}}, self.headers, False)
+        with self.assertRaisesRegex(AccessError, "son kullanma"):
+            validate_fine_grained(accessible, self.repo, {}, False)

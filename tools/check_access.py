@@ -57,6 +57,24 @@ def validate_github(identity, repository, actions, scopes, require_workflow):
                           "Sınırlı depo anahtarında Contents ve Workflows yazma izinleri ayrıca doğrulanmalıdır.")
 
 
+def is_fine_grained(token):
+    return token.startswith("github_pat_")
+
+
+def validate_fine_grained(accessible, repository, headers, require_workflow):
+    """A fine-grained token carries no OAuth scopes; its limits come from the repository list and its expiry."""
+    names = sorted(str(item.get("full_name")) for item in accessible)
+    if names != [GITHUB_REPOSITORY]:
+        raise AccessError("İnce ayarlı anahtar yalnız nriacr/hermes deposuna sınırlı değil; "
+                          f"{len(names)} depoya erişebiliyor. Anahtarı tek depoya daralt.")
+    if not repository.get("permissions", {}).get("push"):
+        raise AccessError("İnce ayarlı anahtarda Contents yazma izni yok.")
+    if not headers.get("github-authentication-token-expiration"):
+        raise AccessError("İnce ayarlı anahtarın son kullanma tarihi yok; süre sınırı koy.")
+    return "Workflow düzenleme: ince ayarlı anahtarda API ile okunamaz; Workflows yazma izni ilk yayında GitHub tarafından sınanır." \
+        if require_workflow else "Workflow düzenleme: bu kontrolde doğrulanmadı."
+
+
 def check_github(require_workflow=False):
     raw = capture(["git", "credential", "fill"], input_text="protocol=https\nhost=github.com\n\n")
     credential = dict(line.split("=", 1) for line in raw.splitlines() if "=" in line)
@@ -65,6 +83,14 @@ def check_github(require_workflow=False):
         raise AccessError("GitHub erişim anahtarı güvenli kimlik deposunda bulunamadı.")
     identity, headers = github_get("/user", token)
     repository, _ = github_get("/repos/" + GITHUB_REPOSITORY, token)
+    if is_fine_grained(token):
+        if identity.get("login") != GITHUB_REPOSITORY.split("/")[0]:
+            raise AccessError("GitHub için beklenen nriacr hesabı kullanılmıyor.")
+        accessible, _ = github_get("/user/repos?per_page=100", token)
+        note = validate_fine_grained(accessible if isinstance(accessible, list) else [], repository, headers, require_workflow)
+        print("GitHub: doğru hesap, tek depoya sınırlı ince ayarlı anahtar ve yayımlama izni doğrulandı.")
+        print(note)
+        return
     actions, _ = github_get("/repos/" + GITHUB_REPOSITORY + "/actions/permissions", token)
     github_get("/repos/" + GITHUB_REPOSITORY + "/actions/workflows", token)
     scopes = {scope.strip() for scope in headers.get("X-OAuth-Scopes", "").split(",")}
