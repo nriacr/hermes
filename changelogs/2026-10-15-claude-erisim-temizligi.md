@@ -45,3 +45,7 @@ Agent güvenlik ayarı, kimlik bilgisi veya yetki değiştirmediği için şunla
 ## Güncelleme: 4.2.5 yeniden başlatma ucu canlıda doğrulandı
 
 15 Ekim 2026 21:43 (yerel): Nuri panelde "Hermes'i yeniden başlat"a bastı. Günlük: "Panelden yeniden başlatma istendi" → "Yeniden başlatma isteği Home Assistant'a iletildi; Hermes kapanıyor" (beklenen zaman aşımı yolu) → 21:44:46 "Hermes v4.2.5 başlatılıyor"; ~1 dk sonra `healthy: true`. Yani `hassio_role: default` ile `/addons/self/restart` çalışıyor. Ayar kaydı (`/addons/self/options`) bu denemede çağrılmadı; ilk gerçek ayar kaydında günlükten izlenmeli (hata verirse 4.2.4'teki manager + slug yoluna dön).
+
+## Güncelleme: 4.2.5 ayar kaydı canlıda doğrulandı
+
+15 Ekim 2026 21:47 (yerel): Nuri ayarlardan bir takip kartını sildi. Kanıt: Supervisor günlüğü 21:47:24 uygulamayı durdurup 21:47:25'te 4.2.4 değil 4.2.5 ile yeniden başlattı; Hermes günlüğü 21:46:34 "kapanıyor"; Supervisor'daki seçeneklerde 13 takip kartı, `/runtime` `active_cards: 13`, `healthy: true`, sürüm 4.2.5. Yani `hassio_role: default` ile hem seçenek yazma (`/addons/self/options`) hem yeniden başlatma çalışıyor; manager rolüne dönüş gerekmedi.
