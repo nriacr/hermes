@@ -69,8 +69,9 @@ def validate_fine_grained(accessible, repository, headers, require_workflow):
                           f"{len(names)} depoya erişebiliyor. Anahtarı tek depoya daralt.")
     if not repository.get("permissions", {}).get("push"):
         raise AccessError("İnce ayarlı anahtarda Contents yazma izni yok.")
+    # A token without an expiry is the owner's explicit choice (15 Oct 2026); it is reported, not refused.
     if not headers.get("github-authentication-token-expiration"):
-        raise AccessError("İnce ayarlı anahtarın son kullanma tarihi yok; süre sınırı koy.")
+        print("Uyarı: anahtarın son kullanma tarihi yok (süresiz).")
     return "Workflow düzenleme: ince ayarlı anahtarda API ile okunamaz; Workflows yazma izni ilk yayında GitHub tarafından sınanır." \
         if require_workflow else "Workflow düzenleme: bu kontrolde doğrulanmadı."
 

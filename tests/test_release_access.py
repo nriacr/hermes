@@ -59,9 +59,8 @@ class FineGrainedTokenTests(unittest.TestCase):
         with self.assertRaises(AccessError):
             validate_fine_grained([], self.repo, self.headers, False)
 
-    def test_missing_push_or_expiry_is_rejected(self):
+    def test_missing_push_is_rejected_but_an_unlimited_token_is_only_a_warning(self):
         accessible = [{"full_name": "nriacr/hermes"}]
         with self.assertRaisesRegex(AccessError, "Contents"):
             validate_fine_grained(accessible, {"permissions": {"pull": True}}, self.headers, False)
-        with self.assertRaisesRegex(AccessError, "son kullanma"):
-            validate_fine_grained(accessible, self.repo, {}, False)
+        validate_fine_grained(accessible, self.repo, {}, False)
