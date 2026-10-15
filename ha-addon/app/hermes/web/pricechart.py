@@ -68,10 +68,13 @@ def _steps(points: List[Point], x, y) -> str:
 
 
 def _scales(points: List[Point], left: float, right: float, top: float, bottom: float,
-            extra: Sequence[float] = (), headroom: float = 0.0):
-    """Maps time to x and price to y; `headroom` widens the price range by that share."""
-    started, ended = points[0][0].timestamp(), points[-1][0].timestamp()
-    prices = [price for _, price in points] + list(extra)
+            extra: Sequence[float] = (), headroom: float = 0.0, also: Sequence[Point] = ()):
+    """Maps time to x and price to y; `headroom` widens the price range by that share.
+
+    `also` is a second line (the Depo or the new offer of the same product) drawn on the same scales."""
+    started = min([points[0][0].timestamp()] + [moment.timestamp() for moment, _ in also[:1]])
+    ended = max([points[-1][0].timestamp()] + [moment.timestamp() for moment, _ in also[-1:]])
+    prices = [price for _, price in points] + [price for _, price in also] + list(extra)
     low, high = min(prices), max(prices)
     margin = (high - low) * headroom or (high * 0.02 if headroom else 0.0)
     low, high = low - margin, high + margin
@@ -107,11 +110,26 @@ def _thousands(value: float) -> str:
     return f"{value / 1000:.1f}".replace(".", ",") + "K"
 
 
-def detail_chart(points: List[Point], target: float) -> str:
-    """The detail sheet chart: price steps, the target line and the first and last day."""
+PAIR_COLORS = {"Yeni": "#8ad8ff", "Depo": "#ffb347"}
+
+
+def partner_legend(names: Tuple[str, str]) -> str:
+    """Which line is which when the new offer and the Depo offer share one chart."""
+    return "<div class='ov-legend'>" + "".join(
+        f"<span><i class='ov-sw' style='background:{PAIR_COLORS[name]}'></i>{name}</span>" for name in names) + "</div>"
+
+
+def detail_chart(points: List[Point], target: float, other: List[Point] = (),
+                 names: Tuple[str, str] = ("Yeni", "Depo")) -> str:
+    """The detail sheet chart: price steps, the target line and the first and last day.
+
+    With `other` the second offer of the product (Depo next to new, or the reverse) is a separate amber line."""
+    other = list(other)
+    own_color = PAIR_COLORS[names[0]] if other else "currentColor"
+    other_color = PAIR_COLORS[names[1]]
     pad = CHART_PAD
     x, y, low, high = _scales(points, pad["left"], CHART_WIDTH - pad["right"], pad["top"], CHART_HEIGHT - pad["bottom"],
-                              [target], headroom=0.14)
+                              [target], headroom=0.14, also=other)
     floor = CHART_HEIGHT - pad["bottom"]
     grid = "".join(
         f"<line x1='{pad['left']}' x2='{CHART_WIDTH - pad['right']}' y1='{y(level):.1f}' y2='{y(level):.1f}' stroke='rgba(255,255,255,.07)'/>"
@@ -120,9 +138,19 @@ def detail_chart(points: List[Point], target: float) -> str:
     )
     steps = _steps(points, x, y)
     area = f"{steps} L{x(points[-1][0]):.1f} {floor} L{x(points[0][0]):.1f} {floor} Z"
-    dots = "".join(f"<circle class='ov-fade' cx='{x(moment):.1f}' cy='{y(price):.1f}' r='4' fill='currentColor' stroke='#0a0814' stroke-width='2'/>"
+    dots = "".join(f"<circle class='ov-fade' cx='{x(moment):.1f}' cy='{y(price):.1f}' r='4' fill='{own_color}' stroke='#0a0814' stroke-width='2'/>"
                    for moment, price in points)
-    first, last = points[0][0], points[-1][0]
+    first = min([points[0][0]] + [moment for moment, _ in other[:1]])
+    last = max([points[-1][0]] + [moment for moment, _ in other[-1:]])
+    partner = ""
+    partner_hover = ""
+    if other:
+        partner = (f"<path d='{_steps(other, x, y)}' fill='none' stroke='{other_color}' stroke-width='3' "
+                   "stroke-linejoin='round' stroke-linecap='round'/>"
+                   + "".join(f"<circle cx='{x(moment):.1f}' cy='{y(price):.1f}' r='4' fill='{other_color}' "
+                             "stroke='#0a0814' stroke-width='2'/>" for moment, price in other))
+        partner_hover = " data-points-b='" + json.dumps([[round(x(moment), 1), round(y(price), 1), int(moment.timestamp()), round(price)]
+                                                        for moment, price in other]) + "'"
     labels = (f"<text x='{x(first):.1f}' y='{CHART_HEIGHT - 7}' font-size='11' fill='#9a95b8'>{_day(first)}</text>"
               f"<text x='{x(last):.1f}' y='{CHART_HEIGHT - 7}' text-anchor='end' font-size='11' fill='#9a95b8'>{_day(last)}</text>")
     target_y = y(target)
@@ -130,12 +158,12 @@ def detail_chart(points: List[Point], target: float) -> str:
     hover = json.dumps([[round(x(moment), 1), round(y(price), 1), int(moment.timestamp()), round(price)] for moment, price in points])
     return (
         f"<svg class='ov-chart' viewBox='0 0 {CHART_WIDTH} {CHART_HEIGHT}' role='img' aria-label='Fiyat geçmişi' "
-        f"data-points='{hover}' data-top='{pad['top']}' data-bottom='{floor}'>"
+        f"data-points='{hover}'{partner_hover} data-top='{pad['top']}' data-bottom='{floor}'>"
         f"{grid}<line x1='{pad['left']}' x2='{CHART_WIDTH - pad['right']}' y1='{target_y:.1f}' y2='{target_y:.1f}' "
         "stroke='#b6ff3b' stroke-dasharray='6 5' stroke-width='1.5'/>"
-        f"<path class='ov-fade' d='{area}' fill='currentColor' fill-opacity='.22'/>"
-        f"<path class='ov-draw' pathLength='1' d='{steps}' fill='none' stroke='currentColor' stroke-width='3' "
-        f"stroke-linejoin='round' stroke-linecap='round'/>{dots}{labels}"
+        f"<path class='ov-fade' d='{area}' fill='{own_color}' fill-opacity='.22'/>"
+        f"<path class='ov-draw' pathLength='1' d='{steps}' fill='none' stroke='{own_color}' stroke-width='3' "
+        f"stroke-linejoin='round' stroke-linecap='round'/>{dots}{partner}{labels}"
         "<line class='ov-cross' x1='0' x2='0' stroke='rgba(255,255,255,.35)' stroke-dasharray='3 3' opacity='0'/>"
         "<circle class='ov-cross-dot' r='6' fill='currentColor' stroke='#fff' stroke-width='2' opacity='0'/></svg>"
     )
@@ -154,19 +182,31 @@ def window_points(points: List[Point], now: datetime, days: int) -> List[Point]:
     return inside
 
 
-def ranged_chart(points: List[Point], target: float, now: datetime) -> str:
-    """The detail chart with a 7/30/90-day/all switch; only windows shorter than the history are offered."""
-    span = (points[-1][0] - points[0][0]).days if points else 0
+def ranged_chart(points: List[Point], target: float, now: datetime, other: List[Point] = (),
+                 names: Tuple[str, str] = ("Yeni", "Depo")) -> str:
+    """The detail chart with a 7/30/90-day/all switch; only windows shorter than the history are offered.
+
+    `other` is the product's second offer (see `detail_chart`), `names` the labels of (this line, that line)."""
+    other = list(other)
+    legend = partner_legend(names) if other else ""
+    start = min([points[0][0]] + [moment for moment, _ in other[:1]]) if points else None
+    end = max([points[-1][0]] + [moment for moment, _ in other[-1:]]) if points else None
+    span = (end - start).days if points else 0
     options = [(f"{days} gün", str(days), window_points(points, now, days)) for days in RANGE_DAYS if days < span]
     if not options:
-        return detail_chart(points, target)
+        return legend + detail_chart(points, target, other, names)
     options.append(("Tümü", "all", points))
     default = "all" if span <= RANGE_DAYS[-1] else str(RANGE_DAYS[-1])
     buttons = "".join(f"<button type='button' class='ov-range' data-range='{key}' aria-pressed='{str(key == default).lower()}'>{label}</button>"
                       for label, key, _ in options)
     charts = "".join(f"<div class='ov-chartwrap' data-range-pane='{key}'{'' if key == default else ' hidden'}>"
-                     f"{detail_chart(chosen if len(chosen) > 1 else points, target)}</div>" for _, key, chosen in options)
-    return f"<div class='ov-ranges' role='group' aria-label='Zaman aralığı'>{buttons}</div>{charts}"
+                     f"{detail_chart(chosen if len(chosen) > 1 else points, target, _other_window(other, now, key), names)}</div>"
+                     for _, key, chosen in options)
+    return f"<div class='ov-ranges' role='group' aria-label='Zaman aralığı'>{buttons}</div>{legend}{charts}"
+
+
+def _other_window(other: List[Point], now: datetime, key: str) -> List[Point]:
+    return other if key == "all" or not other else window_points(other, now, int(key))
 
 
 def _day(moment: datetime) -> str:

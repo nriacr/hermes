@@ -66,7 +66,15 @@
     let bubble = tip;
     if (!bubble) { bubble = document.createElement('div'); bubble.className = 'ov-tip'; box.appendChild(bubble); }
     bubble.hidden = false;
-    bubble.innerHTML = `${fmtPrice(hit[3])}<small>${fmtDate(moment)}</small>`;
+    const otherPoints = JSON.parse(chart.dataset.pointsB || '[]');
+    let extra = '';
+    if (otherPoints.length) {
+      let found = null;
+      for (const point of otherPoints) { if (point[0] <= x) found = point; }
+      const names = [...sheet.querySelectorAll('.ov-legend span')].map((item) => item.textContent.trim());
+      extra = `<small>${names[0] || ''}: ${fmtPrice(hit[3])}${found ? ` · ${names[1] || ''}: ${fmtPrice(found[3])}` : ''}</small>`;
+    }
+    bubble.innerHTML = otherPoints.length ? `${extra}<small>${fmtDate(moment)}</small>` : `${fmtPrice(hit[3])}<small>${fmtDate(moment)}</small>`;
     const boxRect = box.getBoundingClientRect();
     const left = Math.max(70, Math.min(boxRect.width - 70, event.clientX - boxRect.left));
     bubble.style.left = `${left}px`;

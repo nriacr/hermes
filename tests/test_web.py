@@ -539,6 +539,28 @@ class DashboardTests(DataFilesMixin, unittest.TestCase):
         self.assertNotIn("class='ov-chart'", self.live())
         self.assertIn("<span class='ov-chg flat'>yeni</span>", self.live())
 
+    def test_depo_and_new_offer_of_one_product_share_a_chart_with_two_lines(self):
+        url = "https://www.amazon.com.tr/dp/B000000001"
+        self.data.write_state({"new": {"url": url, "tracking_id": "c1", "is_warehouse": False},
+                               "depo": {"url": url, "tracking_id": "c1", "is_warehouse": True}})
+        store = History.at(self.data.files.database)
+        now = datetime.now(timezone.utc)
+        for key, days, price in (("new", 9, "16000"), ("new", 2, "15000"), ("depo", 8, "12000"), ("depo", 1, "11000")):
+            store.record_price(key, "amazon", "Ürün", Decimal(price), now - timedelta(days=days))
+        store.close()
+        self.data.write_summary({"rows": [price_row(price="15.000 TL", tracking_id="c1"),
+                                          price_row(price="11.000 TL", tracking_id="c1", is_warehouse=True)]})
+        html = self.live()
+        self.assertGreaterEqual(html.count("data-points-b='"), 2)  # each sheet (and range pane) carries the other line
+        self.assertIn("<span><i class='ov-sw' style='background:#8ad8ff'></i>Yeni</span>", html)
+        self.assertIn("<span><i class='ov-sw' style='background:#ffb347'></i>Depo</span>", html)
+        self.assertIn("stroke='#ffb347'", html)
+        # a product with only one offer keeps the single-line chart
+        self.data.write_summary({"rows": [price_row(price="15.000 TL", tracking_id="c1")]})
+        single = self.live()
+        self.assertNotIn("data-points-b", single)
+        self.assertNotIn("ov-legend'", single)
+
     def test_price_that_rose_since_the_first_record_is_marked_up(self):
         self.data.write_state({"offer": {"url": "https://www.amazon.com.tr/dp/B000000001", "tracking_id": "", "is_warehouse": False}})
         store = History.at(self.data.files.database)

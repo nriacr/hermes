@@ -143,6 +143,7 @@ class Offer:
     warehouse: bool
     checked_at: str
     points: list = field(default_factory=list)
+    partner_points: list = field(default_factory=list)  # the same product's other offer (Depo <-> new)
 
     @property
     def gap_share(self) -> Decimal:
@@ -170,7 +171,20 @@ def build_offers(rows: List[Dict[str, Any]], state: Dict[str, Any]) -> List[Offe
             hit=is_target_hit(row), warehouse=parse_bool(row.get("is_warehouse"), default=False), checked_at=checked_at,
             points=with_current(points, price, moment),
         ))
+    _pair_partners(offers)
     return offers
+
+
+def _pair_partners(offers: List[Offer]) -> None:
+    """Link each offer to the same product's offer of the other condition, so the sheet can draw both lines."""
+    by_identity: Dict[tuple, Dict[bool, Offer]] = {}
+    for offer in offers:
+        identity = (str(offer.row.get("product_url") or ""), str(offer.row.get("tracking_id") or ""))
+        if identity[0]:
+            by_identity.setdefault(identity, {}).setdefault(offer.warehouse, offer)
+    for pair in by_identity.values():
+        if len(pair) == 2:
+            pair[True].partner_points, pair[False].partner_points = pair[False].points, pair[True].points
 
 
 def variant_labels(titles: List[str]) -> List[List[str]]:
@@ -252,7 +266,9 @@ def detail_html(offer: Offer) -> str:
     if len(offer.points) > 1:
         cells += (f"<div class='ov-fact'><span>İlk kayıtlı fiyat</span><b>{lira(Decimal(str(offer.points[0][1])))}</b></div>"
                   f"<div class='ov-fact'><span>Takip başlangıcı</span><b>{offer.points[0][0].strftime('%d.%m.%Y')}</b></div>")
-    chart = (ranged_chart(offer.points, float(offer.target), _parse_local_time(offer.checked_at) or datetime.now().astimezone())
+    names = ("Depo", "Yeni") if offer.warehouse else ("Yeni", "Depo")
+    chart = (ranged_chart(offer.points, float(offer.target), _parse_local_time(offer.checked_at) or datetime.now().astimezone(),
+                          offer.partner_points, names)
              if len(offer.points) > 1
              else "<p class='ov-note'>Fiyat geçmişi ilk değişiklikten sonra çizilir.</p>")
     product_url = str(offer.row.get("product_url") or "").strip()
