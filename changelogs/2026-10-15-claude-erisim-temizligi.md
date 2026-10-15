@@ -33,3 +33,7 @@ Agent güvenlik ayarı, kimlik bilgisi veya yetki değiştirmediği için şunla
 ## Güncelleme: GitHub anahtarı doğrulandı
 
 15 Ekim 2026: Nuri yeni ince ayarlı anahtarı (bitiş tarihli, yalnız nriacr/hermes) anahtarlığa girdi. `check_access.py --github-only --require-workflow`: doğru hesap, tek depo, yazma izni doğrulandı; Workflows izni ilk workflow push’unda sınanacak. Süresiz anahtar uyarıya çevrildi (Nuri kararı). Eski klasik anahtarın iptali Nuri tarafında.
+
+## Güncelleme: backups iCloud dışına alındı
+
+15 Ekim 2026, Nuri onayıyla (seçenek b): `backups/` klasörü `backups.nosync/` olarak yeniden adlandırıldı, yerine `backups -> backups.nosync` sembolik bağı kondu. İçerik taşınmadı/silinmedi (2,1 GB, aynı disk); tüm yollar çalışıyor. HA deposunun `.gitignore` dosyasına `backups` ve `backups.nosync/` eklendi. Önceden iCloud'a yüklenmiş kopyalar iCloud.com'dan ayrıca silinmedikçe kalır. Geri alma: `rm backups && mv backups.nosync backups`.
