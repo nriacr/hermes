@@ -19,4 +19,4 @@
 
 ## Canlı kanıt
 
-- (kurulumdan sonra eklenecek)
+- install_rpi.sh (yedek b160df65): 4.11.0 started, sağlık ok, 13 takip/364 kayıt/644 fiyat noktası korundu, tüm siteler güncel okundu.
