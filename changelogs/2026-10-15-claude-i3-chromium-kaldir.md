@@ -25,3 +25,8 @@
 ## Kalan sınırlamalar
 
 - Amazon curl okuması geçici hatada tarayıcı kurtarması artık yok; I1 verisine göre bu yol fiilen hiç işe yaramadı.
+
+## Canlı kanıt (kurulum yapıldı)
+
+- tools/install_rpi.sh, yedek b160df65 → Hermes 4.5.0 started, sağlık ok, günlükte Traceback yok.
+- Disk kullanımı 30,5 GB → 29,8 GB (−0,7 GB, eski imaj silindi). Bellek yeni başlangıçta ~107 MB (önce ~477 MB; sürekli çalışma değeri birkaç saat sonra karşılaştırılacak).
