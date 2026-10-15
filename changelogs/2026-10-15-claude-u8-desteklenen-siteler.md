@@ -17,3 +17,7 @@
 ## Veri, yedek ve geri alma
 
 - Veri değişmez. Geri alma: 4.9.0 kaydıyla prepare_code_rollback.sh.
+
+## Canlı kanıt
+
+- install_rpi.sh (yedek b160df65): 4.10.0 started, sağlık ok, 13 takip/364 kayıt/644 fiyat noktası korundu, günlükte Traceback ve "Desteklenmeyen takip linki" satırı yok (mevcut kartlarda sorunlu link yok).
