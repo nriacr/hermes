@@ -20,4 +20,4 @@
 
 ## Canlı kanıt
 
-- (kurulumdan sonra eklenecek)
+- install_rpi.sh (yedek b160df65): 4.11.3 started, sağlık ok, veri sayıları korundu, Amazon son okuma 29 sn önce (zamanlama normal), günlükte Traceback yok.
