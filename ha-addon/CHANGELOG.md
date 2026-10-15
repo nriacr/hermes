@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.11.3
+
+- İç düzenleme: Amazon sağlayıcı dosyası (676 satır) okuma ritmi (rhythm.py), sayfa önbelleği (pagecache.py) ve arama sonucu eşleştirmesi (matching.py) olarak bölündü. Kod satırları aynen taşındı; Amazon okuma zamanlaması, istek sayıları ve takipler değişmedi.
+
 ## 4.11.2
 
 - İç düzenleme: ayar kaydetme işlemleri (silme, güncelleme, toplu kaydetme, ekleme) ve kart doğrulaması küçük fonksiyonlara ayrıldı. Davranış, mesajlar ve veri aynı; ayarlar tarafındaki karmaşıklık uyarıları kapandı.

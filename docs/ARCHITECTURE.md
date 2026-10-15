@@ -178,6 +178,10 @@ screen: automatic submit after the fourth digit and explicit/manual locking.
 
 ### Amazon (`providers/amazon/`)
 
+- File split (4.11.3, behavior unchanged): `__init__.py` holds `AmazonProvider` (reads and
+  variant families); `rhythm.py` the read schedule (`WatchRhythm`, `RhythmMixin`: due,
+  busy, sweep, intervals); `pagecache.py` the per-cycle page cache and absence/exclusion
+  memory (`PageCacheMixin`); `matching.py` search-result ownership by card name.
 - `client.py`: one canonical request (curl with Chrome TLS, or requests). A
   challenge page or HTTP 429/503 is terminal: no retry, no other transport.
   Any other failure is raised as it is: no second transport, no browser (Chromium

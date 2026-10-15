@@ -1,106 +1,36 @@
 """Amazon: search pages, product variant families and verified Amazon Depo offers."""
 
 import math
-import re
 import threading
 import time
-import zlib
 from collections import deque
-from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Deque, Dict, Iterator, List, Optional, Tuple
 
 from ...constants import (
     AMAZON_ACCESS_PATH,
     AMAZON_COOKIES_PATH,
-    AMAZON_EXCLUDED_PAGE_REFRESH_SECONDS,
     AMAZON_MAIN_GAPS_KEPT,
-    DEFAULT_PRIORITY,
-    PRIORITY_INTERVAL_SECONDS,
     SITE_AMAZON,
-    normalize_priority,
 )
 from ...errors import EmptySearchResultsHermesError, HermesError, OutOfStockHermesError, PriceUnavailableHermesError
 from ...logging_utils import log, ProblemLog
 from ...models import OfferResult, SearchResultItem, WatchRule
-from ...utils import extract_asin_from_url, is_amazon_search_url, log_cell, normalize_offer_text
+from ...utils import extract_asin_from_url, is_amazon_search_url, log_cell
 from ..base import DEPO_LANE, Provider, ReadContext, WatchRead, excluded_term_in_title
 from ..http import raise_if_age_verification
 from . import parser
 from .access import MAIN_LANE, AmazonAccess
 from .client import AmazonClient, is_protection_error
-from .search import dedupe_results, extract_result_candidates, filter_matching_results, title_matches_any_keyword, title_matches_keyword
+from .matching import is_platform_seller, offers_from_search_results
+from .pagecache import PageCacheMixin
+from .rhythm import RhythmMixin, WatchRhythm
+from .search import dedupe_results, extract_result_candidates, title_matches_any_keyword
 
-# Bound repeated reads of an absent/unreadable offer independently of card priority.
-# Successful offers and access failures never enter this cache.
-NO_OFFER_RECHECK_SECONDS = 5 * 60
-NO_OFFER_CACHE_LIMIT = 512
-PAGE_CACHE_LIMIT = 128
 VARIATION_LIMIT = 60
-EXCLUDED_PAGE_CACHE_LIMIT = 512
 
 
-@dataclass
-class WatchRhythm:
-    """What the provider remembers of one product watch between cycles.
-
-    Since 3.9 a watch is read as a whole (its configured page with the used listing, where Amazon Depo
-    offers show up, and every variant of its family) once per search round (a cycle) while it is read every
-    minute (red), and every PRIORITY_INTERVAL_SECONDS (5 minutes to 12 hours) otherwise. The
-    intervals are stretched by the access governor's speed factor after a block wave.
-    """
-
-    main_at: Optional[float] = None
-    sweep_at: Optional[float] = None
-    main_cycle: int = -1
-
-
-def is_platform_seller(seller: Optional[str]) -> bool:
-    return re.sub(r"[^a-z0-9]", "", normalize_offer_text(str(seller or ""))) == "amazoncomtr"
-
-
-def _name_specificity(name: str) -> int:
-    """Use model-name token count to prefer a more specific configured card."""
-    return len(normalize_offer_text(name).split())
-
-
-def most_specific_matches(results: List[SearchResultItem], product_name: str,
-                          configured_names: Optional[List[str]] = None) -> List[SearchResultItem]:
-    """Keep search results assigned to the most specific matching watch name.
-
-    This is intentionally model-agnostic: when e.g. "Ultra" and "Ultra Max"
-    cards both match a title, the longer configured model name owns that result.
-    """
-    matches = filter_matching_results(results, product_name) if product_name else results
-    if not product_name or not configured_names:
-        return matches
-    names = {str(name).strip() for name in configured_names if str(name or "").strip()}
-    if normalize_offer_text(product_name) not in {normalize_offer_text(name) for name in names}:
-        names.add(product_name)
-    current_specificity = _name_specificity(product_name)
-    filtered: List[SearchResultItem] = []
-    for item in matches:
-        specificities = [_name_specificity(name) for name in names if title_matches_keyword(item.title, name)]
-        if not specificities or current_specificity >= max(specificities):
-            filtered.append(item)
-    return filtered
-
-
-def offers_from_search_results(results: List[SearchResultItem], product_name: str,
-                               configured_names: Optional[List[str]] = None) -> List[OfferResult]:
-    matches = most_specific_matches(results, product_name, configured_names)
-    if not matches:
-        raise EmptySearchResultsHermesError("Amazon arama sayfasında ürün adına uyan ürün bulunamadı.")
-    # A search result does not prove the offer is sold by Amazon. Leave unknown
-    # sellers unknown so the own-seller filter never trusts a marketplace card.
-    return [
-        OfferResult(title=item.title, price=item.price, seller=item.seller, url=item.url,
-                    is_warehouse=item.is_warehouse, stock_quantity=item.stock_quantity)
-        for item in matches
-    ]
-
-
-class AmazonProvider(Provider):
+class AmazonProvider(RhythmMixin, PageCacheMixin, Provider):
     site = SITE_AMAZON
     progress_timeout_seconds = 3 * 3600
     alert_shows_seller = False
@@ -162,79 +92,6 @@ class AmazonProvider(Provider):
             f"varyant taraması ort={mean('tarama')} | depo: sayfa kontrolü={counters.get('depo_sayfa', 0)}, "
             f"ikinci el listesi={counters.get('depo_liste', 0)}, doğrulanan={counters.get('depo_dogrulanan', 0)} | "
             f"hariç nedeniyle atlanan istek={counters.get('hariç_atlanan', 0)}")
-
-    # -- rhythm ----------------------------------------------------------------
-
-    @staticmethod
-    def _rhythm_key(watch: WatchRule) -> Tuple:
-        return (watch.url, watch.include_variations, watch.official_seller_only, tuple(watch.excluded_terms))
-
-    def next_read_is_main(self, watch: WatchRule) -> bool:
-        """The Depo lane reads a product without variants (one page and its used listing). A variant family is
-        read in full by the sweep queue, so every page of a red family is read once per round."""
-        return not self.is_search_url(watch.url) and not watch.include_variations
-
-    def needs_sweep(self, watch: WatchRule) -> bool:
-        """Searches and variant families that are due at their selected interval.
-
-        A product without variants has nothing to sweep: the Depo lane reads its whole page.
-        """
-        if self.is_search_url(watch.url):
-            return True
-        if not watch.include_variations:
-            return False
-        rhythm = self.rhythms.get(self._rhythm_key(watch))
-        if rhythm is None or rhythm.sweep_at is None:
-            return True
-        return time.monotonic() - rhythm.sweep_at >= self.sweep_interval(watch)
-
-    def is_watch_busy(self, watch: WatchRule) -> bool:
-        return self._is_busy(self._rhythm_key(watch))
-
-    def _is_busy(self, key: Tuple) -> bool:
-        with self._busy_lock:
-            started = self.busy.get(key)
-        # A read that never finished (an abandoned generator) stops counting after ten minutes.
-        return started is not None and time.monotonic() - started < 10 * 60
-
-    def _exclusive(self, key: Tuple, reads):
-        """A watch is read by one lane at a time: busy from the start of its read to its end."""
-        try:
-            yield from reads
-        finally:
-            with self._busy_lock:
-                self.busy.pop(key, None)
-
-    def read_rank(self, watch: WatchRule) -> int:
-        """Quick reads go before variant sweeps (many requests)."""
-        return 1 if self.needs_sweep(watch) else 0
-
-    @staticmethod
-    def category_interval(watch: WatchRule) -> int:
-        """Use the shared card interval, independently of its price or variant count."""
-        return PRIORITY_INTERVAL_SECONDS[normalize_priority(getattr(watch, "priority", None))]
-
-    def is_red(self, watch: WatchRule) -> bool:
-        return normalize_priority(getattr(watch, "priority", None)) == DEFAULT_PRIORITY
-
-    def main_interval(self, watch: WatchRule) -> float:
-        return self.category_interval(watch) * self.client.access.speed_factor()
-
-    def sweep_interval(self, watch: WatchRule) -> float:
-        """How soon a whole family or search page is read again: the card's interval."""
-        return self.main_interval(watch)
-
-    def read_due(self, watch: WatchRule) -> bool:
-        """A watch is due after its category's interval; a red one also at most once per search round."""
-        key = self._rhythm_key(watch)
-        if self._is_busy(key):
-            return False
-        rhythm = self.rhythms.get(key)
-        if rhythm is None or rhythm.main_at is None:
-            return True
-        if self.is_red(watch) and rhythm.main_cycle == self.cycle_no:
-            return False
-        return time.monotonic() - rhythm.main_at >= self.main_interval(watch)
 
     def set_request_delay(self, minimum: float, maximum: float) -> None:
         self.client.delay_range = (float(minimum), float(maximum))
@@ -460,53 +317,6 @@ class AmazonProvider(Provider):
         return offers
 
     # -- product pages and variant families ----------------------------------
-
-    def _remember_page(self, url: str, snapshot: dict) -> None:
-        # A cycle can contain several large families; keep enough parsed pages
-        # to dedupe repeated cards without growing without bound.
-        if url not in self.pages and len(self.pages) >= PAGE_CACHE_LIMIT:
-            self.pages.pop(next(iter(self.pages)))
-        self.pages[url] = snapshot
-
-    def _cached_absence(self, cache_key: str) -> Optional[dict]:
-        absence = self.client.unavailable_product_pages.get(cache_key)
-        if not absence:
-            return None
-        now = time.monotonic()
-        if now >= absence["retry_at"]:
-            self.client.unavailable_product_pages.pop(cache_key, None)
-            return None
-        if now - absence.get("last_skip_logged_at", 0) >= 60:
-            log(f"Amazon aynı varyant için gereksiz istek atlandı: {cache_key} | "
-                f"yeniden kontrol={math.ceil(absence['retry_at'] - now)} sn")
-            absence["last_skip_logged_at"] = now
-        return absence["snapshot"]
-
-    def _remember_absence(self, cache_key: str, snapshot: dict) -> None:
-        cache = self.client.unavailable_product_pages
-        if cache_key not in cache and len(cache) >= NO_OFFER_CACHE_LIMIT:
-            cache.pop(next(iter(cache)))
-        now = time.monotonic()
-        cache[cache_key] = {"snapshot": snapshot, "retry_at": now + NO_OFFER_RECHECK_SECONDS, "last_skip_logged_at": now}
-        log(f"Amazon fiyat/teklif bulunmayan varyant: {cache_key} | yeniden kontrol={NO_OFFER_RECHECK_SECONDS} sn")
-
-    def _remembered_exclusion(self, cache_key: str, watch: WatchRule) -> Optional[dict]:
-        entry = self.client.excluded_pages.get(cache_key)
-        if not entry:
-            return None
-        if entry["terms"] != tuple(watch.excluded_terms) or time.monotonic() >= entry["refresh_at"]:
-            self.client.excluded_pages.pop(cache_key, None)
-            return None
-        return entry
-
-    def _remember_exclusion(self, cache_key: str, watch: WatchRule, variations) -> None:
-        cache = self.client.excluded_pages
-        if cache_key not in cache and len(cache) >= EXCLUDED_PAGE_CACHE_LIMIT:
-            cache.pop(next(iter(cache)))
-        # Each page refreshes at its own time (15-45 minutes) so they never all expire in one sweep.
-        spread = 0.5 + (zlib.crc32(cache_key.encode("utf-8")) % 100) / 100
-        cache[cache_key] = {"variations": list(variations), "terms": tuple(watch.excluded_terms),
-                            "refresh_at": time.monotonic() + AMAZON_EXCLUDED_PAGE_REFRESH_SECONDS * spread}
 
     def iter_product(self, watch: WatchRule, ctx: ReadContext, outcome: WatchRead) -> Iterator[OfferResult]:
         """Yield verified depot offers before continuing to the next variant.
