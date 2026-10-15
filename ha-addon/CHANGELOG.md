@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.9.0
+
+- Kart başına "Bildirim zamanı" (Ayarlar): Her zaman (varsayılan), Yalnız gündüz (08–22), Yalnız akşam (18–23), Yalnız hafta sonu. Pencere dışında fiyat hedefin altında olsa da bildirim gönderilmez ve gönderildi diye işaretlenmez; pencere açılınca ilk okumada fiyat hâlâ uygunsa gider. "90 günün en düşüğü" bildirimi de aynı kurala uyar. Stok dönüşü bildirimi ve sistem uyarılarının sessiz saatleri değişmedi; mevcut kartlar "Her zaman" kalır.
+
 ## 4.8.0
 
 - Ayarlar'da toplu kart işlemleri: her kartın başında seçim kutusu; "Toplu işlem" bölümünden seçili kartlar için aktif/pasif yapma, öncelik ve grup atama. İşlem yalnız kart alanlarını doldurur, kalıcı olması için "Değişiklikleri uygula" gerekir (tek yeniden başlatma). Gizli (filtrelenmiş) kartlar seçilmez. Veri ve kayıt yolu değişmedi.
