@@ -6,15 +6,14 @@ import json
 import os
 from pathlib import Path
 import re
-import shlex
 import subprocess
 
 APP = "769724e3_hermes"
 REQUIRED_FOLDERS = {"share", "ssl", "media"}
 
 
-def capture(args):
-    result = subprocess.run(args, capture_output=True, text=True)
+def capture(args, stdin_text=None):
+    result = subprocess.run(args, capture_output=True, text=True, input=stdin_text)
     if result.returncode:
         raise ValueError("Yedek yönetimi tamamlanamadı; gizli bağlantı ayrıntıları gösterilmedi.")
     return result.stdout
@@ -73,14 +72,20 @@ def main():
         if age > args.max_age_hours:
             raise ValueError("Yedek çok eski.")
     if args.restore:
-        password_arg = ""
+        password_arg, stdin_text = "", None
         if data.get("protected"):
             config = json.loads(capture([str(workspace / "bin/ha-ws"), "rpc", "backup/config/info"]))
             password = config["config"]["create_backup"].get("password")
             if not password:
                 raise ValueError("Şifreli yedeğin geri yükleme anahtarı bulunamadı.")
-            password_arg = " --password " + shlex.quote(password)
-        capture([helper, f"ha backups restore {slug} --app {APP} --homeassistant=false --no-progress{password_arg}"])
+            # The key travels over stdin, so it never appears in this Mac's process list or in the ssh command text.
+            if "\n" in str(password):
+                raise ValueError("Şifreli yedeğin geri yükleme anahtarı geçersiz.")
+            password_arg = ' --password "$HA_BACKUP_KEY"'
+            stdin_text = str(password) + "\n"
+        read_key = "read -r HA_BACKUP_KEY && " if stdin_text else ""
+        capture([helper, f"{read_key}ha backups restore {slug} --app {APP} --homeassistant=false --no-progress{password_arg}"],
+                stdin_text)
         print("Hermes geri yükleme işlemi tamamlandı.")
     elif args.date:
         print(data["date"])

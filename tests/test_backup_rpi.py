@@ -59,7 +59,10 @@ class BackupPolicyTests(unittest.TestCase):
             main()
         command = calls.call_args_list[-1].args[0][-1]
         self.assertIn(f"--app {APP} --homeassistant=false", command)
-        self.assertIn("--password SYNTHETIC_SECRET", command)
+        self.assertNotIn("SYNTHETIC_SECRET", command)  # the key is not part of the command text
+        self.assertIn('--password "$HA_BACKUP_KEY"', command)
+        self.assertTrue(command.startswith("read -r HA_BACKUP_KEY && "))
+        self.assertEqual(calls.call_args_list[-1].args[1], "SYNTHETIC_SECRET\n")  # it travels over stdin
         self.assertNotIn("SYNTHETIC_SECRET", output.getvalue())
 
     def test_missing_encryption_key_stops_before_restore(self):

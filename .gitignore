@@ -4,3 +4,5 @@ __pycache__/
 .venv/
 venv/
 web_access.json
+.claude/
+.cursor/permissions.json

@@ -17,8 +17,31 @@ git -C "$REPO_DIR" merge-base --is-ancestor "$GOOD" HEAD || { printf 'Verilen co
 GOOD_VERSION="$(git -C "$REPO_DIR" show "$GOOD:ha-addon/config.yaml" | sed -n 's/^version: "\([^"]*\)"/\1/p' | head -n 1)"
 [ -n "$GOOD_VERSION" ] || { printf 'Eski sürüm okunamadı; durduruldu.\n' >&2; exit 1; }
 # Only the add-on code returns; tools, tests, docs and changelogs of the current main stay.
-git -C "$REPO_DIR" checkout "$GOOD" -- ha-addon/app ha-addon/config.yaml ha-addon/Dockerfile ha-addon/run.sh ha-addon/.dockerignore
-NEW_VERSION="$("$HA_REPO_DIR/bin/ha-version" --repo "$REPO_DIR" --change patch)"
+CODE_PATHS="ha-addon/app ha-addon/config.yaml ha-addon/Dockerfile ha-addon/run.sh ha-addon/.dockerignore"
+START="$(git -C "$REPO_DIR" rev-parse HEAD)"
+fail() {
+  trap - EXIT
+  printf 'HATA: %s\nÇalışma kopyası yarım kalmış olabilir. Temiz duruma dönmek için (yayımlanmış kayıt zaten güvende):\n  git -C "%s" reset --hard %s\nSonra sorunu düzeltip komutu yeniden çalıştır. Canlıya hiçbir şey kurulmadı.\n' "$1" "$REPO_DIR" "$START" >&2
+  exit 1
+}
+trap 'fail "komut beklenmedik şekilde durdu"' EXIT
+# shellcheck disable=SC2086
+git -C "$REPO_DIR" checkout "$GOOD" -- $CODE_PATHS || fail "eski kod alınamadı"
+LIST_NOW="$(mktemp)"
+LIST_OLD="$(mktemp)"
+# Files that exist now but not in the old release must go too, or the "old" code would still carry them.
+# shellcheck disable=SC2086
+git -C "$REPO_DIR" ls-tree -r --name-only HEAD -- $CODE_PATHS | sort > "$LIST_NOW"
+# shellcheck disable=SC2086
+git -C "$REPO_DIR" ls-tree -r --name-only "$GOOD" -- $CODE_PATHS | sort > "$LIST_OLD"
+REMOVED=0
+for extra in $(comm -23 "$LIST_NOW" "$LIST_OLD"); do
+  git -C "$REPO_DIR" rm -q -f -- "$extra" || fail "yeni dosya kaldırılamadı: $extra"
+  REMOVED=$((REMOVED + 1))
+done
+rm -f "$LIST_NOW" "$LIST_OLD"
+printf 'Eski sürümde bulunmayan %s dosya kaldırıldı.\n' "$REMOVED"
+NEW_VERSION="$("$HA_REPO_DIR/bin/ha-version" --repo "$REPO_DIR" --change patch)" || fail "sürüm ayrılamadı"
 GOOD_VERSION="$GOOD_VERSION" NEW_VERSION="$NEW_VERSION" GOOD="$GOOD" REPO_DIR="$REPO_DIR" "${PYTHON:-python3}" - <<'PY'
 import os
 from pathlib import Path
@@ -30,7 +53,8 @@ entry = (f"## {os.environ['NEW_VERSION']}\n\n"
 head = "# Değişiklik günlüğü\n\n"
 path.write_text(head + entry + text[len(head):] if text.startswith(head) else entry + text, encoding="utf-8")
 PY
-(cd "$REPO_DIR" && sh tools/check.sh)
-git -C "$REPO_DIR" add ha-addon
+(cd "$REPO_DIR" && sh tools/check.sh) || fail "testler geri dönen kodla geçmedi"
+git -C "$REPO_DIR" add -A ha-addon
 git -C "$REPO_DIR" commit -q -m "Roll the add-on code back to $GOOD_VERSION as $NEW_VERSION (data untouched)"
+trap - EXIT
 printf 'Hazır: %s sürümü, %s kodunu taşıyor. Sıradaki adımlar:\n  git push origin HEAD:main\n  sh tools/install_rpi.sh\nChangelogs klasörüne ayrıntılı kayıt yazmayı unutma.\n' "$NEW_VERSION" "$GOOD_VERSION"

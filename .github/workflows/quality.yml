@@ -20,6 +20,10 @@ jobs:
         run: python -m pip install -r ha-addon/app/requirements.txt -r requirements-dev.txt
       - name: Run quality checks
         run: PYTHON=python RUFF=ruff sh tools/check.sh
+      - name: Audit pinned dependencies for known vulnerabilities
+        run: |
+          python -m pip install pip-audit==2.9.0
+          pip-audit --requirement ha-addon/app/requirements.txt --disable-pip --no-deps
       - name: Check release tools
         run: |
           python -m compileall -q tools

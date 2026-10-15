@@ -1,0 +1,19 @@
+# Security updates only: a limit of 0 turns off routine version-bump pull requests,
+# while GitHub still opens pull requests for packages with a known vulnerability.
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /ha-addon/app
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 0
+  - package-ecosystem: docker
+    directory: /ha-addon
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 0
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 0
