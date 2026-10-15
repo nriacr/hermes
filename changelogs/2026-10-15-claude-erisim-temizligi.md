@@ -29,3 +29,7 @@ Agent güvenlik ayarı, kimlik bilgisi veya yetki değiştirmediği için şunla
 ## Test
 
 `sh tools/check.sh` (ruff + tüm testler) geçti; `zsh -n bin/ha-ssh` geçti.
+
+## Güncelleme: GitHub anahtarı doğrulandı
+
+15 Ekim 2026: Nuri yeni ince ayarlı anahtarı (bitiş tarihli, yalnız nriacr/hermes) anahtarlığa girdi. `check_access.py --github-only --require-workflow`: doğru hesap, tek depo, yazma izni doğrulandı; Workflows izni ilk workflow push’unda sınanacak. Süresiz anahtar uyarıya çevrildi (Nuri kararı). Eski klasik anahtarın iptali Nuri tarafında.
