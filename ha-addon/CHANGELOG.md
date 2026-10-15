@@ -1,5 +1,10 @@
 # Değişiklik günlüğü
 
+## 4.5.0
+
+- Docker imajından Chromium, chromium-driver, yazı tipi paketi ve Selenium kaldırıldı (imaj küçüldü, güncelleme daha hızlı iner, bellek baskısı düşer). Amazon'un tek seferlik "tarayıcıyla yeniden oku" yedeği kalktı; curl ile okuma başarısız olursa hata olduğu gibi yükselir ve sonraki çevrimde normal akışla yeniden denenir.
+- CAPTCHA/429/503 davranışı, Amazon kimliği (curl_cffi Chrome TLS), takipler, fiyat geçmişi ve bildirim hafızası değişmedi.
+
 ## 4.4.0
 
 - Günlük özet bildirimi: her gün 09:00'dan sonra (22:00'den önce) bir kez tek Pushover mesajı: son 24 saatte okuma ve hata sayısı, en çok hata veren site, hedefte/altında ürün sayısı ve en iyi 3 ürün. Ayarlar > "Günlük özet" kutusundan kapatılabilir (varsayılan açık).

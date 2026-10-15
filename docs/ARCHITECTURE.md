@@ -180,7 +180,8 @@ screen: automatic submit after the fourth digit and explicit/manual locking.
 
 - `client.py`: one canonical request (curl with Chrome TLS, or requests). A
   challenge page or HTTP 429/503 is terminal: no retry, no other transport.
-  Any other failure gets exactly one Chromium read of the same address.
+  Any other failure is raised as it is: no second transport, no browser (Chromium
+  was removed from the image in 4.5.0).
   Sessions and cookies live for the whole process; pages are cached only
   within a cycle. One consistent browser (since 3.6): curl_cffi's `chrome146`
   profile sets TLS, HTTP/2 and every header in Chrome's order; Hermes only
@@ -191,9 +192,6 @@ screen: automatic submit after the fourth digit and explicit/manual locking.
   `mola` protection error without touching the network), and the first request
   after that closes the old session and starts a new anonymous visitor; cookies
   saved before the last block are not restored after a restart.
-- `browser.py`: headless Chromium with the cache disabled, complete page load,
-  the main document's own network status, and rejection of cached documents,
-  late navigations and redirects to another ASIN.
 - Challenge detection looks at validation forms/inputs, a Robot Check title
   or explicit instructions; script text alone is not a challenge.
 - Speed governor (since 3.7, `AmazonAccess.speed_factor`): a block wave doubles

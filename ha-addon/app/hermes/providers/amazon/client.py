@@ -1,4 +1,4 @@
-"""Amazon transport: one canonical request, terminal protection, one browser fallback.
+"""Amazon transport: one canonical request, terminal protection, no second transport.
 
 The client lives for the whole process so anonymous cookies and connections
 survive between cycles. Page caches are passed in per cycle; a later cycle
@@ -12,7 +12,6 @@ while, and the first request after that starts a new anonymous visitor.
 
 import os
 import random
-import socket
 import threading
 import time
 from contextlib import contextmanager
@@ -30,7 +29,6 @@ from ...storage import load_json, save_json
 from ...utils import canonical_amazon_product_url, extract_asin_from_url, normalize_offer_text
 from ..http import cleaned_html, curl_requests, decode_response_text
 from .access import MAIN_LANE, AmazonAccess
-from .browser import AmazonBrowser
 
 PROTECTION_MESSAGE = "Amazon bot koruması nedeniyle doğrulama (captcha) sayfası döndü."
 HOLD_MESSAGE = "Amazon engelden sonra molada; istek gönderilmedi."
@@ -152,16 +150,6 @@ def is_protection_error(exc: BaseException) -> bool:
     return any(marker in message for marker in ("captcha", "robot", "bot korumasi", "koruma sayfasi"))
 
 
-_NETWORK_ERROR_NAMES = {"DNSError", "ConnectionError", "ConnectTimeout", "gaierror"}
-
-
-def is_network_error(exc: BaseException) -> bool:
-    """The connection itself failed (DNS, refused, unreachable). A browser would hit the same wall."""
-    if isinstance(exc, (requests.ConnectionError, socket.gaierror)):
-        return not isinstance(exc, requests.exceptions.ReadTimeout)
-    return any(cls.__name__ in _NETWORK_ERROR_NAMES for cls in type(exc).__mro__)
-
-
 def block_cause(exc: BaseException) -> str:
     """What the block looked like, for the wave line: the challenge's marker or the HTTP status."""
     status_code = error_status(exc) or getattr(exc, "http_status", None)
@@ -268,13 +256,12 @@ class AmazonClient:
     def __init__(self, access: Optional[AmazonAccess] = None, cookies_path: Optional[Path] = None,
                  delay_range: Tuple[float, float] = (0.0, 0.0), sleep: Callable[[float], None] = time.sleep,
                  clock: Callable[[], float] = time.monotonic):
-        # Reads with curl (Chrome TLS) and falls back to Chromium once.
+        # Reads with curl (Chrome TLS); a failed read is raised, never retried through another transport.
         self.requests_session = requests.Session()
         _seed_session(self.requests_session)
         self.curl_session = None
         # When the current anonymous visitor (curl session) began; a later block retires it.
         self.identity_started_at = 0.0
-        self.browser = AmazonBrowser()
         # Request budget (window, slow start) and the cookie jar that survives restarts.
         self.access = access or AmazonAccess()
         # Two lane threads read through this client: the Depo lane ("main") and the variant sweep ("").
@@ -286,7 +273,7 @@ class AmazonClient:
         self._last_turn_lane: Optional[str] = None
         self.cookies_path = cookies_path
         self._cookies_saved_at = 0.0
-        # Every network request (product, variant, listing, search detail, browser fallback) is
+        # Every network request (product, variant, listing, search detail) is
         # preceded by a random wait between the configured minimum and maximum (decimals, no fixed
         # minimum gap on top; 3.8.3); cached pages never wait. Start and block slow-downs stretch it.
         self.delay_range = (float(delay_range[0]), float(delay_range[1]))
@@ -314,9 +301,8 @@ class AmazonClient:
             if self.curl_session is not None:
                 save_cookies(self.curl_session, self.cookies_path)
                 self.curl_session.close()
-            self.requests_session.close()
         finally:
-            self.browser.close()
+            self.requests_session.close()
 
     def __enter__(self):
         return self
@@ -330,8 +316,7 @@ class AmazonClient:
 
         A challenge or HTTP 429/503 is terminal, and for a while after it nothing
         is sent at all. Never multiply requests through URL/transport variants
-        after the server rejects a read. Another failure gets at most one
-        Chromium read of the same address.
+        after the server rejects a read. Any other failure is raised as it is.
         `on_request` receives every network request: (method, kind, outcome, ms).
         """
         cache = {} if cache is None else cache
@@ -340,17 +325,7 @@ class AmazonClient:
         if key in cache:
             return cache[key]
         method = "curl" if curl_requests is not None else "requests"
-        try:
-            html = self._timed(method, candidate, expect_search, lambda: self._http_read(candidate, timeout, expect_search), on_request)
-        except Exception as exc:  # noqa: BLE001
-            if is_protection_error(exc):
-                raise
-            if is_network_error(exc):
-                # DNS or connection failure: Chromium would fail the same way and only burn CPU and time.
-                log(f"Amazon {method} bağlantı hatası, tarayıcı yedeği atlandı: {block_reason(exc)} | {_short_url(candidate)}")
-                raise
-            log(f"Amazon {method} okuması başarısız, tarayıcıyla bir kez denenecek: {block_reason(exc)} | {_short_url(candidate)}")
-            html = self._timed("browser", candidate, expect_search, lambda: self._browser_read(candidate, timeout, expect_search), on_request)
+        html = self._timed(method, candidate, expect_search, lambda: self._http_read(candidate, timeout, expect_search), on_request)
         cache[key] = html
         return html
 
@@ -452,6 +427,3 @@ class AmazonClient:
         if self.curl_session is not None and now - self._cookies_saved_at >= COOKIE_SAVE_EVERY_SECONDS:
             self._cookies_saved_at = now
             save_cookies(self.curl_session, self.cookies_path)
-
-    def _browser_read(self, url: str, timeout: int, expect_search: bool) -> str:
-        return checked_html(self.browser.read(url, timeout), expect_search)

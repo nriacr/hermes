@@ -2,4 +2,3 @@ beautifulsoup4==4.12.3
 curl_cffi==0.15.0
 requests==2.34.2
 Telethon==1.36.0
-selenium==4.50.0

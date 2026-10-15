@@ -1,19 +1,14 @@
-import json
-import tempfile
 import unittest
-from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 import requests
 
 from support import APP_PATH  # noqa: F401
 
-from hermes.errors import BotProtectionHermesError, HermesError, HttpStatusHermesError, OutOfStockHermesError, error_status
-from hermes.providers.amazon import browser as amazon_browser
+from hermes.errors import BotProtectionHermesError, HermesError, HttpStatusHermesError, error_status
 from hermes.providers.amazon import client as amazon_client
 from hermes.providers.amazon.client import AmazonClient, is_protection_error, is_protection_page, request_url
-from hermes.providers.http import HtmlResponse
 
 PRODUCT = "https://www.amazon.com.tr/dp/B000000001"
 
@@ -104,22 +99,20 @@ class AmazonTransportTests(unittest.TestCase):
     def test_challenge_page_is_terminal_without_rescue(self):
         curl = FakeCurlSession([response(200, '<form action="/errors_page/validateCaptcha">Amazon</form>')])
         with (patch.object(amazon_client, "curl_requests", curl_module(curl)),
-              AmazonClient() as client, patch.object(client.browser, "read") as browser):
+              AmazonClient() as client):
             with self.assertRaises(BotProtectionHermesError):
                 client.fetch("https://www.amazon.com.tr/s?k=test", 10, expect_search=True)
         self.assertEqual(curl.calls, 1)
-        browser.assert_not_called()
 
     def test_http_429_and_503_stop_after_one_request(self):
         for status in (429, 503):
             with self.subTest(status=status):
                 curl = FakeCurlSession([response(status, "Amazon temporary error")])
                 with (patch.object(amazon_client, "curl_requests", curl_module(curl)), AmazonClient() as client,
-                      patch.object(client.browser, "read") as browser, patch.object(client.requests_session, "get") as plain):
+                      patch.object(client.requests_session, "get") as plain):
                     with self.assertRaises(requests.HTTPError) as caught:
                         client.fetch("https://www.amazon.com.tr/s?k=test", 10, expect_search=True)
                     self.assertEqual(error_status(caught.exception), status)
-                    browser.assert_not_called()
                     plain.assert_not_called()
                     self.assertEqual(curl.calls, 1)
 
@@ -130,46 +123,16 @@ class AmazonTransportTests(unittest.TestCase):
                 client.fetch(PRODUCT, 10)
         self.assertEqual(error_status(caught.exception), 503)
 
-    def test_other_failure_gets_one_browser_read_which_is_cached(self):
-        curl = FakeCurlSession([requests.Timeout("timeout")])
-        cache = {}
-        with (patch.object(amazon_client, "curl_requests", curl_module(curl)), AmazonClient() as client,
-              patch.object(client.browser, "read", return_value=HtmlResponse(PRODUCT, "<html>Amazon product</html>", 200)) as browser):
-            first = client.fetch(PRODUCT, 10, cache=cache)
-            second = client.fetch(PRODUCT, 10, cache=cache)
-        self.assertEqual(first, second)
-        self.assertEqual(curl.calls, 1)
-        browser.assert_called_once()
-
-    def test_network_failure_skips_the_browser_fallback(self):
-        class DNSError(requests.ConnectionError):
-            pass
-
-        for failure in (DNSError("could not resolve host"), requests.ConnectionError("refused"), OSError):
-            if failure is OSError:
-                import socket
-                failure = socket.gaierror(-2, "Name or service not known")
+    def test_failed_read_is_raised_once_without_a_second_transport(self):
+        for failure in (requests.Timeout("timeout"), requests.ConnectionError("dns")):
             curl = FakeCurlSession([failure])
             with (patch.object(amazon_client, "curl_requests", curl_module(curl)), AmazonClient() as client,
-                  patch.object(client.browser, "read") as browser):
-                with self.assertRaises(Exception) as caught:
+                  patch.object(client.requests_session, "get") as plain):
+                with self.assertRaises(requests.RequestException) as caught:
                     client.fetch(PRODUCT, 10)
             self.assertIs(caught.exception, failure)
-            browser.assert_not_called()
             self.assertEqual(curl.calls, 1)
-
-    def test_read_timeout_still_gets_the_browser_fallback(self):
-        self.assertFalse(amazon_client.is_network_error(requests.exceptions.ReadTimeout("slow")))
-        self.assertFalse(amazon_client.is_network_error(HermesError("parse")))
-
-    def test_browser_failure_does_not_start_more_transports(self):
-        curl = FakeCurlSession([requests.Timeout("timeout")])
-        with (patch.object(amazon_client, "curl_requests", curl_module(curl)), AmazonClient() as client,
-              patch.object(client.browser, "read", side_effect=HermesError("browser timeout")) as browser):
-            with self.assertRaisesRegex(HermesError, "browser timeout"):
-                client.fetch("https://www.amazon.com.tr/s?k=test", 10, expect_search=True)
-        self.assertEqual(curl.calls, 1)
-        browser.assert_called_once()
+            plain.assert_not_called()
 
     def test_requests_is_used_when_curl_is_unavailable(self):
         with patch.object(amazon_client, "curl_requests", None), AmazonClient() as client, \
@@ -179,108 +142,12 @@ class AmazonTransportTests(unittest.TestCase):
 
     def test_wrong_kind_of_search_page_is_an_error(self):
         curl = FakeCurlSession([response(200, "<html>Amazon ana sayfa</html>")])
-        with (patch.object(amazon_client, "curl_requests", curl_module(curl)), AmazonClient() as client,
-              patch.object(client.browser, "read", side_effect=HermesError("browser")) as browser):
+        with (patch.object(amazon_client, "curl_requests", curl_module(curl)), AmazonClient() as client):
             with self.assertRaises(HermesError):
                 client.fetch("https://www.amazon.com.tr/s?k=test", 10, expect_search=True)
-        browser.assert_called_once()
+        self.assertEqual(curl.calls, 1)
 
     def test_genuine_empty_search_page_is_usable(self):
         html = '<html>Amazon<div id="search"><h3>Amazon Depo içinde juo 240w için sonuç bulunamadı</h3></div></html>'
         self.assertIn("sonuç bulunamadı", amazon_client.checked_html(response(200, html), expect_search=True))
 
-    def test_browser_captcha_and_service_failure_are_errors_not_stock(self):
-        for status, html in ((503, "<html>Amazon Service Unavailable</html>"),
-                             (200, '<html>Amazon<form action="/errors/validateCaptcha"><input name="captchacharacters"></form></html>')):
-            with (self.subTest(status=status), AmazonClient() as client,
-                  # The browser is the fallback after a failed (non-protection) curl read.
-                  patch.object(client, "_http_read", side_effect=HermesError("bozuk sayfa"))):
-                read = (patch.object(client.browser, "read", side_effect=HttpStatusHermesError(503, PRODUCT)) if status == 503
-                        else patch.object(client.browser, "read", return_value=HtmlResponse(PRODUCT, html, status)))
-                with read, self.assertRaises(HermesError) as caught:
-                    client.fetch(PRODUCT, 10)
-                self.assertNotIsInstance(caught.exception, OutOfStockHermesError)
-                self.assertEqual(error_status(caught.exception), 503 if status == 503 else None)
-                self.assertTrue(is_protection_error(caught.exception))
-
-
-def performance_entry(method: str, **params) -> dict:
-    return {"message": json.dumps({"message": {"method": method, "params": params}})}
-
-
-class AmazonBrowserTests(unittest.TestCase):
-    def test_main_document_status_ignores_frames_and_subresources(self):
-        driver = Mock()
-        driver.execute_cdp_cmd.return_value = {"frameTree": {"frame": {"id": "main"}}}
-        driver.get_log.return_value = [
-            performance_entry("Network.responseReceived", frameId="iframe", type="Document", response={"status": 503}),
-            performance_entry("Network.responseReceived", frameId="main", type="Document", response={"status": 200}),
-            performance_entry("Network.responseReceived", frameId="main", type="Image", response={"status": 503}),
-        ]
-        self.assertEqual(amazon_browser.main_document_response(driver)["status"], 200)
-        driver.get_log.return_value = []
-        self.assertIsNone(amazon_browser.main_document_response(driver))
-
-    def test_late_navigation_never_pairs_an_earlier_200_with_new_html(self):
-        driver = Mock()
-        driver.get_log.return_value = [
-            performance_entry("Page.frameNavigated", frame={"id": "main", "loaderId": "one"}),
-            performance_entry("Network.responseReceived", frameId="main", type="Document", loaderId="one", response={"status": 200}),
-            performance_entry("Network.requestWillBeSent", frameId="main", type="Document", loaderId="two"),
-        ]
-        self.assertIsNone(amazon_browser.main_document_response(driver))
-        driver.execute_cdp_cmd.assert_not_called()
-
-    def _browser_with(self, driver):
-        browser = amazon_browser.AmazonBrowser()
-        browser.profile = tempfile.TemporaryDirectory(prefix="hermes-test-browser-")
-        browser.driver = driver
-        return browser
-
-    def test_driver_is_reused_and_cleaned_up(self):
-        driver = Mock(page_source="<html>Amazon product</html>", current_url=PRODUCT)
-        browser = amazon_browser.AmazonBrowser()
-
-        def start():
-            browser.profile = tempfile.TemporaryDirectory(prefix="hermes-test-browser-")
-            return driver
-
-        with (patch.object(browser, "_start", side_effect=start) as launch,
-              patch.object(amazon_browser, "main_document_response", return_value={"status": 200})):
-            for _ in range(2):
-                self.assertEqual(browser.read(PRODUCT, 10).status_code, 200)
-        profile = Path(browser.profile.name)
-        launch.assert_called_once()
-        driver.set_page_load_timeout.assert_called_once_with(25)
-        self.assertEqual(driver.get.call_count, 2)
-        browser.close()
-        driver.quit.assert_called_once()
-        self.assertFalse(profile.exists())
-
-    def test_cached_unverified_failed_or_wrong_product_documents_are_rejected(self):
-        for document, expected in ((None, HermesError), ({"status": 200, "fromDiskCache": True}, HermesError),
-                                   ({"status": 200, "fromServiceWorker": True}, HermesError),
-                                   ({"status": 200, "fromPrefetchCache": True}, HermesError),
-                                   ({"status": 503}, HttpStatusHermesError)):
-            driver = Mock(page_source="<span>Amazon</span>", current_url=PRODUCT)
-            with self.subTest(document=document), patch.object(amazon_browser, "main_document_response", return_value=document):
-                browser = self._browser_with(driver)
-                with self.assertRaises(expected):
-                    browser.read(PRODUCT, 10)
-                browser.close()
-        driver = Mock(page_source="<span>Amazon</span>", current_url=PRODUCT)
-        with patch.object(amazon_browser, "main_document_response", return_value={"status": 200}):
-            browser = self._browser_with(driver)
-            with self.assertRaisesRegex(HermesError, "farklı ürün"):
-                browser.read("https://www.amazon.com.tr/dp/B000000002", 10)
-            browser.close()
-
-    def test_missing_browser_is_a_clear_error(self):
-        browser = amazon_browser.AmazonBrowser()
-        with patch.object(browser, "_start", side_effect=HermesError("Chromium bulunamadı")):
-            with self.assertRaisesRegex(HermesError, "oturumu başlatılamadı"):
-                browser.read(PRODUCT, 10)
-
-
-if __name__ == "__main__":
-    unittest.main()

@@ -149,9 +149,8 @@ okunur; bu önbellek çevrim sonunda silinir ve sonraki çevrimde fiyat tekrar
 ağdan okunur. Her çevrim sonunda öncelik başına başlayan, sırası gelen ve
 ertelenen kart sayıları kaydedilir.
 
-Amazon'un HTTP okuması başarısız olursa (CAPTCHA/429/503 dışında) aynı adres
-Pi'deki Chromium ile bir kez, sayfanın tamamı yüklenerek okunur. Ana belgenin
-ağ yanıtı ve ürün kimliği doğrulanmadan fiyat kullanılmaz.
+Amazon'un HTTP okuması başarısız olursa (CAPTCHA/429/503 dahil) hata olduğu gibi
+yükselir; başka bir yoldan yeniden denenmez. İmajda tarayıcı yoktur.
 
 ## Geliştirme Notu
 
