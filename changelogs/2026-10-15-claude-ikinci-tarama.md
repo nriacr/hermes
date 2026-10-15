@@ -27,7 +27,13 @@
 
 ### Paket F (araç/CI, sürüm artmaz)
 
-Ayrı commit(ler) — bkz. bu dosyanın F bölümü (aşağıda doldurulur).
+Commit `5fc03e3` (runtime kodu değişmedi, sürüm artmadı):
+
+1. `tools/prepare_code_rollback.sh`: eski sürümde bulunmayan yeni kod dosyaları da `git rm` ile kaldırılır (önceden yeni dosyalar eski kodun yanında kalıyordu); her hata adımı net mesajla durur ve `git reset --hard <başlangıç commit>` talimatı verir, "canlıya hiçbir şey kurulmadı" yazar; `git add -A ha-addon`. Gerçek bir çalışma kopyasında değil, geçici bir depoda (sahte `bin/ha-version`, sahte `check.sh`, yerel bare origin) `tests/test_rollback_tool.py` ile denendi: yeni dosya kaldırılıyor, araçlar kalıyor, başarısız test işlemi commit atmadan duruyor, main dışı commit reddediliyor. Gerçek sürüm numarası ayrılmadı.
+2. `.github/workflows/quality.yml`: `pip-audit==2.9.0` adımı (`ha-addon/app/requirements.txt`, yerelde çalıştırıldı: "No known vulnerabilities found"). `.github/dependabot.yml`: pip/docker/github-actions için `open-pull-requests-limit: 0` (yalnız güvenlik güncellemesi PR'ı).
+3. `.gitignore`: `.claude/`, `.cursor/permissions.json`.
+4. Mac `bin/ha-ssh` (Home Assistant deposu): kilit regex'ine `ha core|host|os|supervisor` (restart, update, stop, reboot, shutdown, rebuild) ve `ha backups restore|remove` eklendi; zsh ile 11 komut örneği denendi (yıkıcılar kilitli, info/check/list serbest). `docs/YAYIN_AKISI.md` güncellendi.
+5. `tools/backup_rpi.py`: şifreli yedek anahtarı artık komut satırına değil stdin'e yazılır (`read -r HA_BACKUP_KEY && ha backups restore … --password "$HA_BACKUP_KEY"`); Mac süreç listesinde ve ssh komut metninde görünmez. Pi'de komut `ha` sürecinin argümanında bir an görünür kalır (HA CLI başka yol sunmuyor). stdin aktarımı canlı SSH'ta zararsız bir `read` ile denendi; gerçek geri yükleme denenmedi (veri geri yükleme yetkisi yok), birim testi güncellendi.
 
 ## Değişen dosyalar
 
