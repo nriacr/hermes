@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.11.0
+
+- Son satır içi betik (onay penceresi) statik confirm.js dosyasına taşındı; sayfalarda satır içi betik kalmadı. Görünüm ve davranış aynı; ileride sıkı güvenlik başlığı (CSP) için ön koşul tamamlandı.
+
 ## 4.10.0
 
 - Ayarlar'da "Yeni takip ekle" bölümü desteklenen siteleri listeler. Desteklenmeyen bir siteden link içeren kart artık sessizce kaydedilmez: kaydetme durur ve hangi kartta, hangi sitenin desteklenmediği ile desteklenen liste gösterilir. Takip verisi ve okuma davranışı değişmedi.
