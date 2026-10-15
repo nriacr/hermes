@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.10.0
+
+- Ayarlar'da "Yeni takip ekle" bölümü desteklenen siteleri listeler. Desteklenmeyen bir siteden link içeren kart artık sessizce kaydedilmez: kaydetme durur ve hangi kartta, hangi sitenin desteklenmediği ile desteklenen liste gösterilir. Takip verisi ve okuma davranışı değişmedi.
+
 ## 4.9.0
 
 - Kart başına "Bildirim zamanı" (Ayarlar): Her zaman (varsayılan), Yalnız gündüz (08–22), Yalnız akşam (18–23), Yalnız hafta sonu. Pencere dışında fiyat hedefin altında olsa da bildirim gönderilmez ve gönderildi diye işaretlenmez; pencere açılınca ilk okumada fiyat hâlâ uygunsa gider. "90 günün en düşüğü" bildirimi de aynı kurala uyar. Stok dönüşü bildirimi ve sistem uyarılarının sessiz saatleri değişmedi; mevcut kartlar "Her zaman" kalır.
