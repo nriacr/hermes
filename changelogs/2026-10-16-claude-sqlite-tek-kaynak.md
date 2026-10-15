@@ -22,4 +22,4 @@
 
 ## Canlı kanıt
 
-- (kurulumdan sonra eklenecek)
+- install_rpi.sh (yedek b160df65; ilk deneme mağaza yenileme zaman aşımıyla durdu, hiçbir şey değişmeden 4.11.3 çalışıyordu, ikinci deneme geçti): 4.12.0 started, sağlık ok, veri sayıları korundu. Günlük: "JSON dosyaları veritabanına alındı": amazon_access, amazon_cookies, error_events, login_state, seen_messages, status, telegram_quick_add. Traceback yok.
