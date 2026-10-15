@@ -17,3 +17,7 @@ Aşağıdaki canlı kanıt bölümü kurulumdan sonra doldurulur.
 ## Veri, yedek ve geri alma
 
 - Yalnız sunum; veri değişmez. Geri alma: 4.6.0 kaydı (4a2e1f0) ile prepare_code_rollback.sh.
+
+## Canlı kanıt
+
+- check.sh: ruff + 605 test OK. install_rpi.sh (yedek b160df65): 4.7.0 started, sağlık ok, 13 takip/364 kayıt/644 fiyat noktası korundu, günlükte Traceback yok.
