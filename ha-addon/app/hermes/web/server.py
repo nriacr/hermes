@@ -11,6 +11,7 @@ import json
 import math
 import re
 import threading
+import time
 import urllib.parse
 from dataclasses import dataclass, field
 from html import escape
@@ -85,12 +86,27 @@ class Response:
 NOT_FOUND = Response(404, b"not found\n")
 
 
+PUBLIC_OPTIONS_TTL_SECONDS = 5.0
+_public_options: Dict[str, object] = {"at": -math.inf, "enabled": False, "token": ""}
+_public_options_lock = threading.Lock()
+
+
+def refresh_public_options() -> None:
+    """Forget the cached public-panel options; called after settings are saved."""
+    with _public_options_lock:
+        _public_options["at"] = -math.inf
+
+
 def public_token_allowed(token: str) -> bool:
-    options = read_options()
-    if not parse_bool(options.get("public_dashboard_enabled"), default=False):
-        return False
-    expected = str(options.get("public_dashboard_token") or "").strip()
-    return len(expected) >= PUBLIC_TOKEN_MIN_LENGTH and hmac.compare_digest(token.encode(), expected.encode())
+    # Every public request asks this, so the options file is re-read at most every few seconds.
+    with _public_options_lock:
+        if time.monotonic() - float(_public_options["at"]) > PUBLIC_OPTIONS_TTL_SECONDS:
+            options = read_options()
+            _public_options.update(at=time.monotonic(),
+                                   enabled=parse_bool(options.get("public_dashboard_enabled"), default=False),
+                                   token=str(options.get("public_dashboard_token") or "").strip())
+        enabled, expected = bool(_public_options["enabled"]), str(_public_options["token"])
+    return enabled and len(expected) >= PUBLIC_TOKEN_MIN_LENGTH and hmac.compare_digest(token.encode(), expected.encode())
 
 
 def split_request(raw_path: str, method: str, body: bytes, public_only: bool) -> Optional[Request]:
@@ -139,7 +155,6 @@ ASSETS: Dict[str, Callable[[Request], Response]] = {
     "/restart.js": lambda _r: Response(200, assets.RESTART_SCRIPT.encode("utf-8"), "application/javascript; charset=utf-8"),
     "/live.js": lambda _r: Response(200, assets.LIVE_SCRIPT.encode("utf-8"), "application/javascript; charset=utf-8"),
     "/overview.js": lambda _r: Response(200, assets.OVERVIEW_SCRIPT.encode("utf-8"), "application/javascript; charset=utf-8"),
-    "/settings/restart.js": lambda _r: Response(200, assets.RESTART_SCRIPT.encode("utf-8"), "application/javascript; charset=utf-8"),
     **{f"/fonts/{name}": (lambda _r, name=name: Response(200, assets.read_font(name), "font/woff2")) for name in assets.FONT_FILES},
     "/icon.png": lambda _r: Response(200, HERMES_ICON_PNG, "image/png"),
     "/icon.svg": lambda _r: Response(200, HERMES_ICON_SVG, "image/svg+xml"),
@@ -304,6 +319,7 @@ class Router:
     def _post(self, request: Request, path: str) -> Response:
         if path == "/settings/save":
             ok, message = handle_settings_save(request.body)
+            refresh_public_options()
             if not ok:
                 return redirect(request, "settings", saved="fail", msg=message)
             extra = {"return_to_main": "1"} if should_return_to_main(request.body) else {}

@@ -140,11 +140,20 @@ class WebAccess:
         with self.lock:
             if not self.configured or self.retry_after(scope):
                 return False
+            salt, expected = self.state["salt"], self.state["verifier"]
+        # The slow hash runs outside the lock so one guess does not stall every other request.
+        # The lockout is re-checked at commit time, so parallel guesses cannot beat the limit:
+        # a guess that commits after the lock engaged is refused even if it was correct.
+        valid = False
+        if PIN_PATTERN.fullmatch(pin):
+            value = hashlib.pbkdf2_hmac("sha256", pin.encode("ascii"), bytes.fromhex(salt), HASH_ITERATIONS)
+            valid = hmac.compare_digest(value.hex(), expected)
+        with self.lock:
+            if not self.configured or self.retry_after(scope):
+                return False
+            if self.state["salt"] != salt or self.state["verifier"] != expected:
+                return False  # the PIN was changed while this guess was being hashed
             now = self.clock()
-            valid = False
-            if PIN_PATTERN.fullmatch(pin):
-                value = hashlib.pbkdf2_hmac("sha256", pin.encode("ascii"), bytes.fromhex(self.state["salt"]), HASH_ITERATIONS)
-                valid = hmac.compare_digest(value.hex(), self.state["verifier"])
             state = dict(self.state)
             locks = {name: dict(lock) for name, lock in state["locks"].items()}
             lock = locks[scope]

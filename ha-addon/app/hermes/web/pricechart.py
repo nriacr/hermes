@@ -62,7 +62,7 @@ def with_current(points: List[Point], price: Decimal, checked_at: datetime) -> L
 
 def _steps(points: List[Point], x, y) -> str:
     path = f"M{x(points[0][0]):.1f} {y(points[0][1]):.1f}"
-    for previous, point in zip(points, points[1:]):
+    for previous, point in zip(points, points[1:], strict=False):
         path += f" L{x(point[0]):.1f} {y(previous[1]):.1f} L{x(point[0]):.1f} {y(point[1]):.1f}"
     return path
 

@@ -1,5 +1,6 @@
 """Crash-safe JSON persistence for files under /data."""
 
+import contextlib
 import json
 import os
 import tempfile
@@ -63,8 +64,6 @@ def export_json(path: Path, payload: Any) -> None:
                 os.fsync(handle.fileno())
             os.replace(handle.name, path)
         except BaseException:
-            try:
+            with contextlib.suppress(OSError):
                 os.unlink(handle.name)
-            except OSError:
-                pass
             raise

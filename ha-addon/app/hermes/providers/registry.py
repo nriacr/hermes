@@ -1,5 +1,6 @@
 """All supported sites. A new site gets its own provider module and one line here."""
 
+import contextlib
 from typing import Dict, Iterable
 
 from ..errors import HermesError
@@ -52,10 +53,8 @@ class ProviderSet:
 
     def close(self) -> None:
         for provider in self:
-            try:
+            with contextlib.suppress(Exception):  # shutdown continues for the other sites
                 provider.close()
-            except Exception:  # noqa: BLE001 - shutdown continues for the other sites
-                pass
 
     def __enter__(self):
         return self

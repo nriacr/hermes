@@ -244,7 +244,6 @@ def prepare_telegram_config(payload: Dict[str, object]) -> TelegramConfig:
         api_hash=str(payload.get("api_hash") or "").strip(),
         phone_number=str(payload.get("phone_number") or "").strip(),
         verification_code=str(payload.get("verification_code") or "").strip(),
-        session_name=str(payload.get("session_name") or "telegram_keyword_alert").strip() or "telegram_keyword_alert",
         channels=string_list(payload.get("channels")) or list(DEFAULT_TELEGRAM_CHANNELS),
         keywords=string_list(payload.get("keywords")),
         exclude_keywords=string_list(payload.get("exclude_keywords")),

@@ -13,12 +13,14 @@ from ..constants import (
 )
 from ..logging_utils import log
 from ..storage import load_json
-from ..supervisor import save_options_and_restart, schedule_restart
+from ..supervisor import OPTIONS_LOCK, save_options_and_restart, schedule_restart
 from ..utils import detect_site_from_url, format_tl, parse_bool, parse_decimal, site_label, utc_now, watch_name_required_for_url
 from .dashboard import priority_dot
 from .pages import link, render_notice, render_page, render_tool_actions, CONFIRM_SCRIPT
 
 OTHER_GROUP = "Diğer"
+MAX_WATCH_CARDS = 500
+STALE_PAGE_MESSAGE = "Ayar sayfası eskimiş: takip listesi bu sayfa açıldıktan sonra değişti. Sayfayı yenile ve değişikliği tekrar yap."
 
 
 def _as_list(value) -> list:
@@ -404,9 +406,40 @@ def build_watch(form: Dict[str, List[str]], index: int) -> Optional[Dict[str, An
     return item
 
 
+def _watch_count(form: Dict[str, List[str]]) -> int:
+    """Posted card count, bounded so a forged value cannot spin the loop."""
+    try:
+        count = int(_first(form, "watches_count", "0") or 0)
+    except ValueError as exc:
+        raise ValueError("Takip sayısı geçersiz.") from exc
+    if not 0 <= count <= MAX_WATCH_CARDS:
+        raise ValueError(f"Takip sayısı geçersiz (en fazla {MAX_WATCH_CARDS}).")
+    return count
+
+
+def _require_matching_id(form: Dict[str, List[str]], index: int, existing_watches: List[Dict[str, Any]]) -> None:
+    """The card the page names must still be the one stored at that position."""
+    posted = _first(form, f"watches_{index}_id") or _first(form, "watch_id")
+    if posted and (index >= len(existing_watches) or str(existing_watches[index].get("id") or "") != posted):
+        raise ValueError(STALE_PAGE_MESSAGE)
+
+
+def _require_current_list(form: Dict[str, List[str]], count: int, existing_watches: List[Dict[str, Any]]) -> None:
+    """A whole-page save is refused when the stored list is no longer the one the page showed."""
+    posted_ids = [_first(form, f"watches_{index}_id") for index in range(count)]
+    if not any(posted_ids):
+        return  # an older page or a bare API call without card ids
+    for index, posted in enumerate(posted_ids):
+        if posted:
+            _require_matching_id(form, index, existing_watches)
+    known = {posted for posted in posted_ids if posted}
+    if any(str(item.get("id") or "") not in known for item in existing_watches):
+        raise ValueError(STALE_PAGE_MESSAGE)
+
+
 def build_watches(form: Dict[str, List[str]]) -> List[Dict[str, Any]]:
     watches = []
-    for index in range(int(_first(form, "watches_count", "0") or 0)):
+    for index in range(_watch_count(form)):
         if _first(form, f"watches_{index}_delete") in {"1", "true", "on", "yes"}:
             continue
         item = build_watch(form, index)
@@ -457,6 +490,7 @@ def apply_settings_operation(existing_options: Dict[str, Any], form: Dict[str, L
             raise ValueError("Silinecek takip kaydı geçersiz.") from exc
         if not 0 <= index < len(existing_watches):
             raise ValueError("Silinecek takip kaydı bulunamadı.")
+        _require_matching_id(form, index, existing_watches)
         removed = existing_watches.pop(index)
         options["takip_edilenler"] = existing_watches
         return options, f"{str(removed.get('name') or '').strip() or f'Takip {index + 1}'} takip kaydı silindi."
@@ -467,6 +501,7 @@ def apply_settings_operation(existing_options: Dict[str, Any], form: Dict[str, L
             raise ValueError("Güncellenecek takip kaydı geçersiz.") from exc
         if not 0 <= index < len(existing_watches):
             raise ValueError("Güncellenecek takip kaydı bulunamadı.")
+        _require_matching_id(form, index, existing_watches)
         updated = build_watch(form, index)
         if not updated:
             raise ValueError(f"Takip {index + 1}: hedef fiyat ve en az bir link alanı zorunlu.")
@@ -477,7 +512,9 @@ def apply_settings_operation(existing_options: Dict[str, Any], form: Dict[str, L
         return options, f"{watch_display_name(updated, index, {})} takip kaydı güncellendi."
     if operation == "update_existing":
         built = []
-        for index in range(int(_first(form, "watches_count", "0") or 0)):
+        count = _watch_count(form)
+        _require_current_list(form, count, existing_watches)
+        for index in range(count):
             if _first(form, f"watches_{index}_delete") in {"1", "true", "on", "yes"}:
                 continue
             item = build_watch(form, index)
@@ -506,8 +543,9 @@ def apply_settings_operation(existing_options: Dict[str, Any], form: Dict[str, L
 def handle_settings_save(body: bytes):
     try:
         form = urllib.parse.parse_qs(body.decode("utf-8", errors="replace"), keep_blank_values=True)
-        options, change_message = apply_settings_operation(read_options(), form)
-        save_options_and_restart(options)
+        with OPTIONS_LOCK:  # read, change and save as one step so two saves cannot overwrite each other
+            options, change_message = apply_settings_operation(read_options(), form)
+            save_options_and_restart(options)
         log("Ayarlar Home Assistant config'e kaydedildi; Hermes yeniden başlatılacak.")
         return True, f"{change_message} Hermes yeniden başlatılıyor; 10-20 saniye sonra sayfayı yenileyebilirsin."
     except Exception as exc:  # noqa: BLE001

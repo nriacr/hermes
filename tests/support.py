@@ -35,11 +35,6 @@ LOG_LINES: List[str] = []
 logging_utils.set_output(LOG_LINES.append)
 
 
-def amazon_product(asin: str = "B000000001", **params: str) -> str:
-    url = f"https://www.amazon.com.tr/dp/{asin}"
-    return url + ("?" + "&".join(f"{key}={value}" for key, value in params.items()) if params else "")
-
-
 def watch(name: str = "iPhone", url: str = "https://www.amazon.com.tr/dp/B000000001", target: str = "1000",
           site: Optional[str] = None, **fields: Any) -> WatchRule:
     from hermes.utils import detect_site_from_url
@@ -49,7 +44,7 @@ def watch(name: str = "iPhone", url: str = "https://www.amazon.com.tr/dp/B000000
 
 def telegram_config(**fields: Any) -> TelegramConfig:
     values = dict(enabled=False, api_id=None, api_hash="", phone_number="", verification_code="",
-                  session_name="telegram_keyword_alert", channels=[], keywords=[], exclude_keywords=[])
+                  channels=[], keywords=[], exclude_keywords=[])
     values.update(fields)
     return TelegramConfig(**values)
 
@@ -107,14 +102,3 @@ def monitor(cfg: HermesConfig, data: TempData, notify: Optional[Mock] = None, pr
 
 def key(rule: WatchRule) -> str:
     return watch_key(rule)
-
-
-def price_html(price: str, title: str = "iPhone", extra: str = "") -> str:
-    return (f'<span id="productTitle">{title}</span><div id="corePrice_feature_div"><span class="a-price">'
-            f'<span class="a-offscreen">{price} TL</span></span></div>{extra}')
-
-
-def search_card(asin: str, title: str, price: Optional[str] = "100,00", extra: str = "") -> str:
-    price_html_part = f'<span class="a-price"><span class="a-offscreen">{price} TL</span></span>' if price else ""
-    return (f'<div data-component-type="s-search-result" data-asin="{asin}"><h2><a href="/dp/{asin}"><span>{title}</span>'
-            f'</a></h2>{price_html_part}{extra}</div>')

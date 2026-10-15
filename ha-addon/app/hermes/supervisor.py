@@ -4,7 +4,6 @@ import json
 import os
 import threading
 import urllib.error
-import urllib.parse
 import urllib.request
 from typing import Any, Dict
 
@@ -13,19 +12,9 @@ from .constants import OPTIONS_PATH
 from .logging_utils import log
 from .storage import save_json
 
-ADDON_SLUG = "hermes"
 SUPERVISOR_BASE_URL = "http://supervisor"
-
-
-def current_addon_slug() -> str:
-    """Repository-qualified slug, e.g. `769724e3_hermes`, from the container hostname."""
-    hostname = os.getenv("HOSTNAME", "").strip()
-    hyphen_slug = ADDON_SLUG.replace("_", "-")
-    if hostname.endswith(f"-{hyphen_slug}"):
-        repository_id = hostname[: -(len(hyphen_slug) + 1)]
-        if repository_id:
-            return f"{repository_id}_{ADDON_SLUG}"
-    return hostname.replace("-", "_") if hostname else f"local_{ADDON_SLUG}"
+# One writer at a time: a read-change-save of the option set must not interleave with another.
+OPTIONS_LOCK = threading.RLock()
 
 
 def _headers() -> Dict[str, str]:
@@ -52,7 +41,8 @@ def _post(path: str, payload: Any = None, timeout: int = 8) -> bytes:
 
 
 def _addon_path(action: str) -> str:
-    return f"/addons/{urllib.parse.quote(current_addon_slug(), safe='')}/{action}"
+    # `self` is the add-on's own endpoint; it works with the default Supervisor role, no manager rights needed.
+    return f"/addons/self/{action}"
 
 
 def restart_addon() -> None:

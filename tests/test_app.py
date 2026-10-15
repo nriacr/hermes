@@ -81,9 +81,23 @@ class TelegramQuickAddTests(unittest.TestCase):
     def test_supported_links_are_extracted_and_share_links_resolved(self):
         self.assertEqual(telegram._extract_supported_url("Buna bakar mısın? https://www.amazon.com.tr/dp/B0B2PSDNV1?th=1"),
                          "https://www.amazon.com.tr/dp/B0B2PSDNV1?th=1")
-        response = SimpleNamespace(url="https://www.amazon.com.tr/dp/B0B2PSDNV1?th=1", close=lambda: None)
-        with patch.object(telegram.requests, "get", return_value=response):
-            self.assertEqual(telegram._extract_supported_url("https://amzn.eu/d/example"), response.url)
+        final = "https://www.amazon.com.tr/dp/B0B2PSDNV1?th=1"
+        hops = [SimpleNamespace(headers={"Location": final}, is_redirect=True, close=lambda: None),
+                SimpleNamespace(headers={}, is_redirect=False, close=lambda: None)]
+        with patch.object(telegram.requests, "get", side_effect=hops), patch.object(telegram, "_is_public_address", return_value=True):
+            self.assertEqual(telegram._extract_supported_url("https://amzn.eu/d/example"), final)
+
+    def test_share_links_never_lead_to_private_addresses(self):
+        for host in ("127.0.0.1", "10.0.0.5", "192.168.1.143", "169.254.169.254", "::1"):
+            with self.subTest(host=host), patch.object(telegram.socket, "getaddrinfo", return_value=[(0, 0, 0, "", (host, 0))]):
+                self.assertFalse(telegram._is_public_address("kisa.example"))
+        with patch.object(telegram.socket, "getaddrinfo", return_value=[(0, 0, 0, "", ("93.184.216.34", 0))]):
+            self.assertTrue(telegram._is_public_address("example.com"))
+        redirect = SimpleNamespace(headers={"Location": "http://192.168.1.143:8123/"}, is_redirect=True, close=lambda: None)
+        with (patch.object(telegram.requests, "get", return_value=redirect) as get,
+              patch.object(telegram.socket, "getaddrinfo", side_effect=lambda host, *_: [(0, 0, 0, "", ("192.168.1.143" if host[0].isdigit() else "93.184.216.34", 0))])):
+            self.assertEqual(telegram._resolve_shared_url("https://amzn.eu/d/x"), "")
+        self.assertEqual(get.call_count, 1)  # the private hop was never requested
 
     def test_target_price_accepts_turkish_formats(self):
         self.assertEqual(telegram._parse_target_price("40.000 TL"), Decimal("40000"))

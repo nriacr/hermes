@@ -1,5 +1,18 @@
 # Değişiklik günlüğü
 
+## 4.2.5
+
+- Ayarlar: silme ve güncelleme artık formdaki takip kimliğiyle eşleşir; sayfa eskimişse (liste başka yerde değişmişse) işlem reddedilir ve "sayfayı yenile" denir. Eski sayfa yanlış takibi silemez veya ezemez.
+- Ayar kaydı tek kilit altında yapılır (iki kayıt birbirini ezmez); Telegram hızlı ekleme de aynı kilidi kullanır. Takip kartı sayısı en çok 500.
+- PIN doğrulamasının yavaş hesabı kilit dışına alındı; deneme sınırı ve kilit davranışı aynı kaldı.
+- Herkese açık adres anahtarı için seçenek dosyası en çok 5 saniyede bir okunur (ayar kaydında hemen yenilenir).
+- Telegram kısa bağlantıları: yönlendirme her adımda denetlenir; özel/yerel ağ adreslerine yönlenen bağlantı reddedilir.
+- Home Assistant: `hassio_role: manager` kaldırıldı; Hermes artık yalnız kendi `/addons/self/...` ucunu kullanır.
+- Veritabanı: açılışta `PRAGMA quick_check`; bozuksa dosya silinmez, log'a net uyarı yazılır. WAL dosyası saatte bir `wal_checkpoint(TRUNCATE)` ile küçültülür.
+- Çalışma ölçümü: /runtime çıktısına `storage_bytes` (durum, veritabanı, WAL) ve `database_integrity` eklendi.
+- Ölü kod temizliği (/settings/restart.js çift yolu, kullanılmayan session_name alanı) ve ruff bulguları (try-except-pass, zip strict, raise from).
+- Panel görünümü, fiyat geçmişi, takipler ve bildirim hafızası değişmedi.
+
 ## 4.2.4
 
 - PIN deneme sınırı yüzeye göre ayrıldı: public adresteki yanlış denemeler Home Assistant içinden girişi kilitlemez.

@@ -50,6 +50,7 @@ class DataFilesMixin:
 
     def setUp(self):
         self.data = TempData()
+        server.refresh_public_options()
         root = self.data.root
         self.options_path = root / "options.json"
         self.options_path.write_text(json.dumps({"takip_edilenler": []}), encoding="utf-8")
@@ -74,6 +75,7 @@ class DataFilesMixin:
 
     def write_options(self, options):
         self.options_path.write_text(json.dumps(options), encoding="utf-8")
+        server.refresh_public_options()
 
     def authorized_request(self, router, path, method="GET", body=b"", public_only=False):
         request = server.split_request(path, method, body, public_only)
@@ -833,6 +835,43 @@ class SettingsTests(DataFilesMixin, unittest.TestCase):
             self.assertEqual({k:v for k,v in options["takip_edilenler"][0].items() if k != "id"}, source["takip_edilenler"][0])
             self.assertTrue(options["takip_edilenler"][0]["id"])
             self.assertEqual((options["takip_edilenler"][1]["group"], options["takip_edilenler"][1]["target_price"]), ("Teknoloji", 1500))
+
+    def test_a_stale_page_cannot_delete_or_edit_another_watch(self):
+        # The list changed after the page was opened: position 0 now holds a different watch.
+        stored = {"takip_edilenler": [
+            {"id": "yeni", "name": "Sonradan eklenen", "target_price": 50, "url_1": "https://www.amazon.com.tr/dp/B000000003"},
+            {"id": "a", "name": "A", "target_price": 100, "url_1": "https://www.amazon.com.tr/dp/B000000001"}]}
+        stale = "Ayar sayfası eskimiş"
+        with self.assertRaisesRegex(ValueError, stale):
+            settings.apply_settings_operation(stored, {"operation": ["delete_watch"], "watch_index": ["0"], "watches_0_id": ["a"]})
+        with self.assertRaisesRegex(ValueError, stale):
+            settings.apply_settings_operation(stored, {
+                "operation": ["update_watch"], "update_watch_index": ["0"], "watches_0_id": ["a"], "watches_0_name": ["A"],
+                "watches_0_target_price": ["10"], "watches_0_url_1": ["https://www.amazon.com.tr/dp/B000000001"]})
+        # The same id at the right position still works.
+        options, _ = settings.apply_settings_operation(stored, {"operation": ["delete_watch"], "watch_index": ["1"], "watches_1_id": ["a"]})
+        self.assertEqual([item["id"] for item in options["takip_edilenler"]], ["yeni"])
+
+    def test_a_whole_page_save_from_an_outdated_list_is_refused(self):
+        stored = {"takip_edilenler": [
+            {"id": "a", "name": "A", "target_price": 100, "url_1": "https://www.amazon.com.tr/dp/B000000001"},
+            {"id": "b", "name": "B", "target_price": 200, "url_1": "https://www.amazon.com.tr/dp/B000000002"}]}
+        page = {"operation": ["update_existing"], "watches_count": ["1"], "watches_0_id": ["a"], "watches_0_name": ["A"],
+                "watches_0_target_price": ["100"], "watches_0_url_1": ["https://www.amazon.com.tr/dp/B000000001"]}
+        with self.assertRaisesRegex(ValueError, "Ayar sayfası eskimiş"):  # B was added elsewhere; saving would drop it
+            settings.apply_settings_operation(stored, page)
+        page.update(watches_count=["2"], watches_1_id=["b"], watches_1_name=["B"], watches_1_target_price=["200"],
+                    watches_1_url_1=["https://www.amazon.com.tr/dp/B000000002"], watches_1_delete=["1"])
+        options, _ = settings.apply_settings_operation(stored, page)
+        self.assertEqual([item["id"] for item in options["takip_edilenler"]], ["a"])
+        swapped = dict(page, watches_0_id=["b"], watches_1_id=["a"])
+        with self.assertRaisesRegex(ValueError, "Ayar sayfası eskimiş"):
+            settings.apply_settings_operation(stored, swapped)
+
+    def test_card_count_is_bounded(self):
+        for bad in ("501", "-1", "x"):
+            with self.subTest(count=bad), self.assertRaisesRegex(ValueError, "Takip sayısı geçersiz"):
+                settings.apply_settings_operation({"takip_edilenler": []}, {"operation": ["update_existing"], "watches_count": [bad]})
 
     def test_new_card_additions_and_a_cached_mislabeled_form(self):
         options, message = settings.apply_settings_operation(

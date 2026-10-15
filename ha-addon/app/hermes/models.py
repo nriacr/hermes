@@ -91,7 +91,6 @@ class TelegramConfig:
     api_hash: str
     phone_number: str
     verification_code: str
-    session_name: str
     channels: List[str]
     keywords: List[str]
     exclude_keywords: List[str]

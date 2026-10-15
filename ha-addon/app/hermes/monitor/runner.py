@@ -5,6 +5,7 @@ and applied between cycles, so a reset can never be overwritten by a cycle
 that loaded the state earlier.
 """
 
+import contextlib
 import queue
 import threading
 import time
@@ -165,10 +166,8 @@ class MonitorService:
             except Exception as exc:  # noqa: BLE001 - one queue cannot end another
                 error = exc
                 log(f"{site} kontrolü tamamlanamadı: {type(exc).__name__}")
-                try:
+                with contextlib.suppress(Exception):  # storage failure is surfaced by health too
                     self.monitor.diagnostics.incident(site, "round", traceback.format_exc(), "Sınırlı yeniden deneme")
-                except Exception:  # noqa: BLE001 - storage failure is surfaced by health too
-                    pass
             finally:
                 completions.put((site, error))
 

@@ -183,6 +183,7 @@ class History:
             ]
             self._last_prune = time.monotonic()
         self._write("çevrim", statements)
+        self.database.checkpoint()
 
     def record_read(self, site: str, outcome: str, duration_ms: int, watch_key: str = "", priority: str = "",
                     detail: str = "", load: Optional[SystemLoad] = None) -> None:

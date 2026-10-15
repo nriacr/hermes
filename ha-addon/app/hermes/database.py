@@ -3,8 +3,13 @@
 import json
 import sqlite3
 import threading
+import time
 from pathlib import Path
 from typing import Any
+
+from .logging_utils import log
+
+CHECKPOINT_EVERY_SECONDS = 60 * 60
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS successful_reads(component TEXT PRIMARY KEY, at REAL NOT NULL);
@@ -42,6 +47,10 @@ class Database:
         self.path = path
         self.lock = threading.RLock()
         self.connection: sqlite3.Connection | None = None
+        # Set when the startup check finds damage. Nothing is deleted or recreated; Hermes keeps
+        # running on a best-effort basis and the log says what to restore.
+        self.integrity_error = ""
+        self._last_checkpoint = time.monotonic()
 
     def connect(self) -> sqlite3.Connection:
         with self.lock:
@@ -51,6 +60,7 @@ class Database:
                 try:
                     db.execute("PRAGMA journal_mode=WAL")
                     db.execute("PRAGMA synchronous=FULL")
+                    self._check_integrity(db)
                     db.executescript(SCHEMA)
                     incident_columns = {row[1] for row in db.execute("PRAGMA table_info(incidents)")}
                     if "context" not in incident_columns:
@@ -64,6 +74,37 @@ class Database:
                     raise
                 self.connection = db
             return self.connection
+
+    def _check_integrity(self, db: sqlite3.Connection) -> None:
+        """Quick structural check at open; a damaged file is reported, never rewritten or removed."""
+        try:
+            rows = [str(row[0]) for row in db.execute("PRAGMA quick_check(5)")]
+        except sqlite3.DatabaseError as exc:
+            rows = [f"kontrol çalışmadı: {exc}"]
+        if rows == ["ok"]:
+            self.integrity_error = ""
+            return
+        self.integrity_error = "; ".join(rows)[:300]
+        log(f"VERİTABANI SAĞLIKSIZ ({self.path.name}): {self.integrity_error}. Dosya silinmedi veya değiştirilmedi; "
+            "Hermes çalışmayı sürdürüyor ama kayıtlar güvenilir olmayabilir. Gerekirse en son günlük yedekten dönülmeli.")
+
+    def checkpoint(self, force: bool = False) -> None:
+        """Fold the WAL back into the main file about hourly so it cannot grow without bound."""
+        with self.lock:
+            if self.connection is None:
+                return
+            if not force and time.monotonic() - self._last_checkpoint < CHECKPOINT_EVERY_SECONDS:
+                return
+            self._last_checkpoint = time.monotonic()
+            try:
+                busy, _log_frames, _checkpointed = self.connection.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+            except sqlite3.Error as exc:
+                log(f"Veritabanı WAL temizliği yapılamadı: {exc}")
+                return
+            if busy:
+                log("Veritabanı WAL temizliği şu an meşgul olduğu için sonraya bırakıldı.")
+            if self.integrity_error:
+                log(f"Veritabanı hâlâ sağlıksız ({self.path.name}): {self.integrity_error}")
 
     def transaction(self, statements):
         with self.lock:

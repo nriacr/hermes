@@ -116,8 +116,10 @@ of each site are described in `docs/ARCHITECTURE.md`.
 
 - Keep add-on slug `hermes`, ingress port `8099`, public port `8100`, and health
   route `/health` unless an explicit migration is approved.
-- Preserve `hassio_api: true` and `hassio_role: manager`; settings writes and
-  restarts depend on Supervisor access. `homeassistant_api: true` publishes the
+- Preserve `hassio_api: true`; settings writes and restarts depend on Supervisor
+  access through the add-on's own `/addons/self/...` endpoint (4.2.5 dropped
+  `hassio_role: manager`; if that ever stops working, restore it and the
+  slug-based path from 4.2.4). `homeassistant_api: true` publishes the
   Hermes sensors and the `hermes_firsat` event; their names are a public
   interface for the user's automations.
 - Each site reads in its own sequential queue; never add parallel requests

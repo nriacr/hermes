@@ -1,5 +1,6 @@
 """Hepsiburada: product, variant and search pages with campaign-aware prices."""
 
+import contextlib
 from typing import List, Optional
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
@@ -117,10 +118,8 @@ def _attempt(method: str, candidate: str, exc: Exception) -> str:
 
 
 def fetch_hepsiburada_page(session: requests.Session, url: str, timeout: int):
-    try:
+    with contextlib.suppress(Exception):  # a missing warm-up cookie is not fatal
         session.get(HOME_URL, headers=hepsiburada_headers(HOME_URL), timeout=timeout, allow_redirects=True)
-    except Exception:  # noqa: BLE001 - a missing warm-up cookie is not fatal
-        pass
 
     last_error: Optional[Exception] = None
     attempts: List[str] = []

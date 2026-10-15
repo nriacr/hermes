@@ -152,7 +152,7 @@ class Offer:
 def build_offers(rows: List[Dict[str, Any]], state: Dict[str, Any]) -> List[Offer]:
     histories = load_histories(DATABASE_PATH, offer_index(state), rows)
     offers = []
-    for row, points in zip(rows, histories):
+    for row, points in zip(rows, histories, strict=False):
         price = parse_turkish_money(row.get("price"))
         if price is None:
             continue
@@ -314,7 +314,7 @@ def render_watch_pane(offers: List[Offer]) -> str:
         tags = variant_labels([member.title for member in members])
         body += (f"<section class='ov-group'><h3 class='ov-group-head {members[0].site}'><i></i><b title='{escape(label, quote=True)}'>{escape(label)}</b>"
                  f"<span>{len(members)} sonuç</span></h3><div class='ov-tiles'>"
-                 f"{''.join(render_tile(member, tag, number) for number, (member, tag) in enumerate(zip(members, tags)))}</div></section>")
+                 f"{''.join(render_tile(member, tag, number) for number, (member, tag) in enumerate(zip(members, tags, strict=False)))}</div></section>")
     return chips + body
 
 

@@ -4,6 +4,7 @@ import json
 import hashlib
 import time
 import uuid
+from pathlib import Path
 
 from .constants import APP_VERSION
 from .database import Database
@@ -95,7 +96,7 @@ class Diagnostics:
                 "SELECT id,component,kind,detail,opened,updated,count,recovery,context,resolved FROM incidents WHERE "
                 + where + " ORDER BY updated DESC", params).fetchall()
         fields = ("id", "component", "kind", "detail", "opened", "updated", "count", "recovery", "context", "resolved")
-        items = [dict(zip(fields, row)) for row in rows]
+        items = [dict(zip(fields, row, strict=False)) for row in rows]
         for item in items:
             try:
                 context = json.loads(item["context"])
@@ -130,6 +131,13 @@ class Diagnostics:
                              ("DELETE FROM incidents WHERE resolved < ?", (cutoff,))])
 
 
+def _size(path) -> int:
+    try:
+        return Path(path).stat().st_size
+    except OSError:
+        return 0
+
+
 def runtime_metrics(path):
     """Counts and timing only; never options, URLs, messages or credentials."""
     db = Database.at(path)
@@ -158,6 +166,9 @@ def runtime_metrics(path):
         row = connection.execute("SELECT payload FROM snapshots WHERE name='state.json'").fetchone()
         if row:
             result["state_entries"] = sum(1 for key in json.loads(row[0]) if key != "_meta")
+        result["storage_bytes"] = {"state_snapshot": len(row[0].encode("utf-8")) if row else 0,
+                                   "database": _size(path), "wal": _size(f"{path}-wal"), "shm": _size(f"{path}-shm")}
+        result["database_integrity"] = db.integrity_error or "ok"
         latency = [row[0] for row in connection.execute(
             "SELECT delivered-created FROM outbox WHERE state='sent' AND delivered IS NOT NULL "
             "ORDER BY delivered DESC LIMIT 1000")]

@@ -1,11 +1,13 @@
 """Telegram: keyword relay from deal channels and quick-add from Saved Messages."""
 
 import asyncio
+import ipaddress
 import re
+import socket
 import threading
 from datetime import datetime, timedelta
 from typing import Any, Dict, Iterable, Optional
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urljoin, urlparse
 
 import requests
 
@@ -25,7 +27,7 @@ from ..logging_utils import log
 from ..models import HermesConfig, TelegramConfig
 from ..notifier import Pushover
 from ..storage import file_lock, load_json, save_json
-from ..supervisor import save_options_and_restart
+from ..supervisor import OPTIONS_LOCK, save_options_and_restart
 from ..utils import (
     build_headers,
     detect_site_from_url,
@@ -162,17 +164,51 @@ def _first_time_seen(key: str) -> bool:
 # -- Saved Messages quick add --------------------------------------------------------
 
 
-def _resolve_shared_url(url: str) -> str:
-    """Follow a mobile share link once and accept only a supported final site."""
-    parsed_url = urlparse(url)
-    if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
-        return ""
+MAX_SHARE_REDIRECTS = 5
+
+
+def _is_public_address(host: str) -> bool:
+    """True only when every address the host resolves to is a routable public one."""
     try:
-        response = requests.get(url, headers=build_headers(url), timeout=15, allow_redirects=True, stream=True)
-        resolved_url = str(response.url or "")
-        response.close()
-        detect_site_from_url(resolved_url)
-        return resolved_url
+        addresses = {info[4][0] for info in socket.getaddrinfo(host, None)}
+    except (OSError, UnicodeError):
+        return False
+    if not addresses:
+        return False
+    for address in addresses:
+        try:
+            ip = ipaddress.ip_address(address.split("%", 1)[0])
+        except ValueError:
+            return False
+        if not ip.is_global or ip.is_multicast:
+            return False
+    return True
+
+
+def _public_http_url(url: str) -> bool:
+    parsed_url = urlparse(url)
+    return parsed_url.scheme in {"http", "https"} and bool(parsed_url.hostname) and _is_public_address(parsed_url.hostname)
+
+
+def _resolve_shared_url(url: str) -> str:
+    """Follow a mobile share link and accept only a supported final site.
+
+    Every hop is checked so a short link cannot lead Hermes to a private or local address."""
+    current = url
+    try:
+        for _hop in range(MAX_SHARE_REDIRECTS + 1):
+            if not _public_http_url(current):
+                log("Telegram kısa bağlantısı genel olmayan bir adrese yönleniyor; reddedildi.")
+                return ""
+            response = requests.get(current, headers=build_headers(current), timeout=15, allow_redirects=False, stream=True)
+            location = response.headers.get("Location") if response.is_redirect else ""
+            response.close()
+            if not location:
+                detect_site_from_url(current)
+                return current
+            current = urljoin(current, location)
+        log("Telegram kısa bağlantısı çok fazla yönlendirme içeriyor; reddedildi.")
+        return ""
     except Exception as exc:  # noqa: BLE001
         log(f"Telegram kısa bağlantısı açılamadı: {exc}")
         return ""
@@ -261,6 +297,11 @@ QUICK_ADD_DONE = "Takip kaydı eklendi"
 
 def _quick_add_watch(url: str, target_price, name: str = "") -> str:
     """Append a Saved Messages watch through the same options path as the UI."""
+    with OPTIONS_LOCK:
+        return _quick_add_watch_locked(url, target_price, name)
+
+
+def _quick_add_watch_locked(url: str, target_price, name: str) -> str:
     options = read_options()
     watches = [dict(item) for item in options.get("takip_edilenler", []) if isinstance(item, dict)] \
         if isinstance(options.get("takip_edilenler"), list) else []
@@ -399,7 +440,7 @@ async def _ensure_login(client, telegram_config: TelegramConfig) -> None:
                              phone_code_hash=phone_code_hash)
     except SessionPasswordNeededError:
         record_telegram_error("Telegram hesabında 2FA şifresi gerekiyor. Hermes şu an 2FA password girişi desteklemiyor.")
-        raise WaitingForUser()
+        raise WaitingForUser() from None
     save_json(TELEGRAM_LOGIN_STATE_PATH, {})
     _update_status(telegram_state="Dinleniyor")
     log("Telegram giriş başarılı. Session kalıcı olarak kaydedildi.")
