@@ -20,4 +20,4 @@
 
 ## Canlı kanıt
 
-- (kurulumdan sonra eklenecek)
+- install_rpi.sh (yedek b160df65): 4.14.0 started, sağlık ok, veri sayıları korundu, günlükte Traceback ve veritabanı yazma hatası yok. Hedef kaydı başlangıçta alındı; grafik, hedef değişince basamak yapacak.
