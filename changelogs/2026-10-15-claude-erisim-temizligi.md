@@ -37,3 +37,7 @@ Agent güvenlik ayarı, kimlik bilgisi veya yetki değiştirmediği için şunla
 ## Güncelleme: backups iCloud dışına alındı
 
 15 Ekim 2026, Nuri onayıyla (seçenek b): `backups/` klasörü `backups.nosync/` olarak yeniden adlandırıldı, yerine `backups -> backups.nosync` sembolik bağı kondu. İçerik taşınmadı/silinmedi (2,1 GB, aynı disk); tüm yollar çalışıyor. HA deposunun `.gitignore` dosyasına `backups` ve `backups.nosync/` eklendi. Önceden iCloud'a yüklenmiş kopyalar iCloud.com'dan ayrıca silinmedikçe kalır. Geri alma: `rm backups && mv backups.nosync backups`.
+
+## Güncelleme: Claude'un kendi SSH anahtarı
+
+15 Ekim 2026: Nuri `~/.ssh/homeassistant_claude` (ed25519, 0600) anahtarını kendisi üretti ve Pi'deki SSH eklentisinin `authorized_keys` listesine ekledi (eski anahtar silinmedi). Doğrulama: `HA_AGENT=claude bin/ha-ssh 'echo …'` ve anahtarla doğrudan BatchMode girişi başarılı. Claude bundan sonra `HA_AGENT=claude` kullanır; ChatGPT/Codex eski anahtarla sürer. Özel anahtar hiçbir yere yazılmadı. Geri alma: eklenti yapılandırmasından `claude-mac` satırını sil.
