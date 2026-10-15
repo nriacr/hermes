@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.13.0
+
+- Ürün ayrıntı penceresindeki fiyat grafiği: aynı üründe hem Yeni hem Depo teklifi takipteyse iki ayrı çizgi çizilir (Yeni mavi, Depo turuncu, açıklamalı); zaman aralığı düğmeleri ikisini birlikte keser, üzerine gelince balon iki fiyatı birden gösterir. Tek teklifli ürünlerde grafik aynı kalır. Veri ve bildirimler değişmedi.
+
 ## 4.12.0
 
 - Tüm Hermes verisi artık veritabanında (hermes.db) asıl kaynak: Amazon erişim durumu ve çerezleri ile Telegram durumu, görülen mesajlar, hata olayları, hızlı ekleme ve giriş durumu da takip hafızası ve fiyat özeti gibi tek işlemle veritabanına yazılır; fiyat geçmişi, okumalar ve bildirim kuyruğu zaten oradaydı. İlk açılışta mevcut JSON dosyaları veritabanına alınır. JSON dosyaları eski sürüme geri dönüş için yedek olarak yazılmaya devam eder. Takipler, fiyatlar ve bildirim davranışı değişmedi.
