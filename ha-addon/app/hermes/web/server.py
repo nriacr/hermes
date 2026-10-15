@@ -155,6 +155,7 @@ ASSETS: Dict[str, Callable[[Request], Response]] = {
     "/session.js": lambda _r: Response(200, assets.SESSION_SCRIPT.encode("utf-8"), "application/javascript; charset=utf-8"),
     "/restart.js": lambda _r: Response(200, assets.RESTART_SCRIPT.encode("utf-8"), "application/javascript; charset=utf-8"),
     "/live.js": lambda _r: Response(200, assets.LIVE_SCRIPT.encode("utf-8"), "application/javascript; charset=utf-8"),
+    "/confirm.js": lambda _r: Response(200, assets.CONFIRM_SCRIPT.encode("utf-8"), "application/javascript; charset=utf-8"),
     "/overview.js": lambda _r: Response(200, assets.OVERVIEW_SCRIPT.encode("utf-8"), "application/javascript; charset=utf-8"),
     **{f"/fonts/{name}": (lambda _r, name=name: Response(200, assets.read_font(name), "font/woff2")) for name in assets.FONT_FILES},
     "/icon.png": lambda _r: Response(200, HERMES_ICON_PNG, "image/png"),

@@ -19,7 +19,7 @@ from ..storage import load_json
 from ..diagnostics import Diagnostics
 from ..utils import SystemLoad, site_label
 from .dashboard import compact_error_row, incident_errors, clean_error_message, duration_text, live_region, live_script_tag, relative_time_text, site_theme_class
-from .pages import CONFIRM_SCRIPT, link, render_notice, render_page
+from .pages import confirm_script_tag, link, render_notice, render_page
 
 PERIODS = {"24h": ("Son 24 saat", timedelta(hours=24)), "7d": ("Son 7 gün", timedelta(days=7))}
 DEFAULT_PERIOD = "24h"
@@ -439,7 +439,7 @@ def render_statistics_page(base: str, params: Optional[Dict[str, List[str]]] = N
             + live_region(base, f"live/statistics?p={period}", statistics_live_html(base, params))
             + render_reset_statistics(base))
     return render_page(base, "statistics", "Hermes İstatistik", body, body_class="public ov", refresh_seconds=60,
-                       scripts=CONFIRM_SCRIPT + live_script_tag(base))
+                       scripts=confirm_script_tag(base) + live_script_tag(base))
 
 
 def render_reset_statistics(base: str) -> str:

@@ -25,13 +25,12 @@ GEAR_ICON = (
 )
 
 
-CONFIRM_SCRIPT = """<script>
-document.querySelectorAll('form[data-confirm]').forEach((form) => {
-  form.addEventListener('submit', (event) => {
-    if (!window.confirm(form.getAttribute('data-confirm') || 'Bu işlemi yapmak istediğine emin misin?')) event.preventDefault();
-  });
-});
-</script>"""
+
+
+
+def confirm_script_tag(base: str) -> str:
+    """Asks before a form with data-confirm is sent (see static/confirm.js)."""
+    return f"<script src='{escape(link(base, 'confirm.js'), quote=True)}?v={escape(APP_VERSION)}' defer></script>"
 
 
 def link(base: str, target: str = "") -> str:

@@ -170,6 +170,13 @@ class RouterTests(DataFilesMixin, unittest.TestCase):
         page = self.request("/settings").payload.decode()
         self.assertIn("Desteklenen siteler: Amazon, Hepsiburada", page)
 
+    def test_no_page_carries_an_inline_script_and_the_confirm_script_is_served(self):
+        for path in ("/", "/statistics", "/settings"):
+            page = self.request(path).payload.decode()
+            self.assertNotRegex(page, r"<script(?![^>]*\ssrc=)[^>]*>", path)
+        self.assertIn("form[data-confirm]", self.request("/confirm.js").payload.decode())
+        self.assertIn("confirm.js", self.request("/settings").payload.decode())
+
     def test_restart_button_restarts_hermes_through_home_assistant_on_both_surfaces(self):
         self.write_options({"public_dashboard_enabled": True, "public_dashboard_token": TOKEN})
         with patch.object(settings, "schedule_restart") as restart:
@@ -690,7 +697,7 @@ class StatisticsPageTests(DataFilesMixin, unittest.TestCase):
         form = html.split("statistics-reset")[1].split("</form>")[0]
         self.assertIn("action='./reset-statistics'", form)
         self.assertIn("data-confirm='Başarılı ve başarısız tüm okumalar, süre ölçümleri ve kapanmış sorun kayıtları kalıcı olarak silinecek", form)
-        self.assertIn("form[data-confirm]", html)  # the confirm script is on the page
+        self.assertIn("confirm.js", html)  # the confirm script is on the page
         response = self.request_post("/reset-statistics")
         self.assertEqual(response.status, 303)
         self.assertTrue(response.headers["Location"].startswith("./statistics?saved=ok&msg="))
