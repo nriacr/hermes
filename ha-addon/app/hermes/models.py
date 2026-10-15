@@ -110,3 +110,5 @@ class HermesConfig:
     watches: List[WatchRule]
     telegram: TelegramConfig
     config_errors: List[str] = field(default_factory=list)
+    # One summary message a day at 09:00 (reads, errors, best deals).
+    daily_summary_enabled: bool = True

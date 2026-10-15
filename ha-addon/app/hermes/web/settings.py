@@ -258,6 +258,12 @@ def _timing_section(options: Dict[str, Any]) -> str:
     return f"<section class='settings-section timing-settings'><h2>Zamanlama</h2><div class='form-grid'>{fields}</div></section>"
 
 
+def _daily_summary_section(options: Dict[str, Any]) -> str:
+    box = _checkbox("", "daily_summary_enabled", "Günlük özet bildirimi (her sabah 09:00)", options.get("daily_summary_enabled", True))
+    return ("<section class='settings-section'><h2>Günlük özet</h2>"
+            f"{box}<small>Son 24 saatteki okuma ve hata sayısı ile hedefteki en iyi ürünler tek mesajda gelir.</small></section>")
+
+
 def _update_timing_options(options: Dict[str, Any], form) -> None:
     """Same limits as the add-on schema; a page without these fields keeps the saved values."""
     values = {}
@@ -317,6 +323,7 @@ def render_settings_page(base: str, params: Dict[str, List[str]], *, access_bar:
         + "</section>"
         + _telegram_section(options)
         + _timing_section(options)
+        + _daily_summary_section(options)
         + "<div class='apply-bar'><p>Grup, fiyat, yeni kayıt ve silme işlemlerini sırayla yap; bitince bir kez uygula. "
         "Hermes yalnız o zaman yeniden başlar.</p><button class='button primary' type='submit'>Değişiklikleri uygula</button></div></form>"
         + render_tool_actions(base)
@@ -529,6 +536,7 @@ def apply_settings_operation(existing_options: Dict[str, Any], form: Dict[str, L
         options["takip_edilenler"] = built
         _update_telegram_options(options, form)
         _update_timing_options(options, form)
+        options["daily_summary_enabled"] = "daily_summary_enabled" in form
         return options, "Ayarlar kaydedildi."
     if operation == "add_watch":
         new_watches = build_watches(form)

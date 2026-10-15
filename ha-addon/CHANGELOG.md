@@ -1,5 +1,11 @@
 # Değişiklik günlüğü
 
+## 4.4.0
+
+- Günlük özet bildirimi: her gün 09:00'dan sonra (22:00'den önce) bir kez tek Pushover mesajı: son 24 saatte okuma ve hata sayısı, en çok hata veren site, hedefte/altında ürün sayısı ve en iyi 3 ürün. Ayarlar > "Günlük özet" kutusundan kapatılabilir (varsayılan açık).
+- CAPTCHA ve HTTP 503/429 molaları özette hata olarak sayılmaz ve anılmaz (bilerek sessiz kalan davranış korunur).
+- Takipler, fiyat geçmişi ve bildirim hafızası değişmedi.
+
 ## 4.3.0
 
 - Kart detayında "Son 90 gün en düşük" ve "Son 90 gün ortalaması" (süreye göre ağırlıklı, en az 7 günlük geçmiş varken) ve fiyatın bu ortalamanın yüzde kaç altında/üstünde olduğunu söyleyen etiket; fiyat dönemin dibindeyse "dip" yazar. Veri mevcut fiyat geçmişinden gelir.

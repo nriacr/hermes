@@ -46,6 +46,7 @@ OPTION_DEFAULTS: Dict[str, Any] = {
     "pushover_user_key": "",
     "pushover_api_token": "",
     "public_dashboard_enabled": False,
+    "daily_summary_enabled": True,
     "public_dashboard_token": "",
     "telegram_enabled": False,
     "telegram_saved_messages_enabled": True,
@@ -294,4 +295,5 @@ def load_config(payload: Optional[Dict[str, Any]] = None, *, tolerant=False) -> 
         watches=watches,
         telegram=telegram,
         config_errors=config_errors,
+        daily_summary_enabled=parse_bool(payload.get("daily_summary_enabled"), default=True),
     )

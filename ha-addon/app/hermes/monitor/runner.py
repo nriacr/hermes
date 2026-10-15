@@ -24,6 +24,7 @@ from ..storage import file_lock, load_json, save_json
 from ..utils import local_now, site_label
 from . import scheduling, state as state_ops, summary
 from .alerts import SILENT_GUARD_KINDS, quiet_hours
+from . import daily
 from .stall import StallWatch, stall_threshold
 from .cycle import DataFiles, Monitor
 
@@ -126,6 +127,18 @@ class MonitorService:
         if self.monitor.delivery.thread is not None and not self.monitor.delivery.thread.is_alive():
             return False, "bildirim göndericisi durdu"
         return True, "ok"
+
+    def _maybe_send_daily_summary(self) -> None:
+        now = local_now()
+        with self.monitor._lock:
+            values = state_ops.meta(self.monitor._state)
+            if not daily.summary_due(now, str(values.get("last_daily_summary") or ""), self.config.daily_summary_enabled):
+                return
+            values["last_daily_summary"] = now.date().isoformat()
+            self.monitor.save_state(self.monitor._state)
+        message = daily.build_daily_summary(self.files.database, load_json(self.files.summary, {}))
+        self.monitor.delivery.send("Hermes günlük özet", message, event_id=f"daily:{now.date().isoformat()}")
+        log("Günlük özet bildirimi kuyruğa alındı.")
 
     def _check_stalls(self, stall: StallWatch, sites, now: float) -> None:
         """Tell the user once when a site reads nothing successfully for a long time (see monitor/stall.py)."""
@@ -249,7 +262,11 @@ class MonitorService:
                         for identity in set(communicated) - set(critical):
                             if bridge.clear_problem(identity):
                                 communicated.pop(identity)
-                    self._check_stalls(stall, sites, now)
+                    for housekeeping in (lambda: self._check_stalls(stall, sites, now), self._maybe_send_daily_summary):
+                        try:
+                            housekeeping()
+                        except Exception as exc:  # noqa: BLE001 - an optional notice never stops the monitor
+                            log(f"Yardımcı kontrol hatası: {type(exc).__name__}: {exc}")
                     diagnostics_at = now + 5
                 if now >= maintenance_at:
                     self.monitor.diagnostics.prune()
