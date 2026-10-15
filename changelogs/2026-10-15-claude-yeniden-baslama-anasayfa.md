@@ -17,12 +17,12 @@
 |---|---|---|
 | Yerel | `sh tools/check.sh` (591 test, ruff) | Geçti |
 | Regresyon | ilerleme sayfası oturumsuz açılır, varsayılan dönüş anasayfa (ingress+public), kayıt/yeniden başlat yönlendirmesi, ayarlar/istatistik hâlâ kilitli | Geçti |
-| Canlı | Kurulum sonrası eklenecek | — |
+| Canlı | `install_rpi.sh` kurulum, sürüm/sağlık okuması | 4.2.6 started, healthy; davranış (kayıt sonrası anasayfa) Nuri'nin ayar kaydıyla doğrulanacak |
 
 ## Yayın, veri, geri alma
 
-- Kurulum durumu aşağıda güncellenir. Veri etkisi yok. Geri alma: `sh tools/prepare_code_rollback.sh <4.2.5 commit c4c1153 öncesi kod commit'i>` (kod; veri geri yüklemesi yok).
+- Kurulum: 15 Ekim 2026 ~21:55 yerel, `sh tools/install_rpi.sh` (Nuri sohbette "onay cümlesi istemeden ilerle" dedi). Yedek `b160df65` (HA günlük tam yedeği). Kurulum çıktısındaki bir ölçüm okuması ilk denemede başarısız oldu, yeniden denemede geçti. Veri etkisi yok. Geri alma: `sh tools/prepare_code_rollback.sh <4.2.5 commit c4c1153 öncesi kod commit'i>` (kod; veri geri yüklemesi yok).
 
 ## Kalan durum
 
-- Kurulum Nuri'nin onayını bekliyor.
+- Kayıt sonrası anasayfaya dönüşün canlı doğrulaması Nuri'nin bir ayar kaydı yapmasına bağlı.
