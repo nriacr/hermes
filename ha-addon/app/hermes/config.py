@@ -215,6 +215,7 @@ def _prepare_watch(item):
                 check_now_token=str(item.get("check_now_token") or "").strip(),
                 max_items_to_scan=SEARCH_RESULT_LIMIT,
                 notify_once_in_24h=parse_bool(item.get("notify_once_in_24H"), default=True),
+                notify_on_90_day_low=parse_bool(item.get("notify_90_day_low"), default=False),
                 active=True,
                 tracking_id=tracking_id,
             )

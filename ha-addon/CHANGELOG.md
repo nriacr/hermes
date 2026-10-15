@@ -1,5 +1,11 @@
 # Değişiklik günlüğü
 
+## 4.3.0
+
+- Kart detayında "Son 90 gün en düşük" ve "Son 90 gün ortalaması" (süreye göre ağırlıklı, en az 7 günlük geçmiş varken) ve fiyatın bu ortalamanın yüzde kaç altında/üstünde olduğunu söyleyen etiket; fiyat dönemin dibindeyse "dip" yazar. Veri mevcut fiyat geçmişinden gelir.
+- Yeni isteğe bağlı kart seçeneği "90 günün en düşüğünde de bildir" (varsayılan kapalı, ayar sayfasında): fiyat hedefin üstünde olsa bile son 90 günün (en az 7 gün geçmişle) en düşüğüne inerse tek bir bildirim gelir; aynı veya daha yüksek fiyatta tekrar etmez. Hedef fiyat bildirimlerinin susturma kayıtlarına ve `hermes_firsat` olayına dokunmaz.
+- Takipler, fiyat geçmişi ve bildirim hafızası değişmedi; mevcut kartlarda seçenek kapalıdır.
+
 ## 4.2.8
 
 - Site başına takılma uyarısı: bir site 45 dakika (veya en uzun takip aralığının 3 katı) boyunca hiç başarılı okuma yapamazsa Pushover (sessiz saatler dışında) ve Home Assistant kalıcı bildirimi bir kez uyarır; site yeniden okuyunca uyarı kapanır. Önceki sağlık denetimi yalnız hiç ilerlemeyen okuyucuyu (Amazon için 3 saat) yakalıyordu.

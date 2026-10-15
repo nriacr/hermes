@@ -202,6 +202,35 @@ class NotificationTests(CycleTestCase):
         entry["last_alerted_at"] = (datetime.now(timezone.utc) - timedelta(hours=25)).isoformat()
         self.assertTrue(state_ops.should_alert(entry, Decimal("900"), Decimal("1000"), True))
 
+    def _age_price_history(self, days):
+        from hermes.database import Database
+        old = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+        Database.at(self.data.files.database).transaction([("UPDATE prices SET checked_at=?", (old,))])
+
+    def test_90_day_low_notifies_above_target_only_when_enabled_and_only_for_new_lows(self):
+        for enabled in (True, False):
+            with self.subTest(enabled=enabled):
+                self.data.cleanup()
+                self.data = TempData()
+                self.notify = notifier()
+                rule = watch(url=AMAZON, target="1000", notify_on_90_day_low=enabled)
+                first = [OfferResult("iPhone", Decimal("1500"), url=AMAZON)]
+                with patch.object(AmazonProvider, "read", side_effect=reader(first)):
+                    self.run_cycle(config([rule]))
+                self.assertEqual(self.titles_sent(), [])
+                self._age_price_history(30)
+                lower = [OfferResult("iPhone", Decimal("1400"), url=AMAZON)]
+                with patch.object(AmazonProvider, "read", side_effect=reader(lower)):
+                    state = self.run_later(config([rule]))
+                self.assertEqual(self.titles_sent(), ["Amazon 90 günün en düşüğü"] if enabled else [])
+                entry = state[state[key(rule)]["offer_keys"][0]]
+                self.assertEqual(entry.get("last_low_alert_price"), "1400" if enabled else None)
+                self.assertNotIn("last_alerted_price", entry)
+                # The same price again is not a new low.
+                with patch.object(AmazonProvider, "read", side_effect=reader(lower)):
+                    self.run_later(config([rule]))
+                self.assertEqual(len(self.titles_sent()), 1 if enabled else 0)
+
     def test_stock_return_notifies_once_and_still_records_the_offers(self):
         rule = watch("Kan üzümü", "https://bengurme.com/products/uzum", target="100")
         offers = [OfferResult("Kan üzümü 500 g", Decimal("80"), url=rule.url), OfferResult("Kan üzümü 1 kg", Decimal("150"), url=rule.url + "?v=2")]

@@ -22,6 +22,7 @@ from ..storage import load_json
 from ..diagnostics import Diagnostics
 from ..utils import PROCESS_STARTED_AT, format_tl, is_search_url, parse_bool, parse_iso_datetime, repair_mojibake, site_label
 from .pages import link, render_notice, render_page
+from ..pricestats import MIN_HISTORY_DAYS, WINDOW_DAYS, window_stats
 from .pricechart import SPOT_SIZE, detail_chart, load_histories, offer_index, sparkline, with_current
 
 SITE_THEME_CLASSES = (
@@ -206,6 +207,20 @@ def change_chip(offer: Offer) -> str:
     return f"<span class='ov-chg {direction}' title='İlk kayıtlı fiyata göre ({since})'>{symbol} %{percent_text(change)}</span>"
 
 
+def average_chip(offer: Offer) -> str:
+    """How far today's price sits from the recent average ("is this really a discount?")."""
+    stats = window_stats(offer.points, _parse_local_time(offer.checked_at) or datetime.now().astimezone())
+    if not stats or stats.days < MIN_HISTORY_DAYS or not stats.average:
+        return ""
+    share = (float(offer.price) - stats.average) / stats.average * 100
+    days = min(WINDOW_DAYS, int(stats.days))
+    if abs(share) < 1:
+        return f"<span class='ov-chg flat'>{days} gün ortalamasında</span>"
+    direction, word = ("down", "altında") if share < 0 else ("up", "üstünde")
+    low = " · dip" if float(offer.price) <= stats.low else ""
+    return f"<span class='ov-chg {direction}'>{days} gün ortalamasının %{percent_text(abs(share))} {word}{low}</span>"
+
+
 def ago_html(value: str) -> str:
     return f"<span class='ov-ago'>{escape(relative_time_text(value))}</span>"
 
@@ -228,6 +243,11 @@ def detail_html(offer: Offer) -> str:
     if not offer.warehouse:
         interval = PRIORITY_LABELS[normalize_priority(offer.row.get("priority"))]
         cells += f"<div class='ov-fact'><span>Tarama sıklığı</span><b>{priority_dot(offer.row.get('priority'))}{escape(interval)}</b></div>"
+    stats = window_stats(offer.points, _parse_local_time(offer.checked_at) or datetime.now().astimezone())
+    if stats and stats.days >= MIN_HISTORY_DAYS:
+        days = min(WINDOW_DAYS, int(stats.days))
+        cells += (f"<div class='ov-fact'><span>Son {days} gün en düşük</span><b>{lira(Decimal(str(round(stats.low))))}</b></div>"
+                  f"<div class='ov-fact'><span>Son {days} gün ortalaması</span><b>{lira(Decimal(str(round(stats.average))))}</b></div>")
     cells += f"<div class='ov-fact'><span>Son güncelleme</span><b>{escape(relative_time_text(offer.checked_at))}</b></div>"
     if len(offer.points) > 1:
         cells += (f"<div class='ov-fact'><span>İlk kayıtlı fiyat</span><b>{lira(Decimal(str(offer.points[0][1])))}</b></div>"
@@ -241,7 +261,7 @@ def detail_html(offer: Offer) -> str:
     return (
         f"<div class='ov-d-top'><div class='ov-av'>{escape(offer.seller[:1].upper())}</div><h3>{escape(offer.title)}{depo}</h3>{link_html}"
         "<button type='button' class='ov-x' data-close aria-label='Kapat'>×</button></div>"
-        f"<div class='ov-d-price'><b>{price_parts(offer.price)}</b>{change_chip(offer)}{gap_chip}</div>"
+        f"<div class='ov-d-price'><b>{price_parts(offer.price)}</b>{change_chip(offer)}{gap_chip}{average_chip(offer)}</div>"
         f"<div class='ov-meter'><div class='ov-meter-track'><div class='ov-meter-fill' style='width:{proximity}%'></div></div>"
         f"<p><span>Hedef {lira(offer.target)}</span><span>%{proximity} yakınlık</span></p></div>"
         f"<div class='ov-facts'>{cells}</div><div class='ov-chartbox'>{chart}</div>"
