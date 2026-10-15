@@ -57,3 +57,5 @@ Agent güvenlik ayarı, kimlik bilgisi veya yetki değiştirmediği için şunla
 - **Silinmeyen (Nuri'ye soruluyor):** `.release-state/0d0e029d491b/worktree` ve `.release-state/c4332dc4ba54/worktree` — içinde birleştirilmemiş/değişmiş dosyalar var (örn. deploy/automations/oturma.yaml çakışması, koordinasyon belgeleri, oturma-medya araçları). Zorla silinmedi.
 - Yerel dallar: 10 `codex/*` dalı silindi. Önce `backups/worktree-yedek-20261015.bundle` güncellendi ve doğrulandı (11 dal, `codex/*` + `claude/*`); geri getirme: `git fetch <bundle> 'refs/heads/*:refs/heads/*'`. Uzak depoya dokunulmadı.
 - Dokunulmayanlar: başka ajanların aktif çalışma kopyaları (/private/tmp/ha-*, ~/.codex/worktrees), `feature/*`, `fix/*`, `hermes-3` dalları (birleşmiş), `claude/deleted-watch-summary` (yedekte, silinmedi).
+
+Son durum (Nuri: "yedek almadan sil"): kaydedilmemiş iş içeren iki `.release-state/*/worktree` (0d0e029d491b, c4332dc4ba54) yedeklenmeden Mac çöp kutusuna taşındı (kalıcı silme değil; Finder'dan "Geri koy" veya çöpü boşaltınca kesin silinir) ve `git worktree prune` yapıldı. `.release-state` 14 MB.
