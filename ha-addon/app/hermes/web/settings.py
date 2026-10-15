@@ -9,8 +9,9 @@ from typing import Any, Dict, List, Optional
 
 from ..config import DEFAULT_TELEGRAM_CHANNELS, WATCH_URL_FIELDS, options_with_defaults, read_options, watch_group, watch_urls
 from ..constants import (
-    APP_VERSION, DEFAULT_PRIORITY, PRIORITIES, PRIORITY_DESCRIPTIONS, PRIORITY_LABELS, STATE_PATH, NOTIFY_WINDOWS, normalize_notify_window, SUMMARY_PATH, normalize_priority,
+    APP_VERSION, DEFAULT_PRIORITY, PRIORITIES, PRIORITY_DESCRIPTIONS, PRIORITY_LABELS, STATE_PATH, NOTIFY_WINDOWS, normalize_notify_window, SUMMARY_PATH, SITE_LABELS, normalize_priority,
 )
+from ..errors import HermesError
 from ..logging_utils import log
 from ..storage import load_json
 from ..supervisor import OPTIONS_LOCK, save_options_and_restart, schedule_restart
@@ -295,6 +296,10 @@ def _update_timing_options(options: Dict[str, Any], form) -> None:
 HTTP_WARNING = "Bu adres şifresiz (HTTP). Yalnız güvendiğin ağda ya da HTTPS tünel arkasında kullan."
 
 
+def supported_sites_text() -> str:
+    return ", ".join(SITE_LABELS.values())
+
+
 def bulk_toolbar(groups: List[str]) -> str:
     """Selection controls that only fill the existing card fields; saving stays the single apply step."""
     priorities = "".join(f"<option value='{value}'>{escape(label)}</option>" for value, label in PRIORITY_LABELS.items())
@@ -336,6 +341,7 @@ def render_settings_page(base: str, params: Dict[str, List[str]], *, access_bar:
         "<input type='hidden' name='operation' value='update_existing'>"
         f"<input type='hidden' name='watches_count' id='watches-count' value='{new_index + 1}'>"
         "<section class='settings-section'><h2>Yeni takip ekle</h2>"
+        f"<p class='watch-hint'>Desteklenen siteler: {escape(supported_sites_text())}. Başka bir sitenin linki kaydedilmez.</p>"
         f"<div id='new-watch-list'>{watch_form({}, new_index, is_new=True, groups=groups, known_titles=known_titles)}</div>"
         "<div class='actions'><button class='button secondary' type='button' id='add-watch-card'>Başka takip ekle</button></div>"
         f"<template id='new-watch-template'>{template}</template></section>"
@@ -415,6 +421,11 @@ def build_watch(form: Dict[str, List[str]], index: int) -> Optional[Dict[str, An
     if not any([name, target, size, *urls]):
         return None
     context = _card_context(index, name, urls)
+    for url in urls:
+        try:
+            detect_site_from_url(url)
+        except HermesError as exc:
+            raise ValueError(f"{context}: {exc}. Desteklenen siteler: {supported_sites_text()}.") from exc
     missing = [label for label, value in (("hedef fiyat", target), ("en az bir link", urls)) if not value]
     if missing:
         raise ValueError(f"{context}: {', '.join(missing)} alanı zorunlu.")

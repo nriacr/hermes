@@ -162,6 +162,14 @@ class RouterTests(DataFilesMixin, unittest.TestCase):
         self.assertNotIn("data-new-watch='true'><summary><input type='checkbox' class='bulk-pick'", page)
         self.assertNotIn("name='bulk", page)
 
+    def test_unsupported_site_is_refused_with_the_supported_list(self):
+        form = {"watches_count": ["1"], "watches_0_name": ["x"], "watches_0_target_price": ["100"],
+                "watches_0_url_1": ["https://www.example.com/urun/1"]}
+        with self.assertRaisesRegex(ValueError, "Desteklenmeyen site alan adı: www.example.com. Desteklenen siteler: Amazon, Hepsiburada"):
+            settings.build_watches(form)
+        page = self.request("/settings").payload.decode()
+        self.assertIn("Desteklenen siteler: Amazon, Hepsiburada", page)
+
     def test_restart_button_restarts_hermes_through_home_assistant_on_both_surfaces(self):
         self.write_options({"public_dashboard_enabled": True, "public_dashboard_token": TOKEN})
         with patch.object(settings, "schedule_restart") as restart:
