@@ -20,3 +20,7 @@
 ## Veri, yedek ve geri alma
 
 - Kullanıcı verisi değişmez (yalnız okuma). Geri alma: sh tools/prepare_code_rollback.sh 4.5.0 sürümünün kaydı (ca0d75a).
+
+## Canlı kanıt
+
+- sh tools/check.sh: ruff + 605 test OK. install_rpi.sh (yedek b160df65, commit 4a2e1f0): 4.6.0 started, sağlık ok, veri sayıları korundu (13 takip, 364 state, 644 fiyat noktası), günlükte Traceback yok.
