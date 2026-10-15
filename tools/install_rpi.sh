@@ -15,7 +15,7 @@ BACKUP="${HERMES_BACKUP_SLUG:-}"
 [ -x "$SSH_HELPER" ] && [ -n "$EXPECTED_VERSION" ]
 # Home Assistant installs the code on GitHub main, so the tested tree must be exactly that code.
 git -C "$REPO_DIR" fetch --quiet origin main
-if [ -n "$(git -C "$REPO_DIR" status --porcelain)" ]; then
+if [ -n "$(git -C "$REPO_DIR" status --porcelain --untracked-files=no)" ]; then
   printf 'Çalışma kopyasında kaydedilmemiş değişiklik var; kurulum durduruldu.\n' >&2
   exit 1
 fi

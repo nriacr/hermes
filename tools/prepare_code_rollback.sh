@@ -11,7 +11,7 @@ if [ -z "${HA_DEPLOY_LOCK_PID:-}" ]; then
 fi
 GOOD="${1:?Kullanım: sh tools/prepare_code_rollback.sh ESKİ_COMMIT}"
 git -C "$REPO_DIR" fetch --quiet origin main
-[ -z "$(git -C "$REPO_DIR" status --porcelain)" ] || { printf 'Kaydedilmemiş değişiklik var; durduruldu.\n' >&2; exit 1; }
+[ -z "$(git -C "$REPO_DIR" status --porcelain --untracked-files=no)" ] || { printf 'Kaydedilmemiş değişiklik var; durduruldu.\n' >&2; exit 1; }
 [ "$(git -C "$REPO_DIR" rev-parse HEAD)" = "$(git -C "$REPO_DIR" rev-parse origin/main)" ] || { printf 'Yerel kayıt origin/main ile aynı değil; durduruldu.\n' >&2; exit 1; }
 git -C "$REPO_DIR" merge-base --is-ancestor "$GOOD" HEAD || { printf 'Verilen commit main geçmişinde değil; durduruldu.\n' >&2; exit 1; }
 GOOD_VERSION="$(git -C "$REPO_DIR" show "$GOOD:ha-addon/config.yaml" | sed -n 's/^version: "\([^"]*\)"/\1/p' | head -n 1)"

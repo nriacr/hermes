@@ -52,5 +52,6 @@ Paket D, kısmi (runtime)
 
 ## Kalan durum
 
+- 2026-10-15 (Nuri onayıyla): install_rpi.sh ve prepare_code_rollback.sh önkontrolü `status --porcelain --untracked-files=no` kullanıyor; kayıtsız agent dosyaları (.claude, .cursor) kurulumu durdurmaz, kayıtlı dosya değişikliği yine durdurur. Sürüm artmadı, kurulum yapılmadı.
 - Paket D'nin kalanı (PIN kilidi, açık HTTP uyarısı, root olmayan konteyner) ayrı konuşma ister.
 - İnsan adımları: ajan başına SSH anahtarı, sınırlı GitHub anahtarı, .claude izinleri, iCloud yedek kontrolü, eski çalışma klasörlerinin silinmesi.
