@@ -1,3 +1,5 @@
+import json
+import logging.handlers
 import threading
 import time
 from collections import OrderedDict
@@ -33,11 +35,38 @@ def set_output(output: Callable[[str], None]) -> None:
     _output = output
 
 
+_file_sink: logging.handlers.RotatingFileHandler | None = None
+
+
+def enable_file_log(path, max_bytes: int = 1_000_000, backups: int = 4) -> None:
+    """Also keep redacted JSON-lines diagnostics in a small rotating file (5 x 1 MB)."""
+    global _file_sink
+    try:
+        sink = logging.handlers.RotatingFileHandler(path, maxBytes=max_bytes, backupCount=backups, encoding="utf-8")
+    except OSError:
+        return
+    sink.setFormatter(logging.Formatter("%(message)s"))
+    _file_sink = sink
+
+
+def _write_file(moment: datetime, text: str) -> None:
+    sink = _file_sink
+    if sink is None:
+        return
+    try:
+        sink.handle(logging.makeLogRecord({"msg": json.dumps(
+            {"ts": moment.isoformat(timespec="seconds"), "msg": text}, ensure_ascii=False)}))
+    except Exception:
+        pass  # diagnostics must never break monitoring
+
+
 def log(message: str) -> None:
-    now = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
+    moment = datetime.now().astimezone()
+    text = redact(message)
     # Monitor, web and Telegram threads share stdout; keep each line intact.
     with _PRINT_LOCK:
-        _output(f"[{now}] {redact(message)}")
+        _output(f"[{moment.strftime('%Y-%m-%d %H:%M:%S')}] {text}")
+        _write_file(moment, text)
 
 
 class ProblemLog:

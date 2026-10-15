@@ -7,8 +7,8 @@ from typing import Optional, Tuple
 
 from .config import load_config, read_options
 from .supervisor import migrate_card_ids
-from .constants import APP_VERSION, INGRESS_PORT, PUBLIC_PORT
-from .logging_utils import log
+from .constants import APP_VERSION, DIAGNOSTIC_LOG_PATH, INGRESS_PORT, PUBLIC_PORT
+from .logging_utils import enable_file_log, log
 from .models import HermesConfig
 from .monitor.cycle import DataFiles
 from .monitor.runner import MonitorService, reset_statistics, reset_notifications, reset_price_history
@@ -98,6 +98,7 @@ class HermesRuntime:
 
 
 def main() -> int:
+    enable_file_log(DIAGNOSTIC_LOG_PATH)
     log(f"Hermes v{APP_VERSION} başlatılıyor.")
     try:
         options = read_options()

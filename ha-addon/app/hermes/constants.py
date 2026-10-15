@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 
-APP_VERSION = "4.11.0"
+APP_VERSION = "4.11.1"
 
 # Persistent add-on data. File names are a public interface: 2.x releases read
 # the same files, so a rollback never loses history or notification state.
@@ -21,6 +21,7 @@ TELEGRAM_LOGIN_STATE_PATH = DATA_DIR / "login_state.json"
 TELEGRAM_SEEN_MESSAGES_PATH = DATA_DIR / "seen_messages.json"
 TELEGRAM_STATUS_PATH = DATA_DIR / "status.json"
 TELEGRAM_ERROR_EVENTS_PATH = DATA_DIR / "error_events.json"
+DIAGNOSTIC_LOG_PATH = DATA_DIR / "hermes.log.jsonl"
 TELEGRAM_QUICK_ADD_PATH = DATA_DIR / "telegram_quick_add.json"
 
 INGRESS_PORT = 8099
