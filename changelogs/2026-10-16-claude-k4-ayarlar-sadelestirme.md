@@ -19,4 +19,4 @@
 
 ## Canlı kanıt
 
-- (kurulumdan sonra eklenecek)
+- install_rpi.sh (yedek b160df65): 4.11.2 started, sağlık ok, veri sayıları korundu, günlükte Traceback yok.
