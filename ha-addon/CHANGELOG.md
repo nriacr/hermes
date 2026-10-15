@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.6.0
+
+- Yeni "Fırsat geçmişi" sayfası (Araçlar > Fırsat geçmişi): son 30 günde gönderilen bildirimler, yeniden eskiye; her biri için zaman, fiyat ve ürünün bugünkü fiyatı / hâlâ geçerli olup olmadığı. Veri mevcut bildirim kaydından okunur, yeni tablo yoktur; takipler, fiyat geçmişi ve bildirim davranışı değişmedi.
+
 ## 4.5.0
 
 - Docker imajından Chromium, chromium-driver, yazı tipi paketi ve Selenium kaldırıldı (imaj küçüldü, güncelleme daha hızlı iner, bellek baskısı düşer). Amazon'un tek seferlik "tarayıcıyla yeniden oku" yedeği kalktı; curl ile okuma başarısız olursa hata olduğu gibi yükselir ve sonraki çevrimde normal akışla yeniden denenir.
