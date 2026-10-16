@@ -7,6 +7,8 @@ drives the whole page.
 """
 
 import statistics
+import threading
+import time
 from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -17,6 +19,7 @@ from ..constants import DATABASE_PATH, DEFAULT_PRIORITY, STATE_PATH
 from ..history import BLOCKED_OUTCOMES, SUCCESS_OUTCOMES, Read, read_cycles, read_reads, read_site_requests
 from ..storage import load_json
 from ..diagnostics import Diagnostics
+from ..logging_utils import log
 from ..utils import SystemLoad, site_label
 from .dashboard import compact_error_row, incident_errors, clean_error_message, duration_text, live_region, live_script_tag, relative_time_text, site_theme_class
 from .pages import confirm_script_tag, link, render_notice, render_page
@@ -40,6 +43,41 @@ ERROR_LABELS = {
     "partial": "Kısmen okundu",
     "interrupted": "Durduruldu",
 }
+
+# One stuck database call must not keep the whole page from opening: each data source
+# runs on its own thread with a time limit and falls back to an empty value. Slow or
+# stuck sources are written to the log so the cause can be read there.
+SECTION_LIMIT_SECONDS = 8.0
+SLOW_SECTION_SECONDS = 1.0
+
+
+def guarded(name: str, function, fallback):
+    outcome: Dict[str, object] = {}
+
+    def work() -> None:
+        try:
+            outcome["value"] = function()
+        except Exception as exc:  # noqa: BLE001 - the page must still open
+            outcome["error"] = type(exc).__name__
+
+    started = time.monotonic()
+    thread = threading.Thread(target=work, name=f"statistics-{name}", daemon=True)
+    thread.start()
+    thread.join(SECTION_LIMIT_SECONDS)
+    seconds = time.monotonic() - started
+    if thread.is_alive():
+        log(f"İstatistik bölümü {SECTION_LIMIT_SECONDS:.0f} sn içinde bitmedi, boş gösterildi: {name}")
+        return fallback
+    if "error" in outcome:
+        log(f"İstatistik bölümü okunamadı ({outcome['error']}): {name} | {seconds:.1f} sn")
+        return fallback
+    if seconds >= SLOW_SECTION_SECONDS:
+        log(f"İstatistik bölümü yavaş: {name} | {seconds:.1f} sn")
+    return outcome["value"]
+
+
+SORUN_YOK = ("<details class='summary-panel problem-history' data-key='problem-history'><summary>Sorun geçmişi</summary>"
+             "<p>Sorun geçmişi şu an okunamadı; sayfa yenilenince tekrar denenecek.</p></details>")
 
 
 def period_key(params: Dict[str, List[str]]) -> str:
@@ -401,22 +439,30 @@ def render_daily_history(reads: List[Read], now: datetime) -> str:
 
 
 def statistics_live_html(base: str, params: Optional[Dict[str, List[str]]] = None) -> str:
+    started = time.monotonic()
+    html = _statistics_html(base, params)
+    if time.monotonic() - started >= 2 * SLOW_SECTION_SECONDS:
+        log(f"İstatistik sayfası yavaş hazırlandı: {time.monotonic() - started:.1f} sn")
+    return html
+
+
+def _statistics_html(base: str, params: Optional[Dict[str, List[str]]] = None) -> str:
     period = period_key(params or {})
     label, span = PERIODS[period]
     # Whole minutes keep the block identical between refreshes when nothing changed.
     now = datetime.now().astimezone().replace(second=0, microsecond=0)
     since = now - span
-    week = read_reads(DATABASE_PATH, now - timedelta(days=7) - MAX_CHECK_GAP)
+    week = guarded("okumalar", lambda: read_reads(DATABASE_PATH, now - timedelta(days=7) - MAX_CHECK_GAP), [])
     week = [item for item in week if item.outcome != "interrupted"]
     reads = [item for item in week if item.at >= since]
     gaps = check_gaps(week, since)
     requests_by_site = {
         report.site: (f"{report.total} ağ isteği · {report.captcha} captcha · {report.http_503} adet 503 · "
                       f"{report.http_429} adet 429 · {report.browser} tarayıcıyla")
-        for report in read_site_requests(DATABASE_PATH, since)
+        for report in guarded("istekler", lambda: read_site_requests(DATABASE_PATH, since), [])
     }
     return (
-        f"{render_tiles(reads, gaps)}"
+        f"{guarded('özet kutuları', lambda: render_tiles(reads, gaps), '')}"
         f"<section class='summary-panel'><div class='summary-head'><h2>Kontrol sıklığı</h2><span>{escape(label)}</span></div>"
         f"{render_chart(buckets(reads, gaps, since, period), period)}</section>"
         f"<section class='summary-panel'><div class='summary-head'><h2>Siteler</h2><span>{escape(label)}</span></div>"
@@ -424,7 +470,7 @@ def statistics_live_html(base: str, params: Optional[Dict[str, List[str]]] = Non
         f"<section class='summary-panel'><div class='summary-head'><h2>Engel ve hata türleri</h2><span>{escape(label)}</span></div>"
         f"{render_error_types(reads)}{render_spells(reads)}</section>"
         f"{render_daily_history(week, now)}"
-        f"{render_problem_history(span)}"
+        f"{guarded('sorun geçmişi', lambda: render_problem_history(span), SORUN_YOK)}"
     )
 
 

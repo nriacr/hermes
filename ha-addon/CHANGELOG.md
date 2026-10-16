@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.15.1
+
+- İstatistik sayfası takılırsa artık açılır: okumalar, istekler, özet kutuları ve Sorun geçmişi ayrı çalışır, her biri en fazla 8 saniye bekler; biri bitmezse o bölüm boş/uyarı olarak gösterilir, sayfanın geri kalanı yine açılır. Yavaş (1 sn üstü) veya bitmeyen bölümler günlüğe "İstatistik bölümü ..." satırıyla yazılır; böylece takılmanın nedeni günlükten okunabilir. Veri, takipler ve bildirimler değişmedi.
+
 ## 4.14.0
 
 - Fiyat grafiğindeki hedef çizgisi artık hedef fiyat değiştikçe basamak yapar: Hermes her kartın hedefini değiştiği anda kaydeder ve yeşil kesikli çizgi o tarihte iner/çıkar. Geçmiş hedef değişiklikleri kayıtlı değildir; kayıt bu sürümle başlar, öncesi için ilk kayıtlı hedef düz devam eder. Hiç değişmeyen hedefte çizgi eskisi gibi düzdür. Takipler, bildirimler ve fiyat verisi değişmedi.
