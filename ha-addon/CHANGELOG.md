@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.15.0
+
+- Nordbron ve Ben Gurme siteleri desteklenen siteler listesinden kaldırıldı: bu sitelerin linkleri artık "desteklenmeyen site" olarak reddedilir (diğer linkler ve kartlar etkilenmez). Bu sitelere ait okuyucular ve test örnekleri silindi. Ayarlarda bu sitelere ait kart yoktu; veritabanında (hermes.db) ve durum dosyasında kalmış eski satırlara dokunulmadı, uygulama bunları sorunsuz taşır. Arama sayfası takibi Amazon ve Hepsiburada için aynen çalışır.
+
 ## 4.15.1
 
 - İstatistik sayfası takılırsa artık açılır: okumalar, istekler, özet kutuları ve Sorun geçmişi ayrı çalışır, her biri en fazla 8 saniye bekler; biri bitmezse o bölüm boş/uyarı olarak gösterilir, sayfanın geri kalanı yine açılır. Yavaş (1 sn üstü) veya bitmeyen bölümler günlüğe "İstatistik bölümü ..." satırıyla yazılır; böylece takılmanın nedeni günlükten okunabilir. Veri, takipler ve bildirimler değişmedi.

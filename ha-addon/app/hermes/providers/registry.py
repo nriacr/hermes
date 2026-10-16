@@ -6,12 +6,10 @@ from typing import Dict, Iterable
 from ..errors import HermesError
 from .amazon import AmazonProvider
 from .base import Provider
-from .bengurme import BenGurmeProvider
 from .beymenclub import BeymenClubProvider
 from .hepsiburada import HepsiburadaProvider
 from .hm import HMProvider
 from .network import NetworkProvider
-from .nordbron import NordbronProvider
 from .togg import ToggProvider
 from .trendyol import TrendyolProvider
 from .zara import ZaraProvider
@@ -22,8 +20,6 @@ PROVIDER_TYPES = (
     TrendyolProvider,
     NetworkProvider,
     BeymenClubProvider,
-    BenGurmeProvider,
-    NordbronProvider,
     ZaraProvider,
     HMProvider,
     ToggProvider,

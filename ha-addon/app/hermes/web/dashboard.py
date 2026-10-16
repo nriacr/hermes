@@ -32,7 +32,6 @@ SITE_THEME_CLASSES = (
     ("beymen club", "site-beymenclub"),
     ("beymenclub", "site-beymenclub"),
     ("trendyol", "site-trendyol"),
-    ("nordbron", "site-nordbron"),
     ("zara", "site-zara"),
     ("h&m", "site-hm"),
     ("togg", "site-togg"),

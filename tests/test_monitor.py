@@ -21,9 +21,8 @@ from hermes.monitor.results import skipped_offer_reason
 from hermes.monitor.cycle import CycleRun
 from hermes.providers.base import ReadContext
 from hermes.providers.amazon import AmazonProvider, WatchRhythm
-from hermes.providers.bengurme import BenGurmeProvider
 from hermes.providers.hepsiburada import HepsiburadaProvider
-from hermes.providers.nordbron import NordbronProvider
+from hermes.providers.trendyol import TrendyolProvider
 from hermes.utils import format_duration, utc_now
 
 AMAZON = "https://www.amazon.com.tr/dp/B000000001"
@@ -257,19 +256,6 @@ class NotificationTests(CycleTestCase):
         self.assertTrue(window_open("evening", at(14, 22)))
         self.assertFalse(window_open("weekend", at(16, 12)))
         self.assertTrue(window_open("weekend", at(17, 12)))
-
-    def test_stock_return_notifies_once_and_still_records_the_offers(self):
-        rule = watch("Kan üzümü", "https://bengurme.com/products/uzum", target="100")
-        offers = [OfferResult("Kan üzümü 500 g", Decimal("80"), url=rule.url), OfferResult("Kan üzümü 1 kg", Decimal("150"), url=rule.url + "?v=2")]
-        with patch.object(BenGurmeProvider, "read",
-                          side_effect=reader(OutOfStockHermesError("Ben Gurme ürünü stokta değil.", "Kan üzümü", rule.url), offers)):
-            state = self.run_cycle(config([rule]))
-            self.assertTrue(state[key(rule)]["last_out_of_stock_at"])
-            state = self.run_later(config([rule]))
-        self.assertEqual(self.titles_sent(), ["Ben Gurme stok alarmı"])
-        self.assertNotIn("last_out_of_stock_at", state[key(rule)])
-        self.assertEqual(len(state[key(rule)]["offer_keys"]), 2)
-        self.assertEqual(len(self.published_rows()), 2)
 
     def test_variant_url_change_preserves_alert_suppression_and_history(self):
         rule = watch(url=AMAZON, target="100000", include_variations=True)
@@ -528,8 +514,8 @@ class ProtectionGuardTests(CycleTestCase):
         self.assertEqual(len(self.published_rows()), 1)
 
     def test_other_sites_never_receive_a_guard(self):
-        rule = watch("Çanta", "https://nordbron.com/canta")
-        with patch.object(NordbronProvider, "read", side_effect=reader(BotProtectionHermesError("Nordbron captcha"))) as read:
+        rule = watch("Çanta", "https://www.trendyol.com/canta")
+        with patch.object(TrendyolProvider, "read", side_effect=reader(BotProtectionHermesError("Trendyol captcha"))) as read:
             self.run_cycle(config([rule]))
             state = self.run_later(config([rule]))
         self.assertEqual(read.call_count, 2)
@@ -656,16 +642,16 @@ class DepoLaneTests(CycleTestCase):
         self.assertTrue(read.called)
 
     def test_a_site_without_a_depo_lane_keeps_its_single_queue(self):
-        rule = watch("Çanta", "https://nordbron.com/canta")
+        rule = watch("Çanta", "https://www.trendyol.com/canta")
         names = []
 
-        def nordbron_read(rule, ctx, outcome):
+        def trendyol_read(rule, ctx, outcome):
             names.append(threading.current_thread().name)
             return [OfferResult("Çanta", Decimal("100"), None, rule.url)]
 
-        with patch.object(NordbronProvider, "read", side_effect=nordbron_read):
+        with patch.object(TrendyolProvider, "read", side_effect=trendyol_read):
             self.run_cycle(config([rule]))
-        self.assertEqual(names, ["hermes-nordbron"])
+        self.assertEqual(names, ["hermes-trendyol"])
 
 
 class ReplayedOfferTests(CycleTestCase):
@@ -748,9 +734,9 @@ class SchedulingTests(CycleTestCase):
 
     def test_deferred_medium_and_low_watches_keep_their_last_prices(self):
         now = datetime.now(timezone.utc)
-        medium = watch("Orta öncelik", "https://nordbron.com/orta", target="150", priority="60m")
-        low = watch("Düşük öncelik", "https://nordbron.com/dusuk", target="250", priority="3h")
-        high = watch("Yüksek öncelik", "https://nordbron.com/yuksek", target="350", priority="cycle")
+        medium = watch("Orta öncelik", "https://www.trendyol.com/orta", target="150", priority="60m")
+        low = watch("Düşük öncelik", "https://www.trendyol.com/dusuk", target="250", priority="3h")
+        high = watch("Yüksek öncelik", "https://www.trendyol.com/yuksek", target="350", priority="cycle")
         state = {}
         for rule, price in ((medium, "120"), (low, "220")):
             offer_key = f"cached-{rule.priority}"
@@ -759,7 +745,7 @@ class SchedulingTests(CycleTestCase):
                                 "url": rule.url, "configured_url": rule.url, "site": rule.site, "priority": rule.priority,
                                 "last_checked_at": now.isoformat()}
         self.data.write_state(state)
-        with patch.object(NordbronProvider, "read", side_effect=reader([OfferResult("Yeni fırsat", Decimal("300"), url=high.url)])) as read:
+        with patch.object(TrendyolProvider, "read", side_effect=reader([OfferResult("Yeni fırsat", Decimal("300"), url=high.url)])) as read:
             self.run_cycle(config([medium, low, high], interval_seconds=60))
         read.assert_called_once()
         rows = {row["priority"]: row for row in self.published_rows()}
@@ -770,7 +756,7 @@ class SchedulingTests(CycleTestCase):
         self.assertIn("60 dk=0 başladı, 0 sırası geldi, 1 ertelendi", coverage)
 
     def test_stopping_hermes_ends_the_cycle_between_watches(self):
-        rules = [watch(f"Ürün {i}", f"https://nordbron.com/{i}") for i in range(3)]
+        rules = [watch(f"Ürün {i}", f"https://www.trendyol.com/{i}") for i in range(3)]
         hermes_monitor = monitor(config(rules), self.data, self.notify)
         calls = []
 
@@ -779,7 +765,7 @@ class SchedulingTests(CycleTestCase):
             hermes_monitor.should_stop = lambda: True
             return [OfferResult(rule.name, Decimal("1"), url=rule.url)]
 
-        with patch.object(NordbronProvider, "read", side_effect=read):
+        with patch.object(TrendyolProvider, "read", side_effect=read):
             hermes_monitor.run_cycle()
         hermes_monitor.close()
         self.assertEqual(len(calls), 1)
@@ -799,8 +785,8 @@ class StartupScanTests(CycleTestCase):
 
     def test_every_priority_is_read_once_after_restart_then_normal_deadlines_resume(self):
         priorities = ("1m", "5m", "15m", "30m", "60m", "3h", "6h", "12h")
-        rules = [watch(p, f"https://nordbron.com/{p}", priority=p, target="1") for p in priorities]
-        inactive = watch("Kapalı", "https://nordbron.com/kapali", active=False)
+        rules = [watch(p, f"https://www.trendyol.com/{p}", priority=p, target="1") for p in priorities]
+        inactive = watch("Kapalı", "https://www.trendyol.com/kapali", active=False)
         self.recently_checked(rules)
         service = self.service([*rules, inactive])
         calls = []
@@ -809,7 +795,7 @@ class StartupScanTests(CycleTestCase):
             calls.append(rule.priority)
             return [OfferResult(rule.name, Decimal("100"), url=rule.url)]
 
-        with patch.object(NordbronProvider, "read", side_effect=read):
+        with patch.object(TrendyolProvider, "read", side_effect=read):
             service.monitor.run_cycle()
             self.assertCountEqual(calls, priorities)
             service.monitor.run_cycle()
@@ -824,11 +810,11 @@ class StartupScanTests(CycleTestCase):
 
     def test_site_specific_round_does_not_consume_other_sites_startup_intent(self):
         amazon = watch("Arama", "https://www.amazon.com.tr/s?k=kulaklik", priority="6h", target="1")
-        other = watch("Çanta", "https://nordbron.com/canta", priority="3h", target="1")
+        other = watch("Çanta", "https://www.trendyol.com/canta", priority="3h", target="1")
         self.recently_checked([amazon, other])
         service = self.service([amazon, other])
-        with patch.object(AmazonProvider, "read", return_value=[]) as amazon_read, patch.object(NordbronProvider, "read", return_value=[]) as other_read:
-            service.monitor.run_cycle("nordbron")
+        with patch.object(AmazonProvider, "read", return_value=[]) as amazon_read, patch.object(TrendyolProvider, "read", return_value=[]) as other_read:
+            service.monitor.run_cycle("trendyol")
             other_read.assert_called_once()
             amazon_read.assert_not_called()
             self.assertEqual(service.monitor.startup_scan_metrics()["pending"], 1)
@@ -893,33 +879,50 @@ class StartupScanTests(CycleTestCase):
         self.assertEqual(service.monitor.startup_scan_metrics()["pending"], 0)
 
     def test_failure_consumes_only_one_startup_attempt_and_does_not_repeat_each_cycle(self):
-        rule = watch("Kart", "https://nordbron.com/x", priority="6h")
+        rule = watch("Kart", "https://www.trendyol.com/x", priority="6h")
         self.recently_checked([rule])
         service = self.service([rule])
-        with patch.object(NordbronProvider, "read", side_effect=HermesError("test")) as read:
+        with patch.object(TrendyolProvider, "read", side_effect=HermesError("test")) as read:
             service.monitor.run_cycle()
             service.monitor.run_cycle()
         read.assert_called_once()
         self.assertEqual(service.monitor.startup_scan_metrics(),
                          {"total": 1, "pending": 0, "started": 1, "completed": 1, "successful": 0})
 
+    def test_leftover_rows_of_a_removed_site_are_kept_and_do_not_break_a_cycle(self):
+        from hermes.history import History
+        rule = watch("Kart", "https://www.trendyol.com/x", priority="6h")
+        old_offer = "removed-site-offer"
+        state = {key(rule): {"last_checked_at": utc_now(), "offer_keys": []},
+                 "tracking_card_eski_nordbron": {"offer_keys": [old_offer], "last_checked_at": utc_now()},
+                 old_offer: {"last_price": "50", "min_price": "40", "max_price": "80"}}
+        self.data.write_state(state)
+        history = History.at(self.data.files.database)
+        history.record_price(old_offer, "nordbron", "Eski kart", Decimal("50"))
+        history.database.snapshot("state.json", state)
+        service = self.service([rule])
+        with patch.object(TrendyolProvider, "read", return_value=[]):
+            service.monitor.run_cycle()
+        self.assertEqual(self.data.state()[old_offer], state[old_offer])
+        self.assertEqual(service.monitor.history._db().execute("SELECT count(*) FROM prices WHERE site='nordbron'").fetchone()[0], 1)
+
     def test_initialization_keeps_history_and_suppression_and_jobs_label_startup(self):
         import json
         from hermes.history import History
-        rule = watch("Kart", "https://nordbron.com/x", priority="6h")
+        rule = watch("Kart", "https://www.trendyol.com/x", priority="6h")
         offer_key = "existing-offer"
         state = {key(rule): {"last_checked_at": utc_now(), "offer_keys": [offer_key]},
                  offer_key: {"last_price": "50", "min_price": "40", "max_price": "80", "last_alerted_at": utc_now(),
                              "last_alerted_price": "50"}, "_meta": {"notification_generation": "keep"}}
         self.data.write_state(state)
         history = History.at(self.data.files.database)
-        history.record_price(offer_key, "nordbron", "Kart", Decimal("50"))
+        history.record_price(offer_key, "trendyol", "Kart", Decimal("50"))
         history.database.snapshot("state.json", state)
         service = self.service([rule])
         self.assertEqual(self.data.state()[offer_key], state[offer_key])
         self.assertEqual(service.monitor.history._db().execute("SELECT count(*) FROM prices").fetchone()[0], 1)
         self.assertEqual(self.data.state()["_meta"]["notification_generation"], "keep")
-        with patch.object(NordbronProvider, "read", return_value=[]):
+        with patch.object(TrendyolProvider, "read", return_value=[]):
             service.monitor.run_cycle()
         db = service.monitor.history._db()
         row = db.execute("SELECT delay_ms,evidence FROM jobs ORDER BY started DESC LIMIT 1").fetchone()
@@ -930,23 +933,23 @@ class StartupScanTests(CycleTestCase):
 class SiteQueueTests(CycleTestCase):
     def test_a_slow_amazon_read_does_not_delay_other_sites(self):
         amazon = watch(url=AMAZON)
-        nordbron = watch("Çanta", "https://nordbron.com/canta")
+        trendyol = watch("Çanta", "https://www.trendyol.com/canta")
         other_site_done = threading.Event()
 
         def slow_amazon(rule, ctx, outcome):
-            # Sequential reading would deadlock here: Nordbron could never run.
-            self.assertTrue(other_site_done.wait(5), "Nordbron waited for Amazon")
+            # Sequential reading would deadlock here: Trendyol could never run.
+            self.assertTrue(other_site_done.wait(5), "Trendyol waited for Amazon")
             return [OfferResult("iPhone", Decimal("2000"), url=rule.url)]
 
-        def nordbron_read(rule, ctx, outcome):
+        def trendyol_read(rule, ctx, outcome):
             other_site_done.set()
             return [OfferResult("Çanta", Decimal("2000"), url=rule.url)]
 
         with (patch.object(AmazonProvider, "read", side_effect=slow_amazon),
-              patch.object(NordbronProvider, "read", side_effect=nordbron_read)):
-            state = self.run_cycle(config([amazon, nordbron]))
+              patch.object(TrendyolProvider, "read", side_effect=trendyol_read)):
+            state = self.run_cycle(config([amazon, trendyol]))
         self.assertEqual(len(self.published_rows()), 2)
-        self.assertTrue(state[key(amazon)]["offer_keys"] and state[key(nordbron)]["offer_keys"])
+        self.assertTrue(state[key(amazon)]["offer_keys"] and state[key(trendyol)]["offer_keys"])
 
     def test_one_site_keeps_a_single_sequential_queue(self):
         rules = [watch(f"Ürün {i}", f"https://www.amazon.com.tr/dp/B00000000{i}") for i in range(1, 5)]
@@ -970,16 +973,17 @@ class SiteQueueTests(CycleTestCase):
     def test_parallel_sites_record_every_offer_and_notification(self):
         rules = [watch(f"Ürün {site}{i}", url, target="1000")
                  for i in range(3)
-                 for site, url in (("a", f"https://www.amazon.com.tr/dp/B00000000{i}"), ("n", f"https://nordbron.com/{i}"),
+                 for site, url in (("a", f"https://www.amazon.com.tr/dp/B00000000{i}"), ("n", f"https://www.network.com.tr/x-p-{i}"),
                                    ("t", f"https://www.trendyol.com/x-p-{i}"), ("z", f"https://www.zara.com/tr/tr/x-p0{i}.html"))]
 
         def read(rule, ctx, outcome):
             time.sleep(0.005)
             return [OfferResult(rule.name, Decimal("900"), url=rule.url)]
 
+        from hermes.providers.network import NetworkProvider
         from hermes.providers.trendyol import TrendyolProvider
         from hermes.providers.zara import ZaraProvider
-        with (patch.object(AmazonProvider, "read", side_effect=read), patch.object(NordbronProvider, "read", side_effect=read),
+        with (patch.object(AmazonProvider, "read", side_effect=read), patch.object(NetworkProvider, "read", side_effect=read),
               patch.object(TrendyolProvider, "read", side_effect=read), patch.object(ZaraProvider, "read", side_effect=read)):
             state = self.run_cycle(config(rules))
         self.assertEqual(len(self.published_rows()), 12)
@@ -988,9 +992,9 @@ class SiteQueueTests(CycleTestCase):
         self.assertEqual(sum(1 for entry in state.values() if isinstance(entry, dict) and entry.get("last_alerted_price")), 12)
 
     def test_an_unexpected_error_in_a_site_queue_reaches_the_cycle(self):
-        rule = watch("Çanta", "https://nordbron.com/canta")
+        rule = watch("Çanta", "https://www.trendyol.com/canta")
         hermes_monitor = monitor(config([rule]), self.data, self.notify)
-        with (patch.object(NordbronProvider, "read", side_effect=reader([OfferResult("x", Decimal("1"))])),
+        with (patch.object(TrendyolProvider, "read", side_effect=reader([OfferResult("x", Decimal("1"))])),
               patch.object(hermes_monitor.results, "_record_success", side_effect=OSError("disk full")),
               patch.object(hermes_monitor.results, "_record_failure", side_effect=OSError("disk full"))):
             with self.assertRaises(OSError):
@@ -1047,12 +1051,12 @@ class RequestSpacingTests(CycleTestCase):
         hermes_monitor.close()
 
     def test_other_sites_wait_their_gap_between_watch_reads(self):
-        rules = [watch(f"Çanta {i}", f"https://nordbron.com/{i}") for i in range(3)]
+        rules = [watch(f"Çanta {i}", f"https://www.trendyol.com/{i}") for i in range(3)]
         sleeps = []
         hermes_monitor = monitor(config(rules), self.data, self.notify)
         hermes_monitor.sleep = sleeps.append
-        with (patch.dict("hermes.monitor.cycle.SITE_MIN_REQUEST_GAP_SECONDS", {"nordbron": 30}),
-              patch.object(NordbronProvider, "read", side_effect=lambda rule, *_a: [OfferResult(rule.name, Decimal("1"), url=rule.url)])):
+        with (patch.dict("hermes.monitor.cycle.SITE_MIN_REQUEST_GAP_SECONDS", {"trendyol": 30}),
+              patch.object(TrendyolProvider, "read", side_effect=lambda rule, *_a: [OfferResult(rule.name, Decimal("1"), url=rule.url)])):
             hermes_monitor.run_cycle()
         hermes_monitor.close()
         self.assertEqual(len(sleeps), 2)  # second and third read wait for the gap
@@ -1062,11 +1066,11 @@ class RequestSpacingTests(CycleTestCase):
 class HomeAssistantTests(CycleTestCase):
     def test_cycle_publishes_sensors_and_an_event_per_opportunity(self):
         bridge = Mock(enabled=True)
-        rules = [watch("iPhone", AMAZON, target="1000"), watch("Çanta", "https://nordbron.com/canta", target="100")]
+        rules = [watch("iPhone", AMAZON, target="1000"), watch("Çanta", "https://www.trendyol.com/canta", target="100")]
         hermes_monitor = monitor(config(rules), self.data, self.notify)
         hermes_monitor.home_assistant = bridge
         with (patch.object(AmazonProvider, "read", side_effect=reader([OfferResult("iPhone", Decimal("900"), url=AMAZON)])),
-              patch.object(NordbronProvider, "read", side_effect=reader([OfferResult("Çanta", Decimal("150"), url=rules[1].url)]))):
+              patch.object(TrendyolProvider, "read", side_effect=reader([OfferResult("Çanta", Decimal("150"), url=rules[1].url)]))):
             hermes_monitor.run_cycle()
         hermes_monitor.close()
         bridge.publish_opportunity.assert_called_once()
@@ -1241,7 +1245,7 @@ class SummaryFileTests(CycleTestCase):
         self.assertEqual(prices, {"https://example.com/old": "200 TL", "https://example.com/fresh": "90 TL"})
 
     def test_incremental_save_removes_only_the_failed_watch_rows(self):
-        stale = PriceSummaryRow("Nordbron", "Stark", "https://nordbron.com/stark", Decimal("4850"), Decimal("4500"),
+        stale = PriceSummaryRow("Trendyol", "Stark", "https://www.trendyol.com/stark", Decimal("4850"), Decimal("4500"),
                                 Decimal("4850"), Decimal("4850"))
         summary.save_price_summary(self.data.files.summary, [stale, self.row("Güncel", "https://example.com/current", "300")])
         summary.save_incremental_summary(self.data.files.summary, [], removed_price_ids={summary.price_row_identity(stale)})
@@ -1349,7 +1353,7 @@ class PanelCommandTests(CycleTestCase):
         self.assertEqual(state["offer"]["last_price"], "90")
 
     def test_commands_are_applied_between_cycles_and_can_start_one_now(self):
-        rule = watch("Ürün", "https://nordbron.com/x", target="100")
+        rule = watch("Ürün", "https://www.trendyol.com/x", target="100")
         service = runner.MonitorService(config([rule], interval_seconds=3600), self.data.files, notifier=self.notify)
         cycles = []
 
@@ -1362,7 +1366,7 @@ class PanelCommandTests(CycleTestCase):
                 service.stop()
             return [OfferResult("Ürün", Decimal("90"), url=rule.url)]
 
-        with patch.object(NordbronProvider, "read", side_effect=read):
+        with patch.object(TrendyolProvider, "read", side_effect=read):
             service.run()
         self.assertEqual(len(cycles), 2)  # the reset started a new cycle immediately
         self.assertIn(self.notify.send.call_count, (1, 2))  # in-flight delivery may finish; new sends stop
@@ -1374,7 +1378,7 @@ class PanelCommandTests(CycleTestCase):
         self.assertFalse(service.health()[0])
 
     def test_unexpected_cycle_error_does_not_stop_monitoring(self):
-        rule = watch("Ürün", "https://nordbron.com/x")
+        rule = watch("Ürün", "https://www.trendyol.com/x")
         service = runner.MonitorService(config([rule], interval_seconds=1), self.data.files, notifier=self.notify)
         runs = []
 

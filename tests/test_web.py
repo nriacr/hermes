@@ -384,7 +384,7 @@ class DashboardTests(DataFilesMixin, unittest.TestCase):
 
     def test_site_theme_classes_are_distinct(self):
         expected = {"Amazon": "site-amazon", "Hepsiburada": "site-hepsiburada", "Trendyol": "site-trendyol",
-                    "Network": "site-network", "Beymen Club": "site-beymenclub", "Nordbron": "site-nordbron",
+                    "Network": "site-network", "Beymen Club": "site-beymenclub",
                     "Zara": "site-zara", "H&M": "site-hm"}
         self.assertEqual({seller: dashboard.site_theme_class(seller) for seller in expected}, expected)
 
@@ -953,11 +953,11 @@ class SettingsTests(DataFilesMixin, unittest.TestCase):
 
     def test_new_card_additions_and_a_cached_mislabeled_form(self):
         options, message = settings.apply_settings_operation(
-            {"takip_edilenler": [{"name": "Nordbron çanta", "target_price": 4500, "url_1": "https://nordbron.com/stark"}]},
+            {"takip_edilenler": [{"name": "Trendyol çanta", "target_price": 4500, "url_1": "https://www.trendyol.com/stark"}]},
             {"operation": ["update_watch"], "watches_count": ["1"], "watches_0_name": ["Belkin şarj"],
              "watches_0_target_price": ["4000"], "watches_0_url_1": ["https://www.amazon.com.tr/dp/B000000001"]})
         self.assertIn("eklendi", message)
-        self.assertEqual([item["name"] for item in options["takip_edilenler"]], ["Nordbron çanta", "Belkin şarj"])
+        self.assertEqual([item["name"] for item in options["takip_edilenler"]], ["Trendyol çanta", "Belkin şarj"])
         self.assertTrue(options["takip_edilenler"][1]["check_now_token"])
 
     def test_saving_preserves_every_other_option(self):

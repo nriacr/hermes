@@ -16,7 +16,7 @@ from hermes import config as hermes_config
 from hermes.errors import HermesError
 from hermes.models import OfferResult
 from hermes.monitor import runner
-from hermes.providers.nordbron import NordbronProvider
+from hermes.providers.trendyol import TrendyolProvider
 from hermes import supervisor
 from hermes.constants import APP_VERSION
 from hermes.storage import load_json, save_json
@@ -56,19 +56,19 @@ class ConfigTests(unittest.TestCase):
 
     def test_inactive_cards_skipped_and_old_or_unknown_priorities_read_every_6_hours(self):
         watches = hermes_config.prepare_watches([
-            {"name": "Pasif", "target_price": 1, "url_1": "https://nordbron.com/a", "active": False},
-            {"name": "Acil", "target_price": 1, "url_1": "https://nordbron.com/b", "priority": "acil"},
+            {"name": "Pasif", "target_price": 1, "url_1": "https://www.trendyol.com/a", "active": False},
+            {"name": "Acil", "target_price": 1, "url_1": "https://www.trendyol.com/b", "priority": "acil"},
             # Cards saved before 3.12 move to the lowest priority, whatever they were.
-            {"name": "Eski yüksek", "target_price": 1, "url_1": "https://nordbron.com/c", "priority": "high"},
-            {"name": "Eski orta", "target_price": 1, "url_1": "https://nordbron.com/d", "priority": "medium"},
-            {"name": "Önceliksiz", "target_price": 1, "url_1": "https://nordbron.com/e"},
-            {"name": "Yeni", "target_price": 1, "url_1": "https://nordbron.com/f", "priority": "30m"}])
+            {"name": "Eski yüksek", "target_price": 1, "url_1": "https://www.trendyol.com/c", "priority": "high"},
+            {"name": "Eski orta", "target_price": 1, "url_1": "https://www.trendyol.com/d", "priority": "medium"},
+            {"name": "Önceliksiz", "target_price": 1, "url_1": "https://www.trendyol.com/e"},
+            {"name": "Yeni", "target_price": 1, "url_1": "https://www.trendyol.com/f", "priority": "30m"}])
         self.assertEqual([(item.name, item.priority) for item in watches],
                          [("Acil", "6h"), ("Eski yüksek", "6h"), ("Eski orta", "6h"), ("Önceliksiz", "6h"), ("Yeni", "30m")])
 
     def test_minimum_above_target_is_rejected(self):
         with self.assertRaisesRegex(HermesError, "minimum fiyat"):
-            hermes_config.prepare_watches([{"name": "x", "target_price": 100, "minimum_price": 200, "url_1": "https://nordbron.com/a"}])
+            hermes_config.prepare_watches([{"name": "x", "target_price": 100, "minimum_price": 200, "url_1": "https://www.trendyol.com/a"}])
 
     def test_tracking_card_identity_is_stable_across_releases(self):
         # The identity keys state.json; it must match what 2.x computed.
@@ -224,7 +224,7 @@ class RuntimeTests(unittest.TestCase):
         self.assertNotIn("last_alerted_price", self.data.state()["offer"])
 
     def test_a_running_monitor_applies_resets_itself(self):
-        runtime = hermes_app.HermesRuntime(config([watch("x", "https://nordbron.com/x")]), files=self.data.files)
+        runtime = hermes_app.HermesRuntime(config([watch("x", "https://www.trendyol.com/x")]), files=self.data.files)
         command = runner.Command("reset_price_history", runner.reset_price_history)
         command.done.set()
         command.result = 3
@@ -234,7 +234,7 @@ class RuntimeTests(unittest.TestCase):
         self.assertIn("3", message)
 
     def test_a_reset_during_a_long_cycle_is_queued_with_an_explanation(self):
-        runtime = hermes_app.HermesRuntime(config([watch("x", "https://nordbron.com/x")]), files=self.data.files)
+        runtime = hermes_app.HermesRuntime(config([watch("x", "https://www.trendyol.com/x")]), files=self.data.files)
         command = runner.Command("reset_notifications", runner.reset_notifications)
         with (patch.object(runtime.service, "submit", return_value=command), patch.object(hermes_app, "ACTION_WAIT_SECONDS", 0)):
             ok, message = runtime.reset_notifications()
@@ -242,7 +242,7 @@ class RuntimeTests(unittest.TestCase):
         self.assertIn("tarama sürüyor", message)
 
     def test_statistics_reset_uses_the_command_barrier_and_reports_queued_state(self):
-        runtime = hermes_app.HermesRuntime(config([watch("x", "https://nordbron.com/x")]), files=self.data.files)
+        runtime = hermes_app.HermesRuntime(config([watch("x", "https://www.trendyol.com/x")]), files=self.data.files)
         command = runner.Command("reset_statistics", runner.reset_statistics)
         with patch.object(runtime.service, "submit", return_value=command) as submit, patch.object(hermes_app, "ACTION_WAIT_SECONDS", 0):
             ok, message = runtime.reset_statistics()
@@ -252,14 +252,14 @@ class RuntimeTests(unittest.TestCase):
         self.assertFalse(command.done.is_set())
 
     def test_runtime_exposes_startup_coverage_without_watch_identity(self):
-        rule = watch("Kart", "https://nordbron.com/x", priority="6h")
+        rule = watch("Kart", "https://www.trendyol.com/x", priority="6h")
         runtime = hermes_app.HermesRuntime(config([rule]), files=self.data.files)
         self.assertEqual(runtime.metrics()["startup_scan"],
                          {"total": 1, "pending": 1, "started": 0, "completed": 0, "successful": 0})
         runtime.service.monitor.close()
 
     def test_stuck_cycle_fails_health(self):
-        service = runner.MonitorService(config([watch("x", "https://nordbron.com/x")]), self.data.files, notifier=Mock())
+        service = runner.MonitorService(config([watch("x", "https://www.trendyol.com/x")]), self.data.files, notifier=Mock())
         self.assertTrue(service.health()[0])
         service.cycle_started_at = 0.0
         with patch.object(runner.time, "monotonic", return_value=runner.STUCK_CYCLE_SECONDS + 1):
@@ -275,7 +275,7 @@ class EndToEndTests(unittest.TestCase):
         from hermes.web import dashboard, server
 
         data = TempData()
-        rule = watch("Çanta", "https://nordbron.com/canta", target="5000")
+        rule = watch("Çanta", "https://www.trendyol.com/canta", target="5000")
         cfg = config([rule], interval_seconds=3600)
         runtime = hermes_app.HermesRuntime(cfg, files=data.files)
         runtime.service.monitor.delivery.transport = Mock(configured=True)
@@ -285,7 +285,7 @@ class EndToEndTests(unittest.TestCase):
             reads.append(1)
             return [OfferResult("Stark Sırt Çantası", Decimal("4500"), url=rule.url)]
 
-        with (patch.object(NordbronProvider, "read", side_effect=read),
+        with (patch.object(TrendyolProvider, "read", side_effect=read),
               patch.object(dashboard, "SUMMARY_PATH", data.files.summary), patch.object(dashboard, "STATE_PATH", data.files.state)):
             httpd = server.start_server(server.Router(runtime), 0, public_only=False)
             monitor_thread = threading.Thread(target=runtime.service.run, daemon=True)

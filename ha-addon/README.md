@@ -5,7 +5,7 @@ Hermes, Home Assistant üzerinde çalışan çok siteli ürün ve Telegram fırs
 ## Özellikler
 
 - Takip edilenler: tek kayıt altında en fazla 5 link izleme
-- Linkten otomatik site algılama: Amazon, Hepsiburada, Trendyol, Network, Beymen Club, Nordbron, Zara, H&M, Ben Gurme, Togg
+- Linkten otomatik site algılama: Amazon, Hepsiburada, Trendyol, Network, Beymen Club, Zara, H&M, Togg
 - Ürün ve arama linklerini aynı takip kaydı içinde karışık kullanabilme
 - Arama linklerinde, takip adını keyword kabul ederek eşleşen sonuçlar arasından en iyi fiyatı seçme
 - Arama linklerinde sabit olarak en fazla 60 sonuç tarama
@@ -132,10 +132,8 @@ Hermes her siteyi kendi sağlayıcısında okur. Bir sitenin fiyat okuma kuralı
 - **Trendyol:** Ürün sayfasındaki güncel ürün fiyatını ve temel ürün bilgisini okur.
 - **Network:** Sayfadaki normal fiyatın yanında `Sepette` fiyatı varsa indirimli sepet fiyatını önceliklendirir. Beden girilmişse yalnızca istenen beden stoktayken fiyatı tabloya alır; `XL`, `xl` ve parantezli beden ekleri eşdeğer kabul edilir.
 - **Beymen Club:** Network ile aynı şekilde normal fiyatın yanında `Sepette`, `2 ve üzeri` veya `3 ve üzeri` kampanya fiyatı varsa indirimli fiyatı önceliklendirir. Beden girilmişse yalnızca istenen beden stoktayken fiyatı tabloya alır; büyük/küçük harf farkı yoktur.
-- **Nordbron:** Sayfadaki ürün fiyatını okur; bot koruması veya captcha gerçek hata olarak kaydedilir.
 - **Zara:** Renk varyasyonlarını ve seçilen bedeni kontrol eder. İstenen beden stokta değilse bu durum hata değil, Özet Tablo'daki `Stokta yok` sekmesine yazılır. `6` ve `44` gibi girilen bedenler, sayfadaki yaş/EU ekleriyle uyumlu karşılaştırılır.
 - **H&M:** Renk ve beden stok bilgisini siteye özel veri yolu üzerinden okur. Stokta olmayan beden hata olarak değil, `Stokta Olmayanlar` bölümünde gösterilir.
-- **Ben Gurme:** Shopify ürün verisindeki canlı stok ve varyant bilgisini okur. Stoktaki her gramaj ayrı satır olarak değerlendirilir; ürün tamamen tükendiyse bu teknik hata sayılmaz ve `Stokta Olmayanlar` bölümünde gösterilir. Ürün tekrar stokta olduğunda hedef fiyattan bağımsız tek bir stok bildirimi gönderilir.
 
 - **Togg:** Konfigüratör sayfasının kullandığı herkese açık model listesini okur (dakikada en fazla bir istek, tüm Togg kartları için ortak). Kartın `name` alanına izlenecek model yazılır (örneğin `T10X V2 RWD Uzun Menzil`); model listede varsa stokta, yoksa `Stokta Olmayanlar` bölümünde görünür. Stokta olmaması hata sayılmaz. Model listeye girdiğinde tek bir stok bildirimi gönderilir. Fiyat takibi yoktur; kart biçimi gereği istenen hedef fiyat yüksek bir sayı girilebilir.
 
@@ -156,7 +154,7 @@ yükselir; başka bir yoldan yeniden denenmez. İmajda tarayıcı yoktur.
 
 Her site kendi okuyucusunda (`app/hermes/providers/`) hem sayfayı indirir hem
 fiyatı ayrıştırır: `amazon/`, `hepsiburada/`, `trendyol.py`, `network.py`,
-`beymenclub.py`, `nordbron.py`, `zara.py`, `hm.py`, `bengurme.py`, `togg.py`. Yeni site
+`beymenclub.py`, `zara.py`, `hm.py`, `togg.py`. Yeni site
 eklerken mevcut okuyuculara dokunulmaz; yeni bir okuyucu yazılıp
 `providers/registry.py` dosyasına eklenir. Mimari ayrıntılar
 [`docs/ARCHITECTURE.md`](../docs/ARCHITECTURE.md) dosyasındadır.

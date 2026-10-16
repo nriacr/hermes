@@ -290,11 +290,10 @@ screen: automatic submit after the fourth digit and explicit/manual locking.
 - Hepsiburada: product, variant and search pages; payable campaign prices
   (`Sepete özel`, Premium) win; each variant keeps its own price and label;
   search cards get their variant label from the product page.
-- Trendyol, Nordbron: product price.
+- Trendyol: product price.
 - Network, Beymen Club: `Sepette` / `2 ve üzeri` campaign prices win; requested
   sizes are case-insensitive; a missing size is a stock state.
 - Zara, H&M: colors and the requested size; a missing size is a stock state.
-- Ben Gurme: Shopify JSON; every weight variant is a row; stock-return notice.
 - Togg: the configurator's public model list (one request per cycle for all Togg cards); the card `name` is the model, matched as a phrase. A model in the list is in stock, a missing one is a stock state; stock-return notice.
 
 

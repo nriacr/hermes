@@ -33,8 +33,6 @@ SITE_HEPSIBURADA = "hepsiburada"
 SITE_TRENDYOL = "trendyol"
 SITE_NETWORK = "network"
 SITE_BEYMENCLUB = "beymenclub"
-SITE_BENGURME = "bengurme"
-SITE_NORDBRON = "nordbron"
 SITE_ZARA = "zara"
 SITE_HM = "hm"
 SITE_TOGG = "togg"
@@ -44,8 +42,6 @@ SITE_LABELS = {
     SITE_TRENDYOL: "Trendyol",
     SITE_NETWORK: "Network",
     SITE_BEYMENCLUB: "Beymen Club",
-    SITE_BENGURME: "Ben Gurme",
-    SITE_NORDBRON: "Nordbron",
     SITE_ZARA: "Zara",
     SITE_HM: "H&M",
     SITE_TOGG: "Togg",
@@ -57,8 +53,6 @@ SITE_HOST_MARKERS = (
     ("trendyol", SITE_TRENDYOL),
     ("network", SITE_NETWORK),
     ("beymenclub", SITE_BEYMENCLUB),
-    ("bengurme", SITE_BENGURME),
-    ("nordbron", SITE_NORDBRON),
     ("zara", SITE_ZARA),
     ("hm.com", SITE_HM),
     ("togg", SITE_TOGG),

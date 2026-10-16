@@ -24,7 +24,7 @@ from hermes.models import OfferResult
 from hermes.monitor import scheduling
 from hermes.monitor.runner import MonitorService
 from hermes.monitor.state import watch_key
-from hermes.providers import nordbron, trendyol, network, beymenclub, bengurme, hm
+from hermes.providers import trendyol, network, beymenclub, hm
 from hermes.providers.amazon import AmazonProvider
 from hermes.storage import load_json
 from hermes.web.settings import apply_settings_operation
@@ -162,7 +162,7 @@ class DurableDeliveryTests(unittest.TestCase):
 class ScopedProductTests(unittest.TestCase):
     def test_recommendation_script_price_is_never_the_product_price(self):
         html = '<h1>Takip edilen ürün</h1><script>recommendations={"price":79.90}</script>'
-        for extract in (nordbron.extract_offer, trendyol.extract_offer, network.extract_offer, beymenclub.extract_offer, bengurme.extract_offer):
+        for extract in (trendyol.extract_offer, network.extract_offer, beymenclub.extract_offer):
             with self.subTest(provider=extract.__module__), self.assertRaises(HermesError):
                 extract(html)
 
@@ -170,7 +170,7 @@ class ScopedProductTests(unittest.TestCase):
         html = '''<h1>Ürün</h1><div class="recommendations"><div class="product-detail_price">79,90 TL</div>
         <script type="application/ld+json">{"@type":"Product","name":"Ürün","offers":{"price":79.90}}</script></div>'''
         with self.assertRaises(HermesError):
-            nordbron.extract_offer(html)
+            trendyol.extract_offer(html)
 
     def test_unrelated_jsonld_product_does_not_supply_price(self):
         html = '''<h1>Telefon</h1><script type="application/ld+json">{"@type":"Product","name":"Kılıf",
@@ -194,14 +194,7 @@ class ScopedProductTests(unittest.TestCase):
 
     def test_visible_foreign_currency_is_not_assumed_try(self):
         with self.assertRaises(HermesError):
-            nordbron.extract_offer('<h1>Ürün</h1><span class="product-detail_price">90 EUR</span>')
-
-    def test_shopify_variant_ids_have_distinct_price_identity(self):
-        payload = {"title": "Üzüm", "variants": [{"id": 11, "title": "500 g", "price": 9000, "available": True},
-            {"id": 22, "title": "1 kg", "price": 15000, "available": True}]}
-        offers = bengurme.extract_offers(json.dumps(payload), "https://bengurme.com/products/uzum")
-        self.assertEqual([item.url for item in offers], ["https://bengurme.com/products/uzum?variant=11", "https://bengurme.com/products/uzum?variant=22"])
-        self.assertEqual([item.price for item in offers], [Decimal("90"), Decimal("150")])
+            network.extract_offer('<h1>Ürün</h1><span class="product-price">90 EUR</span>')
 
 
 class RuntimeSafetyTests(unittest.TestCase):
@@ -243,8 +236,8 @@ class RuntimeSafetyTests(unittest.TestCase):
 
     def test_invalid_card_does_not_disable_valid_card(self):
         options = {"pushover_user_key": "user", "pushover_api_token": "token", "takip_edilenler": [
-            {"name": "Hatalı", "target_price": "xx", "url_1": "https://nordbron.com/x"},
-            {"name": "Doğru", "target_price": "100", "url_1": "https://nordbron.com/y"}]}
+            {"name": "Hatalı", "target_price": "xx", "url_1": "https://www.trendyol.com/x"},
+            {"name": "Doğru", "target_price": "100", "url_1": "https://www.trendyol.com/y"}]}
         result = load_config(options, tolerant=True)
         self.assertEqual([item.name for item in result.watches], ["Doğru"])
         self.assertEqual(len(result.config_errors), 1)
@@ -252,10 +245,10 @@ class RuntimeSafetyTests(unittest.TestCase):
             load_config(options)
 
     def test_target_edit_keeps_legacy_tracking_identity(self):
-        old = {"takip_edilenler": [{"name": "Ürün", "target_price": "100", "url_1": "https://nordbron.com/x"}]}
+        old = {"takip_edilenler": [{"name": "Ürün", "target_price": "100", "url_1": "https://www.trendyol.com/x"}]}
         expected = prepare_watches(old["takip_edilenler"])[0].tracking_id
         form = {"operation": ["update_watch"], "update_watch_index": ["0"], "watches_0_name": ["Ürün"],
-            "watches_0_target_price": ["200"], "watches_0_url_1": ["https://nordbron.com/x"], "watches_0_active": ["on"]}
+            "watches_0_target_price": ["200"], "watches_0_url_1": ["https://www.trendyol.com/x"], "watches_0_active": ["on"]}
         changed, _ = apply_settings_operation(old, form)
         self.assertEqual(prepare_watches(changed["takip_edilenler"])[0].tracking_id, expected)
         self.assertEqual(options_with_defaults(old)["takip_edilenler"][0]["id"], expected)
@@ -333,7 +326,7 @@ class RuntimeSafetyTests(unittest.TestCase):
 
     def test_slow_site_does_not_delay_next_read_of_healthy_site(self):
         fast = watch("Hızlı", "https://www.network.com.tr/x", target="100")
-        slow = watch("Yavaş", "https://nordbron.com/x", target="100")
+        slow = watch("Yavaş", "https://www.trendyol.com/x", target="100")
         release = threading.Event()
         started = threading.Event()
         progressed = threading.Event()
@@ -351,7 +344,7 @@ class RuntimeSafetyTests(unittest.TestCase):
         # Advance only card deadlines by one minute after each fast read; real
         # worker timing stays intact so the slow site must still be running.
         with patch.object(network.NetworkProvider, "read", side_effect=fast_read), \
-                patch.object(nordbron.NordbronProvider, "read", side_effect=slow_read), \
+                patch.object(trendyol.TrendyolProvider, "read", side_effect=slow_read), \
                 patch.object(scheduling, "local_now", side_effect=lambda: datetime.now().astimezone() + timedelta(minutes=len(reads))):
             thread = threading.Thread(target=service.run)
             thread.start()
@@ -367,7 +360,7 @@ class RuntimeSafetyTests(unittest.TestCase):
             self.assertFalse(thread.is_alive())
 
     def test_async_notification_is_sent_before_blocked_next_variant_finishes(self):
-        rule = watch("Ürün", "https://nordbron.com/x", target="100")
+        rule = watch("Ürün", "https://www.trendyol.com/x", target="100")
         instance = monitor(config([rule]), self.data, notifier())
         accepted = threading.Event()
         instance.delivery.transport.send.side_effect = lambda *_a, **_k: accepted.set()
@@ -377,7 +370,7 @@ class RuntimeSafetyTests(unittest.TestCase):
             yield OfferResult("Pahalı", Decimal("110"), url=rule.url+"/v")
         instance.delivery.start()
         try:
-            with patch.object(nordbron.NordbronProvider, "read", side_effect=stream):
+            with patch.object(trendyol.TrendyolProvider, "read", side_effect=stream):
                 instance.run_cycle()
             self.assertTrue(accepted.is_set())
             state = load_json(self.data.files.state, {})
@@ -386,12 +379,12 @@ class RuntimeSafetyTests(unittest.TestCase):
             instance.close()
 
     def test_failed_atomic_price_write_does_not_leave_suppression(self):
-        rule = watch("Ürün", "https://nordbron.com/x", target="100")
+        rule = watch("Ürün", "https://www.trendyol.com/x", target="100")
         transport = notifier()
         instance = monitor(config([rule]), self.data, transport)
         instance.delivery.db.transaction([("CREATE TRIGGER fail_price BEFORE INSERT ON prices BEGIN SELECT RAISE(ABORT,'test disk failure'); END", ())])
         try:
-            with patch.object(nordbron.NordbronProvider, "read", return_value=[OfferResult("Ürün", Decimal("90"), url=rule.url)]):
+            with patch.object(trendyol.TrendyolProvider, "read", return_value=[OfferResult("Ürün", Decimal("90"), url=rule.url)]):
                 instance.run_cycle()
             self.assertEqual(runtime_metrics(self.data.files.database)["outbox"], {})
             self.assertFalse(any(item.get("pending_alert_price") for item in instance._state.values() if isinstance(item, dict)))

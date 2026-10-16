@@ -11,7 +11,7 @@ from decimal import Decimal
 from hermes.logging_utils import ProblemLog
 from hermes.monitor.cycle import ReadCancelled
 from hermes.monitor.runner import MonitorService
-from hermes.providers.nordbron import NordbronProvider
+from hermes.providers.trendyol import TrendyolProvider
 from hermes.web.dashboard import collect_errors, render_errors
 from hermes.web.statistics import _percent, site_figures, render_problem_history
 
@@ -107,14 +107,14 @@ class ShutdownTests(unittest.TestCase):
 
     def test_partial_provider_result_is_persisted_as_partial(self):
         data = TempData()
-        rule = watch('Ürün', 'https://nordbron.com/x')
+        rule = watch('Ürün', 'https://www.trendyol.com/x')
         app = monitor(config([rule]), data, notifier())
         def read(rule, ctx, outcome):
             outcome.errors.append('Fiyat belirsiz')
             outcome.error_details.append({'product_url':rule.url, 'product_title':'Ürün', 'reason':'Fiyat belirsiz'})
             return [OfferResult('Ürün', Decimal('100'), url=rule.url)]
         try:
-            with patch.object(NordbronProvider, 'read', side_effect=read):
+            with patch.object(TrendyolProvider, 'read', side_effect=read):
                 app.run_cycle()
             records = read_reads(data.files.database, datetime(2000,1,1,tzinfo=timezone.utc))
             self.assertEqual([row.outcome for row in records], ['partial'])
@@ -125,13 +125,13 @@ class ShutdownTests(unittest.TestCase):
 
     def test_stop_during_pacing_is_interrupted_without_error_or_price(self):
         data = TempData()
-        rule = watch('Ürün', 'https://nordbron.com/x')
+        rule = watch('Ürün', 'https://www.trendyol.com/x')
         app = monitor(config([rule]), data, notifier())
         stopped = [False]
         app.should_stop = lambda: stopped[0]
         app.pace = lambda label: stopped.__setitem__(0, True)
         try:
-            with patch.object(NordbronProvider, 'read') as read:
+            with patch.object(TrendyolProvider, 'read') as read:
                 app.run_cycle()
             read.assert_not_called()
             self.assertEqual(app.diagnostics.active(), [])

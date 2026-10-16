@@ -23,10 +23,8 @@ from hermes.providers.amazon.access import MAIN_LANE
 from hermes.providers.amazon.client import AmazonClient
 from hermes.providers.amazon.search import AmazonSearchCandidate
 from hermes.providers.base import DEPO_LANE, ReadContext, WatchRead
-from hermes.providers.bengurme import fetch_bengurme_page
 from hermes.providers.beymenclub import fetch_beymenclub_page, fetch_beymenclub_size_summary
 from hermes.providers.hepsiburada import HepsiburadaProvider, is_challenge_page as hepsiburada_challenge
-from hermes.providers.nordbron import is_challenge_page as nordbron_challenge
 from hermes.providers.zara import is_interstitial as zara_interstitial
 from hermes.utils import extract_asin_from_url
 
@@ -795,12 +793,6 @@ class AmazonSellerFilterTests(unittest.TestCase):
 
 
 class OtherSiteTests(unittest.TestCase):
-    def test_nordbron_product_page_is_not_misread_as_a_challenge(self):
-        html = ('<div class="product-detail_price__hYyw9"><span>₺ 3,900.00</span></div>'
-                '<script>{"customerSettings":{"requireCaptchaValidation":true},"label":"robot"}</script>')
-        self.assertFalse(nordbron_challenge(html))
-        self.assertTrue(nordbron_challenge("captcha robot"))
-
     def test_zara_product_page_is_not_misread_as_a_challenge(self):
         html = ('<script type="application/ld+json">{"@type":"Product","name":"Zara ürün"}</script>'
                 '<script>{"customerSettings":{"requireCaptchaValidation":true},"label":"robot"}</script>')
@@ -820,18 +812,6 @@ class OtherSiteTests(unittest.TestCase):
         with patch.object(provider, "_page", return_value=page):
             enriched = provider._with_variant_titles(context(), [offer])
         self.assertEqual(enriched[0].title, "Samsung Galaxy Tab S10 FE+ 8GB 128GB SM-X620 / 128 GB / Mavi")
-
-    def test_bengurme_fetch_prefers_shopify_variant_json(self):
-        response = SimpleNamespace(status_code=200, headers={"content-type": "application/json"}, encoding="utf-8",
-                                   text='{"title":"Kilis Karası Kan Üzümü","variants":[]}', raise_for_status=lambda: None)
-        response.content = response.text.encode("utf-8")
-        session = Mock()
-        session.get.return_value = response
-        result = fetch_bengurme_page(session, "https://bengurme.com/products/kilis-karasi-kan-uzumu", 10)
-        self.assertIs(result, response)
-        session.get.assert_called_once()
-        self.assertEqual(session.get.call_args.args[0], "https://bengurme.com/products/kilis-karasi-kan-uzumu.js")
-        self.assertIn("Chrome/124", session.get.call_args.kwargs["headers"]["User-Agent"])
 
     def test_beymenclub_fetch_uses_its_browser_shaped_headers(self):
         response = SimpleNamespace(status_code=200, headers={"content-type": "text/html; charset=utf-8"},

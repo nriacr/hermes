@@ -1,4 +1,3 @@
-import json
 import unittest
 from decimal import Decimal
 from unittest.mock import patch
@@ -22,7 +21,6 @@ from hermes.providers.amazon.parser import (
 )
 from hermes.providers.amazon.search import dedupe_results, extract_result_candidates
 from hermes.providers.base import soup_from_html
-from hermes.providers.bengurme import extract_offers as extract_bengurme_offers
 from hermes.providers.beymenclub import (
     extract_offer as extract_beymenclub_offer,
     extract_offers as extract_beymenclub_offers,
@@ -47,7 +45,6 @@ from hermes.providers.network import (
     extract_offer as extract_network_offer,
     extract_offers as extract_network_offers,
 )
-from hermes.providers.nordbron import extract_offer as extract_nordbron_offer
 from hermes.providers.zara import extract_offers as extract_zara_offers
 from hermes.utils import detect_site_from_url, extract_asin_from_url, is_amazon_search_url
 
@@ -1460,57 +1457,6 @@ class HepsiburadaParserTests(unittest.TestCase):
 
 
 class OtherSiteParserTests(unittest.TestCase):
-    def test_bengurme_url_is_detected(self):
-        self.assertEqual(
-            detect_site_from_url("https://bengurme.com/products/kilis-karasi-kan-uzumu"),
-            "bengurme",
-        )
-
-    def test_bengurme_reads_each_available_gram_variant(self):
-        payload = {
-            "title": "Kilis Karası Kan Üzümü",
-            "variants": [
-                {"title": "250 gram", "price": 27500, "available": True},
-                {"title": "500 gram", "price": 45000, "available": True},
-                {"title": "1000 gram", "price": 95000, "available": True},
-                {"title": "2000 gram", "price": 180000, "available": False},
-            ],
-        }
-
-        offers = extract_bengurme_offers(json.dumps(payload), "https://bengurme.com/products/uzum")
-
-        self.assertEqual(
-            [(offer.title, offer.price) for offer in offers],
-            [
-                ("Kilis Karası Kan Üzümü / 250 gram", Decimal("275")),
-                ("Kilis Karası Kan Üzümü / 500 gram", Decimal("450")),
-                ("Kilis Karası Kan Üzümü / 1000 gram", Decimal("950")),
-            ],
-        )
-
-    def test_bengurme_unavailable_product_is_stock_state_not_page_error(self):
-        payload = {
-            "title": "Taş Kırma Çekirdeksiz Yeşil Zeytin",
-            "variants": [{"title": "1 kg", "price": 69500, "available": False}],
-        }
-
-        with self.assertRaisesRegex(OutOfStockHermesError, "Ben Gurme ürünü stokta değil"):
-            extract_bengurme_offers(json.dumps(payload), "https://bengurme.com/products/zeytin")
-
-    def test_bengurme_requested_variant_matching_is_case_insensitive(self):
-        payload = {
-            "title": "Kilis Karası Kan Üzümü",
-            "variants": [
-                {"title": "500 gram", "price": 45000, "available": True},
-                {"title": "1000 gram", "price": 95000, "available": True},
-            ],
-        }
-
-        offers = extract_bengurme_offers(json.dumps(payload), size="500 GRAM")
-
-        self.assertEqual(len(offers), 1)
-        self.assertEqual(offers[0].price, Decimal("450"))
-
     def test_network_prefers_two_or_more_basket_price(self):
         html = """
         <html><head><title>Vizon Mini Elbise</title></head><body>
@@ -1659,23 +1605,14 @@ class OtherSiteParserTests(unittest.TestCase):
 
         self.assertEqual(extract_beymenclub_product_id(html), 1941303)
 
-    def test_nordbron_product_price(self):
-        html = """
-        <html>
-          <head><title>Stark Sırt Çantası</title></head>
-          <body>
-            <h1>Stark Sırt Çantası</h1>
-            <div class="product-detail_price__hYyw9"><span>₺ 4,850.00</span></div>
-          </body>
-        </html>
-        """
-        offer = extract_nordbron_offer(html)
-        self.assertEqual(offer.title, "Stark Sırt Çantası")
-        self.assertEqual(offer.price, Decimal("4850.00"))
-
-    def test_nordbron_site_detection(self):
-        url = "https://nordbron.com/stark-sirt-cantasi?Renk=Antrasit&Beden=Standart-Beden"
-        self.assertEqual(detect_site_from_url(url), "nordbron")
+    def test_removed_sites_are_rejected_and_do_not_block_other_links(self):
+        for url in ("https://nordbron.com/stark-sirt-cantasi", "https://bengurme.com/products/uzum"):
+            with self.subTest(url=url), self.assertRaises(HermesError):
+                detect_site_from_url(url)
+        watches = prepare_watches([{"name": "Karışık", "target_price": 100, "url_1": "https://nordbron.com/x",
+                                    "url_2": "https://www.trendyol.com/x-p-1", "url_3": "https://bengurme.com/products/y"}])
+        self.assertEqual([item.site for item in watches], ["trendyol"])
+        self.assertEqual(prepare_watches([{"name": "Eski", "target_price": 100, "url_1": "https://bengurme.com/products/y"}]), [])
 
     def test_zara_site_detection(self):
         url = "https://www.zara.com/tr/tr/dokulu-regular-fit-polo-t-shirt-p03166301.html?v1=567184888"
@@ -2157,7 +2094,7 @@ class WatchCardTests(unittest.TestCase):
                     "target_price": 1000,
                     "url_1": "https://www.amazon.com.tr/dp/B000000001",
                     "url_2": "https://www.hepsiburada.com/ornek-urun-p-HBCV000000000",
-                    "url_3": "https://nordbron.com/stark-sirt-cantasi",
+                    "url_3": "https://www.trendyol.com/stark-sirt-cantasi",
                     "group": "Moda",
                     "size": "M",
                     "notify_once_in_24H": True,
@@ -2166,7 +2103,7 @@ class WatchCardTests(unittest.TestCase):
             ]
         )
         self.assertEqual(len(watches), 3)
-        self.assertEqual([item.site for item in watches], ["amazon", "hepsiburada", "nordbron"])
+        self.assertEqual([item.site for item in watches], ["amazon", "hepsiburada", "trendyol"])
         self.assertTrue(all(item.name == "Ortak ürün" for item in watches))
         self.assertTrue(all(item.group == "Moda" for item in watches))
         self.assertTrue(all(item.size == "M" for item in watches))
