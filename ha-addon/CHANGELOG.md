@@ -1,6 +1,6 @@
 # Değişiklik günlüğü
 
-## 
+## 4.16.1
 
 - İstatistik sayfası artık anında açılır: sayfa arka planda hazırlanıp bellekten gösterilir (dakikada bir yenilenir, uygulama açılışında önceden hazırlanır; bölüm zaman aşımı olursa 10 sn sonra yeniden denenir; "İstatistik geçmişini sil" önbelleği temizler). İstek sayıları satır satır Python'a çekilmek yerine SQLite içinde toplanır; kullanılmayan istek süre ortancası kaldırıldı. Sayfa içeriği, veri ve bildirimler değişmedi.
 

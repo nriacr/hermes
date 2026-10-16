@@ -4,7 +4,7 @@
 
 - Agent ve konu/çalışma kopyası: Claude, hermes-work, istatistik sayfası
 - İnsan talimatı ve kapsamı: Nuri, "ok" (4.15.1 günlüğü okumalar/istekler bölümlerinin 8 sn'de bitmediğini, sayfanın 19,3 sn'de hazırlandığını gösterdi; önerilen önbellek + SQL toplama onaylandı).
-- Başlangıç commiti: 47d8687 (canlı 4.15.1). Sürüm: 
+- Başlangıç commiti: 47d8687 (canlı 4.15.1). Sürüm: 4.16.1 (ilk push'ta sürüm boş kaldı: 66ff949; bu commit düzeltir. O commit canlıya 4.16.0 etiketiyle girmiş olabilir)
 
 ## Amaç ve davranış
 
