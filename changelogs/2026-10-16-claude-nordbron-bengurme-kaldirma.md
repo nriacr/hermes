@@ -29,3 +29,10 @@
 - Kullanıcı verisi silinmedi: hermes.db, state.json, fiyat geçmişi ve ayarlar dokunulmadı. Kalan eski satırlar (varsa) site etiketi yedeği (`Nordbron`/`Bengurme` başlık biçimi) ile gösterilir, okunmaz.
 - Kartı olan karışık karta (Nordbron + başka site) dikkat: kimliksiz eski kartlarda kart kimliği desteklenen linklerden türetildiği için kimlik değişebilir; canlıda böyle kart yoktu.
 - Yedek ve geri alma: aşağıda.
+
+## Canlı kanıt (17 Ekim 2026)
+
+- Not: bu kayıttaki "4.15.0" geçişleri sürüm çakışması yüzünden 4.16.0'a çevrildi (4.15.1 başka iş parçacığınca yayımlandı); yayın commiti 8ad03ab "Release 4.16.0".
+- Kurulum: HA_AGENT=claude, bin/ha-exclusive altında tools/install_rpi.sh; check.sh geçti; kullanılan tam yedek 42c055d8; çıktı "Hermes 4.16.0 kuruldu", sağlık healthy:true, 13 aktif kart, price_points 682 (artış normal tarama), veritabanı korunmuş.
+- Geri alma: `sh tools/prepare_code_rollback.sh 7ba824c` (4.14.0 kodu) veya aynı komutla 9b89c88 (4.15.1); rollback_rpi.sh yalnız Nuri'nin açık onayıyla.
+- Sınırlama: Pi'deki hermes.db'de bu sitelerin eski satır sayısı uzaktan okunamadı; satırlar silinmedi.
