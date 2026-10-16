@@ -1274,6 +1274,7 @@ class SummaryFileTests(CycleTestCase):
                  "unavailable_checked_at": "2026-10-07T10:00:00+00:00", "last_checked_at": "2026-10-01T10:00:00+00:00"}
         class W:
             target_price = Decimal("1290")
+            excluded_terms = []
         row = summary.cached_stock_rows(W, entry, "Zara")[0]
         self.assertEqual(row.checked_at, "2026-10-07T10:00:00+00:00")
         legacy = {**entry, "last_out_of_stock_at": "2026-10-05T10:00:00+00:00"}

@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.17.1
+
+- Hariç tut filtresi artık anasayfada, listelerde ve özet kartta eski kayıtlara da uygulanır: kartın filtresine uyan başlıklar (ör. Hepsiburada iPhone 17 Pro Max kartında "2 TB") önbellekteki son sonuçlardan, stok tablosundan ve açılışta yayımlanmış tablodan düşer. Fiyat geçmişi ve takip hafızası silinmez; filtre kaldırılınca kayıtlar geri gelir. Filtre yazıldığı gibi çalışır, büyük/küçük harfe duyarsızdır ("2 TB" ile "2048 GB" eşitlenmez). Amazon önbellek ve istek yolları değişmedi.
+
 ## 4.17.0
 
 - SSD'ye gereksiz yazma azaltıldı. Bir okumada yalnız zaman damgaları değiştiyse tüm takip hafızası (yaklaşık 740 KB) artık her okumada veritabanına yazılmaz; en çok dakikada bir ve her çevrim sonunda yazılır. Fiyat satırı, fiyat/hata/uyarı değişiklikleri ve bildirim kuyruğu yine anında kaydedilir. Geri alma için tutulan JSON kopyaları (state.json, latest_price_summary.json vb.) her okumada değil en çok dakikada bir yazılır (durdurma ve çıkışta son hali yazılır).

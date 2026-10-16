@@ -7,6 +7,7 @@ from typing import Any, Dict, List
 from ..constants import normalize_priority
 from ..errors import HermesError
 from ..logging_utils import log
+from ..providers.base import excluded_term_in_title
 from ..models import PriceSummaryRow, StockSummaryRow, WatchRule
 from ..storage import load_json, save_json
 from ..utils import (
@@ -74,8 +75,14 @@ def summary_row_from_state(watch: WatchRule, state_entry: Dict[str, Any], seller
     )
 
 
-def cached_summary_rows(watch: WatchRule, key: str, state: Dict[str, Any], seller: str) -> List[PriceSummaryRow]:
-    """Last successful rows of a watch that is not read in this cycle."""
+def cached_summary_rows(watch: WatchRule, key: str, state: Dict[str, Any], seller: str,
+                        filtered: bool = True) -> List[PriceSummaryRow]:
+    """Last successful rows of a watch that is not read in this cycle.
+
+    Rows whose title the card's current exclusion filter hides are left out; their state and
+    price history stay, so removing the filter brings them back. `filtered=False` lists every
+    stored row (used to find which published rows a fresh read replaces).
+    """
     base_entry = state.get(key, {})
     if not isinstance(base_entry, dict):
         base_entry = {}
@@ -86,7 +93,7 @@ def cached_summary_rows(watch: WatchRule, key: str, state: Dict[str, Any], selle
     for item_key in offer_keys:
         entry = state.get(item_key, {})
         row = summary_row_from_state(watch, entry, seller) if isinstance(entry, dict) else None
-        if row:
+        if row and not (filtered and excluded_term_in_title(watch, row.product_title)):
             rows.append(row)
     return rows
 
@@ -106,6 +113,7 @@ def cached_stock_rows(watch: WatchRule, entry: Dict[str, Any], seller: str) -> L
                         str(item.get("reason") or "Stokta yok"), _stock_checked_at(entry))
         for item in unavailable
         if isinstance(item, dict) and item.get("product_title") and item.get("product_url")
+        and not excluded_term_in_title(watch, str(item["product_title"]))
     ]
 
 
@@ -131,7 +139,7 @@ def price_row_identity(row: PriceSummaryRow) -> str:
 
 def cached_offer_ids(watch: WatchRule, key: str, state: Dict[str, Any], seller: str) -> set[str]:
     """This watch's published offer identities before its state is replaced."""
-    return {identity for row in cached_summary_rows(watch, key, state, seller) if (identity := price_row_identity(row))}
+    return {identity for row in cached_summary_rows(watch, key, state, seller, filtered=False) if (identity := price_row_identity(row))}
 
 
 def drop_unconfigured_summary_rows(path: Path, watches: List[WatchRule], state: Dict[str, Any]) -> None:
