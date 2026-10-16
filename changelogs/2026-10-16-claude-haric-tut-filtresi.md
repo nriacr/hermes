@@ -24,3 +24,8 @@
 
 - Veri etkisi yok (silme yok). Yedek: kurulum betiği en yeni doğrulanmış günlük tam yedeği kullanır; yeni yedek alınmadı.
 - Geri alma: sh tools/prepare_code_rollback.sh d20589c (4.17.0). rollback_rpi.sh kullanılmaz.
+
+## Yayın ve kurulum
+
+- Yayımlandı: 4.17.1, push edildi (commit: git log). Kuruldu: 4.17.1 çalışıyor, healthy, 14 aktif kart, price_points 687.
+- Kullanılan doğrulanmış günlük yedek: 42c055d8. Kurulum sonrası anasayfa okuması: 2 TB / 2048 GB satırı yok.
