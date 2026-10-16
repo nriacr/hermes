@@ -6,7 +6,7 @@
 
 ## 4.16.0
 
-- Nordbron ve Ben Gurme siteleri desteklenen siteler listesinden kaldırıldı: bu sitelerin linkleri artık "desteklenmeyen site" olarak reddedilir (diğer linkler ve kartlar etkilenmez). Bu sitelere ait okuyucular ve test örnekleri silindi. Ayarlarda bu sitelere ait kart yoktu; veritabanında (hermes.db) ve durum dosyasında kalmış eski satırlara dokunulmadı, uygulama bunları sorunsuz taşır. Arama sayfası takibi Amazon ve Hepsiburada için aynen çalışır.
+- Nordbron ve Ben Gurme siteleri desteklenen siteler listesinden kaldırıldı: bu sitelerin linkleri artık "desteklenmeyen site" olarak reddedilir (diğer linkler ve kartlar etkilenmez). Bu sitelere ait okuyucular ve test örnekleri silindi. Ayarlarda bu sitelere ait kart yoktu; veritabanında (hermes.db) ve durum dosyasında kalmış eski satırlara dokunulmadı, uygulama bunları sorunsuz taşır. Arama sayfası takibi Amazon ve Hepsiburada için aynen çalışır. Kod geri dönüşü: `sh tools/prepare_code_rollback.sh 47d8687` (4.15.1); kurulum yedeği 42c055d8 (16 Ekim 2026 18:50 UTC, tam).
 
 ## 4.15.1
 

@@ -34,5 +34,6 @@
 
 - Not: bu kayıttaki "4.15.0" geçişleri sürüm çakışması yüzünden 4.16.0'a çevrildi (4.15.1 başka iş parçacığınca yayımlandı); yayın commiti 8ad03ab "Release 4.16.0".
 - Kurulum: HA_AGENT=claude, bin/ha-exclusive altında tools/install_rpi.sh; check.sh geçti; kullanılan tam yedek 42c055d8; çıktı "Hermes 4.16.0 kuruldu", sağlık healthy:true, 13 aktif kart, price_points 682 (artış normal tarama), veritabanı korunmuş.
-- Geri alma: `sh tools/prepare_code_rollback.sh 7ba824c` (4.14.0 kodu) veya aynı komutla 9b89c88 (4.15.1); rollback_rpi.sh yalnız Nuri'nin açık onayıyla.
+- Yedek (düzeltme): kurulumda kullanılan 42c055d8, 16 Ekim 2026 18:50 UTC'de alınmış "Home Assistant manuel tam yedek" (tam, 466,79 MB); bu iş için ayrı alınmadı, kurulumdan (~21:20 UTC) önceki en yeni tam yedekti. Ayrıca b5d1ccbd (15 Ekim 22:06 UTC, tam) mevcut. Bu iş için ek tam yedek alınmadı (politika: yalnız Nuri'nin açık isteğiyle).
+- Geri alma (kod): `sh tools/prepare_code_rollback.sh 47d8687` (4.15.1 koduna döner, 4.16.0 öncesi canlı durum). Daha eskiye (4.14.0) dönmek için 7ba824c. rollback_rpi.sh (veri geri yükleme) yalnız Nuri'nin açık onayıyla.
 - Sınırlama: Pi'deki hermes.db'de bu sitelerin eski satır sayısı uzaktan okunamadı; satırlar silinmedi.
