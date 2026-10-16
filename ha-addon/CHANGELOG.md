@@ -1,6 +1,6 @@
 # Değişiklik günlüğü
 
-## 4.15.0
+## 4.16.0
 
 - Nordbron ve Ben Gurme siteleri desteklenen siteler listesinden kaldırıldı: bu sitelerin linkleri artık "desteklenmeyen site" olarak reddedilir (diğer linkler ve kartlar etkilenmez). Bu sitelere ait okuyucular ve test örnekleri silindi. Ayarlarda bu sitelere ait kart yoktu; veritabanında (hermes.db) ve durum dosyasında kalmış eski satırlara dokunulmadı, uygulama bunları sorunsuz taşır. Arama sayfası takibi Amazon ve Hepsiburada için aynen çalışır.
 

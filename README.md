@@ -6,7 +6,7 @@ takip add-on'udur.
 - Bir takip kartında en fazla 5 ürün veya arama linki; site ve link türü
   linkten otomatik anlaşılır. Arama linklerinde kart adı aranacak ifadedir.
 - Desteklenen siteler: Amazon, Hepsiburada, Trendyol, Network, Beymen Club,
-  Zara, H&M, Togg. Nordbron ve Ben Gurme 4.15.0'da kaldırıldı; bu sitelerin
+  Zara, H&M, Togg. Nordbron ve Ben Gurme 4.16.0'da kaldırıldı; bu sitelerin
   yeni linkleri desteklenmeyen site olarak reddedilir.
 - Tarama sıklığı: 1 dk, 5 dk, 15 dk, 30 dk, 60 dk, 3 saat, 6 saat, 12 saat.
   Renkli nokta en sık kademede kırmızı, en seyrek kademede yeşildir; bütün ekranlar

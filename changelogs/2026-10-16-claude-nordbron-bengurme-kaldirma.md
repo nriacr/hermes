@@ -1,10 +1,10 @@
-# 2026-10-16 — Claude — Nordbron ve Ben Gurme sitelerinin kaldırılması (4.15.0)
+# 2026-10-16 — Claude — Nordbron ve Ben Gurme sitelerinin kaldırılması (4.16.0)
 
 ## Sorumlu ve yetki
 
 - Agent: Claude. Çalışma kopyası: hermes-claude-site-removal (dal claude-site-removal, origin/main 7ba824c üzerine).
 - İnsan talimatı: Nuri "nordbron ve bengurme sitelerini tanınan sitelerden kaldır, arama kartını kullanmak istemiyorum artık" dedi (16 Ekim 2026); kod, test ve kurulum için onay.
-- Sürüm: 4.14.0 → 4.15.0 (bin/ha-version --change minor ile ayrıldı).
+- Sürüm: 4.14.0 → 4.16.0 (bin/ha-version --change minor ile ayrıldı).
 
 ## Amaç ve davranış
 
