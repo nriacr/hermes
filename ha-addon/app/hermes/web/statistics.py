@@ -16,7 +16,7 @@ from html import escape
 from typing import Dict, List, Optional, Tuple
 
 from ..constants import DATABASE_PATH, DEFAULT_PRIORITY, STATE_PATH
-from ..history import BLOCKED_OUTCOMES, SUCCESS_OUTCOMES, Read, read_cycles, read_reads, read_site_requests
+from ..history import BLOCKED_OUTCOMES, SUCCESS_OUTCOMES, Read, read_cycles, read_request_counts, read_reads
 from ..storage import load_json
 from ..diagnostics import Diagnostics
 from ..logging_utils import log
@@ -66,9 +66,11 @@ def guarded(name: str, function, fallback):
     thread.join(SECTION_LIMIT_SECONDS)
     seconds = time.monotonic() - started
     if thread.is_alive():
+        _degraded.value = True
         log(f"İstatistik bölümü {SECTION_LIMIT_SECONDS:.0f} sn içinde bitmedi, boş gösterildi: {name}")
         return fallback
     if "error" in outcome:
+        _degraded.value = True
         log(f"İstatistik bölümü okunamadı ({outcome['error']}): {name} | {seconds:.1f} sn")
         return fallback
     if seconds >= SLOW_SECTION_SECONDS:
@@ -438,12 +440,68 @@ def render_daily_history(reads: List[Read], now: datetime) -> str:
             f"<tbody>{rows}</tbody></table></div></details>")
 
 
+# The page is prepared in the background and served from memory: opening it never waits
+# for the database. A degraded result (a section timed out) is retried much sooner.
+CACHE_FRESH_SECONDS = 60.0
+CACHE_RETRY_SECONDS = 10.0
+_cache: Dict[str, Tuple[float, float, str]] = {}  # period -> (prepared at, valid for, html)
+_cache_lock = threading.Lock()
+_preparing: set = set()
+_degraded = threading.local()
+
+
+def _prepare(period: str) -> None:
+    try:
+        started = time.monotonic()
+        _degraded.value = False
+        html = _statistics_html("", {"p": [period]})
+        seconds = time.monotonic() - started
+        if seconds >= 2 * SLOW_SECTION_SECONDS:
+            log(f"İstatistik sayfası yavaş hazırlandı ({period}): {seconds:.1f} sn")
+        valid = CACHE_RETRY_SECONDS if getattr(_degraded, "value", False) else CACHE_FRESH_SECONDS
+        with _cache_lock:
+            _cache[period] = (time.monotonic(), valid, html)
+    finally:
+        with _cache_lock:
+            _preparing.discard(period)
+
+
+def _start_prepare(period: str) -> None:
+    with _cache_lock:
+        if period in _preparing:
+            return
+        _preparing.add(period)
+    threading.Thread(target=_prepare, args=(period,), name=f"statistics-prepare-{period}", daemon=True).start()
+
+
+def clear_statistics_cache() -> None:
+    with _cache_lock:
+        _cache.clear()
+
+
+def warm_statistics() -> None:
+    for period in PERIODS:
+        _start_prepare(period)
+
+
 def statistics_live_html(base: str, params: Optional[Dict[str, List[str]]] = None) -> str:
-    started = time.monotonic()
-    html = _statistics_html(base, params)
-    if time.monotonic() - started >= 2 * SLOW_SECTION_SECONDS:
-        log(f"İstatistik sayfası yavaş hazırlandı: {time.monotonic() - started:.1f} sn")
-    return html
+    period = period_key(params or {})
+    with _cache_lock:
+        entry = _cache.get(period)
+    if entry is None:
+        # Nothing prepared yet (just started): wait for the first preparation, at most as long as its sections allow.
+        _start_prepare(period)
+        deadline = time.monotonic() + 3 * SECTION_LIMIT_SECONDS
+        while entry is None and time.monotonic() < deadline:
+            time.sleep(0.2)
+            with _cache_lock:
+                entry = _cache.get(period)
+        if entry is None:
+            return "<p class='statistics-empty'>İstatistik hazırlanıyor; birkaç saniye sonra sayfayı yenile.</p>"
+        return entry[2]
+    if time.monotonic() - entry[0] >= entry[1]:
+        _start_prepare(period)  # the old page is shown now, the new one replaces it for the next visit
+    return entry[2]
 
 
 def _statistics_html(base: str, params: Optional[Dict[str, List[str]]] = None) -> str:
@@ -459,7 +517,7 @@ def _statistics_html(base: str, params: Optional[Dict[str, List[str]]] = None) -
     requests_by_site = {
         report.site: (f"{report.total} ağ isteği · {report.captcha} captcha · {report.http_503} adet 503 · "
                       f"{report.http_429} adet 429 · {report.browser} tarayıcıyla")
-        for report in guarded("istekler", lambda: read_site_requests(DATABASE_PATH, since), [])
+        for report in guarded("istekler", lambda: read_request_counts(DATABASE_PATH, since), [])
     }
     return (
         f"{guarded('özet kutuları', lambda: render_tiles(reads, gaps), '')}"

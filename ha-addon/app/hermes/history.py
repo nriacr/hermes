@@ -442,7 +442,6 @@ class SiteRequests:
     http_429: int = 0
     other: int = 0
     browser: int = 0
-    typical_ms: Optional[float] = None
 
 
 def read_site_reads(path: Path, since: datetime) -> List[SiteReads]:
@@ -464,25 +463,25 @@ def read_site_reads(path: Path, since: datetime) -> List[SiteReads]:
     return sorted(by_site.values(), key=lambda report: (-report.total, report.site))
 
 
-def read_site_requests(path: Path, since: datetime) -> List[SiteRequests]:
+def read_request_counts(path: Path, since: datetime) -> List[SiteRequests]:
+    """Request counts per site, summed inside SQLite (no row is moved into Python)."""
     by_site: Dict[str, SiteRequests] = {}
-    durations: Dict[str, List[int]] = {}
-    rows = _read(path, "SELECT site, method, outcome, duration_ms FROM requests WHERE at >= ?", (_at(since),))
-    for site, method, outcome, duration_ms in rows:
+    rows = _read(path, "SELECT site, method = 'browser', outcome, count(*) FROM requests WHERE at >= ? "
+                       "GROUP BY site, method = 'browser', outcome", (_at(since),))
+    for site, browser, outcome, count in rows:
         report = by_site.setdefault(site, SiteRequests(site))
-        report.total += 1
-        report.browser += method == "browser"
+        report.total += count
+        report.browser += count if browser else 0
         if outcome == "ok":
-            report.ok += 1
-            durations.setdefault(site, []).append(duration_ms)
+            report.ok += count
         elif outcome in ("captcha", "bot_korumasi"):
-            report.captcha += 1
+            report.captcha += count
         elif outcome == "http_503":
-            report.http_503 += 1
+            report.http_503 += count
         elif outcome == "http_429":
-            report.http_429 += 1
+            report.http_429 += count
         else:
-            report.other += 1
-    for site, values in durations.items():
-        by_site[site].typical_ms = statistics.median(values)
+            report.other += count
     return sorted(by_site.values(), key=lambda report: (-report.total, report.site))
+
+

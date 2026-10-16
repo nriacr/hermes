@@ -663,8 +663,12 @@ class StatisticsPageTests(DataFilesMixin, unittest.TestCase):
         self.now = datetime.now().astimezone()
         self.runtime = FakeRuntime()
         router = server.Router(self.runtime)
-        self.request = lambda path, public_only=False: self.authorized_request(router, path, public_only=public_only)
+        self.request = lambda path, public_only=False: self.fresh_request(router, path, public_only)
         self.request_post = lambda path: self.authorized_request(router, path, method="POST")
+
+    def fresh_request(self, router, path, public_only):
+        statistics_page.clear_statistics_cache()  # the page is served from memory; each test needs its own data
+        return self.authorized_request(router, path, public_only=public_only)
 
     def read(self, minutes_ago, site="amazon", outcome="ok", key="w1", priority="cycle", ms=2000, detail="", load=None):
         moment = self.now - timedelta(minutes=minutes_ago)

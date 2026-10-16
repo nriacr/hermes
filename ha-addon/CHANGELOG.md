@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 
+
+- İstatistik sayfası artık anında açılır: sayfa arka planda hazırlanıp bellekten gösterilir (dakikada bir yenilenir, uygulama açılışında önceden hazırlanır; bölüm zaman aşımı olursa 10 sn sonra yeniden denenir; "İstatistik geçmişini sil" önbelleği temizler). İstek sayıları satır satır Python'a çekilmek yerine SQLite içinde toplanır; kullanılmayan istek süre ortancası kaldırıldı. Sayfa içeriği, veri ve bildirimler değişmedi.
+
 ## 4.16.0
 
 - Nordbron ve Ben Gurme siteleri desteklenen siteler listesinden kaldırıldı: bu sitelerin linkleri artık "desteklenmeyen site" olarak reddedilir (diğer linkler ve kartlar etkilenmez). Bu sitelere ait okuyucular ve test örnekleri silindi. Ayarlarda bu sitelere ait kart yoktu; veritabanında (hermes.db) ve durum dosyasında kalmış eski satırlara dokunulmadı, uygulama bunları sorunsuz taşır. Arama sayfası takibi Amazon ve Hepsiburada için aynen çalışır.

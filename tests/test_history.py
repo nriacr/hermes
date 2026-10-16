@@ -15,7 +15,7 @@ from support import LOG_LINES, TempData, config, key, monitor, notifier, watch
 
 from hermes import history as history_module
 from hermes.errors import BotProtectionHermesError, HermesError, HttpStatusHermesError, OutOfStockHermesError, PriceUnavailableHermesError
-from hermes.history import History, read_cycles, read_prices, read_site_reads, read_site_requests
+from hermes.history import History, read_cycles, read_prices, read_site_reads, read_request_counts
 from hermes.models import OfferResult
 from hermes.monitor import cycle as cycle_module, runner, scheduling, state as state_ops, summary
 from hermes.utils import SystemLoad
@@ -326,7 +326,7 @@ class WriteTests(HistoryCase):
         self.history.record_cycle(6, now)
         self.assertEqual([d for _, d in read_cycles(self.data.files.database, now - timedelta(days=365))], [6])
         self.assertEqual(read_site_reads(self.data.files.database, now - timedelta(days=365))[0].total, 1)
-        self.assertEqual(read_site_requests(self.data.files.database, now - timedelta(days=365)), [])
+        self.assertEqual(read_request_counts(self.data.files.database, now - timedelta(days=365)), [])
 
     def test_a_broken_database_never_stops_monitoring(self):
         self.data.files.database.write_text("bu bir veritabanı değil", encoding="utf-8")
@@ -353,7 +353,7 @@ class ReportTests(HistoryCase):
         self.assertEqual((amazon.site, amazon.total, amazon.ok, amazon.blocked, amazon.errors, amazon.typical_ms),
                          ("amazon", 5, 2, 2, 1, 2000))
         self.assertEqual((hepsiburada.ok, hepsiburada.typical_ms), (2, 3000))
-        requests_report = read_site_requests(self.data.files.database, since)[0]
+        requests_report = read_request_counts(self.data.files.database, since)[0]
         self.assertEqual((requests_report.total, requests_report.ok, requests_report.captcha, requests_report.http_503,
                           requests_report.http_429, requests_report.other, requests_report.browser), (6, 2, 1, 1, 1, 1, 1))
 
@@ -439,7 +439,7 @@ class MonitorHistoryTests(HistoryCase):
             return [amazon_offer()]
 
         self.run_cycle(config([rule]), read)
-        report = read_site_requests(self.data.files.database, datetime.now(timezone.utc) - timedelta(hours=1))[0]
+        report = read_request_counts(self.data.files.database, datetime.now(timezone.utc) - timedelta(hours=1))[0]
         self.assertEqual((report.site, report.total, report.ok, report.http_503), ("amazon", 2, 1, 1))
 
     def test_price_reset_also_clears_database_prices(self):

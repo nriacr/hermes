@@ -15,6 +15,7 @@ from .monitor.cycle import DataFiles
 from .monitor.runner import MonitorService, reset_statistics, reset_notifications, reset_price_history
 from .telegram.listener import start_telegram_listener
 from .web.server import Router, start_server
+from .web.statistics import warm_statistics
 
 # How long a panel action waits for the monitor to apply it before answering.
 ACTION_WAIT_SECONDS = 5
@@ -115,6 +116,7 @@ def main() -> int:
     runtime = HermesRuntime(config, config_error)
     router = Router(runtime)
     servers = [start_server(router, INGRESS_PORT, public_only=False), start_server(router, PUBLIC_PORT, public_only=True)]
+    warm_statistics()
 
     def request_stop(signum, _frame) -> None:
         log(f"Durdurma sinyali alındı ({signal.Signals(signum).name}); Hermes kapanıyor.")
