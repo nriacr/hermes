@@ -7,14 +7,17 @@ an older Hermes. A file that has no snapshot yet is read from disk and adopted o
 directly, so neither is listed.
 """
 
+import atexit
 import contextlib
 import json
 import os
 import tempfile
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
+from . import writestats
 from .logging_utils import log
 from .database import Database, read_snapshot
 
@@ -81,8 +84,17 @@ def adopt_json_files(data_dir: Path) -> list:
     return adopted
 
 
-def export_json(path: Path, payload: Any) -> None:
-    """Write the compatible JSON projection after its authoritative SQL commit."""
+# The JSON copies only serve a rollback to an older Hermes, so each file is rewritten at most once
+# per EXPORT_EVERY_SECONDS (the newest content waits in memory and is flushed by a timer, on stop
+# and at exit). The authoritative copy in `hermes.db` is written separately and is not delayed.
+EXPORT_EVERY_SECONDS = 60
+_PENDING: dict[Path, str] = {}
+_LAST_EXPORT: dict[Path, float] = {}
+_PENDING_GUARD = threading.Lock()
+_flusher_started = False
+
+
+def _write_text(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with file_lock(path):
         handle = tempfile.NamedTemporaryFile(
@@ -90,7 +102,7 @@ def export_json(path: Path, payload: Any) -> None:
         )
         try:
             with handle:
-                json.dump(payload, handle, ensure_ascii=False, indent=2)
+                handle.write(text)
                 handle.flush()
                 os.fsync(handle.fileno())
             os.replace(handle.name, path)
@@ -98,3 +110,52 @@ def export_json(path: Path, payload: Any) -> None:
             with contextlib.suppress(OSError):
                 os.unlink(handle.name)
             raise
+    with _PENDING_GUARD:
+        _LAST_EXPORT[path] = time.monotonic()
+    writestats.record(f"{path.name} JSON", len(text))
+
+
+def flush_exports(only_due: bool = False) -> None:
+    """Write the JSON copies that are waiting (all of them, or only those past their delay)."""
+    with _PENDING_GUARD:
+        now = time.monotonic()
+        due = [(path, text) for path, text in _PENDING.items()
+               if not only_due or now - _LAST_EXPORT.get(path, 0.0) >= EXPORT_EVERY_SECONDS]
+        for path, _text in due:
+            del _PENDING[path]
+    for path, text in due:
+        try:
+            _write_text(path, text)
+        except OSError as exc:
+            log(f"JSON kopyası yazılamadı: {path.name} | {exc}")
+
+
+def _flush_loop() -> None:
+    while True:
+        time.sleep(EXPORT_EVERY_SECONDS / 2)
+        flush_exports(only_due=True)
+
+
+def export_json(path: Path, payload: Any, *, now: bool = False) -> None:
+    """Write the compatible JSON projection after its authoritative SQL commit."""
+    global _flusher_started
+    text = json.dumps(payload, ensure_ascii=False, indent=2)
+    path = Path(path)
+    if now or path.name not in SQL_BACKED:
+        with _PENDING_GUARD:
+            _PENDING.pop(path, None)
+        _write_text(path, text)
+        return
+    with _PENDING_GUARD:
+        waiting = time.monotonic() - _LAST_EXPORT.get(path, 0.0) < EXPORT_EVERY_SECONDS
+        if waiting:
+            _PENDING[path] = text
+            if not _flusher_started:
+                _flusher_started = True
+                threading.Thread(target=_flush_loop, name="json-export-flush", daemon=True).start()
+            return
+        _PENDING.pop(path, None)
+    _write_text(path, text)
+
+
+atexit.register(flush_exports)

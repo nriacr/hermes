@@ -18,11 +18,15 @@ if str(APP_PATH) not in sys.path:
 
 from hermes import logging_utils  # noqa: E402
 from hermes.history import History  # noqa: E402
+from hermes import storage as _storage  # noqa: E402
 from hermes.storage import save_json  # noqa: E402
 from hermes.models import HermesConfig, TelegramConfig, WatchRule  # noqa: E402
 from hermes.monitor.cycle import DataFiles, Monitor  # noqa: E402
 from hermes.monitor.state import watch_key  # noqa: E402
 from hermes.providers.registry import ProviderSet  # noqa: E402
+
+# Tests read the JSON copies right after a write; the 60-second delay is tested on its own.
+_storage.EXPORT_EVERY_SECONDS = 0
 
 # Request gaps are tested on their own; elsewhere tests must not sleep.
 from hermes import constants  # noqa: E402

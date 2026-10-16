@@ -7,6 +7,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from . import writestats
 from .logging_utils import log
 
 CHECKPOINT_EVERY_SECONDS = 60 * 60
@@ -51,6 +52,7 @@ class Database:
         # running on a best-effort basis and the log says what to restore.
         self.integrity_error = ""
         self._last_checkpoint = time.monotonic()
+        self._state_written = 0.0
 
     def connect(self) -> sqlite3.Connection:
         with self.lock:
@@ -106,7 +108,19 @@ class Database:
             if self.integrity_error:
                 log(f"Veritabanı hâlâ sağlıksız ({self.path.name}): {self.integrity_error}")
 
+    def state_snapshot_age(self) -> float:
+        """Seconds since the whole state was last committed to the database."""
+        return time.monotonic() - self._state_written
+
     def transaction(self, statements):
+        statements = list(statements)
+        for sql, params in statements:
+            if sql.startswith("INSERT OR REPLACE INTO snapshots"):
+                writestats.record(f"{params[0]} SQL", len(params[1]))
+                if params[0] == "state.json":
+                    self._state_written = time.monotonic()
+        writestats.record("diğer SQL", writestats.statement_bytes(
+            item for item in statements if not item[0].startswith("INSERT OR REPLACE INTO snapshots")))
         with self.lock:
             db = self.connect()
             db.execute("BEGIN IMMEDIATE")

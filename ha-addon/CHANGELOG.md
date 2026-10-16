@@ -1,5 +1,10 @@
 # Değişiklik günlüğü
 
+## 4.17.0
+
+- SSD'ye gereksiz yazma azaltıldı. Bir okumada yalnız zaman damgaları değiştiyse tüm takip hafızası (yaklaşık 740 KB) artık her okumada veritabanına yazılmaz; en çok dakikada bir ve her çevrim sonunda yazılır. Fiyat satırı, fiyat/hata/uyarı değişiklikleri ve bildirim kuyruğu yine anında kaydedilir. Geri alma için tutulan JSON kopyaları (state.json, latest_price_summary.json vb.) her okumada değil en çok dakikada bir yazılır (durdurma ve çıkışta son hali yazılır).
+- Yeni: Hermes'in diske verdiği veri 10 dakikada bir günlüğe "Yazma özeti" olarak yazılır (dosya/tablo bazında MB ve adet), böylece asıl yazıcı sayılarla görülür. Takipler, fiyat geçmişi ve bildirim davranışı değişmedi.
+
 ## 4.16.1
 
 - İstatistik sayfası artık anında açılır: sayfa arka planda hazırlanıp bellekten gösterilir (dakikada bir yenilenir, uygulama açılışında önceden hazırlanır; bölüm zaman aşımı olursa 10 sn sonra yeniden denenir; "İstatistik geçmişini sil" önbelleği temizler). İstek sayıları satır satır Python'a çekilmek yerine SQLite içinde toplanır; kullanılmayan istek süre ortancası kaldırıldı. Sayfa içeriği, veri ve bildirimler değişmedi.

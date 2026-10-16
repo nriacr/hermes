@@ -27,6 +27,13 @@ if TYPE_CHECKING:
     from .cycle import CycleRun
 
 NO_RESULTS_RECHECK_SECONDS = 5 * 60
+# While nothing but its timestamps changed, the whole state is committed at most this often.
+STATE_SNAPSHOT_EVERY_SECONDS = 60
+TIMESTAMP_FIELDS = ("last_price_checked_at", "last_checked_at")
+
+
+def _without_times(entry: Dict[str, Any]) -> Dict[str, Any]:
+    return {key: value for key, value in entry.items() if key not in TIMESTAMP_FIELDS}
 
 def skipped_offer_reason(watch: WatchRule, offer: OfferResult, display_name: str) -> str:
     if watch.minimum_price is not None and offer.price < watch.minimum_price:
@@ -237,8 +244,15 @@ class ResultRecorder:
                         self.notifier.enqueue({"title": title, "message": message, "url": matched_url, "price": str(offer.price),
                                                "target": str(watch.target_price), "kind": "low90"}, identity, state, price_statements)
                     else:
-                        self.notifier.db.transaction(price_statements + [
-                            ("INSERT OR REPLACE INTO snapshots VALUES (?,?)", ("state.json", json.dumps(state, ensure_ascii=False)))])
+                        # A read that only moved its timestamps does not rewrite the whole (large) state each time;
+                        # any real change, and every cycle end, still commits it. The price row always commits.
+                        quiet = _without_times(updated) == _without_times(offer_entry)
+                        statements = list(price_statements)
+                        if not quiet or self.notifier.db.state_snapshot_age() >= STATE_SNAPSHOT_EVERY_SECONDS:
+                            statements.append(("INSERT OR REPLACE INTO snapshots VALUES (?,?)",
+                                               ("state.json", json.dumps(state, ensure_ascii=False))))
+                        if statements:
+                            self.notifier.db.transaction(statements)
                 except Exception:
                     state[item_key] = offer_entry
                     self.history._failed = True

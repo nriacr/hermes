@@ -20,6 +20,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
+from . import writestats
 from .logging_utils import log, redact
 from .database import Database
 from .storage import load_json
@@ -141,6 +142,8 @@ class History:
         return self._connection
 
     def _write(self, label: str, statements: Iterable[Tuple[str, tuple]]) -> bool:
+        statements = list(statements)
+        writestats.record(f"{label} kayıtları SQL", writestats.statement_bytes(statements))
         with self._lock:
             try:
                 db = self._db()
