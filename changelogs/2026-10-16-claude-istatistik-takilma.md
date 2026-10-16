@@ -25,12 +25,13 @@
 
 ## Yayın ve kurulum
 
-- Kurulum sonucu aşağıda/ayrı notta güncellenir.
+- Commit 9b89c88, GitHub main'e itildi. tools/install_rpi.sh ile 4.15.1 kuruldu; add-on started, sürüm 4.15.1, runtime sağlıklı (günlük yedek doğrulaması kurulum aracı tarafından yapıldı, yedek 42c055d8).
+- Canlı doğrulama: sayfa PIN'li olduğundan ben açamadım; Nuri'nin bir kez açıp süreyi söylemesi, ardından günlükteki 'İstatistik bölümü' satırları okunacak.
 
 ## Veri, yedek ve geri alma
 
 - Kullanıcı verisine etkisi: yok (yalnız okuma ve günlük).
-- Geri alma: sh tools/prepare_code_rollback.sh 7ba824c (rollback_rpi.sh kullanılmaz).
+- Geri alma: sh tools/prepare_code_rollback.sh 7ba824c (rollback_rpi.sh kullanılmaz; installer'ın yazdığı rollback_rpi.sh önerisi kullanılmadı).
 
 ## Kalan durum
 
