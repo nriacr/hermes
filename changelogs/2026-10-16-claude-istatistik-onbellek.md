@@ -23,7 +23,8 @@
 
 ## Yayın ve kurulum
 
-- Kurulum sonucu kurulumdan sonra eklenir.
+- 66ff949 yanlışlıkla boş sürümle push edildi (ha-version başka bir yayın yüzünden başarısız olmuştu); o sırada başka bir thread 4.16.0'ı kurdu ve bu kod 4.16.0 etiketiyle canlıya girmiş olabilir. Düzeltme: 538060a, sürüm 4.16.1, sh tools/install_rpi.sh ile kuruldu (add-on started, sürüm 4.16.1, 610 test geçti).
+- Canlı kanıt (günlük): açılışta arka plan hazırlığı 24 sa 5,9 sn, 7 gün 5,0 sn; bölümler 8 sn sınırının altında. Sayfa bellekten sunulur. Nuri'nin açış süresi bekleniyor.
 
 ## Veri, yedek ve geri alma
 
