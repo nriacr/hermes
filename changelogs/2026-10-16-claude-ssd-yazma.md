@@ -19,16 +19,18 @@
 | Kontrol | Komut/yöntem ve kapsam | Sonuç / kanıt dosyası |
 |---|---|---|
 | Yerel test | sh tools/check.sh (617 test, ruff) | başarılı |
-| Canlı davranış | kurulum sonrası sda yazma ölçümü ve günlükteki Yazma özeti | kurulum notuna bakın |
+| Canlı davranış | sda /proc/diskstats, 3-4 dk ortalama | önce 42 MB/dk, 4.17.0 sonrası 22 MB/dk, 4.17.1 yerleştikten sonra 1 dk'da 22 MB/dk. 'Yazma özeti' günlük satırı henüz yakalanamadı (günlük arabelleği 100 satır); dosya bazlı pay ölçülmedi. |
 
 ## Yayın ve kurulum
 
-- Kurulum sonrası eklenir.
+- d20589c GitHub main'e itildi; sh tools/install_rpi.sh ile 4.17.0 kuruldu (started). Sonradan başka thread 4.17.1'i kurdu; yazma azaltma kodu 4.17.1'de duruyor.
 
 ## Veri, yedek ve geri alma
 
 - Kullanıcı verisi: SQL asıl kaynak aynı; JSON kopyaları ≤60 sn geriden gelebilir. Geri alma: sh tools/prepare_code_rollback.sh 2662736 (rollback_rpi.sh kullanılmaz).
 
 ## Kalan durum
+
+- 'Yazma özeti' satırı yakalanıp Hermes'in kalan payı ayrıştırılacak (bugün tamamlanmadı).
 
 - Kalan SSD yazımı Hermes dışından geliyorsa (Supervisor/Docker, mosquitto, vb.) bu sürüm onu azaltmaz; ölçümle ayrıştırılacak.
