@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.18.0
+
+- Yeni: Hermes'in kendi internet kullanımı ölçülür. Her HTTP yanıtı için site bazında istek sayısı, ağdan inen (sıkıştırılmış) bayt, açılmış bayt ve gönderilen bayt sayılır (Amazon, Hepsiburada, H&M, Zara, Trendyol, Beymen Club, Togg, Pushover ve Telegram kısa link açma). Sayaçlar hermes.db içindeki yeni `traffic` tablosuna gün+site başına tek satır olarak dakikada bir yazılır (30 gün saklanır) ve 10 dakikada bir günlüğe "İnternet kullanımı" satırı düşer. İstatistik sayfasında yeni "İnternet kullanımı · Son 7 gün" bölümü: Bugün, Son 7 gün, Günlük ortalama, En çok kullanan, site başına MB/gün çubuğu ve günlük tablo. İstek sayısı, sıklığı, başlıklar, Amazon kimliği ve tekrar denemeler değişmedi; sayaç hata verirse istek etkilenmez. TLS el sıkışması, DNS ve Telegram'ın kendi (Telethon) bağlantısı sayılmaz. Kod geri dönüşü: `sh tools/prepare_code_rollback.sh ee0bdb4` (4.17.1).
+
 ## 4.17.1
 
 - Hariç tut filtresi artık anasayfada, listelerde ve özet kartta eski kayıtlara da uygulanır: kartın filtresine uyan başlıklar (ör. Hepsiburada iPhone 17 Pro Max kartında "2 TB") önbellekteki son sonuçlardan, stok tablosundan ve açılışta yayımlanmış tablodan düşer. Fiyat geçmişi ve takip hafızası silinmez; filtre kaldırılınca kayıtlar geri gelir. Filtre yazıldığı gibi çalışır, büyük/küçük harfe duyarsızdır ("2 TB" ile "2048 GB" eşitlenmez). Amazon önbellek ve istek yolları değişmedi.
