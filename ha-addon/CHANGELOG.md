@@ -1,5 +1,10 @@
 # Değişiklik günlüğü
 
+## 4.19.0
+
+- SSD yazması azaltıldı (davranış değişmedi). Takip hafızası (`state.json`, yaklaşık 740 KB) ve fiyat özeti gibi büyük kayıtlar artık `hermes.db` içinde sıkıştırılarak (zlib) saklanır; yazılan değer hemen açılıp orijinalle bayt bayt karşılaştırılır, eşit değilse eski düz metin yöntemiyle yazılır. 4 KB altı kayıtlar ve eski düz metin kayıtlar aynen okunur. Son yazılandan farksız bir kayıt tekrar yazılmaz (işlem başarısız olursa "yazıldı" sayılmaz), geri dönüş için tutulan JSON kopyaları da içerik değişmediyse yeniden yazılmaz. Bildirim kuyruğu, bastırma kayıtları, `synchronous=FULL`, JSON dışa aktarımı ve fiyat geçmişi değişmedi. Teşhis çıktısında `state_snapshot_stored` (diskteki bayt) eklendi.
+- Dikkat (geri dönüş): 4.19.0'dan önceki sürümler sıkıştırılmış kaydı okuyamaz ve takip hafızasını bozuk sayar. `prepare_code_rollback.sh` bu yüzden 4.19.0 öncesi bir sürüme dönmeyi varsayılan olarak reddeder; acil durumda Hermes durdurulup `snapshots` tablosundaki `state.json` ve `latest_price_summary.json` satırları silinirse eski sürüm en çok 60 sn eski JSON kopyalarından açılır. Normal geri dönüş için günlük yedek kullanılır.
+
 ## 4.18.0
 
 - Yeni: Hermes'in kendi internet kullanımı ölçülür. Her HTTP yanıtı için site bazında istek sayısı, ağdan inen (sıkıştırılmış) bayt, açılmış bayt ve gönderilen bayt sayılır (Amazon, Hepsiburada, H&M, Zara, Trendyol, Beymen Club, Togg, Pushover ve Telegram kısa link açma). Sayaçlar hermes.db içindeki yeni `traffic` tablosuna gün+site başına tek satır olarak dakikada bir yazılır (30 gün saklanır) ve 10 dakikada bir günlüğe "İnternet kullanımı" satırı düşer. İstatistik sayfasında yeni "İnternet kullanımı · Son 7 gün" bölümü: Bugün, Son 7 gün, Günlük ortalama, En çok kullanan, site başına MB/gün çubuğu ve günlük tablo. İstek sayısı, sıklığı, başlıklar, Amazon kimliği ve tekrar denemeler değişmedi; sayaç hata verirse istek etkilenmez. TLS el sıkışması, DNS ve Telegram'ın kendi (Telethon) bağlantısı sayılmaz. Kod geri dönüşü: `sh tools/prepare_code_rollback.sh ee0bdb4` (4.17.1).

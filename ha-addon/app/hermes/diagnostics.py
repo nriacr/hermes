@@ -7,7 +7,7 @@ import uuid
 from pathlib import Path
 
 from .constants import APP_VERSION
-from .database import Database
+from .database import Database, decode_payload
 from .logging_utils import redact
 from .monitor.stall import SUCCESS_OUTCOMES
 from .utils import PROCESS_STARTED_AT
@@ -170,8 +170,9 @@ def runtime_metrics(path):
         result["migration"] = json.loads(migration[0]) if migration else None
         row = connection.execute("SELECT payload FROM snapshots WHERE name='state.json'").fetchone()
         if row:
-            result["state_entries"] = sum(1 for key in json.loads(row[0]) if key != "_meta")
-        result["storage_bytes"] = {"state_snapshot": len(row[0].encode("utf-8")) if row else 0,
+            result["state_entries"] = sum(1 for key in json.loads(decode_payload(row[0])) if key != "_meta")
+        result["storage_bytes"] = {"state_snapshot": len(decode_payload(row[0]).encode("utf-8")) if row else 0,
+                                   "state_snapshot_stored": len(row[0]) if row else 0,
                                    "database": _size(path), "wal": _size(f"{path}-wal"), "shm": _size(f"{path}-shm")}
         result["database_integrity"] = db.integrity_error or "ok"
         latency = [row[0] for row in connection.execute(

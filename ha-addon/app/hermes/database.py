@@ -2,6 +2,7 @@
 
 import json
 import sqlite3
+import zlib
 import threading
 import time
 from pathlib import Path
@@ -11,6 +12,35 @@ from . import writestats
 from .logging_utils import log
 
 CHECKPOINT_EVERY_SECONDS = 60 * 60
+
+# Large snapshots (the whole watch state, the price table) are stored deflated in the same
+# `snapshots.payload` column. The marker tells a compressed value from a plain JSON text, so rows
+# written by older versions are still read and small snapshots stay plain text.
+COMPRESSED_MARKER = b"HZ1"
+COMPRESS_FROM_BYTES = 4096
+
+
+def encode_payload(text: str):
+    """Deflate a large snapshot; the result is read back and compared before it is used."""
+    raw = text.encode("utf-8")
+    if len(raw) < COMPRESS_FROM_BYTES:
+        return text
+    try:
+        packed = COMPRESSED_MARKER + zlib.compress(raw, 6)
+        if zlib.decompress(packed[len(COMPRESSED_MARKER):]) != raw:
+            return text
+    except zlib.error:
+        return text
+    return packed if len(packed) < len(raw) else text
+
+
+def decode_payload(value) -> str:
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        value = bytes(value)
+        if value.startswith(COMPRESSED_MARKER):
+            return zlib.decompress(value[len(COMPRESSED_MARKER):]).decode("utf-8")
+        return value.decode("utf-8")
+    return value
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS successful_reads(component TEXT PRIMARY KEY, at REAL NOT NULL);
@@ -53,6 +83,8 @@ class Database:
         self.integrity_error = ""
         self._last_checkpoint = time.monotonic()
         self._state_written = 0.0
+        # Last text committed per snapshot name; an identical rewrite is skipped.
+        self._written_snapshots: dict[str, str] = {}
 
     def connect(self) -> sqlite3.Connection:
         with self.lock:
@@ -114,23 +146,36 @@ class Database:
 
     def transaction(self, statements):
         statements = list(statements)
+        prepared = []
+        committed_texts = {}
         for sql, params in statements:
             if sql.startswith("INSERT OR REPLACE INTO snapshots"):
-                writestats.record(f"{params[0]} SQL", len(params[1]))
-                if params[0] == "state.json":
+                name, text = params[0], params[1]
+                if name == "state.json":
                     self._state_written = time.monotonic()
+                if isinstance(text, str) and self._written_snapshots.get(name) == text:
+                    continue  # nothing changed since the last commit of this snapshot
+                payload = encode_payload(text) if isinstance(text, str) else text
+                writestats.record(f"{name} SQL", len(payload))
+                if isinstance(text, str):
+                    committed_texts[name] = text
+                params = (name, payload)
+            prepared.append((sql, params))
         writestats.record("diğer SQL", writestats.statement_bytes(
-            item for item in statements if not item[0].startswith("INSERT OR REPLACE INTO snapshots")))
+            item for item in prepared if not item[0].startswith("INSERT OR REPLACE INTO snapshots")))
+        if not prepared:
+            return
         with self.lock:
             db = self.connect()
             db.execute("BEGIN IMMEDIATE")
             try:
-                for sql, params in statements:
+                for sql, params in prepared:
                     db.execute(sql, params)
                 db.execute("COMMIT")
             except BaseException:
                 db.execute("ROLLBACK")
                 raise
+            self._written_snapshots.update(committed_texts)
 
     def snapshot(self, name: str, payload: Any):
         self.transaction([("INSERT OR REPLACE INTO snapshots VALUES (?,?)",
@@ -152,6 +197,6 @@ def read_snapshot(path: Path, name: str):
     try:
         exists = db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='snapshots'").fetchone()
         row = db.execute("SELECT payload FROM snapshots WHERE name=?", (name,)).fetchone() if exists else None
-        return json.loads(row[0]) if row else None
+        return json.loads(decode_payload(row[0])) if row else None
     finally:
         db.close()

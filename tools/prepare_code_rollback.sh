@@ -16,6 +16,12 @@ git -C "$REPO_DIR" fetch --quiet origin main
 git -C "$REPO_DIR" merge-base --is-ancestor "$GOOD" HEAD || { printf 'Verilen commit main geçmişinde değil; durduruldu.\n' >&2; exit 1; }
 GOOD_VERSION="$(git -C "$REPO_DIR" show "$GOOD:ha-addon/config.yaml" | sed -n 's/^version: "\([^"]*\)"/\1/p' | head -n 1)"
 [ -n "$GOOD_VERSION" ] || { printf 'Eski sürüm okunamadı; durduruldu.\n' >&2; exit 1; }
+# Since 4.19.0 large snapshots in hermes.db are stored compressed (see CHANGELOG). A release that cannot
+# read them would treat state.json as damaged, so such a rollback is refused unless explicitly allowed.
+if ! git -C "$REPO_DIR" show "$GOOD:ha-addon/app/hermes/database.py" 2>/dev/null | grep -q "def decode_payload" \
+   && git -C "$REPO_DIR" show HEAD:ha-addon/app/hermes/database.py | grep -q "def decode_payload"; then
+  [ "${HERMES_ALLOW_PRE_COMPRESSION_ROLLBACK:-}" = "evet" ] || { printf 'Bu eski sürüm sıkıştırılmış durum kaydını okuyamaz; geri dönüş durduruldu. Önce CHANGELOG 4.19.0 notundaki adımları oku; bilerek devam etmek için HERMES_ALLOW_PRE_COMPRESSION_ROLLBACK=evet ver.\n' >&2; exit 1; }
+fi
 # Only the add-on code returns; tools, tests, docs and changelogs of the current main stay.
 CODE_PATHS="ha-addon/app ha-addon/config.yaml ha-addon/Dockerfile ha-addon/run.sh ha-addon/.dockerignore"
 START="$(git -C "$REPO_DIR" rev-parse HEAD)"

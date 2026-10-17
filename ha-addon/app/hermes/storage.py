@@ -90,6 +90,7 @@ def adopt_json_files(data_dir: Path) -> list:
 EXPORT_EVERY_SECONDS = 60
 _PENDING: dict[Path, str] = {}
 _LAST_EXPORT: dict[Path, float] = {}
+_LAST_TEXT: dict[Path, str] = {}  # content last written per file; an identical rewrite is skipped
 _PENDING_GUARD = threading.Lock()
 _flusher_started = False
 
@@ -97,6 +98,10 @@ _flusher_started = False
 def _write_text(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with file_lock(path):
+        if _LAST_TEXT.get(path) == text and path.exists():
+            with _PENDING_GUARD:
+                _LAST_EXPORT[path] = time.monotonic()
+            return
         handle = tempfile.NamedTemporaryFile(
             "w", encoding="utf-8", dir=path.parent, prefix=f".{path.name}.", suffix=".tmp", delete=False
         )
@@ -106,6 +111,7 @@ def _write_text(path: Path, text: str) -> None:
                 handle.flush()
                 os.fsync(handle.fileno())
             os.replace(handle.name, path)
+            _LAST_TEXT[path] = text
         except BaseException:
             with contextlib.suppress(OSError):
                 os.unlink(handle.name)

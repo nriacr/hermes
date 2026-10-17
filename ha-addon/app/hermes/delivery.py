@@ -6,7 +6,7 @@ import threading
 import time
 from decimal import Decimal
 
-from .database import Database
+from .database import Database, decode_payload
 from .diagnostics import Diagnostics
 from .logging_utils import log, redact
 
@@ -74,7 +74,7 @@ class DeliveryQueue:
             return time.time() - created < 24 * 3600
         with self.db.lock:
             row = self.db.connect().execute("SELECT payload FROM snapshots WHERE name='state.json'").fetchone()
-        state = json.loads(row[0]) if row else {}
+        state = json.loads(decode_payload(row[0])) if row else {}
         offer = state.get(key, {})
         if state.get("_meta", {}).get("notification_generation") != payload.get("generation"):
             return False
