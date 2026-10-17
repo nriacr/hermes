@@ -130,7 +130,7 @@ def _thousands(value: float) -> str:
     return f"{value / 1000:.1f}".replace(".", ",") + "K"
 
 
-PAIR_COLORS = {"Yeni": "#8ad8ff", "Depo": "#ffb347"}
+PAIR_COLORS = {"Yeni": "currentColor", "Depo": "#ffd35c"}
 
 
 def partner_legend(names: Tuple[str, str]) -> str:
@@ -182,7 +182,7 @@ def detail_chart(points: List[Point], target: float, other: List[Point] = (),
     return (
         f"<svg class='ov-chart' viewBox='0 0 {CHART_WIDTH} {CHART_HEIGHT}' role='img' aria-label='Fiyat geçmişi' "
         f"data-points='{hover}'{partner_hover} data-top='{pad['top']}' data-bottom='{floor}'>"
-        f"{grid}<path d='{goal_path}' fill='none' stroke='#b6ff3b' stroke-dasharray='6 5' stroke-width='1.5'/>"
+        f"{grid}<path d='{goal_path}' fill='none' stroke='#f4f2ff' stroke-opacity='.8' stroke-dasharray='6 5' stroke-width='1.5'/>"
         f"<path class='ov-fade' d='{area}' fill='{own_color}' fill-opacity='.22'/>"
         f"<path class='ov-draw' pathLength='1' d='{steps}' fill='none' stroke='{own_color}' stroke-width='3' "
         f"stroke-linejoin='round' stroke-linecap='round'/>{dots}{partner}{labels}"

@@ -210,7 +210,7 @@ def percent_text(value: float) -> str:
 
 
 def change_chip(offer: Offer) -> str:
-    """Price movement since the first recorded point: lower is good (green), higher is pink."""
+    """Price movement since the first recorded point: lower is good (green), higher is red."""
     if len(offer.points) < 2:
         return "<span class='ov-chg flat'>yeni</span>"
     first = offer.points[0][1]

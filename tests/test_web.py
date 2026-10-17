@@ -503,6 +503,8 @@ class DashboardTests(DataFilesMixin, unittest.TestCase):
                   for key, _label in steps[:8]]
         self.assertEqual(len(set(colors)), 8)
         self.assertEqual((colors[0], colors[-1]), ("#e30a17", "#3fbf6a"))
+        ramp = [APP_CSS.split(f".ov .priority-{key} {{ --priority-color:")[1].split(";")[0] for key, _label in steps[:8]]
+        self.assertEqual((len(set(ramp)), ramp[0], ramp[-1]), (8, "#ffffff", "#606078"))  # overview: one grey ramp
         self.assertIn("background:var(--priority-color)", APP_CSS)
         self.assertIn("color:var(--priority-color)", APP_CSS)
 
@@ -550,9 +552,9 @@ class DashboardTests(DataFilesMixin, unittest.TestCase):
                                           price_row(price="11.000 TL", tracking_id="c1", is_warehouse=True)]})
         html = self.live()
         self.assertGreaterEqual(html.count("data-points-b='"), 2)  # each sheet (and range pane) carries the other line
-        self.assertIn("<span><i class='ov-sw' style='background:#8ad8ff'></i>Yeni</span>", html)
-        self.assertIn("<span><i class='ov-sw' style='background:#ffb347'></i>Depo</span>", html)
-        self.assertIn("stroke='#ffb347'", html)
+        self.assertIn("<span><i class='ov-sw' style='background:currentColor'></i>Yeni</span>", html)
+        self.assertIn("<span><i class='ov-sw' style='background:#ffd35c'></i>Depo</span>", html)
+        self.assertIn("stroke='#ffd35c'", html)
         # a product with only one offer keeps the single-line chart
         self.data.write_summary({"rows": [price_row(price="15.000 TL", tracking_id="c1")]})
         single = self.live()
@@ -573,13 +575,13 @@ class DashboardTests(DataFilesMixin, unittest.TestCase):
         self.assertEqual(len(history_module.read_targets_by_card(self.data.files.database, ["c1"])["c1"]), 2)
         self.data.write_summary({"rows": [price_row(price="14.000 TL", target="13.000 TL", tracking_id="c1")]})
         html = self.live()
-        line = html.split("stroke='#b6ff3b'")[0].rsplit("<path d='", 1)[1]
+        line = html.split("stroke='#f4f2ff'")[0].rsplit("<path d='", 1)[1]
         self.assertGreaterEqual(line.count(" L"), 2)  # the target moved (15.000 -> 13.000), so the line is not flat
         self.assertNotEqual(line.split(" L")[1].split()[1], line.split(" L")[-1].split()[1])
         # a card with no record keeps a flat line at the current target
         self.data.write_summary({"rows": [price_row(price="14.000 TL", target="13.000 TL", tracking_id="c2")]})
         self.data.write_state({"offer": {"url": url, "tracking_id": "c2", "is_warehouse": False}})
-        flat = self.live().split("stroke='#b6ff3b'")[0].rsplit("<path d='", 1)[1]
+        flat = self.live().split("stroke='#f4f2ff'")[0].rsplit("<path d='", 1)[1]
         self.assertEqual(len({part.split()[1] for part in flat.split("'")[0].replace("M", "").split(" L") if part.strip()}), 1)
 
     def test_price_that_rose_since_the_first_record_is_marked_up(self):
@@ -590,11 +592,11 @@ class DashboardTests(DataFilesMixin, unittest.TestCase):
         self.data.write_summary({"rows": [price_row(price="14.000 TL")]})
         self.assertIn("▲ %40,0", self.live())
 
-    def test_settings_share_the_home_screen_skin_and_the_logo_is_a_spinning_ring(self):
+    def test_settings_share_the_home_screen_skin_and_the_logo_is_a_neutral_tile(self):
         page = self.router_get("/settings")
         self.assertIn("<body class='public ov settings-page'>", page)
         css = self.router_get("/app.css")
-        for text in ("body.ov .topbar .badge::before", "conic-gradient", "ov-spin", ".settings-page .settings-section",
+        for text in ("body.ov .topbar .badge::before", "linear-gradient(135deg,#5d6a8e,#e8ebf5)", ".settings-page .settings-section",
                      "body.ov .button.primary"):
             self.assertIn(text, css)
 
