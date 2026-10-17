@@ -150,7 +150,7 @@ class PageTests(unittest.TestCase):
     NOW = datetime(2026, 10, 17, 15, 0).astimezone()
 
     def test_empty_database_explains_that_measuring_just_started(self):
-        self.assertIn("yeni başladı", render_traffic([], self.NOW))
+        self.assertIn("Henüz ölçüm yok.", render_traffic([], self.NOW))
 
     def test_section_shows_tiles_sites_and_days(self):
         rows = [("2026-10-16", "amazon", 100, 30_000_000, 90_000_000, 1_000_000),

@@ -204,9 +204,7 @@ def watch_form(item: Dict[str, Any], index: int, is_new: bool = False, groups=No
         f"{_field(prefix, 'minimum_price', 'Hedef Fiyat Min', _price_input_value(item.get('minimum_price', '')))}"
         f"{_field(prefix, 'size', 'Beden', item.get('size', ''))}"
         f"</div><div class='watch-links'>{link_fields}</div>"
-        f"<div class='watch-bottom'>{priority_field}{window_field}{exclude_field}{flags}{actions}"
-        f"<p class='watch-hint'>Öncelik, fiyatın ne sıklıkla tarandığıdır: {', '.join(PRIORITY_LABELS.values())}. Satıcı filtresi şu an Amazon’da uygulanır; "
-        "doğrulanmış Depo teklifleri korunur.</p></div></div>"
+        f"<div class='watch-bottom'>{priority_field}{window_field}{exclude_field}{flags}{actions}</div></div>"
     )
     attributes = " data-new-watch='true'" if is_new else (
         f" data-watch-group='{escape(group, quote=True)}' data-watch-search='{escape(display_name, quote=True)}'"
@@ -254,19 +252,19 @@ def _telegram_section(options: Dict[str, Any]) -> str:
             f"<details><summary>Telegram ayarları</summary><div class='form-grid'>{inner}</div></details></section>")
 
 
-# Supervisor options shown at the bottom of Ayarlar: (key, label, note, lowest, highest).
+# Supervisor options shown at the bottom of Ayarlar: (key, label, lowest, highest).
 TIMING_FIELDS = (
-    ("interval_seconds", "Çevrim aralığı", "İki kontrol turu arasındaki bekleme (saniye)", 1, 86400),
-    ("request_delay_min_seconds", "Bekleme süresi min", "Aynı sitede iki istek arasındaki en kısa süre (saniye)", 0, 120),
-    ("request_delay_max_seconds", "Bekleme süresi maks", "Aynı sitede iki istek arasındaki en uzun süre (saniye)", 0, 120),
+    ("interval_seconds", "Çevrim aralığı", 1, 86400),
+    ("request_delay_min_seconds", "Bekleme süresi min", 0, 120),
+    ("request_delay_max_seconds", "Bekleme süresi maks", 0, 120),
 )
 
 
 def _timing_section(options: Dict[str, Any]) -> str:
     fields = "".join(
         f"<label>{escape(label)}<input type='number' inputmode='numeric' name='{key}' min='{lowest}' max='{highest}' step='1' "
-        f"value='{escape(str(options.get(key, '')), quote=True)}' required><small>{escape(note)}</small></label>"
-        for key, label, note, lowest, highest in TIMING_FIELDS
+        f"value='{escape(str(options.get(key, '')), quote=True)}' required></label>"
+        for key, label, lowest, highest in TIMING_FIELDS
     )
     return f"<section class='settings-section timing-settings'><h2>Zamanlama</h2><div class='form-grid'>{fields}</div></section>"
 
@@ -274,13 +272,13 @@ def _timing_section(options: Dict[str, Any]) -> str:
 def _daily_summary_section(options: Dict[str, Any]) -> str:
     box = _checkbox("", "daily_summary_enabled", "Günlük özet bildirimi (her sabah 09:00)", options.get("daily_summary_enabled", True))
     return ("<section class='settings-section'><h2>Günlük özet</h2>"
-            f"{box}<small>Son 24 saatteki okuma ve hata sayısı ile hedefteki en iyi ürünler tek mesajda gelir.</small></section>")
+            f"{box}</section>")
 
 
 def _update_timing_options(options: Dict[str, Any], form) -> None:
     """Same limits as the add-on schema; a page without these fields keeps the saved values."""
     values = {}
-    for key, label, _note, lowest, highest in TIMING_FIELDS:
+    for key, label, lowest, highest in TIMING_FIELDS:
         raw = _first(form, key)
         if not raw:
             continue
@@ -298,7 +296,7 @@ def _update_timing_options(options: Dict[str, Any], form) -> None:
     options.update(values)
 
 
-HTTP_WARNING = "Bu adres şifresiz (HTTP). Yalnız güvendiğin ağda ya da HTTPS tünel arkasında kullan."
+HTTP_WARNING = "HTTP (şifresiz bağlantı)"
 
 
 def supported_sites_text() -> str:
@@ -320,7 +318,7 @@ def bulk_toolbar(groups: List[str]) -> str:
         "<button class='button secondary' type='button' data-bulk-set-priority>Önceliği uygula</button>"
         f"<select data-bulk-group aria-label='Grup'><option value=''>Grup yok</option>{group_options}</select>"
         "<button class='button secondary' type='button' data-bulk-set-group>Grubu uygula</button></div>"
-        "<p class='watch-hint'>Seçili kartların alanları değişir; kalıcı olması için en altta “Değişiklikleri uygula”ya bas.</p></section>"
+        "</section>"
     )
 
 
@@ -346,7 +344,6 @@ def render_settings_page(base: str, params: Dict[str, List[str]], *, access_bar:
         "<input type='hidden' name='operation' value='update_existing'>"
         f"<input type='hidden' name='watches_count' id='watches-count' value='{new_index + 1}'>"
         "<section class='settings-section'><h2>Yeni takip ekle</h2>"
-        f"<p class='watch-hint'>Desteklenen siteler: {escape(supported_sites_text())}. Başka bir sitenin linki kaydedilmez.</p>"
         f"<div id='new-watch-list'>{watch_form({}, new_index, is_new=True, groups=groups, known_titles=known_titles)}</div>"
         "<div class='actions'><button class='button secondary' type='button' id='add-watch-card'>Başka takip ekle</button></div>"
         f"<template id='new-watch-template'>{template}</template></section>"
@@ -362,13 +359,11 @@ def render_settings_page(base: str, params: Dict[str, List[str]], *, access_bar:
         + _telegram_section(options)
         + _timing_section(options)
         + _daily_summary_section(options)
-        + "<div class='apply-bar'><p>Grup, fiyat, yeni kayıt ve silme işlemlerini sırayla yap; bitince bir kez uygula. "
-        "Hermes yalnız o zaman yeniden başlar.</p><button class='button primary' type='submit'>Değişiklikleri uygula</button></div></form>"
+        + "<div class='apply-bar'><p>Uygulayınca Hermes yeniden başlar.</p><button class='button primary' type='submit'>Değişiklikleri uygula</button></div></form>"
         + render_tool_actions(base)
     )
     overlay = ("<div id='saving-overlay' class='saving-overlay' hidden><div class='saving-dialog'><div class='saving-spinner'></div>"
-               "<h2 id='saving-title'>Ayarlar kaydediliyor</h2><p id='saving-message'>Tüm değişiklikler tek seferde Home Assistant'a "
-               "yazılıyor. Hermes bir kez yeniden başlayacak; hazır olduğunda ayarlara otomatik dönülecek.</p></div></div>")
+               "<h2 id='saving-title'>Ayarlar kaydediliyor</h2><p id='saving-message'>Kaydediliyor, Hermes yeniden başlıyor…</p></div></div>")
     script = f"<script src='{escape(link(base, 'settings.js'), quote=True)}?v={escape(APP_VERSION)}' defer></script>"
     return render_page(base, "settings", "Hermes Ayarlar", body, body_class="public ov settings-page", after_main=overlay, scripts=confirm_script_tag(base) + script)
 
@@ -382,8 +377,6 @@ def render_restart_page(base: str, params: Dict[str, List[str]]) -> bytes:
     body = (
         "<h2 class='page-heading'>Hermes yeniden başlatılıyor</h2>"
         f"<p class='notice notice-ok'>{escape(message)}</p>"
-        "<p>Hermes yeniden başlarken bu sayfa kısa süre bekleyecek; "
-        f"hazır olduğunda {'ana ekran' if return_to_main else 'ayarlar ekranı'} otomatik yenilenecek.</p>"
         "<p class='footer-note' id='restart-status'>Hazırlanıyor... Birkaç saniye içinde bağlantı kontrolü başlayacak.</p>"
         f"<div class='actions'><a class='button secondary' href='{escape(destination, quote=True)}'>"
         f"{'Ana ekrana dön' if return_to_main else 'Ayarlar ekranına dön'}</a></div>"

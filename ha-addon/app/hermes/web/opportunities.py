@@ -103,7 +103,5 @@ def render_rows(items: List[SentOpportunity], current: Dict[str, Decimal]) -> st
 
 def render_opportunities_page(base: str, params=None) -> bytes:
     body = ("<div class='statistics-top'><h2 class='page-heading'>Fırsat geçmişi</h2></div>"
-            "<p class='statistics-intro'>Son 30 günde Pushover'a gönderilen fırsat bildirimleri; en yenisi üstte. "
-            "\"Şimdi\" sütunu ürünün bugünkü durumunu gösterir.</p>"
             + render_rows(read_sent(), current_prices()))
     return render_page(base, "opportunities", "Hermes Fırsat geçmişi", body, body_class="public ov")

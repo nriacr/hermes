@@ -271,7 +271,7 @@ def detail_html(offer: Offer) -> str:
     chart = (ranged_chart(offer.points, float(offer.target), _parse_local_time(offer.checked_at) or datetime.now().astimezone(),
                           offer.partner_points, names, offer.target_points)
              if len(offer.points) > 1
-             else "<p class='ov-note'>Fiyat geçmişi ilk değişiklikten sonra çizilir.</p>")
+             else "")
     product_url = str(offer.row.get("product_url") or "").strip()
     link_html = (f"<a class='ov-d-link' href='{escape(product_url, quote=True)}' target='_blank' rel='noopener noreferrer'>Ürüne git →</a>"
                  if product_url else "")
@@ -345,7 +345,7 @@ def render_watch_pane(offers: List[Offer]) -> str:
              + "".join(f"<button type='button' class='ov-chip {site}' data-filter='{site}' aria-pressed='false'><i></i>{escape(name)}</button>"
                        for site, name in sites) + "</div>")
     if not offers:
-        return chips + "<p class='ov-empty'>Hedef üstünde bekleyen ürün yok.</p>"
+        return chips + "<p class='ov-empty'>Yok.</p>"
     singles, sections = group_offers(offers)
     body = f"<div class='ov-tiles'>{''.join(render_tile(offer, None, number) for number, offer in enumerate(singles))}</div>" if singles else ""
     for label, members in sections:
@@ -358,7 +358,7 @@ def render_watch_pane(offers: List[Offer]) -> str:
 
 def render_stock_pane(rows: List[Dict[str, Any]]) -> str:
     if not rows:
-        return "<p class='ov-empty'>Stok dışında izlenen ürün yok.</p>"
+        return "<p class='ov-empty'>Yok.</p>"
     items = []
     for row in sorted(rows, key=lambda item: (repair_mojibake(str(item.get("seller") or "")).casefold(),
                                               repair_mojibake(str(item.get("product_title") or "")).casefold())):
@@ -385,7 +385,7 @@ def render_telegram_pane(status: Dict[str, Any]) -> str:
         rows.append(f"<li class='ov-row'><div class='ov-tx'><h4>{title}</h4>"
                     f"<span>{escape(str(item.get('channel') or '-'))} · {escape(str(item.get('created_at') or '-'))}</span>"
                     f"<p>{escape(str(item.get('message') or ''))}</p></div></li>")
-    return f"<ul class='ov-rows'>{''.join(rows)}</ul>" if rows else "<p class='ov-empty'>Henüz Telegram bildirimi yok.</p>"
+    return f"<ul class='ov-rows'>{''.join(rows)}</ul>" if rows else "<p class='ov-empty'>Yok.</p>"
 
 
 def short_product_name(title, variant="") -> str:
@@ -457,7 +457,7 @@ def render_summary(payload: Dict[str, Any], state: Dict[str, Any], telegram_stat
                f"<div class='ov-num'><b>{len(stock_rows)}</b><span>stokta yok</span></div>"
                f"<div class='ov-num deal'><b>{len(deals)}</b><span>fırsat</span></div></div>")
     spot = (f"<div class='ov-spot'>{''.join(render_deal(offer) for offer in deals)}</div>" if deals
-            else "<p class='ov-empty'>Şu anda hedef fiyatın altına düşen ürün yok.</p>")
+            else "<p class='ov-empty'>Yok.</p>")
     telegram_count = min(5, len(telegram_status.get("recent_notifications") or [])) if isinstance(telegram_status.get("recent_notifications"), list) else 0
     tabs = (
         "<div class='ov-tabs' role='tablist'>"
@@ -468,8 +468,7 @@ def render_summary(payload: Dict[str, Any], state: Dict[str, Any], telegram_stat
     panes = (f"<div class='ov-pane' data-pane='watch'>{render_watch_pane(watching)}</div>"
              f"<div class='ov-pane' data-pane='stock' hidden>{render_stock_pane(stock_rows)}</div>"
              f"<div class='ov-pane' data-pane='tg' hidden>{render_telegram_pane(telegram_status)}</div>")
-    return (f"{status}<section class='ov-hero'><div><h1>Özet Tablo</h1>"
-            "<p>Hedef fiyatın altına inen ürünler en önde. Detay için karta dokun.</p></div>"
+    return (f"{status}<section class='ov-hero'><div><h1>Özet Tablo</h1></div>"
             f"{numbers}</section><h2 class='ov-sec'>Fırsatlar</h2>{spot}{tabs}{panes}{render_errors(errors)}")
 
 # -- errors -------------------------------------------------------------------------

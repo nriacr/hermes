@@ -72,7 +72,7 @@
       card.classList.remove('is-deleted');
       deleteButton.textContent = 'Sil';
     } else {
-      if (!window.confirm('Bu takip, değişiklikleri uygulayınca silinecek. Devam etmek istiyor musun?')) return;
+      if (!window.confirm('Bu takip silinecek. Devam?')) return;
       flag.value = '1';
       card.classList.add('is-deleted');
       deleteButton.textContent = 'Vazgeç';
@@ -131,7 +131,7 @@
     }
     dirty = false;
     savingTitle.textContent = 'Ayarlar kaydediliyor';
-    savingMessage.textContent = 'Tüm değişiklikler tek seferde Home Assistant’a yazılıyor. Hermes bir kez yeniden başlayacak; hazır olduğunda ayarlara otomatik dönülecek.';
+    savingMessage.textContent = 'Kaydediliyor, Hermes yeniden başlıyor…';
     savingOverlay.hidden = false;
   });
 })();

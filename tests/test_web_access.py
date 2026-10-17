@@ -395,6 +395,6 @@ class OpenHttpWarningTests(AccessCase):
         with patch.object(settings, "read_options", return_value={}), patch.object(settings, "stored_watch_titles", return_value=[]):
             shown = settings.render_settings_page(".", {}, open_http=True).decode()
             hidden = settings.render_settings_page(".", {}).decode()
-        self.assertIn("Bu adres şifresiz (HTTP).", shown)
+        self.assertIn("HTTP (şifresiz bağlantı)", shown)
         self.assertIn("notice-warn", shown)
-        self.assertNotIn("şifresiz (HTTP)", hidden)
+        self.assertNotIn("şifresiz bağlantı", hidden)

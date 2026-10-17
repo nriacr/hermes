@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.19.5
+
+- Sayfa metinleri sadeleştirildi (yalnız metin; veri, bildirim ve tarama mantığı değişmedi). Kaldırıldı: anasayfa başlık altı cümlesi, fiyat geçmişi ipucu, Ayarlar'daki desteklenen siteler / öncelik / toplu işlem / zamanlama / günlük özet açıklamaları, istatistik giriş ve kutu altı açıklamaları, hata dönemleri ve internet kullanımı alt yazıları, Fırsat geçmişi giriş cümlesi, PIN ekranlarındaki yönlendirme cümleleri. Kısaltıldı: boş durum metinleri ("Yok." / "Henüz ölçüm yok."), HTTP uyarısı ("HTTP (şifresiz bağlantı)"), kaydetme ve yeniden başlatma metinleri, tüm onay pencereleri ("… Devam?"). Gerçek hatalar (ayar hatası, eskimiş sayfa, açık sorunlar) ve silme/sıfırlama/yeniden başlatma onayları korundu. Kod geri dönüşü: `sh tools/prepare_code_rollback.sh 92cafbb` (4.19.4).
+
 ## 4.19.4
 
 - Hepsiburada gereksiz başarısız istekleri atlar. 4.19.3 ölçümü (10 dk, 28 okuma): ana sayfa 403 x28, python-requests 403 x84, requests_fresh 403 x84, curl_cffi başarılı x28; yani her okuma 7 reddedilen istekten sonra curl ile okunuyordu (okuma başına 8 istek). Artık curl_cffi bir adresi başarıyla okuduysa aynı adresin sonraki okumaları doğrudan o adresle curl'dan başlar; curl'da herhangi bir hata olursa adres unutulur ve önceki tam sıra (ana sayfa ısınma, requests, requests_fresh, curl) aynen çalışır, yani hiçbir okuma kaybolmaz. Başlıklar, kimlik, okuma sayısı ve sıklığı değişmedi. Günlükteki "Hepsiburada deneme özeti" satırı `curl_first` yöntemini de gösterir. Kod geri dönüşü: `sh tools/prepare_code_rollback.sh 48e380d` (4.19.3 + 4.19.2 kayıt).

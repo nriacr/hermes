@@ -144,7 +144,7 @@ class RouterTests(DataFilesMixin, unittest.TestCase):
         row = settings_page[settings_page.index("tool-actions"):]
         row = row[:row.index("</div>")]
         self.assertIn("href='./statistics'>İstatistik</a>", row)
-        self.assertIn("action='./restart' data-confirm='Hermes, Home Assistant üzerinden uygulama olarak yeniden başlatılacak.", row)
+        self.assertIn("action='./restart' data-confirm='Hermes yeniden başlatılacak, süren tarama yarıda kalır. Devam?", row)
         self.assertGreater(row.index("Hermes'i yeniden başlat"), row.index("İstatistik"))
         self.assertNotIn("link-test", settings_page)
         self.assertNotIn(">Test</a>", settings_page)
@@ -167,8 +167,6 @@ class RouterTests(DataFilesMixin, unittest.TestCase):
                 "watches_0_url_1": ["https://www.example.com/urun/1"]}
         with self.assertRaisesRegex(ValueError, "Desteklenmeyen site alan adı: www.example.com. Desteklenen siteler: Amazon, Hepsiburada"):
             settings.build_watches(form)
-        page = self.request("/settings").payload.decode()
-        self.assertIn("Desteklenen siteler: Amazon, Hepsiburada", page)
 
     def test_no_page_carries_an_inline_script_and_the_confirm_script_is_served(self):
         for path in ("/", "/statistics", "/settings"):
@@ -680,7 +678,7 @@ class StatisticsPageTests(DataFilesMixin, unittest.TestCase):
 
     def test_empty_database_explains_itself(self):
         html = self.page()
-        self.assertIn("henüz kontrol sıklığı ölçümü yok", html)
+        self.assertIn("Henüz ölçüm yok.", html)
         self.assertIn("Bu dönemde okuma yok.", html)
         self.assertIn("Bu dönemde engel veya hata yok.", html)
 
@@ -745,7 +743,7 @@ class StatisticsPageTests(DataFilesMixin, unittest.TestCase):
         html = self.page("7d")
         form = html.split("statistics-reset")[1].split("</form>")[0]
         self.assertIn("action='./reset-statistics'", form)
-        self.assertIn("data-confirm='Başarılı ve başarısız tüm okumalar, süre ölçümleri ve kapanmış sorun kayıtları kalıcı olarak silinecek", form)
+        self.assertIn("data-confirm='Tüm okuma, süre ve sorun kayıtları silinecek", form)
         self.assertIn("confirm.js", html)  # the confirm script is on the page
         response = self.request_post("/reset-statistics")
         self.assertEqual(response.status, 303)

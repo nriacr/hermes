@@ -240,7 +240,7 @@ def render_tiles(reads: List[Read], gaps) -> str:
     last_cycle = relative_time_text(last_at.isoformat() if last_at else None)
     cycle_length = duration_text(last_duration, "-")
     tiles = (
-        ("Kontrol sıklığı", _short_duration(check), "yüksek öncelikli bir ürün tipik olarak bu aralıkla okunuyor"),
+        ("Kontrol sıklığı", _short_duration(check), ""),
         ("Son tur", last_cycle, f"süresi {cycle_length}"),
         ("Başarı", _percent(len(reads) - failures, len(reads)), f"{len(reads)} okumadan {len(reads) - failures} başarılı"),
         ("Engel ve hata", str(failures), f"{partial} kısmi · {blocked} engel · {failures - blocked - partial} hata"),
@@ -248,7 +248,7 @@ def render_tiles(reads: List[Read], gaps) -> str:
     alert = " stat-tile-alert" if failures else ""
     return "<div class='stat-tiles'>" + "".join(
         f"<section class='stat-tile{alert if index == 3 else ''}'><span>{escape(title)}</span><strong>{escape(value)}</strong>"
-        f"<small>{escape(note)}</small></section>"
+        f"{f'<small>{escape(note)}</small>' if note else ''}</section>"
         for index, (title, value, note) in enumerate(tiles)
     ) + "</div>"
 
@@ -256,8 +256,7 @@ def render_tiles(reads: List[Read], gaps) -> str:
 def render_chart(slots: List[Bucket], period: str) -> str:
     values = [slot.check_seconds for slot in slots]
     if not any(value is not None for value in values):
-        return ("<p class='statistics-empty'>Bu dönem için henüz kontrol sıklığı ölçümü yok. "
-                "Yüksek öncelikli ürünler iki kez okunduktan sonra grafik dolmaya başlar.</p>")
+        return "<p class='statistics-empty'>Henüz ölçüm yok.</p>"
     top = max(60.0, *(value for value in values if value is not None))
     width, left, bottom, height = 1000, 54, 196, 160
     step = (width - left - 10) / len(slots)
@@ -420,8 +419,7 @@ def render_spells(reads: List[Read]) -> str:
         )
     more = len(spells) - MAX_LISTED_SPELLS
     extra = f"<p class='site-note'>ve {more} dönem daha</p>" if more > 0 else ""
-    return ("<h3 class='spell-title'>Hata dönemleri</h3><p class='site-note'>Birbirine 15 dakikadan yakın engel ve hatalar "
-            f"tek satırda; en yeni üstte.</p><ul class='error-spells'>{''.join(items)}</ul>{extra}")
+    return f"<h3 class='spell-title'>Hata dönemleri</h3><ul class='error-spells'>{''.join(items)}</ul>{extra}"
 
 
 def render_daily_history(reads: List[Read], now: datetime) -> str:
@@ -520,7 +518,7 @@ def _megabytes(size: float) -> str:
 def render_traffic(rows, today: datetime) -> str:
     """Internet use of the last seven days per site, from the counters in `traffic` (see traffic.py)."""
     if not rows:
-        return ("<p class='statistics-empty'>İnternet kullanımı ölçümü yeni başladı; ilk veriler birkaç dakika içinde burada görünür.</p>")
+        return "<p class='statistics-empty'>Henüz ölçüm yok.</p>"
     today_key = today.strftime("%Y-%m-%d")
     days = sorted({row[0] for row in rows})
     per_site: Dict[str, List[int]] = {}
@@ -538,13 +536,13 @@ def render_traffic(rows, today: datetime) -> str:
     top_site, top_figures = ranked[0]
     top_share = round(100 * (top_figures[1] + top_figures[2]) / total) if total else 0
     tiles = (
-        ("Bugün", _megabytes(per_day.get(today_key, 0)), "şu ana kadar (indirilen + gönderilen)"),
-        ("Son 7 gün", _megabytes(total), f"{len(days)} günlük ölçüm"),
-        ("Günlük ortalama", _megabytes(average), "ölçülen günlerin ortalaması"),
+        ("Bugün", _megabytes(per_day.get(today_key, 0)), ""),
+        ("Son 7 gün", _megabytes(total), ""),
+        ("Günlük ortalama", _megabytes(average), ""),
         ("En çok kullanan", TRAFFIC_LABELS.get(top_site) or site_label(top_site), f"toplamın %{top_share}'i"),
     )
     tile_html = "<div class='stat-tiles'>" + "".join(
-        f"<section class='stat-tile'><span>{escape(title)}</span><strong>{escape(value)}</strong><small>{escape(note)}</small></section>"
+        f"<section class='stat-tile'><span>{escape(title)}</span><strong>{escape(value)}</strong>{f'<small>{escape(note)}</small>' if note else ''}</section>"
         for title, value, note in tiles) + "</div>"
     cards = []
     for site, (count, wire, sent, measured_days) in ranked:
@@ -570,8 +568,7 @@ def render_traffic(rows, today: datetime) -> str:
     table = ("<details class='daily-history' data-key='traffic-days'><summary>Günlük internet kullanımı</summary>"
              "<div class='table-wrap measure-wrap'><table class='statistics-table measure-table'><thead><tr><th>Gün</th>"
              f"<th>İndirilen + gönderilen</th></tr></thead><tbody>{day_rows}</tbody></table></div></details>")
-    note = ("<p class='site-note'>Hermes'in kendi trafiği; sıkıştırılmış (ağdan geçen) boyuttur. TLS el sıkışması, DNS ve Telegram "
-            "bağlantısı dahil değildir, gerçek kullanım bundan biraz yüksektir. Telegram bağlantıları yalnızca paylaşılan kısa linklerin açılmasıdır.</p>")
+    note = "<p class='site-note'>Yalnız Hermes trafiği, sıkıştırılmış boyut; gerçek kullanım biraz yüksektir.</p>"
     return f"{tile_html}<div class='site-health-list'>{''.join(cards)}</div>{note}{table}"
 
 
@@ -607,12 +604,10 @@ def _statistics_html(base: str, params: Optional[Dict[str, List[str]]] = None) -
 
 def render_statistics_page(base: str, params: Optional[Dict[str, List[str]]] = None) -> bytes:
     period = period_key(params or {})
-    intro = ("<p class='statistics-intro'>Kontrol sıklığı, yüksek öncelikli bir ürünün iki okuması arasındaki tipik süredir. "
-             "Engel; captcha, 503 ve 429 yanıtlarıdır. Sayfa açıkken veriler dakikada bir güncellenir.</p>")
     params = params or {}
     notice = render_notice(params.get("saved", [""])[0], params.get("msg", [""])[0])
     body = (f"<div class='statistics-top'><h2 class='page-heading'>İstatistik</h2>{render_period_switch(base, period)}</div>"
-            f"{notice}{intro}"
+            f"{notice}"
             + live_region(base, f"live/statistics?p={period}", statistics_live_html(base, params))
             + render_reset_statistics(base))
     return render_page(base, "statistics", "Hermes İstatistik", body, body_class="public ov", refresh_seconds=60,
@@ -622,8 +617,7 @@ def render_statistics_page(base: str, params: Optional[Dict[str, List[str]]] = N
 def render_reset_statistics(base: str) -> str:
     """Confirmed reset of all statistical history, independent of price history."""
     return (f"<div class='actions tool-actions statistics-reset'><form class='inline-form' method='post' "
-            f"action='{escape(link(base, 'reset-statistics'), quote=True)}' data-confirm='Başarılı ve başarısız tüm okumalar, süre ölçümleri ve kapanmış sorun "
-            "kayıtları kalıcı olarak silinecek. Fiyat geçmişi, takipler ve bildirim hafızası korunacak. Devam etmek istiyor musun?'>"
+            f"action='{escape(link(base, 'reset-statistics'), quote=True)}' data-confirm='Tüm okuma, süre ve sorun kayıtları silinecek. Fiyat geçmişi ve takipler korunur. Devam?'>"
             "<button class='button secondary' type='submit'>İstatistik geçmişini sil</button></form></div>")
 
 
