@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.19.4
+
+- Hepsiburada gereksiz başarısız istekleri atlar. 4.19.3 ölçümü (10 dk, 28 okuma): ana sayfa 403 x28, python-requests 403 x84, requests_fresh 403 x84, curl_cffi başarılı x28; yani her okuma 7 reddedilen istekten sonra curl ile okunuyordu (okuma başına 8 istek). Artık curl_cffi bir adresi başarıyla okuduysa aynı adresin sonraki okumaları doğrudan o adresle curl'dan başlar; curl'da herhangi bir hata olursa adres unutulur ve önceki tam sıra (ana sayfa ısınma, requests, requests_fresh, curl) aynen çalışır, yani hiçbir okuma kaybolmaz. Başlıklar, kimlik, okuma sayısı ve sıklığı değişmedi. Günlükteki "Hepsiburada deneme özeti" satırı `curl_first` yöntemini de gösterir. Kod geri dönüşü: `sh tools/prepare_code_rollback.sh 48e380d` (4.19.3 + 4.19.2 kayıt).
+
 ## 4.19.3
 
 - Hepsiburada ağ denemeleri ölçülür (yalnızca ölçüm, davranış aynı): her deneme (ana sayfa, requests, requests_fresh, curl) yöntem ve sonuca (200, 403, ... veya hata türü) göre sayılır ve 10 dakikada bir günlüğe "Hepsiburada deneme özeti" satırı yazılır. Amaç, okuma başına neden 5-6 istek yapıldığını görmek. Okuma sayısı, sıra, başlıklar ve kimlik değişmedi. Kod geri dönüşü: `sh tools/prepare_code_rollback.sh fd76e83` (4.19.2).

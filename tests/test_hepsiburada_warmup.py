@@ -92,5 +92,61 @@ class AttemptTallyTests(unittest.TestCase):
         self.assertEqual(len(hepsiburada._attempts), 0)
 
 
+class CurlFirstTests(unittest.TestCase):
+    """After curl_cffi read a url, later reads go there first; every failure falls back to the full original order."""
+
+    def setUp(self):
+        hepsiburada._curl_winner.clear()
+        self.curl_calls = []
+        self.curl_status = 200
+        outer = self
+
+        class FakeCurlSession:
+            def get(self, url, **_kwargs):
+                outer.curl_calls.append(url)
+                return reply(outer.curl_status)
+
+        self.fake_curl = SimpleNamespace(Session=FakeCurlSession)
+
+    def blocked_requests_world(self):
+        return (patch.object(hepsiburada, "curl_requests", self.fake_curl),
+                patch.object(hepsiburada, "CountedSession", lambda: FakeSession(page_status=403)))
+
+    def test_first_read_runs_the_full_order_and_remembers_curl(self):
+        session = FakeSession(page_status=403, home_status=403)
+        first, second = self.blocked_requests_world()
+        with first, second:
+            fetch_hepsiburada_page(session, PRODUCT, 5)
+        self.assertEqual(session.calls[0], HOME_URL)          # warm-up and python-requests attempts ran first
+        self.assertGreaterEqual(len(session.calls), 3)
+        self.assertEqual(len(self.curl_calls), 1)
+        self.assertIn(PRODUCT, hepsiburada._curl_winner)
+
+    def test_remembered_url_goes_straight_to_curl_with_no_other_request(self):
+        hepsiburada._curl_winner[PRODUCT] = PRODUCT
+        session = FakeSession(page_status=403, home_status=403)
+        first, second = self.blocked_requests_world()
+        with first, second:
+            page = fetch_hepsiburada_page(session, PRODUCT, 5)
+        self.assertEqual(page.status_code, 200)
+        self.assertEqual(session.calls, [])
+        self.assertEqual(self.curl_calls, [PRODUCT])
+
+    def test_a_failed_shortcut_runs_the_whole_original_order_and_forgets_the_address(self):
+        hepsiburada._curl_winner[PRODUCT] = PRODUCT
+        session = FakeSession()                                # python requests works now
+        self.curl_status = 403                                 # but curl is refused
+        with patch.object(hepsiburada, "curl_requests", self.fake_curl):
+            page = fetch_hepsiburada_page(session, PRODUCT, 5)
+        self.assertEqual(page.status_code, 200)               # the read is not lost
+        self.assertEqual(session.calls[0], HOME_URL)          # original path (warm-up, then requests) ran
+        self.assertNotIn(PRODUCT, hepsiburada._curl_winner)
+
+    def test_without_curl_nothing_is_remembered(self):
+        with patch.object(hepsiburada, "curl_requests", None):
+            fetch_hepsiburada_page(FakeSession(), PRODUCT, 5)
+        self.assertEqual(hepsiburada._curl_winner, {})
+
+
 if __name__ == "__main__":
     unittest.main()

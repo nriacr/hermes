@@ -147,6 +147,32 @@ def note_attempt(method: str, outcome) -> None:
         log(line)
 
 
+# url -> the address that curl_cffi last read successfully. A later read of the same url tries only that
+# one first; any failure there forgets it and the full original order below runs unchanged.
+_curl_winner: dict = {}
+
+
+def _curl_first(url: str, timeout: int):
+    """The page from the address curl_cffi read before, or None (nothing remembered or it failed)."""
+    candidate = _curl_winner.get(url)
+    if not candidate or curl_requests is None:
+        return None
+    try:
+        page = _checked(
+            count_curl(curl_requests.Session().get(
+                candidate, headers=hepsiburada_headers(candidate), timeout=timeout,
+                allow_redirects=True, impersonate="chrome124",
+            )),
+            candidate,
+        )
+        note_attempt("curl_first", "ok")
+        return page
+    except Exception as exc:  # noqa: BLE001
+        note_attempt("curl_first", _outcome(exc))
+        _curl_winner.pop(url, None)
+        return None
+
+
 def _outcome(exc: Exception):
     return getattr(exc, "status_code", None) or exc.__class__.__name__
 
@@ -166,6 +192,9 @@ def _warm_up(session: requests.Session, timeout: int) -> None:
 
 
 def fetch_hepsiburada_page(session: requests.Session, url: str, timeout: int):
+    remembered = _curl_first(url, timeout)
+    if remembered is not None:
+        return remembered
     _warm_up(session, timeout)
 
     last_error: Optional[Exception] = None
@@ -199,6 +228,7 @@ def fetch_hepsiburada_page(session: requests.Session, url: str, timeout: int):
                         candidate,
                     )
                     note_attempt("curl", "ok")
+                    _curl_winner[url] = candidate
                     return page
                 except Exception as exc:  # noqa: BLE001
                     last_error = exc
