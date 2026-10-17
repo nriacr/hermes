@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.19.2
+
+- SSD yazması biraz daha azaltıldı: geri dönüş için tutulan JSON kopyaları (state.json, latest_price_summary.json vb.) en çok 5 dakikada bir yazılır (önceden dakikada bir; durdurma ve çıkışta son hali yine yazılır, değişmeyen içerik zaten yazılmıyor). Asıl kayıt `hermes.db` içinde anında yazılmaya devam eder; bildirim, fiyat geçmişi ve tablo davranışı değişmedi. Yalnız eski sürüme acil dönüşte kullanılan JSON kopyası en çok 5 dk eski olabilir.
+
 ## 4.19.1
 
 - Hepsiburada artık her ürün okumasından önce ana sayfaya ısınma isteği atmaz: ana sayfa bir okuma oturumunda (her çevrimde site başına bir oturum) yalnızca ilk okumadan önce istenir, çerezleri oturumda kalır. Ana sayfa isteği başarısız olursa veya bir sayfa okuması başarısız olursa bir sonraki okuma yine ısınma ile başlar; yedek yollar (taze oturum, curl) ve tüm başlıklar/kimlik aynı. Okuma sayısı ve sıklığı değişmez, yalnızca gereksiz ağ isteği azalır (4.18.0 internet sayacıyla ölçülür). Kod geri dönüşü: `sh tools/prepare_code_rollback.sh f64cd64` (4.19.0).
