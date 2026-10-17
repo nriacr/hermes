@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.19.1
+
+- Hepsiburada artık her ürün okumasından önce ana sayfaya ısınma isteği atmaz: ana sayfa bir okuma oturumunda (her çevrimde site başına bir oturum) yalnızca ilk okumadan önce istenir, çerezleri oturumda kalır. Ana sayfa isteği başarısız olursa veya bir sayfa okuması başarısız olursa bir sonraki okuma yine ısınma ile başlar; yedek yollar (taze oturum, curl) ve tüm başlıklar/kimlik aynı. Okuma sayısı ve sıklığı değişmez, yalnızca gereksiz ağ isteği azalır (4.18.0 internet sayacıyla ölçülür). Kod geri dönüşü: `sh tools/prepare_code_rollback.sh f64cd64` (4.19.0).
+
 ## 4.19.0
 
 - SSD yazması azaltıldı (davranış değişmedi). Takip hafızası (`state.json`, yaklaşık 740 KB) ve fiyat özeti gibi büyük kayıtlar artık `hermes.db` içinde sıkıştırılarak (zlib) saklanır; yazılan değer hemen açılıp orijinalle bayt bayt karşılaştırılır, eşit değilse eski düz metin yöntemiyle yazılır. 4 KB altı kayıtlar ve eski düz metin kayıtlar aynen okunur. Son yazılandan farksız bir kayıt tekrar yazılmaz (işlem başarısız olursa "yazıldı" sayılmaz), geri dönüş için tutulan JSON kopyaları da içerik değişmediyse yeniden yazılmaz. Bildirim kuyruğu, bastırma kayıtları, `synchronous=FULL`, JSON dışa aktarımı ve fiyat geçmişi değişmedi. Teşhis çıktısında `state_snapshot_stored` (diskteki bayt) eklendi.

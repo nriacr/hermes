@@ -118,9 +118,24 @@ def _attempt(method: str, candidate: str, exc: Exception) -> str:
     return f"{method}:{getattr(exc, 'status_code', None) or exc.__class__.__name__}:{candidate[:100]}"
 
 
-def fetch_hepsiburada_page(session: requests.Session, url: str, timeout: int):
+WARMED_ATTRIBUTE = "hermes_hepsiburada_warmed"
+
+
+def _warm_up(session: requests.Session, timeout: int) -> None:
+    """Visit the home page once per session; the cookies it sets stay in the session.
+
+    A session whose last page read failed (or whose warm-up failed) warms up again on its next read.
+    """
+    if getattr(session, WARMED_ATTRIBUTE, False):
+        return
     with contextlib.suppress(Exception):  # a missing warm-up cookie is not fatal
-        session.get(HOME_URL, headers=hepsiburada_headers(HOME_URL), timeout=timeout, allow_redirects=True)
+        response = session.get(HOME_URL, headers=hepsiburada_headers(HOME_URL), timeout=timeout, allow_redirects=True)
+        if getattr(response, "status_code", 0) < 400:
+            setattr(session, WARMED_ATTRIBUTE, True)
+
+
+def fetch_hepsiburada_page(session: requests.Session, url: str, timeout: int):
+    _warm_up(session, timeout)
 
     last_error: Optional[Exception] = None
     attempts: List[str] = []
@@ -135,6 +150,8 @@ def fetch_hepsiburada_page(session: requests.Session, url: str, timeout: int):
             except Exception as exc:  # noqa: BLE001
                 last_error = exc
                 attempts.append(_attempt(method, candidate, exc))
+                if client is session:
+                    setattr(session, WARMED_ATTRIBUTE, False)  # the next read starts with a fresh warm-up
     if curl_requests is not None:
         try:
             curl_session = curl_requests.Session()
