@@ -19,11 +19,13 @@
 | Kontrol | Komut/yöntem ve kapsam | Sonuç / kanıt dosyası |
 |---|---|---|
 | Yerel test | `sh tools/check.sh` (ruff + 640 test, 6'sı yeni) | Geçti |
-| Canlı davranış | Kurulum sonrası: Yazma özeti, /proc/diskstats (sda) önce/sonra, bildirim/tablo karşılaştırma | Aşağıda "Canlı kanıt" bölümü kurulumdan sonra doldurulur |
+| Canlı: Hermes yazması | Hermes "Yazma özeti" (10 dk) önce/sonra | 13,36 MB/dk → 1,10 MB/dk (state.json SQL 116,3 MB/157x → 1,7 MB/31x; fiyat özeti SQL 8,2 → 0,9 MB) |
+| Canlı: SSD toplam | /proc/diskstats sda, HA ayarları zaten canlıyken: önce 22,6 MB/dk (253 sn), sonra 7,3 MB/dk (540 sn, kurulumdan hemen sonra) | ~%68 düşüş (HA öncesi 24,4 MB/dk) |
+| Canlı: davranış | Kurulum sonrası günlük, Hermes 4.19.0 started, outbox/gecikme sağlıklı, hata/bozuk kayıt satırı yok; fan ve UPS sensörleri sağlıklı | Geçti. Bildirim/tablo birebir karşılaştırması: kurulumda yeni bildirim olmadı, anlık görüntü eşitliği her yazmada bayt bayt doğrulanıyor |
 
 ## Yayın ve kurulum
 
-- Kurulum yapılana kadar bu kayıt "yayımlanmadı" sayılır; durum kurulumdan sonra aşağıya yazılır.
+- Yayımlandı: c04545b (origin/main). Kuruldu: 2026-10-17 ~13:43 UTC, `ha-exclusive sh tools/install_rpi.sh`; test, yedek doğrulama, sürüm 4.19.0 ve canlı okuma geçti. Önizleme ortamı yok; ön doğrulama yerel testlerle yapıldı.
 
 ## Veri, yedek ve geri alma
 
@@ -33,4 +35,4 @@
 
 ## Kalan durum
 
-- Canlı ölçüm sonuçları kurulumdan sonra eklenecek.
+- Kalan yazma ~7 MB/dk: HA çekirdeği/zigbee2mqtt/diğer; Hermes JSON kopyası (state.json) dakikada ~0,8 MB hâlâ yazılıyor (geri dönüş uyumluluğu için). İleride JSON kopya aralığı 60 sn → 300 sn yapılabilir (~0,7 MB/dk kazanç), şimdilik yapılmadı.
