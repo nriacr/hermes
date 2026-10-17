@@ -23,7 +23,8 @@
 
 ## Yayın, kurulum ve canlı doğrulama
 
-- Aşağıda kurulumdan sonra doldurulur.
+- Yayın: GitHub main dff3940 (4.19.5). Kurulum: `HA_AGENT=claude bin/ha-exclusive sh tools/install_rpi.sh`; Hermes 4.19.5 kuruldu, kurulum sonu sağlık/okuma kontrolü ok (failed outbox 1 önceden vardı, açık sorun 1, Amazon/Hepsiburada/Togg okumaları 10-52 sn önce).
+- Canlı sayfalar (HA ingress, bellekte oturum): anasayfa 4.19.5 – "Yok." boş durumu görüldü, kaldırılan başlık altı cümlesi yok. PIN kilit ekranı yalnız PIN alanı + Home Assistant bağlantısını gösteriyor. İstatistik, Fırsat geçmişi ve Ayarlar PIN'li olduğu için canlıda açılmadı; metinler testlerle (650 OK) doğrulandı.
 
 ## Veri, yedek ve geri alma
 
