@@ -1,6 +1,9 @@
 """Hepsiburada: product, variant and search pages with campaign-aware prices."""
 
 import contextlib
+import threading
+import time
+from collections import Counter
 from typing import List, Optional
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
@@ -119,6 +122,33 @@ def _attempt(method: str, candidate: str, exc: Exception) -> str:
 
 
 WARMED_ATTRIBUTE = "hermes_hepsiburada_warmed"
+ATTEMPT_LOG_SECONDS = 600
+_attempts: Counter = Counter()
+_attempts_lock = threading.Lock()
+_attempts_since = time.monotonic()
+
+
+def note_attempt(method: str, outcome) -> None:
+    """Tally every network attempt by method and result; one summary line every ten minutes (measurement only)."""
+    global _attempts_since
+    line = ""
+    with _attempts_lock:
+        _attempts[(method, str(outcome))] += 1
+        elapsed = time.monotonic() - _attempts_since
+        if elapsed >= ATTEMPT_LOG_SECONDS:
+            by_method: dict = {}
+            for (name, result), count in sorted(_attempts.items()):
+                by_method.setdefault(name, []).append(f"{result}={count}")
+            line = (f"Hepsiburada deneme özeti (son {elapsed / 60:.0f} dk): "
+                    + " | ".join(f"{name}: {', '.join(results)}" for name, results in by_method.items()))
+            _attempts.clear()
+            _attempts_since = time.monotonic()
+    if line:
+        log(line)
+
+
+def _outcome(exc: Exception):
+    return getattr(exc, "status_code", None) or exc.__class__.__name__
 
 
 def _warm_up(session: requests.Session, timeout: int) -> None:
@@ -130,6 +160,7 @@ def _warm_up(session: requests.Session, timeout: int) -> None:
         return
     with contextlib.suppress(Exception):  # a missing warm-up cookie is not fatal
         response = session.get(HOME_URL, headers=hepsiburada_headers(HOME_URL), timeout=timeout, allow_redirects=True)
+        note_attempt("home", getattr(response, "status_code", "?"))
         if getattr(response, "status_code", 0) < 400:
             setattr(session, WARMED_ATTRIBUTE, True)
 
@@ -143,12 +174,15 @@ def fetch_hepsiburada_page(session: requests.Session, url: str, timeout: int):
     for method, client in (("requests", session), ("requests_fresh", CountedSession())):
         for candidate in variants:
             try:
-                return _checked(
+                page = _checked(
                     client.get(candidate, headers=hepsiburada_headers(candidate), timeout=timeout, allow_redirects=True),
                     candidate,
                 )
+                note_attempt(method, "ok")
+                return page
             except Exception as exc:  # noqa: BLE001
                 last_error = exc
+                note_attempt(method, _outcome(exc))
                 attempts.append(_attempt(method, candidate, exc))
                 if client is session:
                     setattr(session, WARMED_ATTRIBUTE, False)  # the next read starts with a fresh warm-up
@@ -157,15 +191,18 @@ def fetch_hepsiburada_page(session: requests.Session, url: str, timeout: int):
             curl_session = curl_requests.Session()
             for candidate in variants:
                 try:
-                    return _checked(
+                    page = _checked(
                         count_curl(curl_session.get(
                             candidate, headers=hepsiburada_headers(candidate), timeout=timeout,
                             allow_redirects=True, impersonate="chrome124",
                         )),
                         candidate,
                     )
+                    note_attempt("curl", "ok")
+                    return page
                 except Exception as exc:  # noqa: BLE001
                     last_error = exc
+                    note_attempt("curl", _outcome(exc))
                     attempts.append(_attempt("curl", candidate, exc))
         except Exception as exc:  # noqa: BLE001
             last_error = exc

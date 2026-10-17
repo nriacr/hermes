@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.19.3
+
+- Hepsiburada ağ denemeleri ölçülür (yalnızca ölçüm, davranış aynı): her deneme (ana sayfa, requests, requests_fresh, curl) yöntem ve sonuca (200, 403, ... veya hata türü) göre sayılır ve 10 dakikada bir günlüğe "Hepsiburada deneme özeti" satırı yazılır. Amaç, okuma başına neden 5-6 istek yapıldığını görmek. Okuma sayısı, sıra, başlıklar ve kimlik değişmedi. Kod geri dönüşü: `sh tools/prepare_code_rollback.sh fd76e83` (4.19.2).
+
 ## 4.19.2
 
 - SSD yazması biraz daha azaltıldı: geri dönüş için tutulan JSON kopyaları (state.json, latest_price_summary.json vb.) en çok 5 dakikada bir yazılır (önceden dakikada bir; durdurma ve çıkışta son hali yine yazılır, değişmeyen içerik zaten yazılmıyor). Asıl kayıt `hermes.db` içinde anında yazılmaya devam eder; bildirim, fiyat geçmişi ve tablo davranışı değişmedi. Yalnız eski sürüme acil dönüşte kullanılan JSON kopyası en çok 5 dk eski olabilir.

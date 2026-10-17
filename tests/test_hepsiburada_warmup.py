@@ -66,5 +66,31 @@ class WarmUpTests(unittest.TestCase):
         self.assertEqual(session.calls.count(HOME_URL), 2)  # healthy again: no more warm-ups
 
 
+class AttemptTallyTests(unittest.TestCase):
+    def setUp(self):
+        hepsiburada._attempts.clear()
+        hepsiburada._attempts_since = __import__("time").monotonic()
+
+    def test_attempts_are_tallied_by_method_and_result(self):
+        session = FakeSession()
+        fetch_hepsiburada_page(session, PRODUCT, 5)
+        self.assertEqual(hepsiburada._attempts[("home", "200")], 1)
+        self.assertEqual(hepsiburada._attempts[("requests", "ok")], 1)
+
+    def test_failures_are_tallied_with_their_status_and_the_summary_line_is_logged_after_ten_minutes(self):
+        session = FakeSession(page_status=403)
+        with patch.object(hepsiburada, "curl_requests", None), patch.object(hepsiburada, "CountedSession", lambda: FakeSession(page_status=403)), \
+                self.assertRaises(Exception):
+            fetch_hepsiburada_page(session, PRODUCT, 5)
+        self.assertGreaterEqual(hepsiburada._attempts[("requests", "403")], 1)
+        self.assertGreaterEqual(hepsiburada._attempts[("requests_fresh", "403")], 1)
+        hepsiburada._attempts_since -= hepsiburada.ATTEMPT_LOG_SECONDS + 1
+        with patch.object(hepsiburada, "log") as log:
+            hepsiburada.note_attempt("curl", "ok")
+        self.assertIn("Hepsiburada deneme özeti", log.call_args.args[0])
+        self.assertIn("requests: 403=", log.call_args.args[0])
+        self.assertEqual(len(hepsiburada._attempts), 0)
+
+
 if __name__ == "__main__":
     unittest.main()
