@@ -9,6 +9,7 @@ import requests
 from ..constants import CHROME_CLIENT_HINTS, SITE_HM
 from ..errors import HermesError, OutOfStockHermesError
 from ..logging_utils import log
+from ..traffic import count_curl
 from ..models import OfferResult
 from ..utils import build_headers, normalize_offer_text, parse_decimal, repair_mojibake
 from .base import Provider, extract_title, iter_json_objects, soup_from_html
@@ -398,7 +399,7 @@ def _api_url(article_ids: List[str]) -> str:
 def _api_get(session: requests.Session, api_url: str, source_url: str, timeout: int) -> Dict[str, Any]:
     headers = hm_headers(source_url)
     if curl_requests is not None:
-        response = curl_requests.get(api_url, headers=headers, timeout=timeout, impersonate="chrome124")
+        response = count_curl(curl_requests.get(api_url, headers=headers, timeout=timeout, impersonate="chrome124"))
     else:
         response = session.get(api_url, headers=headers, timeout=timeout)
     response.raise_for_status()

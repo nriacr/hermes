@@ -20,11 +20,11 @@ from pathlib import Path
 from typing import Callable, Dict, Optional, Tuple
 from urllib.parse import parse_qsl, urlencode, urlsplit
 
-import requests
 
 from ...constants import AMAZON_COOKIE_MAX_AGE_SECONDS
 from ...errors import BotProtectionHermesError, HermesError, error_status
 from ...logging_utils import log
+from ...traffic import CountedSession, count_curl
 from ...storage import load_json, save_json
 from ...utils import canonical_amazon_product_url, extract_asin_from_url, normalize_offer_text
 from ..http import cleaned_html, curl_requests, decode_response_text
@@ -257,7 +257,7 @@ class AmazonClient:
                  delay_range: Tuple[float, float] = (0.0, 0.0), sleep: Callable[[float], None] = time.sleep,
                  clock: Callable[[], float] = time.monotonic):
         # Reads with curl (Chrome TLS); a failed read is raised, never retried through another transport.
-        self.requests_session = requests.Session()
+        self.requests_session = CountedSession()
         _seed_session(self.requests_session)
         self.curl_session = None
         # When the current anonymous visitor (curl session) began; a later block retires it.
@@ -415,9 +415,9 @@ class AmazonClient:
                 restored = load_cookies(self.curl_session, self.cookies_path, blocked_at)
                 if restored:
                     log(f"Amazon çerezleri geri yüklendi: adet={restored}")
-            response = self.curl_session.get(
+            response = count_curl(self.curl_session.get(
                 url, headers=amazon_headers(), timeout=timeout, allow_redirects=True, impersonate=IMPERSONATE
-            )
+            ), "amazon")
         else:
             response = self.requests_session.get(url, headers=amazon_headers(), timeout=timeout, allow_redirects=True)
         return checked_html(response, expect_search)

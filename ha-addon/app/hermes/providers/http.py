@@ -8,6 +8,7 @@ import requests
 from ..constants import RETRY_DELAYS_SECONDS, RETRY_STATUS_CODES
 from ..errors import BotProtectionHermesError, HermesError, HttpStatusHermesError
 from ..logging_utils import log
+from ..traffic import CountedSession
 from ..utils import build_headers, normalize_offer_text, repair_mojibake
 
 try:
@@ -99,7 +100,7 @@ def read_site_html(response, label: str, is_challenge=has_generic_challenge, mes
     return html
 
 
-class MeasuredSession(requests.Session):
+class MeasuredSession(CountedSession):
     """Persistent connections with one measurement for every actual request attempt."""
 
     def __init__(self, measure):

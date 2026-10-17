@@ -52,6 +52,10 @@ CREATE TABLE IF NOT EXISTS request_window (
     at TEXT NOT NULL, site TEXT NOT NULL, duration_ms INTEGER NOT NULL, outcome TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS request_window_at ON request_window (at);
+CREATE TABLE IF NOT EXISTS traffic (
+    day TEXT NOT NULL, site TEXT NOT NULL, requests INTEGER NOT NULL DEFAULT 0, wire_rx INTEGER NOT NULL DEFAULT 0,
+    body_rx INTEGER NOT NULL DEFAULT 0, tx INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (day, site)
+);
 
 """
 READ_COLUMNS = (
@@ -185,6 +189,7 @@ class History:
                 ("DELETE FROM cycles WHERE checked_at < ?", (cycle_cutoff,)),
                 ("DELETE FROM reads WHERE at < ?", (measurement_cutoff,)),
                 ("DELETE FROM requests WHERE at < ?", (measurement_cutoff,)),
+                ("DELETE FROM traffic WHERE day < ?", (measurement_cutoff[:10],)),
             ]
             self._last_prune = time.monotonic()
         self._write("çevrim", statements)
@@ -213,6 +218,14 @@ class History:
             ("INSERT INTO request_window VALUES (?,?,?,?)", (at, site, duration, outcome)),
             ("DELETE FROM request_window WHERE at<?", (_at(now-timedelta(hours=1)),)),
         ])
+
+    def record_traffic(self, day: str, figures: Dict[str, List[int]]) -> bool:
+        """Add counted internet traffic ([requests, wire_rx, body_rx, tx] per site) to one day's totals."""
+        return self._write("internet kullanımı", [
+            ("INSERT INTO traffic VALUES (?,?,?,?,?,?) ON CONFLICT(day,site) DO UPDATE SET requests=requests+excluded.requests, "
+             "wire_rx=wire_rx+excluded.wire_rx, body_rx=body_rx+excluded.body_rx, tx=tx+excluded.tx",
+             (day, site, *row))
+            for site, row in figures.items()])
 
     def price_statement(self, offer_key, site, title, price, checked_at=None):
         # The price and its durable notification intent can share one transaction.
@@ -464,6 +477,12 @@ def read_site_reads(path: Path, since: datetime) -> List[SiteReads]:
     for site, values in durations.items():
         by_site[site].typical_ms = statistics.median(values)
     return sorted(by_site.values(), key=lambda report: (-report.total, report.site))
+
+
+def read_traffic(path: Path, since_day: str) -> List[Tuple[str, str, int, int, int, int]]:
+    """(day, site, requests, wire_rx, body_rx, tx) from the given local day on."""
+    return _read(path, "SELECT day, site, requests, wire_rx, body_rx, tx FROM traffic WHERE day >= ? ORDER BY day, site",
+                 (since_day,))
 
 
 def read_request_counts(path: Path, since: datetime) -> List[SiteRequests]:

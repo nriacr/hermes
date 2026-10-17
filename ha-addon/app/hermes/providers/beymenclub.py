@@ -14,6 +14,7 @@ import requests
 from ..constants import CHROME_CLIENT_HINTS, CHROME_USER_AGENT, SITE_BEYMENCLUB
 from ..errors import HermesError, HttpStatusHermesError, OutOfStockHermesError
 from ..logging_utils import log
+from ..traffic import CountedSession, count_curl
 from ..models import OfferResult
 from ..utils import parse_decimal, referer_for_url
 from .base import (
@@ -206,7 +207,7 @@ def fetch_beymenclub_page(session: requests.Session, url: str, timeout: int):
     """Fetch Beymen Club through its WAF-friendly, site-specific request path."""
     last_error: Optional[Exception] = None
     attempts: List[str] = []
-    for method, client in (("requests", session), ("requests_fresh", requests.Session())):
+    for method, client in (("requests", session), ("requests_fresh", CountedSession())):
         try:
             return _get_page(client, url, timeout)
         except Exception as exc:  # noqa: BLE001
@@ -214,9 +215,9 @@ def fetch_beymenclub_page(session: requests.Session, url: str, timeout: int):
             attempts.append(_attempt_label(method, exc))
     if curl_requests is not None:
         try:
-            response = curl_requests.Session().get(
+            response = count_curl(curl_requests.Session().get(
                 url, headers=beymenclub_headers(url), timeout=timeout, allow_redirects=True, impersonate="chrome124"
-            )
+            ))
             return _checked_page(response, url)
         except Exception as exc:  # noqa: BLE001
             last_error = exc
@@ -249,7 +250,7 @@ def _summary_headers(product_url: str) -> Dict[str, str]:
 def _get_size_summary(session, product_url: str, product_id: int, timeout: int) -> Dict[str, Any]:
     parsed = urlsplit(product_url)
     summary_url = f"{parsed.scheme}://{parsed.netloc}/sf-api/api/product/{product_id}/productsummary"
-    response = session.post(summary_url, headers=_summary_headers(product_url), timeout=timeout, allow_redirects=True)
+    response = count_curl(session.post(summary_url, headers=_summary_headers(product_url), timeout=timeout, allow_redirects=True))
     if response.status_code == 403:
         raise HttpStatusHermesError(403, summary_url)
     response.raise_for_status()
@@ -271,7 +272,7 @@ def fetch_beymenclub_size_summary(session: requests.Session, product_url: str, p
     except Exception as exc:  # noqa: BLE001
         last_error = exc
         attempts.append(_attempt_label("requests", exc))
-    fresh_session = requests.Session()
+    fresh_session = CountedSession()
     try:
         _get_page(fresh_session, product_url, timeout)
         return _get_size_summary(fresh_session, product_url, product_id, timeout)
@@ -281,10 +282,10 @@ def fetch_beymenclub_size_summary(session: requests.Session, product_url: str, p
     if curl_requests is not None:
         try:
             curl_session = curl_requests.Session()
-            response = curl_session.get(
+            response = count_curl(curl_session.get(
                 product_url, headers=beymenclub_headers(product_url), timeout=timeout,
                 allow_redirects=True, impersonate="chrome124",
-            )
+            ))
             _checked_page(response, product_url)
             return _get_size_summary(curl_session, product_url, product_id, timeout)
         except Exception as exc:  # noqa: BLE001

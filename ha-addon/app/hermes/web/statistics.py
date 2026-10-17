@@ -16,7 +16,7 @@ from html import escape
 from typing import Dict, List, Optional, Tuple
 
 from ..constants import DATABASE_PATH, DEFAULT_PRIORITY, STATE_PATH
-from ..history import BLOCKED_OUTCOMES, SUCCESS_OUTCOMES, Read, read_cycles, read_request_counts, read_reads
+from ..history import BLOCKED_OUTCOMES, SUCCESS_OUTCOMES, Read, read_cycles, read_request_counts, read_reads, read_traffic
 from ..storage import load_json
 from ..diagnostics import Diagnostics
 from ..logging_utils import log
@@ -504,6 +504,77 @@ def statistics_live_html(base: str, params: Optional[Dict[str, List[str]]] = Non
     return entry[2]
 
 
+TRAFFIC_DAYS = 7
+TRAFFIC_LABELS = {"diger": "Diğer", "telegram": "Telegram bağlantıları", "pushover": "Pushover"}
+
+
+def _megabytes(size: float) -> str:
+    """Turkish decimal comma: 842 KB, 12,4 MB, 1,38 GB."""
+    if size >= 1e9:
+        return f"{size / 1e9:.2f} GB".replace(".", ",")
+    if size >= 1e6:
+        return f"{size / 1e6:.1f} MB".replace(".", ",")
+    return f"{size / 1e3:.0f} KB"
+
+
+def render_traffic(rows, today: datetime) -> str:
+    """Internet use of the last seven days per site, from the counters in `traffic` (see traffic.py)."""
+    if not rows:
+        return ("<p class='statistics-empty'>İnternet kullanımı ölçümü yeni başladı; ilk veriler birkaç dakika içinde burada görünür.</p>")
+    today_key = today.strftime("%Y-%m-%d")
+    days = sorted({row[0] for row in rows})
+    per_site: Dict[str, List[int]] = {}
+    per_day: Dict[str, int] = {}
+    for day, site, count, wire, _body, sent in rows:
+        figures = per_site.setdefault(site, [0, 0, 0, 0])
+        figures[0] += count
+        figures[1] += wire
+        figures[2] += sent
+        figures[3] += 1
+        per_day[day] = per_day.get(day, 0) + wire + sent
+    total = sum(per_day.values())
+    average = total / len(days)
+    ranked = sorted(per_site.items(), key=lambda item: -(item[1][1] + item[1][2]))
+    top_site, top_figures = ranked[0]
+    top_share = round(100 * (top_figures[1] + top_figures[2]) / total) if total else 0
+    tiles = (
+        ("Bugün", _megabytes(per_day.get(today_key, 0)), "şu ana kadar (indirilen + gönderilen)"),
+        ("Son 7 gün", _megabytes(total), f"{len(days)} günlük ölçüm"),
+        ("Günlük ortalama", _megabytes(average), "ölçülen günlerin ortalaması"),
+        ("En çok kullanan", TRAFFIC_LABELS.get(top_site) or site_label(top_site), f"toplamın %{top_share}'i"),
+    )
+    tile_html = "<div class='stat-tiles'>" + "".join(
+        f"<section class='stat-tile'><span>{escape(title)}</span><strong>{escape(value)}</strong><small>{escape(note)}</small></section>"
+        for title, value, note in tiles) + "</div>"
+    cards = []
+    for site, (count, wire, sent, measured_days) in ranked:
+        used = wire + sent
+        share = round(100 * used / total) if total else 0
+        label = TRAFFIC_LABELS.get(site) or site_label(site)
+        per_request = _megabytes(wire / count) if count else "-"
+        cards.append(
+            f"<article class='site-health {site_theme_class(label)}'>"
+            f"<header><strong>{escape(label)}</strong><span>{escape(_megabytes(used / measured_days))} / gün · toplam {escape(_megabytes(used))}</span></header>"
+            f"<div class='health-bar traffic-bar' role='img' aria-label='toplamın %{share}'>"
+            f"<i class='health-ok' style='flex-grow:{max(used, 1)}'></i><i style='flex-grow:{max(total - used, 0)}'></i></div>"
+            "<dl>"
+            f"<div><dt>Pay</dt><dd>%{share}</dd></div>"
+            f"<div><dt>İndirilen</dt><dd>{escape(_megabytes(wire))}</dd></div>"
+            f"<div><dt>Gönderilen</dt><dd>{escape(_megabytes(sent))}</dd></div>"
+            f"<div><dt>İstek</dt><dd>{count}</dd></div>"
+            f"<div><dt>İstek başına</dt><dd>{escape(per_request)}</dd></div>"
+            "</dl></article>")
+    day_rows = "".join(
+        f"<tr><td>{datetime.strptime(day, '%Y-%m-%d').strftime('%d.%m.%Y')}</td><td>{escape(_megabytes(per_day[day]))}</td></tr>"
+        for day in reversed(days))
+    table = ("<details class='daily-history' data-key='traffic-days'><summary>Günlük internet kullanımı</summary>"
+             "<div class='table-wrap measure-wrap'><table class='statistics-table measure-table'><thead><tr><th>Gün</th>"
+             f"<th>İndirilen + gönderilen</th></tr></thead><tbody>{day_rows}</tbody></table></div></details>")
+    note = ("<p class='site-note'>Hermes'in kendi trafiği; sıkıştırılmış (ağdan geçen) boyuttur. TLS el sıkışması, DNS ve Telegram "
+            "bağlantısı dahil değildir, gerçek kullanım bundan biraz yüksektir. Telegram bağlantıları yalnızca paylaşılan kısa linklerin açılmasıdır.</p>")
+    return f"{tile_html}<div class='site-health-list'>{''.join(cards)}</div>{note}{table}"
+
+
 def _statistics_html(base: str, params: Optional[Dict[str, List[str]]] = None) -> str:
     period = period_key(params or {})
     label, span = PERIODS[period]
@@ -525,6 +596,8 @@ def _statistics_html(base: str, params: Optional[Dict[str, List[str]]] = None) -
         f"{render_chart(buckets(reads, gaps, since, period), period)}</section>"
         f"<section class='summary-panel'><div class='summary-head'><h2>Siteler</h2><span>{escape(label)}</span></div>"
         f"{render_sites(site_figures(reads, gaps), requests_by_site)}</section>"
+        f"<section class='summary-panel'><div class='summary-head'><h2>İnternet kullanımı</h2><span>Son {TRAFFIC_DAYS} gün</span></div>"
+        f"{guarded('internet kullanımı', lambda: render_traffic(read_traffic(DATABASE_PATH, (now - timedelta(days=TRAFFIC_DAYS - 1)).strftime('%Y-%m-%d')), now), '')}</section>"
         f"<section class='summary-panel'><div class='summary-head'><h2>Engel ve hata türleri</h2><span>{escape(label)}</span></div>"
         f"{render_error_types(reads)}{render_spells(reads)}</section>"
         f"{render_daily_history(week, now)}"

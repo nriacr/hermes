@@ -11,6 +11,7 @@ from urllib.parse import parse_qs, urljoin, urlparse
 
 import requests
 
+from .. import traffic
 from ..config import read_options, watch_urls
 from ..constants import (
     DEFAULT_PRIORITY,
@@ -201,6 +202,7 @@ def _resolve_shared_url(url: str) -> str:
                 log("Telegram kısa bağlantısı genel olmayan bir adrese yönleniyor; reddedildi.")
                 return ""
             response = requests.get(current, headers=build_headers(current), timeout=15, allow_redirects=False, stream=True)
+            traffic.count_requests(response, "telegram")
             location = response.headers.get("Location") if response.is_redirect else ""
             response.close()
             if not location:

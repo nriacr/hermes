@@ -71,6 +71,8 @@ p { margin:0; color:var(--muted); line-height:1.5; font-size:13px; }
 .site-health header span { color:var(--muted); font-size:12px; }
 .health-bar { display:flex; height:8px; margin:9px 0 10px; border-radius:6px; overflow:hidden; background:#33373c; }
 .health-bar i { display:block; min-width:4px; }
+.traffic-bar i:last-child { min-width:0; }
+.stat-tiles + .site-health-list { margin-top:10px; }
 .health-ok { background:var(--ok); } .health-blocked { background:var(--warn); } .health-error { background:var(--bad); }
 .site-health dl { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:8px; margin:0; }
 .site-health dt { color:var(--muted); font-size:10px; font-weight:800; letter-spacing:.03em; text-transform:uppercase; }

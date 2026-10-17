@@ -35,6 +35,8 @@ from ..notifier import Pushover
 from ..providers.base import DEPO_LANE, Provider, ReadContext, RequestSpacing, WatchRead
 from ..providers.registry import ProviderSet
 from ..providers.http import MeasuredSession
+from .. import traffic
+from ..traffic import CountedSession
 from ..storage import load_json, save_json, export_json
 from ..utils import SystemLoad, parse_iso_datetime, site_label, system_load, utc_now
 from . import alerts, scheduling, state as state_ops, summary
@@ -132,6 +134,7 @@ class Monitor:
         self.last_cycle_read = False
         self._last_durations = (0.0, 0.0)
         self.history = History.at(self.files.database)
+        traffic.start(self.history)
         self.history.migrate_json(self.files.state, self.files.cycle_history)
         self.history.drop_idle_cycles(self.config.interval_seconds)
         self.history.record_targets({watch.tracking_id: watch.target_price for watch in self.config.watches})
@@ -360,7 +363,7 @@ class Monitor:
                 if not site_watches:
                     return
                 site = site_watches[0].site
-                with MeasuredSession(lambda method, kind, result, ms: self._measure_request(site, method, kind, result, ms)) as session:
+                with traffic.bind(site), MeasuredSession(lambda method, kind, result, ms: self._measure_request(site, method, kind, result, ms)) as session:
                     ctx = context(session, site)
                     provider = self.providers[site]
                     for watch in scheduling.priority_order(site_watches, provider.read_rank):
@@ -382,7 +385,7 @@ class Monitor:
         def work_depo(site: str, site_watches: List[WatchRule], sweep_done: threading.Event) -> None:
             provider = self.providers[site]
             try:
-                with requests.Session() as session:
+                with traffic.bind(site), CountedSession() as session:
                     ctx = context(session, site, DEPO_LANE)
                     while True:
                         progressed = False

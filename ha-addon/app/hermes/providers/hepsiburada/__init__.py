@@ -9,6 +9,7 @@ import requests
 from ...constants import CHROME_CLIENT_HINTS, SITE_HEPSIBURADA
 from ...errors import HermesError, HttpStatusHermesError
 from ...logging_utils import log
+from ...traffic import CountedSession, count_curl
 from ...models import OfferResult
 from ...utils import build_headers, format_tl, is_hepsiburada_search_url, normalize_offer_text
 from ..base import Provider
@@ -124,7 +125,7 @@ def fetch_hepsiburada_page(session: requests.Session, url: str, timeout: int):
     last_error: Optional[Exception] = None
     attempts: List[str] = []
     variants = url_variants(url)
-    for method, client in (("requests", session), ("requests_fresh", requests.Session())):
+    for method, client in (("requests", session), ("requests_fresh", CountedSession())):
         for candidate in variants:
             try:
                 return _checked(
@@ -140,10 +141,10 @@ def fetch_hepsiburada_page(session: requests.Session, url: str, timeout: int):
             for candidate in variants:
                 try:
                     return _checked(
-                        curl_session.get(
+                        count_curl(curl_session.get(
                             candidate, headers=hepsiburada_headers(candidate), timeout=timeout,
                             allow_redirects=True, impersonate="chrome124",
-                        ),
+                        )),
                         candidate,
                     )
                 except Exception as exc:  # noqa: BLE001
