@@ -12,8 +12,14 @@
 
 ## Test ve doğrulama
 
-Yerel test ve canlı sonuç aşağıda kurulumdan sonra eklenir (yapılmadan başarılı yazılmaz).
+| Kontrol | Sonuç |
+|---|---|
+| Yerel test | `sh tools/check.sh`: ruff + 644 test geçti |
+| Kurulum | `ha-exclusive sh tools/install_rpi.sh` 4.19.2 kuruldu (commit fd76e83); sonra başka thread 4.19.3 kurdu |
+| Sağlık | günlükte hata/bozuk kayıt satırı 0, Hermes started |
+| SSD yazma (sda, 10 dk, başka kurulum yokken) | 6,3 MB/dk (iki 5 dk: 6,27 ve 6,31), önceki 7,65 MB/dk. İlk ölçüm penceresi başka thread'in 4.19.3 kurulumuyla çakıştığı için geçersiz sayıldı |
+| Yazma özeti | Hermes yeniden başlatmaları nedeniyle son 100 günlük satırında yoktu; ölçülmedi |
 
 ## Veri, yedek ve geri alma
 
-- Kullanıcı verisi etkilenmez. Yedek: HA tam yedeği e7a080d7 (13:26 UTC) en yeni tam yedek, Hermes dahil. Geri alma: önceki sürüm kodu (4.19.1, sıkıştırma okuyabilir) `sh tools/prepare_code_rollback.sh 2393453`.
+- Kullanıcı verisi etkilenmez. Yedek: "Hermes 4.19.2 öncesi - 2026-10-17" slug 7a1a7d89 (tam, Hermes dahil); önceki e7a080d7. Geri alma: önceki sürüm kodu (4.19.1, sıkıştırma okuyabilir) `sh tools/prepare_code_rollback.sh 2393453`.
