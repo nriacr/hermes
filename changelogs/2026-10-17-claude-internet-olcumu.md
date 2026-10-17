@@ -19,7 +19,7 @@
 
 | Kontrol | Komut/yöntem ve kapsam | Sonuç / kanıt dosyası |
 |---|---|---|
-| Yerel test | `python -m unittest discover` (634 test), `ruff check` | 632 geçti; 2 başarısız, ikisi de değişiklikten önceki main'de aynı (test_app.test_monitor_panel_and_reset_work_together, test_monitor.test_commands_are_applied_between_cycles_and_can_start_one_now). ruff temiz. |
+| Yerel test | `python -m unittest discover` (634 test), `ruff check` | İlk koşuda 2 test başarısızdı, ikisi de değişiklikten önceki main'de (ee0bdb4) de aynıydı: test_app.test_monitor_panel_and_reset_work_together ve test_monitor.test_commands_are_applied_between_cycles_and_can_start_one_now. Neden: günlük özet 09:00-22:00 arası gönderildiği için bu saatlerde fazladan bildirim/outbox satırı çıkıyor (gece geçerler). Düzeltme: iki testte `daily_summary_enabled=False`; ürün kodu değişmedi. Düzeltmeden sonra paket temiz (sonuç aşağıda). |
 | Yeni testler | `tests/test_traffic.py` (gerçek gzip'li yerel sunucu, yönlendirme, iş parçacığı bağlama, bozuk yanıt, depolama, sayfa) | 13/13 geçti |
 | Önizleme | örnek veriyle statistics sayfası, masaüstü + telefon görüntüsü | docs/previews/u9-internet-*.png |
 | Canlı davranış | aşağıdaki "Canlı doğrulama" bölümünde |  |
