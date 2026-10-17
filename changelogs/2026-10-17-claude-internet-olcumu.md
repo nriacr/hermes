@@ -34,3 +34,16 @@
 - Kullanılan mevcut yedek: 42c055d8 (Home Assistant manuel tam yedek, 16 Ekim 2026 18:50 UTC). Yeni yedek alınmadı (Hermes AGENTS.md: sahip açıkça istemedikçe yeni yedek yok).
 - Kod geri alma: `sh tools/prepare_code_rollback.sh ee0bdb4` (4.17.1), ardından push ve `tools/install_rpi.sh`.
 - Veri geri yükleme ayrı insan yetkisi gerektirir; gerekmez.
+
+## Canlı doğrulama (2026-10-17)
+
+- Yayın: GitHub main 73d3e03 (4.18.0) + 39f3f4a (iki zamana bağlı testin düzeltmesi; ürün kodu aynı). Kurulan kayıt: 39f3f4a.
+- Kurulum: `HA_AGENT=claude sh tools/install_rpi.sh` (bin/ha-exclusive altında). İlk kurulum denemesi `tools/check.sh` içindeki 2 teste takıldı (gündüz saatlerinde günlük özet fazladan bildirim üretiyor); kontrol atlanmadı, testler düzeltilip yeniden çalıştırıldı, ikinci denemede tüm paket geçti ve kuruldu (16:16 yerel). Hermes 4.18.0 başladı.
+- Kullanılan tam yedek: eb87939c (install_rpi.sh'nin doğruladığı en yeni yedek, 17 Ekim 02:44 UTC). Yeni yedek alınmadı.
+- Çalışma zamanı okuması: version 4.18.0, healthy true, 14 aktif takip, 702 fiyat noktası, 369 state girişi (kayıp yok), outbox sent 134 / failed 1 (kurulum öncesinden), açık sorun 2, Amazon/Hepsiburada/Togg okumaları 13-37 sn önce.
+- İlk ölçüm (16:16-16:26 yerel, 10 dk): indirilen 19,25 MB (açılmış 107,75 MB), gönderilen 0,28 MB, 318 istek; Amazon 13,52 MB/57 istek (yaklaşık 237 KB/istek), Hepsiburada 5,46 MB/249 istek (yaklaşık 22 KB/istek), Togg 0,27 MB/9 istek. Hız yaklaşık 2,8 GB/gün (indirilen, sıkıştırılmış). Veritabanı yazma satırı "internet kullanımı kayıtları SQL 9x" görüldü (dakikada bir toplu yazma).
+- Çapraz kontrol: Supervisor konteyner sayacı aynı sürede rx 25,3 MB, tx 1,65 MB. Sayılan 19,5 MB bunun yaklaşık %77'si; fark TLS/TCP başlıkları, el sıkışmaları, DNS ve Home Assistant ile yerel konuşmadır. Sayaç makul ve alt sınırdır.
+- Kaynak: bellek 420 MB, CPU %26 (kurulumdan önce %26 ve 495 MB); günlükte Traceback/yazma hatası yok.
+- Doğrulanamayan: istatistik sayfası PIN'li olduğu için sayfanın açılma hızını ve yeni bölümün canlı görünümünü ben görmedim; ortam testiyle (önizleme) doğrulandı. Nuri sayfayı açıp bölümü görmeli.
+- Gözlem (bu işin kapsamı dışı): aynı günlükte "Yazma özeti" state.json SQL 111,9 MB / 10 dk (151 yazma) gösteriyor; SSD yazma konusu diğer thread'in işi.
+- Geri alma: `sh tools/prepare_code_rollback.sh ee0bdb4` (4.17.1 koduna dönüş, yeni yama sürümü olarak), ardından push ve `tools/install_rpi.sh`. Veri geri yüklemesi (`rollback_rpi.sh eb87939c`) yalnız Nuri'nin açık izniyle ve gerekmez: traffic tablosu eski sürümlerce yok sayılır.
