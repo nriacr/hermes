@@ -1,3 +1,8 @@
+# İsteğe bağlı ayrıntılı rapor şablonu
+
+Varsayılan süreç, iş sonunda [DURUM.md](DURUM.md) listesini kısa güncellemektir.
+Aşağıdaki uzun şablon yalnız kullanıcı ayrıca ayrıntılı rapor istediğinde kullanılır.
+
 # YYYY-MM-DD — Agent — Konu
 
 ## Sorumlu ve yetki

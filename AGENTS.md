@@ -136,6 +136,27 @@ of each site are described in `docs/ARCHITECTURE.md`.
 - Do not expose the public dashboard without its token path and the user's
   reverse proxy/tunnel controls.
 
+## Kredi verimliliği ve ortak iş listesi
+
+- Kredi/token verimliliği iki agent için de öncelikli kuraldır. Yeterli doğruluğu
+  sağlayan en kısa yolu kullan; gereksiz araç çağrısı, tekrar okuma, uzun çıktı,
+  ayrı rapor ve sonucu değişmeyecek test tekrarından kaçın. Güvenlik, yedek,
+  gerekli test ve canlı doğrulamayı atlamak verimlilik sayılmaz.
+- Her iş için yeni rapor dosyası açma. Her depoda tek changelogs/DURUM.md tutulur:
+  yapılanlar, planlananlar, yapılamayanlar/engeller ve son kontroller. İş sonunda
+  ilgili satırları güncelle; iş yarıda kalırsa sonraki somut adımı bırak.
+- Kısa kayıt: tarih, Agent, ne değişti, gerçek test sonucu, yayın/kurulum durumu;
+  canlı değişiklikte gerekli yedek/geri alma bilgisi. Yapılmayana yapıldı deme;
+  engelin nedenini ve varsa gereken insan kararını açıkça belirt.
+- Mevcut maddeyi güncelle; aynı bilgiyi ayrı dosyalara veya uzun anlatımlara
+  çoğaltma. Geçmiş ayrıntı Git'te kalır; liste sınırsız günlük haline getirilmez.
+  Başka agentın maddesini kaybetme; son pull ile eşzamanlı değişiklikleri birleştir.
+- Eski changeloglar korunur, rutin olarak topluca okunmaz/yazılmaz. Ayrı ayrıntılı
+  rapor yalnız kullanıcı açıkça istediğinde hazırlanır; şablon SABLON.md'dir.
+  Runtime sürümünün zorunlu CHANGELOG kaydı kısa tutulur; ikinci iş raporu üretilmez.
+- Sohbette kısa ilerleme/sonuç ve önemli engel bilgisi yeterlidir. Ortak liste ve
+  konuyla ilgili kaynakları hedefli oku; güncel kanıtı değişmedikçe yeniden üretme.
+
 ## Change workflow
 
 1. Inspect the current implementation and relevant tests before editing.
@@ -163,17 +184,14 @@ of each site are described in `docs/ARCHITECTURE.md`.
    contains no chat ownership guard. Never print credentials or bypass a real
    access denial. Installation retains tests, daily backup validation, exact
    installed version, runtime health and behavior-specific live verification.
-10. Every agent writes a detailed changelogs/YYYY-MM-DD-konu.md (agent adı dosya adında değil, kayıt içindeki "Agent" alanında yazılır) record:
-    human instruction and scope; before/after behavior; changed files and
-    dependencies; exact tests/results; commit/version; whether published and
-    installed; live evidence; protected data; backup/rollback; remaining limits.
-    Use a distinct file to avoid concurrent log overwrites. Never claim an
-    unperformed test or installation. Never put secrets in a log. Successful
-    installs produce no routine chat/report message; keep the evidence in files.
-    Report only failure, a required human decision or an explicit status request.
-    Data restore/deletion requires separate explicit authorization.
-    Read the canonical Home Assistant docs/YAYIN_AKISI.md. Its current rules
-    supersede coordinator instructions in old worktree copies.
+10. After each job, update only its relevant entries in changelogs/DURUM.md:
+    done, planned, blocked/not done (with reason), actual checks and publication/
+    installation status. Include date/Agent and necessary backup/rollback evidence
+    for live changes. Do not create a separate job report unless the user asks.
+    Keep required ha-addon/CHANGELOG.md release notes short. Never claim tests or
+    installation that did not happen. Merge concurrent list edits without loss.
+    Read the canonical Alfred docs/YAYIN_AKISI.md when relevant; its current rules
+    supersede old worktree instructions. Preserve required checks and data safety.
 
 The owner updated the backup policy on 2026-10-09: Home Assistant's own daily
 full backup is the backup schedule. Do not schedule backups or backup checks
@@ -203,5 +221,5 @@ Documentation and deployment-tool-only changes do not require an add-on version 
 - Runtime changes include a version bump and are pushed to GitHub.
 - The Raspberry Pi add-on is updated after each runtime release and its
   installed version/state are verified.
-- A detailed agent changelog records behavior and verification; successful
-  installation does not trigger a routine message to the user.
+- Relevant changelogs/DURUM.md entries record actual changes/checks briefly;
+  avoid separate reports and redundant messages.
