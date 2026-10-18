@@ -163,7 +163,7 @@ of each site are described in `docs/ARCHITECTURE.md`.
    contains no chat ownership guard. Never print credentials or bypass a real
    access denial. Installation retains tests, daily backup validation, exact
    installed version, runtime health and behavior-specific live verification.
-10. Every agent writes a detailed changelogs/YYYY-MM-DD-agent-topic.md record:
+10. Every agent writes a detailed changelogs/YYYY-MM-DD-konu.md (agent adı dosya adında değil, kayıt içindeki "Agent" alanında yazılır) record:
     human instruction and scope; before/after behavior; changed files and
     dependencies; exact tests/results; commit/version; whether published and
     installed; live evidence; protected data; backup/rollback; remaining limits.
