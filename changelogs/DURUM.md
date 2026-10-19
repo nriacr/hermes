@@ -5,7 +5,7 @@ sonuç, gerçek kontrol ve yayın/kurulum bilgisi yeterlidir. Ayrıntı Git geç
 
 ## Yapılanlar
 
-- 2026-10-19 · Agent: Claude · 4.20.1: Telegram keyword bildirimleri sessiz (Pushover öncelik -1); fiyat fırsatı bildirimleri değişmedi. Kontrol: tools/check.sh 651 test başarılı. Kurulum: 4.20.1 canlı, install_rpi.sh doğrulaması başarılı; geri dönüş yedeği 00ed4add.
+- 2026-10-19 · Agent: Claude · 4.20.1: Telegram keyword bildirimleri sessiz (Pushover öncelik -1); fiyat fırsatı bildirimleri değişmedi. Kontrol: tools/check.sh 651 test başarılı. Kurulum: 4.20.1 canlı, install_rpi.sh doğrulaması başarılı; kod geri dönüşü: sh tools/prepare_code_rollback.sh 6918e21 (veri geri yükleme gerekmez); günlük yedek 00ed4add.
 - 2026-10-18 · Agent: Codex · Kredi verimliliği ortak öncelik olarak kurallara
   işlendi; iş başına rapor yerine bu listeye geçildi. Belge değişikliği;
   uygulama sürümü ve canlı sistem değişmedi. Kontrol: bağlantılar ve Git farkı başarılı.
