@@ -102,8 +102,9 @@ class DeliveryQueue:
                 self._complete(identity, payload, False, "expired")
                 return True
             try:
+                extra = {"quiet": True} if payload.get("quiet") else {}
                 self.transport.send(payload["title"], payload["message"], payload.get("url", ""),
-                                    url_title=payload.get("url_title", "Ürünü aç"))
+                                    url_title=payload.get("url_title", "Ürünü aç"), **extra)
             except Exception as exc:  # noqa: BLE001 - persist attempts, classify permanent errors
                 status = getattr(getattr(exc, "response", None), "status_code", None)
                 permanent = isinstance(status, int) and (status == 200 or 400 <= status < 500)

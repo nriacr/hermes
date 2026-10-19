@@ -21,7 +21,7 @@ class Pushover:
     def configured(self) -> bool:
         return bool(self.user_key and self.api_token)
 
-    def send(self, title: str, message: str, url: str = "", url_title: str = "Ürünü aç") -> None:
+    def send(self, title: str, message: str, url: str = "", url_title: str = "Ürünü aç", quiet: bool = False) -> None:
         with traffic.bind("pushover"):
             response = self.session.post(
                 PUSHOVER_URL,
@@ -32,7 +32,7 @@ class Pushover:
                     "message": message,
                     "url": url,
                     "url_title": url_title,
-                    "priority": "0",
+                    "priority": "-1" if quiet else "0",
                     "sound": "pushover",
                 },
                 timeout=self.timeout,

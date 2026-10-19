@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.20.1
+
+- Telegram keyword bildirimleri sessiz gelir (Pushover öncelik -1: ses ve titreşim yok; ekranda görünür). Fiyat fırsatı bildirimleri aynı kaldı. Yalnız bu bildirimin ayarı değişti; tespit, sıra ve gönderim mantığı aynı.
+
 ## 4.20.0
 
 - Fırsatlar/fiyatlar sayfası (anasayfa) yeni renk düzenine geçti (yalnız görünüm; veri, bildirim, tarama mantığı değişmedi; ayarlar ve istatistik sayfaları aynı). Kural: kırmızı ve yeşil yalnız fiyat artış/azalış okları ve değişim yüzdelerinde (▼ yeşil `#3ddc84`, ▲ kırmızı `#ff5c6c`; "hedefin altında" etiketi ve `ov-chg down/up` aynı). Sarı (`#ffd35c`) yalnız Depo (Depo kartı/etiketi, detay grafiğinde Depo çizgisi; eski `#ffb347` kalktı). Her site tek ana renkten bir palet kullanır (`--c` ana, `--hi` açık ton, `--lo` koyu ton): Amazon `#2f9bff` (mavi), Hepsiburada `#ff7a1a` (turuncu), Trendyol `#9a7bff`, Network `#19d3d3`, Beymen Club `#d4b896`, Zara `#e8ebf5`, H&M `#e56bff`, Togg `#8d9bb5`, diğer `#a7a3c8`. Fırsat kartı çerçevesi artık sitenin kendi rengi. Küçük çizgi grafik site renginde (yönü ok/yüzde söyler). Detay grafiğinde tek çizgi site rengi; Depo+Yeni çiftinde "Yeni" çizgisi ve açıklama kutusu site rengi, Depo sarı; hedef çizgisi beyaz kesik. Nötr (beyaz/gri/koyu mavi-gri): seçili sekme, "Ürüne git", çevrim noktası, fırsat sayısı, "açık sorun yok", sorun satırları, arka plan lekeleri, logo; tarama sıklığı noktaları anasayfada beyazdan griye tek ton (Ayarlar'daki renkler aynı kaldı). Kod geri dönüşü: `sh tools/prepare_code_rollback.sh dff3940` (4.19.5). Ayrıntı: `changelogs/2026-10-17-renk-duzeni.md`.

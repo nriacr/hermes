@@ -408,7 +408,7 @@ def _send_keyword_notification(notifier: Pushover, event, channel_name: str, key
     message_url = _telegram_message_link(event)
     notifier.send("Telegram keyword alarmı", _message_preview(text), message_url, url_title="Telegram'da aç",
                   event_id="telegram:" + _message_key(event),
-                  metadata={"telegram": [channel_name, keyword, message_url, _message_preview(text, 180)]})
+                  metadata={"telegram": [channel_name, keyword, message_url, _message_preview(text, 180)], "quiet": True})
     log(f"Telegram bildirimi kuyruğa alındı: kanal={channel_name} | keyword={keyword}")
 
 
