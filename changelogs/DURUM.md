@@ -5,6 +5,7 @@ sonuç, gerçek kontrol ve yayın/kurulum bilgisi yeterlidir. Ayrıntı Git geç
 
 ## Yapılanlar
 
+- 2026-10-20 · Agent: Claude · 4.20.2 (Nuri: telefonda Hermes açılışı 2-3 sn siyah): ana sayfa özet bloğu sunucuda 1,6-7,8 sn üretiliyordu; kısa önbellek + eski kopyayı anında verip arkada yenileme eklendi, bildirim/tarama değişmedi. Kontrol: tools/check.sh 652 test başarılı. Kurulum: bekliyor.
 - 2026-10-19 · Agent: Claude · 4.20.1: Telegram keyword bildirimleri sessiz (Pushover öncelik -1); fiyat fırsatı bildirimleri değişmedi. Kontrol: tools/check.sh 651 test başarılı. Kurulum: 4.20.1 canlı, install_rpi.sh doğrulaması başarılı; kod geri dönüşü: sh tools/prepare_code_rollback.sh 6918e21 (veri geri yükleme gerekmez); günlük yedek 00ed4add.
 - 2026-10-18 · Agent: Codex · Kredi verimliliği ortak öncelik olarak kurallara
   işlendi; iş başına rapor yerine bu listeye geçildi. Belge değişikliği;

@@ -2,6 +2,7 @@
 
 import gzip
 import json
+import time
 import unittest
 
 from hermes.web.assets import APP_CSS
@@ -51,6 +52,7 @@ class DataFilesMixin:
     def setUp(self):
         self.data = TempData()
         server.refresh_public_options()
+        dashboard.clear_dashboard_cache()
         root = self.data.root
         self.options_path = root / "options.json"
         self.options_path.write_text(json.dumps({"takip_edilenler": []}), encoding="utf-8")
@@ -357,7 +359,7 @@ class DashboardTests(DataFilesMixin, unittest.TestCase):
         for kind in ("partial", "read"):
             diagnostics.incident("watch", kind, "Fiyat yok", "Diğer varyantlar okunuyor", context=context)
         for base in (".", "/public/test-access"):
-            html = dashboard.dashboard_live_html(base)
+            html = dashboard._build_dashboard_live_html(base)
             self.assertIn("Açık sorunlar <small>2", html)
             self.assertIn("<strong>iPhone Pro Max</strong>", html)
             self.assertIn("512 GB / Gümüş", html)
@@ -401,6 +403,7 @@ class DashboardTests(DataFilesMixin, unittest.TestCase):
         self.assertNotIn("Eski", html)
         self.assertGreater(html.index("Açık sorunlar <small>"), html.index("Özet Tablo"))
         self.data.write_state({})
+        dashboard.clear_dashboard_cache()
         self.assertIn("Şu anda açık sorun yok", dashboard.render_dashboard_page(".", {}).decode())
 
     def test_error_links_of_variants_are_listed(self):
@@ -409,7 +412,7 @@ class DashboardTests(DataFilesMixin, unittest.TestCase):
         self.assertEqual(dashboard.clean_error_message("https://x.test | Site 403"), "Site 403")
 
     def live(self):
-        return dashboard.dashboard_live_html(".")
+        return dashboard._build_dashboard_live_html(".")
 
     def test_multi_result_watch_gets_its_own_section_with_variant_tags(self):
         rows = [price_row(product_title="Juo Q3, 256 GB / Yeşil", product_url="https://example.test/green", price="14.000 TL",
@@ -650,6 +653,7 @@ class DashboardTests(DataFilesMixin, unittest.TestCase):
         self.assertIn("https://t.me/firsatz/1", html)  # shown even before the first price table exists
         self.assertIn("AirPods indirim", html)
         self.data.write_summary({"rows": [price_row(price="14.000 TL")]})
+        dashboard.clear_dashboard_cache()
         html = dashboard.render_dashboard_page(".", {}).decode()
         self.assertIn("data-pane='tg'", html)
         self.assertIn("AirPods indirim", html)
@@ -999,3 +1003,31 @@ class SettingsTests(DataFilesMixin, unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DashboardCacheTests(unittest.TestCase):
+    def setUp(self):
+        dashboard.clear_dashboard_cache()
+        self.addCleanup(dashboard.clear_dashboard_cache)
+
+    def test_second_open_uses_cache_and_stale_copy_is_served_at_once(self):
+        calls = []
+
+        def build(base):
+            calls.append(base)
+            return f"v{len(calls)}"
+
+        with patch.object(dashboard, "_build_dashboard_live_html", build):
+            self.assertEqual(dashboard.dashboard_live_html("."), "v1")
+            self.assertEqual(dashboard.dashboard_live_html("."), "v1")
+            self.assertEqual(len(calls), 1)
+            stamp, html = dashboard._live_cache["."]
+            dashboard._live_cache["."] = (stamp - dashboard._LIVE_FRESH_SECONDS - 1, html)
+            self.assertEqual(dashboard.dashboard_live_html("."), "v1")  # stale: answered at once
+            for _ in range(100):
+                if len(calls) == 2 and "." not in dashboard._live_refreshing:
+                    break
+                time.sleep(0.02)
+            self.assertEqual(dashboard.dashboard_live_html("."), "v2")
+            dashboard.clear_dashboard_cache()
+            self.assertEqual(dashboard.dashboard_live_html("."), "v3")

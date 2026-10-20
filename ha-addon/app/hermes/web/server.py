@@ -25,7 +25,7 @@ from ..notifier import Pushover
 from ..utils import parse_bool
 from . import assets
 from .access import Session, WebAccess
-from .dashboard import dashboard_live_html, render_dashboard_page
+from .dashboard import clear_dashboard_cache, dashboard_live_html, render_dashboard_page
 from .icons import HERMES_ICON_PNG, HERMES_ICON_SVG, render_web_manifest
 from .pages import link
 from .pin import csrf_field, render_configure_page, render_pin_page, render_session_bar
@@ -320,6 +320,7 @@ class Router:
         return Response(200, pages[path](), HTML)
 
     def _post(self, request: Request, path: str) -> Response:
+        clear_dashboard_cache()
         if path == "/settings/save":
             ok, message = handle_settings_save(request.body)
             refresh_public_options()

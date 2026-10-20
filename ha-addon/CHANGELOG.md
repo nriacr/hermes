@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.20.2
+
+- Telefondan açılışta 2-7 sn siyah ekran giderildi: anasayfanın özet bloğu kısa süre önbellekte tutulur (8 sn taze; 3 dk'ya kadar eski kopya anında verilir, arkada yenilenir; ayar/sıfırlama işlemleri önbelleği siler). Tarama, bildirim ve veri mantığı değişmedi; yalnız web görünümünün hazırlanışı.
+
 ## 4.20.1
 
 - Telegram keyword bildirimleri sessiz gelir (Pushover öncelik -1: ses ve titreşim yok; ekranda görünür). Fiyat fırsatı bildirimleri aynı kaldı. Yalnız bu bildirimin ayarı değişti; tespit, sıra ve gönderim mantığı aynı.

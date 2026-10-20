@@ -2,6 +2,8 @@
 
 import re
 import sqlite3
+import threading
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from decimal import ROUND_DOWN, Decimal, InvalidOperation
@@ -586,7 +588,49 @@ def live_region(base: str, endpoint: str, html: str) -> str:
             f"data-live-interval='{LIVE_INTERVAL_SECONDS[endpoint.split('?')[0]]}'>{html}</div>")
 
 
+_LIVE_FRESH_SECONDS = 8.0
+_LIVE_STALE_SECONDS = 180.0
+_live_cache: Dict[str, Any] = {}
+_live_lock = threading.Lock()
+_live_refreshing: set = set()
+
+
+def clear_dashboard_cache() -> None:
+    with _live_lock:
+        _live_cache.clear()
+
+
+def _store_live(base: str) -> str:
+    try:
+        html = _build_dashboard_live_html(base)
+        with _live_lock:
+            _live_cache[base] = (time.monotonic(), html)
+        return html
+    finally:
+        with _live_lock:
+            _live_refreshing.discard(base)
+
+
 def dashboard_live_html(base: str) -> str:
+    """Cached summary block: the page opens at once, a stale copy is refreshed in the background.
+
+    The browser's live refresh fetches the new block a moment later, so nothing stays old.
+    """
+    with _live_lock:
+        hit = _live_cache.get(base)
+        age = time.monotonic() - hit[0] if hit else None
+        if hit and age <= _LIVE_FRESH_SECONDS:
+            return hit[1]
+        if hit and age <= _LIVE_STALE_SECONDS:
+            if base not in _live_refreshing:
+                _live_refreshing.add(base)
+                threading.Thread(target=_store_live, args=(base,), daemon=True).start()
+            return hit[1]
+        _live_refreshing.add(base)
+    return _store_live(base)
+
+
+def _build_dashboard_live_html(base: str) -> str:
     """Everything on the summary page that changes while it is open."""
     try:
         payload = load_json(SUMMARY_PATH, {})
