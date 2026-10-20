@@ -589,7 +589,7 @@ def live_region(base: str, endpoint: str, html: str) -> str:
 
 
 _LIVE_FRESH_SECONDS = 8.0
-_LIVE_STALE_SECONDS = 180.0
+_LIVE_STALE_SECONDS = 1800.0
 _live_cache: Dict[str, Any] = {}
 _live_lock = threading.Lock()
 _live_refreshing: set = set()

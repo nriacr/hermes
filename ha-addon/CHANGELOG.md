@@ -1,8 +1,12 @@
 # Değişiklik günlüğü
 
+## 4.20.3
+
+- Eski önbellek kopyası süresi 3 dk'dan 30 dk'ya çıkarıldı (uzun boşta kaldıktan sonraki ilk açılış da anında); canlı yenileme birkaç sn içinde güncel veriyi getirir.
+
 ## 4.20.2
 
-- Telefondan açılışta 2-7 sn siyah ekran giderildi: anasayfanın özet bloğu kısa süre önbellekte tutulur (8 sn taze; 3 dk'ya kadar eski kopya anında verilir, arkada yenilenir; ayar/sıfırlama işlemleri önbelleği siler). Tarama, bildirim ve veri mantığı değişmedi; yalnız web görünümünün hazırlanışı.
+- Telefondan açılışta 2-7 sn siyah ekran giderildi: anasayfanın özet bloğu kısa süre önbellekte tutulur (8 sn taze; 30 dk'ya kadar eski kopya anında verilir, arkada yenilenir; ayar/sıfırlama işlemleri önbelleği siler). Tarama, bildirim ve veri mantığı değişmedi; yalnız web görünümünün hazırlanışı.
 
 ## 4.20.1
 
