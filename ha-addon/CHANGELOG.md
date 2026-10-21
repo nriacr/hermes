@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.20.5
+
+- "Değişiklikleri uygula" butonu grup filtrelerindeki yeşil renge (referans renk) getirildi.
+
 ## 4.20.4
 
 - Ayarlar sayfasında "Değişiklikleri uygula" butonu koyu zeminde görünmüyordu; yeşilimsi (lime-yeşil) renge çevrildi.
