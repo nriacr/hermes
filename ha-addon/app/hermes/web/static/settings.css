@@ -24,6 +24,7 @@ body.ov .notice-warn { color:var(--warn); background:rgba(255,200,87,.1); border
 .settings-page .watch-group-filter { min-height:36px; padding:0 14px; border-radius:99px; border:1px solid var(--edge); background:var(--glass); color:var(--text); font:600 13px var(--display); transition:transform .2s,background .2s; } .settings-page .watch-group-filter:hover { transform:translateY(-2px); border-color:rgba(255,255,255,.28); }
 .settings-page .watch-group-filter[aria-pressed='true'] { background:rgba(182,255,59,.14); border-color:rgba(182,255,59,.45); } .settings-page .watch-group-filter[aria-pressed='false'] { background:transparent; color:var(--faint); opacity:.8; }
 .settings-page .watch-hint, .settings-page .apply-bar p { color:var(--mute); }
+.settings-page .apply-bar .button.primary { border-color:transparent; background:linear-gradient(95deg,#b6ff3b,#3be0a8); color:#07110a; font-weight:800; }
 .settings-page .apply-bar { bottom:10px; margin-top:20px; padding:12px 14px; border:1px solid var(--edge); border-radius:20px; background:rgba(14,11,28,.82); backdrop-filter:blur(14px); box-shadow:0 12px 40px rgba(0,0,0,.45); }
 .settings-page .tool-actions { margin-top:22px; }
 body.ov .footer-note { border-left:0; border-radius:16px; background:var(--glass); border:1px solid var(--edge); color:var(--mute); }

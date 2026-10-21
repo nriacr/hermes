@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.20.4
+
+- Ayarlar sayfasında "Değişiklikleri uygula" butonu koyu zeminde görünmüyordu; yeşilimsi (lime-yeşil) renge çevrildi.
+
 ## 4.20.3
 
 - Eski önbellek kopyası süresi 3 dk'dan 30 dk'ya çıkarıldı (uzun boşta kaldıktan sonraki ilk açılış da anında); canlı yenileme birkaç sn içinde güncel veriyi getirir.
