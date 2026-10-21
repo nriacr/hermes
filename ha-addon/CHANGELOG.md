@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.20.6
+
+- "Değişiklikleri uygula" butonu grup filtresiyle aynı tasarıma (hap şekli, yazı, yeşil) getirildi.
+
 ## 4.20.5
 
 - "Değişiklikleri uygula" butonu grup filtrelerindeki yeşil renge (referans renk) getirildi.
