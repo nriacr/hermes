@@ -10,6 +10,7 @@ the JSON history (cycle durations and the min/max/last prices in the state) is
 copied into the database; the JSON files themselves are never changed here.
 """
 
+import json
 import sqlite3
 import statistics
 import threading
@@ -376,6 +377,16 @@ def _read(path: Path, sql: str, params: tuple = ()) -> List[tuple]:
         return []
 
 
+def _read_packed(path: Path, columns: str, sql: str, params: tuple = ()) -> List[list]:
+    """All rows of `sql` as one JSON value, so the panel thread steps the cursor once.
+
+    Reading thousands of rows one by one hands the interpreter lock back and forth with the busy
+    price checker on every row; the panel then waited seconds while doing almost no work.
+    """
+    rows = _read(path, f"SELECT json_group_array(json_array({columns})) FROM ({sql})", params)
+    return json.loads(rows[0][0]) if rows and rows[0][0] else []
+
+
 def read_cycles(path: Path, since: datetime, until: Optional[datetime] = None) -> List[Tuple[datetime, float]]:
     rows = _read(path, "SELECT checked_at, duration_seconds FROM cycles WHERE checked_at >= ? AND checked_at <= ? "
                        "ORDER BY checked_at", (_at(since), _at(until or datetime.now(timezone.utc))))
@@ -392,9 +403,11 @@ def read_prices_by_key(path: Path, offer_keys: List[str]) -> Dict[str, List[Tupl
     found: Dict[str, List[Tuple[datetime, Decimal]]] = {key: [] for key in offer_keys}
     for start in range(0, len(offer_keys), 200):
         chunk = offer_keys[start:start + 200]
-        rows = _read(path, "SELECT offer_key, checked_at, price FROM prices WHERE offer_key IN "
-                           f"({', '.join('?' * len(chunk))}) ORDER BY checked_at, rowid", tuple(chunk))
-        for key, checked_at, price in rows:
+        rows = _read_packed(path, "offer_key, checked_at, price, id",
+                            "SELECT offer_key, checked_at, price, rowid AS id FROM prices WHERE offer_key IN "
+                            f"({', '.join('?' * len(chunk))})", tuple(chunk))
+        rows.sort(key=lambda row: (row[1], row[3]))
+        for key, checked_at, price, _rowid in rows:
             found[key].append((parse_iso_datetime(checked_at).astimezone(), Decimal(price)))
     return found
 
@@ -404,9 +417,11 @@ def read_targets_by_card(path: Path, cards: List[str]) -> Dict[str, List[Tuple[d
     found: Dict[str, List[Tuple[datetime, Decimal]]] = {card: [] for card in cards}
     for start in range(0, len(cards), 200):
         chunk = cards[start:start + 200]
-        rows = _read(path, f"SELECT card, at, target FROM targets WHERE card IN ({', '.join('?' * len(chunk))}) "
-                           "ORDER BY at, rowid", tuple(chunk))
-        for card, at, target in rows:
+        rows = _read_packed(path, "card, at, target, id",
+                            f"SELECT card, at, target, rowid AS id FROM targets WHERE card IN ({', '.join('?' * len(chunk))})",
+                            tuple(chunk))
+        rows.sort(key=lambda row: (row[1], row[3]))
+        for card, at, target, _rowid in rows:
             found[card].append((parse_iso_datetime(at).astimezone(), Decimal(target)))
     return found
 

@@ -549,3 +549,29 @@ class QuietLogTests(HistoryCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PackedReadTests(unittest.TestCase):
+    def test_batched_reads_keep_the_old_order_and_values(self):
+        import tempfile
+        from pathlib import Path
+        from hermes import history as history_module
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "hermes.db"
+            connection = sqlite3.connect(path)
+            connection.executescript(history_module.SCHEMA)
+            rows = [("a", "amazon", "A", "12.999", "2026-10-01T10:00:00+00:00"),
+                    ("b", "amazon", "B", "5", "2026-10-01T09:00:00+00:00"),
+                    ("a", "amazon", "A", "13.500", "2026-10-01T09:00:00+00:00"),
+                    ("a", "amazon", "A", "13.400", "2026-10-01T09:00:00+00:00")]
+            connection.executemany("INSERT INTO prices VALUES (?,?,?,?,?)", rows)
+            connection.executemany("INSERT INTO targets VALUES (?,?,?)",
+                                   [("c", "100", "2026-10-02T00:00:00+00:00"), ("c", "90", "2026-10-01T00:00:00+00:00")])
+            connection.commit()
+            connection.close()
+            found = history_module.read_prices_by_key(path, ["a", "b", "x"])
+            self.assertEqual(found["a"], history_module.read_prices(path, "a"))
+            self.assertEqual([price for _at, price in found["a"]], [Decimal("13.500"), Decimal("13.400"), Decimal("12.999")])
+            self.assertEqual(found["x"], [])
+            targets = history_module.read_targets_by_card(path, ["c"])
+            self.assertEqual([value for _at, value in targets["c"]], [Decimal("90"), Decimal("100")])

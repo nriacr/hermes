@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.20.12
+
+- Ana sayfa yavaşlığının asıl nedeni giderildi: ürünlerin fiyat ve hedef geçmişi veritabanından satır satır değil tek parça okunur (fiyat kontrolü sürerken panel her satırda sırasını bekliyordu, 5-9 sn). Gösterilen veri aynı.
+
 ## 4.20.11
 
 - Yavaş özet hazırlığı günlük satırına adım süreleri eklendi (yalnız kayıt).

@@ -627,7 +627,7 @@ def _store_live(base: str) -> str:
         started = time.monotonic()
         html = _build_dashboard_live_html(base)
         elapsed = time.monotonic() - started
-        if elapsed > 1.0:
+        if elapsed > 0.3:
             parts = ", ".join(f"{name} {wall:.1f}/{cpu:.1f}" for name, (wall, cpu) in _stages.items())
             log(f"Panel özeti {elapsed:.1f} sn'de hazırlandı (adım duvar/işlemci sn: {parts})")
         with _live_lock:
