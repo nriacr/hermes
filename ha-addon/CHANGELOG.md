@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.20.8
+
+- Uzun boşta sonra ilk açılış yine yavaştı (durum verisini diskten açmak ~3-8 sn): panel kullanıldığı sürece (son 12 saat) özet bloğu arkada 90 sn'de bir yenilenir, ilk açılış anında gelir. Tarama ve bildirimlere dokunulmadı.
+
 ## 4.20.6
 
 - "Değişiklikleri uygula" butonu grup filtresiyle aynı tasarıma (hap şekli, yazı, yeşil) getirildi.
@@ -11,10 +15,6 @@
 ## 4.20.4
 
 - Ayarlar sayfasında "Değişiklikleri uygula" butonu koyu zeminde görünmüyordu; yeşilimsi (lime-yeşil) renge çevrildi.
-
-## 4.20.4
-
-- Tanı: panel özeti 1,5 sn'den uzun hazırlanırsa nedeni günlüğe tek satır yazılır (yavaş açılışın kaynağını bulmak için; davranış değişmedi).
 
 ## 4.20.3
 

@@ -1031,3 +1031,16 @@ class DashboardCacheTests(unittest.TestCase):
             self.assertEqual(dashboard.dashboard_live_html("."), "v2")
             dashboard.clear_dashboard_cache()
             self.assertEqual(dashboard.dashboard_live_html("."), "v3")
+
+    def test_warmer_refreshes_old_blocks_only_while_the_panel_is_in_use(self):
+        calls = []
+        with patch.object(dashboard, "_build_dashboard_live_html", lambda base: calls.append(base) or f"v{len(calls)}"):
+            dashboard.dashboard_live_html(".")
+            stamp, html = dashboard._live_cache["."]
+            dashboard._live_cache["."] = (stamp - dashboard._WARM_REFRESH_SECONDS - 1, html)
+            dashboard._warm_once()
+            self.assertEqual(len(calls), 2)
+            dashboard._live_cache["."] = (stamp - dashboard._WARM_REFRESH_SECONDS - 1, html)
+            dashboard._last_opened -= dashboard._WARM_ACTIVE_SECONDS + 1
+            dashboard._warm_once()
+            self.assertEqual(len(calls), 2)

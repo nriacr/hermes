@@ -1,8 +1,5 @@
 """The Özet Tablo home screen: deal cards, price tiles with history, stock list, Telegram and errors."""
 
-import cProfile
-import io
-import pstats
 import re
 import sqlite3
 import threading
@@ -594,6 +591,10 @@ def live_region(base: str, endpoint: str, html: str) -> str:
 
 _LIVE_FRESH_SECONDS = 8.0
 _LIVE_STALE_SECONDS = 1800.0
+_WARM_REFRESH_SECONDS = 90.0
+_WARM_ACTIVE_SECONDS = 12 * 3600.0
+_last_opened = -1e9
+_warmer_started = False
 _live_cache: Dict[str, Any] = {}
 _live_lock = threading.Lock()
 _live_refreshing: set = set()
@@ -606,18 +607,7 @@ def clear_dashboard_cache() -> None:
 
 def _store_live(base: str) -> str:
     try:
-        started = time.monotonic()
-        profiler = cProfile.Profile()
-        profiler.enable()
-        try:
-            html = _build_dashboard_live_html(base)
-        finally:
-            profiler.disable()
-        if time.monotonic() - started > 1.5:  # one-off diagnosis of the slow panel start
-            out = io.StringIO()
-            pstats.Stats(profiler, stream=out).sort_stats("cumulative").print_stats(9)
-            log(f"Panel özeti yavaş hazırlandı ({time.monotonic() - started:.1f} sn): "
-                + " | ".join(line.strip() for line in out.getvalue().splitlines() if "hermes" in line or "sqlite" in line or "json" in line)[:1500])
+        html = _build_dashboard_live_html(base)
         with _live_lock:
             _live_cache[base] = (time.monotonic(), html)
         return html
@@ -631,7 +621,9 @@ def dashboard_live_html(base: str) -> str:
 
     The browser's live refresh fetches the new block a moment later, so nothing stays old.
     """
+    global _last_opened
     with _live_lock:
+        _last_opened = time.monotonic()
         hit = _live_cache.get(base)
         age = time.monotonic() - hit[0] if hit else None
         if hit and age <= _LIVE_FRESH_SECONDS:
@@ -643,6 +635,36 @@ def dashboard_live_html(base: str) -> str:
             return hit[1]
         _live_refreshing.add(base)
     return _store_live(base)
+
+
+def _warm_once() -> None:
+    """Rebuild every cached block that is getting old, while the panel is in regular use."""
+    with _live_lock:
+        if time.monotonic() - _last_opened > _WARM_ACTIVE_SECONDS:
+            return
+        due = [base for base, (stamp, _html) in _live_cache.items()
+               if time.monotonic() - stamp >= _WARM_REFRESH_SECONDS and base not in _live_refreshing]
+        _live_refreshing.update(due)
+    for base in due:
+        try:
+            _store_live(base)
+        except Exception as exc:  # noqa: BLE001 - warming is best effort
+            log(f"Panel önbelleği yenilenemedi: {type(exc).__name__}")
+
+
+def start_dashboard_warmer() -> None:
+    """Keeps the summary block recent so the first open after a quiet spell is instant."""
+    global _warmer_started
+    with _live_lock:
+        if _warmer_started:
+            return
+        _warmer_started = True
+
+    def loop():
+        while True:
+            time.sleep(30)
+            _warm_once()
+    threading.Thread(target=loop, name="dashboard-warmer", daemon=True).start()
 
 
 def _build_dashboard_live_html(base: str) -> str:

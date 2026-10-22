@@ -25,7 +25,7 @@ from ..notifier import Pushover
 from ..utils import parse_bool
 from . import assets
 from .access import Session, WebAccess
-from .dashboard import clear_dashboard_cache, dashboard_live_html, render_dashboard_page
+from .dashboard import clear_dashboard_cache, dashboard_live_html, render_dashboard_page, start_dashboard_warmer
 from .icons import HERMES_ICON_PNG, HERMES_ICON_SVG, render_web_manifest
 from .pages import link
 from .pin import csrf_field, render_configure_page, render_pin_page, render_session_bar
@@ -421,5 +421,6 @@ def make_handler(router: Router, public_only: bool):
 def start_server(router: Router, port: int, public_only: bool) -> ThreadingHTTPServer:
     server = ThreadingHTTPServer(("0.0.0.0", port), make_handler(router, public_only))
     server.daemon_threads = True
+    start_dashboard_warmer()
     threading.Thread(target=server.serve_forever, name=f"web-{port}", daemon=True).start()
     return server
