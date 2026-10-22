@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.20.11
+
+- Yavaş özet hazırlığı günlük satırına adım süreleri eklendi (yalnız kayıt).
+
 ## 4.20.10
 
 - Özet tablo 1 sn'den uzun hazırlanırsa süresi günlüğe yazılır (yalnız kayıt).

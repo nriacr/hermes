@@ -155,8 +155,9 @@ class Offer:
 
 
 def build_offers(rows: List[Dict[str, Any]], state: Dict[str, Any]) -> List[Offer]:
-    histories = load_histories(DATABASE_PATH, offer_index(state), rows)
-    target_lines = load_targets(DATABASE_PATH, rows)
+    with _stage("geçmiş"):
+        histories = load_histories(DATABASE_PATH, offer_index(state), rows)
+        target_lines = load_targets(DATABASE_PATH, rows)
     offers = []
     for row, points, target_line in zip(rows, histories, target_lines, strict=False):
         price = parse_turkish_money(row.get("price"))
@@ -605,13 +606,30 @@ def clear_dashboard_cache() -> None:
         _live_cache.clear()
 
 
+_stages: Dict[str, List[float]] = {}
+
+
+class _stage:
+    """Wall and own-thread CPU time of one build step (for the slow-build log line)."""
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+    def __enter__(self):
+        self.wall, self.cpu = time.monotonic(), time.thread_time()
+
+    def __exit__(self, *_exc):
+        _stages[self.name] = [time.monotonic() - self.wall, time.thread_time() - self.cpu]
+
+
 def _store_live(base: str) -> str:
     try:
         started = time.monotonic()
         html = _build_dashboard_live_html(base)
         elapsed = time.monotonic() - started
         if elapsed > 1.0:
-            log(f"Panel özeti {elapsed:.1f} sn'de hazırlandı")
+            parts = ", ".join(f"{name} {wall:.1f}/{cpu:.1f}" for name, (wall, cpu) in _stages.items())
+            log(f"Panel özeti {elapsed:.1f} sn'de hazırlandı (adım duvar/işlemci sn: {parts})")
         with _live_lock:
             _live_cache[base] = (time.monotonic(), html)
         return html
@@ -674,8 +692,9 @@ def start_dashboard_warmer() -> None:
 def _build_dashboard_live_html(base: str) -> str:
     """Everything on the summary page that changes while it is open."""
     try:
-        payload = load_json(SUMMARY_PATH, {})
-        state = load_json(STATE_PATH, {})
+        with _stage("veri"):
+            payload = load_json(SUMMARY_PATH, {})
+            state = load_json(STATE_PATH, {})
     except (RuntimeError, sqlite3.Error):
         error = {"title": "Takip hafızası okunamadı", "meta": "Mevcut kayıtlar korunuyor",
                  "message": "Takip hafızasının incelenmesi gerekiyor. Ayarlar sayfası açık.",
@@ -683,10 +702,12 @@ def _build_dashboard_live_html(base: str) -> str:
         return render_summary({}, {}, {}, [error])
     telegram_status = load_json(TELEGRAM_STATUS_PATH, {})
     state = state if isinstance(state, dict) else {}
-    active = Diagnostics(DATABASE_PATH).active()
+    with _stage("tanı"):
+        active = Diagnostics(DATABASE_PATH).active()
     # One failing watch may exist both in state and in durable diagnostics.
     diagnosed = {item["component"] for item in active if item["kind"] in {"read", "partial"}}
-    errors = [error for error in collect_errors(state) if error["component"] not in diagnosed]
+    with _stage("hatalar"):
+        errors = [error for error in collect_errors(state) if error["component"] not in diagnosed]
     for item in active:
         errors.extend(incident_errors(item, state))
     unique = {}
@@ -695,8 +716,9 @@ def _build_dashboard_live_html(base: str) -> str:
         if identity not in unique or unique[identity]["checked_at"] < error["checked_at"]:
             unique[identity] = error
     errors = sorted(unique.values(), key=lambda error: error["checked_at"], reverse=True)
-    return render_summary(payload if isinstance(payload, dict) else {}, state,
-                          telegram_status if isinstance(telegram_status, dict) else {}, errors)
+    with _stage("çizim"):
+        return render_summary(payload if isinstance(payload, dict) else {}, state,
+                              telegram_status if isinstance(telegram_status, dict) else {}, errors)
 
 
 def render_dashboard_page(base: str, params: Dict[str, List[str]], config_error: str = "") -> bytes:
