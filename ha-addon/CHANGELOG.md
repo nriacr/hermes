@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.20.10
+
+- Özet tablo 1 sn'den uzun hazırlanırsa süresi günlüğe yazılır (yalnız kayıt).
+
 ## 4.20.9
 
 - Özet tablonun hazırlanması hızlandı: durum verisi diskten açılmak yerine bellekteki son kayıttan okunur (içerik aynı, daha güncel). Tarama ve bildirimlere dokunulmadı.

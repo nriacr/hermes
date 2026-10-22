@@ -607,7 +607,11 @@ def clear_dashboard_cache() -> None:
 
 def _store_live(base: str) -> str:
     try:
+        started = time.monotonic()
         html = _build_dashboard_live_html(base)
+        elapsed = time.monotonic() - started
+        if elapsed > 1.0:
+            log(f"Panel özeti {elapsed:.1f} sn'de hazırlandı")
         with _live_lock:
             _live_cache[base] = (time.monotonic(), html)
         return html
