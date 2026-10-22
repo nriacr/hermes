@@ -1,5 +1,8 @@
 """The Özet Tablo home screen: deal cards, price tiles with history, stock list, Telegram and errors."""
 
+import cProfile
+import io
+import pstats
 import re
 import sqlite3
 import threading
@@ -20,6 +23,7 @@ from ..constants import (
     TELEGRAM_STATUS_PATH,
     normalize_priority,
 )
+from ..logging_utils import log
 from ..storage import load_json
 from ..diagnostics import Diagnostics
 from ..utils import PROCESS_STARTED_AT, format_tl, is_search_url, parse_bool, parse_iso_datetime, repair_mojibake, site_label
@@ -602,7 +606,18 @@ def clear_dashboard_cache() -> None:
 
 def _store_live(base: str) -> str:
     try:
-        html = _build_dashboard_live_html(base)
+        started = time.monotonic()
+        profiler = cProfile.Profile()
+        profiler.enable()
+        try:
+            html = _build_dashboard_live_html(base)
+        finally:
+            profiler.disable()
+        if time.monotonic() - started > 1.5:  # one-off diagnosis of the slow panel start
+            out = io.StringIO()
+            pstats.Stats(profiler, stream=out).sort_stats("cumulative").print_stats(9)
+            log(f"Panel özeti yavaş hazırlandı ({time.monotonic() - started:.1f} sn): "
+                + " | ".join(line.strip() for line in out.getvalue().splitlines() if "hermes" in line or "sqlite" in line or "json" in line)[:1500])
         with _live_lock:
             _live_cache[base] = (time.monotonic(), html)
         return html

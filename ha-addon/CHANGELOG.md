@@ -12,6 +12,10 @@
 
 - Ayarlar sayfasında "Değişiklikleri uygula" butonu koyu zeminde görünmüyordu; yeşilimsi (lime-yeşil) renge çevrildi.
 
+## 4.20.4
+
+- Tanı: panel özeti 1,5 sn'den uzun hazırlanırsa nedeni günlüğe tek satır yazılır (yavaş açılışın kaynağını bulmak için; davranış değişmedi).
+
 ## 4.20.3
 
 - Eski önbellek kopyası süresi 3 dk'dan 30 dk'ya çıkarıldı (uzun boşta kaldıktan sonraki ilk açılış da anında); canlı yenileme birkaç sn içinde güncel veriyi getirir.
