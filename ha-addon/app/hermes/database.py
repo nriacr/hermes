@@ -74,6 +74,13 @@ class Database:
                 cls._instances[path] = cls(path)
             return cls._instances[path]
 
+    @classmethod
+    def latest_text(cls, path: Path, name: str):
+        """The last snapshot text this process committed, or None (then the file is read)."""
+        with cls._guard:
+            instance = cls._instances.get(Path(path).resolve())
+        return instance._written_snapshots.get(name) if instance else None
+
     def __init__(self, path: Path):
         self.path = path
         self.lock = threading.RLock()

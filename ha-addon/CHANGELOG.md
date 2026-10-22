@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.20.9
+
+- Özet tablonun hazırlanması hızlandı: durum verisi diskten açılmak yerine bellekteki son kayıttan okunur (içerik aynı, daha güncel). Tarama ve bildirimlere dokunulmadı.
+
 ## 4.20.8
 
 - Uzun boşta sonra ilk açılış yine yavaştı (durum verisini diskten açmak ~3-8 sn): panel kullanıldığı sürece (son 12 saat) özet bloğu arkada 90 sn'de bir yenilenir, ilk açılış anında gelir. Tarama ve bildirimlere dokunulmadı.

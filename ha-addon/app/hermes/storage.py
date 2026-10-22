@@ -39,6 +39,10 @@ def file_lock(path: Path) -> threading.RLock:
 def load_json(path: Path, default: Any) -> Any:
     try:
         if path.name in SQL_BACKED:
+            # This process wrote the newest copy: reuse its text instead of reading and inflating the blob.
+            text = Database.latest_text(path.parent / "hermes.db", path.name)
+            if text is not None:
+                return json.loads(text)
             snapshot = read_snapshot(path.parent / "hermes.db", path.name)
             if snapshot is not None:
                 return snapshot
