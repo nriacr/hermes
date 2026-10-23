@@ -30,6 +30,23 @@ from .search import dedupe_results, extract_result_candidates, title_matches_any
 VARIATION_LIMIT = 60
 
 
+
+_page_timings: list = []
+
+
+def _note_page_timing(timing, size: int) -> None:
+    """Logs, every 20 product pages, where the time after a fetch goes (wall/CPU seconds)."""
+    parse_wall, parse_cpu = timing[2] - timing[0], timing[3] - timing[1]
+    rest_wall, rest_cpu = time.monotonic() - timing[2], time.thread_time() - timing[3]
+    _page_timings.append((parse_wall, parse_cpu, rest_wall, rest_cpu, size))
+    if len(_page_timings) >= 20:
+        n = len(_page_timings)
+        avg = [sum(item[i] for item in _page_timings) / n for i in range(5)]
+        log(f"Amazon sayfa işleme: sayfa={n} | çözümleme={avg[0]:.1f}/{avg[1]:.1f} sn | "
+            f"diğer={avg[2]:.1f}/{avg[3]:.1f} sn (duvar/işlemci, ort.) | html={avg[4] / 1024:.0f} KB")
+        _page_timings.clear()
+
+
 class AmazonProvider(RhythmMixin, PageCacheMixin, Provider):
     site = SITE_AMAZON
     progress_timeout_seconds = 3 * 3600
@@ -368,7 +385,9 @@ class AmazonProvider(RhythmMixin, PageCacheMixin, Provider):
                 if snapshot is None or needs_variation_upgrade or needs_offer_upgrade:
                     page_was_reused = False
                     html = self.fetch(variation.url, ctx)
+                    timing = (time.monotonic(), time.thread_time())
                     page_soup = parser.parse_product_page(html)
+                    timing += (time.monotonic(), time.thread_time())
                     discovered = None
                     if follow_variations:
                         discovery_pages += 1
@@ -400,6 +419,7 @@ class AmazonProvider(RhythmMixin, PageCacheMixin, Provider):
                         "offers_skipped_by_exclusion": bool(exclusion_term),
                         "offer_skip_excluded_terms": tuple(watch.excluded_terms) if exclusion_term else (),
                     }
+                    _note_page_timing(timing, len(html))
                     if snapshot is None:
                         snapshot = {"label": selected_label or variation.label, "variations": discovered, **page_state}
                         self._remember_page(cache_key, snapshot)

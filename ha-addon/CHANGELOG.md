@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.20.16
+
+- Ölçüm: Amazon ürün sayfasının çözümlenme süresi 20 sayfada bir günlüğe yazılır (yalnız kayıt; hızlı okuyucuya geçiş öncesi doğrulama).
+
 ## 4.20.15
 
 - Hepsiburada kartları hızlandı: kartın 'hariç tut' listesine düşen seçenekler (ör. 256 GB kartında 512 GB / 1 TB) artık hiç açılmaz; her seçenek okunur okunmaz tabloya yazılır (kartın bitmesi beklenmez). Bildirim kuralları aynı.
