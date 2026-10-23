@@ -835,6 +835,23 @@ class OtherSiteTests(unittest.TestCase):
         self.assertEqual([first.url] + [item.url for item in rest], [main, keep])
         self.assertEqual(opened, [keep])  # the 512 GB variant was never opened
 
+    def test_hepsiburada_main_title_never_excludes_another_variant(self):
+        from hermes.providers.hepsiburada import parser as hb_parser
+        main, wanted = "https://www.hepsiburada.com/x-p-MAIN", "https://www.hepsiburada.com/x-p-512"
+        labels = {main: "256 GB", wanted: "512 GB"}
+        provider = HepsiburadaProvider()
+        watch = SimpleNamespace(url=main, name="iPhone 512", excluded_terms=["256 GB"], max_items_to_scan=10)
+        offer = OfferResult("Apple iPhone 17 Pro 256 GB", Decimal("100"), "Hepsiburada", main)
+        opened = []
+        with patch.object(hb_parser, "extract_variant_urls", return_value=[main, wanted]), \
+                patch.object(hb_parser, "extract_embedded_variant_label", side_effect=lambda _html, url: labels[url]), \
+                patch.object(hb_parser, "extract_embedded_variant_offer", return_value=offer), \
+                patch.object(hb_parser, "extract_offer", return_value=offer), \
+                patch.object(hb_parser, "extract_selected_variant_label", return_value=""), \
+                patch.object(provider, "_page", side_effect=lambda _ctx, url: opened.append(url) or "<html></html>"):
+            list(provider._product_offers(context(), watch, "<html></html>"))
+        self.assertEqual(opened, [wanted])  # the 512 GB variant is read although the main title says 256 GB
+
     def test_amazon_excluded_pages_are_remembered_across_a_restart(self):
         import tempfile
         from pathlib import Path

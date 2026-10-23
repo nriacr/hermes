@@ -296,16 +296,13 @@ class HepsiburadaProvider(Provider):
         found = 0
         errors: List[str] = []
         seen_offer_keys: set[tuple[str, str, str, str]] = set()
-        page_title = None
         for variant_url in variant_urls or [watch.url]:
             try:
                 variant_label = parser.extract_embedded_variant_label(html, variant_url)
                 if variant_label and watch.excluded_terms and variant_url != watch.url:
-                    # A variant the card's exclusions drop anyway is not opened (saves a page read per variant).
-                    if page_title is None:
-                        main_offer = parser.extract_embedded_variant_offer(html, watch.url) or parser.extract_offer(html, source_url=watch.url)
-                        page_title = (main_offer.title if main_offer else "") or ""
-                    term = excluded_term_in_title(watch, parser.title_with_variant_label(page_title, variant_label) + " " + variant_label)
+                    # A variant whose own label carries an exclusion is dropped anyway; it is not opened.
+                    # Only the label is checked: the main page's title names the main variant, not this one.
+                    term = excluded_term_in_title(watch, variant_label)
                     if term:
                         log(f"Hepsiburada varyasyonu açılmadı (hariç tut: {term}): {variant_label}")
                         continue
