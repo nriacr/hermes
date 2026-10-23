@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.20.15
+
+- Hepsiburada kartları hızlandı: kartın 'hariç tut' listesine düşen seçenekler (ör. 256 GB kartında 512 GB / 1 TB) artık hiç açılmaz; her seçenek okunur okunmaz tabloya yazılır (kartın bitmesi beklenmez). Bildirim kuralları aynı.
+
 ## 4.20.14
 
 - Düzeltme: ana sayfa 1 dk'lık ürünlerde 8-10 dk eski okuma zamanı gösteriyordu. 4.20.9'daki 'durum verisini bellekteki son kayıttan oku' geri alındı; panel yine veritabanındaki güncel kaydı okur.

@@ -813,6 +813,28 @@ class OtherSiteTests(unittest.TestCase):
             enriched = provider._with_variant_titles(context(), [offer])
         self.assertEqual(enriched[0].title, "Samsung Galaxy Tab S10 FE+ 8GB 128GB SM-X620 / 128 GB / Mavi")
 
+    def test_hepsiburada_skips_excluded_variants_and_yields_each_offer_as_read(self):
+        from hermes.providers.hepsiburada import parser as hb_parser
+        main, keep, drop = ("https://www.hepsiburada.com/x-p-MAIN", "https://www.hepsiburada.com/x-p-KEEP",
+                            "https://www.hepsiburada.com/x-p-DROP")
+        labels = {main: "256 GB / Abis", keep: "256 GB / Gümüş", drop: "512 GB / Abis"}
+        provider = HepsiburadaProvider()
+        watch = SimpleNamespace(url=main, name="iPhone", excluded_terms=["512 GB"], max_items_to_scan=10)
+        offer = OfferResult("Apple iPhone", Decimal("100"), "Hepsiburada", main)
+        opened = []
+        with patch.object(hb_parser, "extract_variant_urls", return_value=[main, keep, drop]), \
+                patch.object(hb_parser, "extract_embedded_variant_label", side_effect=lambda _html, url: labels[url]), \
+                patch.object(hb_parser, "extract_embedded_variant_offer", return_value=offer), \
+                patch.object(hb_parser, "extract_offer", return_value=offer), \
+                patch.object(hb_parser, "extract_selected_variant_label", return_value=""), \
+                patch.object(provider, "_page", side_effect=lambda _ctx, url: opened.append(url) or "<html></html>"):
+            stream = provider._product_offers(context(), watch, "<html></html>")
+            first = next(stream)
+            self.assertEqual(opened, [])  # the main page's offer comes before any other page is read
+            rest = list(stream)
+        self.assertEqual([first.url] + [item.url for item in rest], [main, keep])
+        self.assertEqual(opened, [keep])  # the 512 GB variant was never opened
+
     def test_beymenclub_fetch_uses_its_browser_shaped_headers(self):
         response = SimpleNamespace(status_code=200, headers={"content-type": "text/html; charset=utf-8"},
                                    text="<script>BEYMEN.productMain = {}</script>", raise_for_status=lambda: None)

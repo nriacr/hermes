@@ -15,7 +15,7 @@ from ...logging_utils import log
 from ...traffic import CountedSession, count_curl
 from ...models import OfferResult
 from ...utils import build_headers, format_tl, is_hepsiburada_search_url, normalize_offer_text
-from ..base import Provider
+from ..base import Provider, excluded_term_in_title
 from ..http import curl_requests, decode_response_text, has_generic_challenge, read_site_html
 from . import parser
 from .parser import clean_display_title, is_product_url
@@ -287,17 +287,28 @@ class HepsiburadaProvider(Provider):
                 enriched.append(offer)
         return enriched
 
-    def _product_offers(self, ctx, watch, html: str) -> List[OfferResult]:
+    def _product_offers(self, ctx, watch, html: str):
+        """Yields each variant's offer as soon as it is read, so the table refreshes variant by variant."""
         variant_urls = parser.extract_variant_urls(html, watch.url, self._scan_limit(watch))
         if len(variant_urls) > 1:
             log(f"Hepsiburada varyasyonları bulundu: {watch.name or watch.url} | adet={len(variant_urls)}")
 
-        offers: List[OfferResult] = []
+        found = 0
         errors: List[str] = []
         seen_offer_keys: set[tuple[str, str, str, str]] = set()
+        page_title = None
         for variant_url in variant_urls or [watch.url]:
             try:
                 variant_label = parser.extract_embedded_variant_label(html, variant_url)
+                if variant_label and watch.excluded_terms and variant_url != watch.url:
+                    # A variant the card's exclusions drop anyway is not opened (saves a page read per variant).
+                    if page_title is None:
+                        main_offer = parser.extract_embedded_variant_offer(html, watch.url) or parser.extract_offer(html, source_url=watch.url)
+                        page_title = (main_offer.title if main_offer else "") or ""
+                    term = excluded_term_in_title(watch, parser.title_with_variant_label(page_title, variant_label) + " " + variant_label)
+                    if term:
+                        log(f"Hepsiburada varyasyonu açılmadı (hariç tut: {term}): {variant_label}")
+                        continue
                 offer, variant_html = self._variant_offer(ctx, watch, html, variant_url)
                 if variant_html:
                     variant_label = parser.extract_selected_variant_label(variant_html) or variant_label
@@ -316,13 +327,14 @@ class HepsiburadaProvider(Provider):
                     )
                     continue
                 seen_offer_keys.add(dedupe_key)
-                offers.append(OfferResult(title=offer_title, price=offer.price, seller=offer.seller, url=variant_url))
+                found += 1
+                yield OfferResult(title=offer_title, price=offer.price, seller=offer.seller, url=variant_url)
             except Exception as exc:  # noqa: BLE001
                 errors.append(f"{variant_url} | {exc}")
                 log(f"Hepsiburada varyasyon okunamadı: {variant_url} | {exc}")
 
-        if offers:
-            return offers
+        if found:
+            return
         if errors:
             raise HermesError(errors[-1])
         raise HermesError("Hepsiburada sayfasından fiyat bulunamadı.")
