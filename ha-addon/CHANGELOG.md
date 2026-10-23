@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.20.18
+
+- Düzeltme: lxml sayfayı 512 baytlık parçalarla okurken her parçada diğer okuyucuları bekliyordu (Amazon sayfası 14 sn). Sayfa artık tek parçada verilir.
+
 ## 4.20.17
 
 - HTML okuyucu hızlı lxml'e geçti (yeni bağımlılık lxml 6.0.2; sayfa çözümleme ~1,6 sn → daha kısa). Amazon'un 'bu seçenek hariç' hafızası diske yazılır, yeniden başlatmadan sonra hariç seçenekler tekrar okunmaz. Değişen özet tablosu günlüğe en çok 5 dk'da bir yazılır. Amazon sayfa işleme süresi adım adım günlüğe yazılır (20 sayfada bir). Ek yedek: ec840e92 (kısmi, Hermes).
