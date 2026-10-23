@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.20.19
+
+- lxml okuyucu geri alındı: Pi'de Amazon sayfasını çözmek 1,6 sn'den 14-15 sn'ye çıkardı (işlemci aynı, bekleme arttı). Eski okuyucuya dönüldü; hariç sayfa hafızası, özet günlüğü sınırı ve adım adım ölçüm kaldı.
+
 ## 4.20.18
 
 - Düzeltme: lxml sayfayı 512 baytlık parçalarla okurken her parçada diğer okuyucuları bekliyordu (Amazon sayfası 14 sn). Sayfa artık tek parçada verilir.

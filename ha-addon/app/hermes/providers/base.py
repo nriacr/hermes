@@ -7,7 +7,6 @@ from typing import Any, Callable, Dict, Iterable, List, Optional
 
 import requests
 from bs4 import BeautifulSoup
-from bs4.builder import _lxml as _lxml_builder
 
 from ..errors import HermesError
 from ..utils import normalize_offer_text, parse_decimal, repair_mojibake
@@ -30,14 +29,8 @@ PRICE_META_SELECTORS = [
 ]
 
 
-# BeautifulSoup feeds lxml 512 bytes at a time; every chunk hands the interpreter lock back and the
-# page then waits behind the busy reader threads for each one (a 1.2 MB page took ~14 s on the Pi).
-# One feed per page keeps the parse to its real cost.
-_lxml_builder.LXMLTreeBuilderForXML.CHUNK_SIZE = 64 * 1024 * 1024
-
-
 def soup_from_html(html: str) -> BeautifulSoup:
-    return BeautifulSoup(html, "lxml")
+    return BeautifulSoup(html, "html.parser")
 
 
 def extract_title(soup: BeautifulSoup) -> Optional[str]:

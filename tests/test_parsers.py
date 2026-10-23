@@ -2222,11 +2222,3 @@ class SiteDetectionHostTests(unittest.TestCase):
 if __name__ == "__main__":
     unittest.main()
 
-
-class LxmlFeedTests(unittest.TestCase):
-    def test_pages_are_fed_to_lxml_in_one_piece(self):
-        from bs4.builder import _lxml
-        from hermes.providers import base
-        self.assertGreaterEqual(_lxml.LXMLTreeBuilderForXML.CHUNK_SIZE, 16 * 1024 * 1024)
-        html = "<html><body>" + "<div class='x'>1</div>" * 50000 + "<span id='productTitle'>Son</span></body></html>"
-        self.assertEqual(base.soup_from_html(html).select_one("#productTitle").get_text(), "Son")
