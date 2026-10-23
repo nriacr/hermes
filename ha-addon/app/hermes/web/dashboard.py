@@ -590,15 +590,10 @@ def live_region(base: str, endpoint: str, html: str) -> str:
             f"data-live-interval='{LIVE_INTERVAL_SECONDS[endpoint.split('?')[0]]}'>{html}</div>")
 
 
-_LIVE_FRESH_SECONDS = 8.0
-_LIVE_STALE_SECONDS = 1800.0
-_WARM_REFRESH_SECONDS = 90.0
-_WARM_ACTIVE_SECONDS = 12 * 3600.0
-_last_opened = -1e9
-_warmer_started = False
+# The page and its first live refresh ask within moments; both get one build. Nothing older is shown.
+_LIVE_FRESH_SECONDS = 3.0
 _live_cache: Dict[str, Any] = {}
 _live_lock = threading.Lock()
-_live_refreshing: set = set()
 
 
 def clear_dashboard_cache() -> None:
@@ -622,71 +617,21 @@ class _stage:
         _stages[self.name] = [time.monotonic() - self.wall, time.thread_time() - self.cpu]
 
 
-def _store_live(base: str) -> str:
-    try:
-        started = time.monotonic()
-        html = _build_dashboard_live_html(base)
-        elapsed = time.monotonic() - started
-        if elapsed > 0.3:
-            parts = ", ".join(f"{name} {wall:.1f}/{cpu:.1f}" for name, (wall, cpu) in _stages.items())
-            log(f"Panel özeti {elapsed:.1f} sn'de hazırlandı (adım duvar/işlemci sn: {parts})")
-        with _live_lock:
-            _live_cache[base] = (time.monotonic(), html)
-        return html
-    finally:
-        with _live_lock:
-            _live_refreshing.discard(base)
-
-
 def dashboard_live_html(base: str) -> str:
-    """Cached summary block: the page opens at once, a stale copy is refreshed in the background.
-
-    The browser's live refresh fetches the new block a moment later, so nothing stays old.
-    """
-    global _last_opened
+    """The summary block, built from the current data (a copy at most a few seconds old is reused)."""
     with _live_lock:
-        _last_opened = time.monotonic()
         hit = _live_cache.get(base)
-        age = time.monotonic() - hit[0] if hit else None
-        if hit and age <= _LIVE_FRESH_SECONDS:
+        if hit and time.monotonic() - hit[0] <= _LIVE_FRESH_SECONDS:
             return hit[1]
-        if hit and age <= _LIVE_STALE_SECONDS:
-            if base not in _live_refreshing:
-                _live_refreshing.add(base)
-                threading.Thread(target=_store_live, args=(base,), daemon=True).start()
-            return hit[1]
-        _live_refreshing.add(base)
-    return _store_live(base)
-
-
-def _warm_once() -> None:
-    """Rebuild every cached block that is getting old, while the panel is in regular use."""
+    started = time.monotonic()
+    html = _build_dashboard_live_html(base)
+    elapsed = time.monotonic() - started
+    if elapsed > 1.5:
+        parts = ", ".join(f"{name} {wall:.1f}/{cpu:.1f}" for name, (wall, cpu) in _stages.items())
+        log(f"Panel özeti {elapsed:.1f} sn'de hazırlandı (adım duvar/işlemci sn: {parts})")
     with _live_lock:
-        if time.monotonic() - _last_opened > _WARM_ACTIVE_SECONDS:
-            return
-        due = [base for base, (stamp, _html) in _live_cache.items()
-               if time.monotonic() - stamp >= _WARM_REFRESH_SECONDS and base not in _live_refreshing]
-        _live_refreshing.update(due)
-    for base in due:
-        try:
-            _store_live(base)
-        except Exception as exc:  # noqa: BLE001 - warming is best effort
-            log(f"Panel önbelleği yenilenemedi: {type(exc).__name__}")
-
-
-def start_dashboard_warmer() -> None:
-    """Keeps the summary block recent so the first open after a quiet spell is instant."""
-    global _warmer_started
-    with _live_lock:
-        if _warmer_started:
-            return
-        _warmer_started = True
-
-    def loop():
-        while True:
-            time.sleep(30)
-            _warm_once()
-    threading.Thread(target=loop, name="dashboard-warmer", daemon=True).start()
+        _live_cache[base] = (time.monotonic(), html)
+    return html
 
 
 def _build_dashboard_live_html(base: str) -> str:

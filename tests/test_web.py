@@ -2,7 +2,6 @@
 
 import gzip
 import json
-import time
 import unittest
 
 from hermes.web.assets import APP_CSS
@@ -1010,37 +1009,13 @@ class DashboardCacheTests(unittest.TestCase):
         dashboard.clear_dashboard_cache()
         self.addCleanup(dashboard.clear_dashboard_cache)
 
-    def test_second_open_uses_cache_and_stale_copy_is_served_at_once(self):
-        calls = []
-
-        def build(base):
-            calls.append(base)
-            return f"v{len(calls)}"
-
-        with patch.object(dashboard, "_build_dashboard_live_html", build):
-            self.assertEqual(dashboard.dashboard_live_html("."), "v1")
-            self.assertEqual(dashboard.dashboard_live_html("."), "v1")
-            self.assertEqual(len(calls), 1)
-            stamp, html = dashboard._live_cache["."]
-            dashboard._live_cache["."] = (stamp - dashboard._LIVE_FRESH_SECONDS - 1, html)
-            self.assertEqual(dashboard.dashboard_live_html("."), "v1")  # stale: answered at once
-            for _ in range(100):
-                if len(calls) == 2 and "." not in dashboard._live_refreshing:
-                    break
-                time.sleep(0.02)
-            self.assertEqual(dashboard.dashboard_live_html("."), "v2")
-            dashboard.clear_dashboard_cache()
-            self.assertEqual(dashboard.dashboard_live_html("."), "v3")
-
-    def test_warmer_refreshes_old_blocks_only_while_the_panel_is_in_use(self):
+    def test_a_copy_is_reused_only_for_a_few_seconds(self):
         calls = []
         with patch.object(dashboard, "_build_dashboard_live_html", lambda base: calls.append(base) or f"v{len(calls)}"):
-            dashboard.dashboard_live_html(".")
+            self.assertEqual(dashboard.dashboard_live_html("."), "v1")
+            self.assertEqual(dashboard.dashboard_live_html("."), "v1")
             stamp, html = dashboard._live_cache["."]
-            dashboard._live_cache["."] = (stamp - dashboard._WARM_REFRESH_SECONDS - 1, html)
-            dashboard._warm_once()
-            self.assertEqual(len(calls), 2)
-            dashboard._live_cache["."] = (stamp - dashboard._WARM_REFRESH_SECONDS - 1, html)
-            dashboard._last_opened -= dashboard._WARM_ACTIVE_SECONDS + 1
-            dashboard._warm_once()
-            self.assertEqual(len(calls), 2)
+            dashboard._live_cache["."] = (stamp - dashboard._LIVE_FRESH_SECONDS - 1, html)
+            self.assertEqual(dashboard.dashboard_live_html("."), "v2")  # never an older copy
+            dashboard.clear_dashboard_cache()
+            self.assertEqual(dashboard.dashboard_live_html("."), "v3")

@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.20.13
+
+- Ana sayfa her açılışta o anki veriyle hazırlanır (0,5-1 sn); eski kopya gösterimi ve arka plan yenilemesi kaldırıldı. Yalnız aynı anda gelen iki istek 3 sn içinde tek hazırlığı paylaşır.
+
 ## 4.20.12
 
 - Ana sayfa yavaşlığının asıl nedeni giderildi: ürünlerin fiyat ve hedef geçmişi veritabanından satır satır değil tek parça okunur (fiyat kontrolü sürerken panel her satırda sırasını bekliyordu, 5-9 sn). Gösterilen veri aynı.
