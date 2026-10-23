@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.20.23
+
+- Amazon Depo (ikinci el) teklif doğrulaması hızlandı: özellik seçicileri de dizinden yanıtlanır, kutular yapısal karşılaştırma yerine kimlikle ayırt edilir, ürün JSON verisi dizinli betik listesinden okunur. Kural aynı: yalnız en içteki ikinci el satırı okunur.
+
 ## 4.20.22
 
 - Amazon ürün sayfası bir kez dizinlenir; fiyat, varyant, Depo ve stok aramaları tüm sayfayı her seferinde baştan taramaz (desteklenmeyen seçicide eski yöntem kullanılır, sonuçlar aynı).

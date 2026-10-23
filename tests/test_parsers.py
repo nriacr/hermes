@@ -2290,3 +2290,16 @@ class FastSelectTests(unittest.TestCase):
         for section in plain.select("#usedAccordionRow"):
             section.decompose()
         self.assertEqual([str(item) for item in fast.select(".a-offscreen")], [str(item) for item in plain.select(".a-offscreen")])
+
+
+class WarehouseRowTests(unittest.TestCase):
+    def test_only_the_innermost_used_offer_row_is_read(self):
+        from hermes.providers.amazon import parser as amazon_parser
+        page = ("<html><body><div id='usedAccordionRow'>Amazon Depo ikinci el 900 TL dış"
+                "<div class='aod-offer'>Amazon Depo ikinci el <span class='a-price'><span class='a-offscreen'>800,00 TL</span></span></div>"
+                "</div></body></html>")
+        calls = []
+        original = amazon_parser._offer_container_price
+        with patch.object(amazon_parser, "_offer_container_price", side_effect=lambda c: calls.append(c.get("id") or c.get("class")) or original(c)):
+            amazon_parser.extract_verified_warehouse_offers_from_listing(page, "https://www.amazon.com.tr/dp/B000000001")
+        self.assertEqual(calls, [["aod-offer"]])

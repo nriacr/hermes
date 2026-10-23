@@ -112,10 +112,18 @@ def price_from_offer(offer: Any):
     return None
 
 
+_LD_JSON_TYPE = re.compile(r"ld\+json", re.I)
+
+
 def extract_jsonld_product(soup: BeautifulSoup):
     found_title = None
     found_price = None
-    for script in soup.find_all("script", attrs={"type": re.compile(r"ld\+json", re.I)}):
+    # select("script") is answered from an indexed page's tag list; same scripts as find_all with the type filter.
+    for script in soup.select("script"):
+        script_type = script.get("type")
+        script_type = " ".join(script_type) if isinstance(script_type, list) else script_type
+        if not script_type or not _LD_JSON_TYPE.search(script_type):
+            continue
         raw = script.string or script.get_text(" ", strip=True)
         if not raw:
             continue

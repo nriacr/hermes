@@ -545,15 +545,19 @@ def extract_verified_warehouse_offers_from_listing(html: str, source_url: str, s
     offers: list[OfferResult] = []
     seen_prices: set = set()
     containers = []
+    seen = set()
     for selector in AMAZON_USED_OFFER_CONTAINER_SELECTORS:
         for container in soup.select(selector):
-            if container not in containers:
+            # Identity, not bs4's structural equality (which compares whole subtrees and was slow).
+            if id(container) not in seen:
+                seen.add(id(container))
                 containers.append(container)
 
+    # An outer used accordion may enclose a more precise offer header: only the innermost rows are read.
+    enclosing = {id(parent) for container in containers for parent in container.parents}
     for container in containers:
-        # An outer used accordion may enclose a more precise offer header.
         # Never read one row's price together with another row's seller.
-        if any(other is not container and container in other.parents for other in containers):
+        if id(container) in enclosing:
             continue
         container_asin = str(container.get("data-csa-c-asin") or "")
         source_asin = extract_asin_from_url(source_url)

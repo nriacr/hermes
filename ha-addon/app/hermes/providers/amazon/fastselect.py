@@ -77,10 +77,13 @@ def _matches(element: Tag, compound: Compound) -> bool:
 
 class PageIndex:
     def __init__(self, soup: BeautifulSoup) -> None:
+        # Attribute names are indexed too: "[data-cy='aod-offer']" then looks at the few elements
+        # that have the attribute instead of the whole page.
         self.order: Dict[int, int] = {}
         self.by_id: Dict[str, List[Tag]] = {}
         self.by_class: Dict[str, List[Tag]] = {}
         self.by_tag: Dict[str, List[Tag]] = {}
+        self.by_attr: Dict[str, List[Tag]] = {}
         self.all: List[Tag] = []
         for position, element in enumerate(soup.find_all(True)):
             self.order[id(element)] = position
@@ -91,13 +94,17 @@ class PageIndex:
                 self.by_id.setdefault(element_id, []).append(element)
             for name in _classes(element):
                 self.by_class.setdefault(name, []).append(element)
+            for name in element.attrs:
+                self.by_attr.setdefault(name, []).append(element)
 
     def _candidates(self, compound: Compound) -> List[Tag]:
-        tag, ids, classes, _attrs = compound
+        tag, ids, classes, attrs = compound
         if ids:
             return self.by_id.get(ids[0], [])
         if classes:
             return self.by_class.get(classes[0], [])
+        if attrs:
+            return self.by_attr.get(attrs[0][0], [])
         if tag:
             return self.by_tag.get(tag, [])
         return self.all
