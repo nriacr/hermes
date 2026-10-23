@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.20.14
+
+- Düzeltme: ana sayfa 1 dk'lık ürünlerde 8-10 dk eski okuma zamanı gösteriyordu. 4.20.9'daki 'durum verisini bellekteki son kayıttan oku' geri alındı; panel yine veritabanındaki güncel kaydı okur.
+
 ## 4.20.13
 
 - Ana sayfa her açılışta o anki veriyle hazırlanır (0,5-1 sn); eski kopya gösterimi ve arka plan yenilemesi kaldırıldı. Yalnız aynı anda gelen iki istek 3 sn içinde tek hazırlığı paylaşır.
