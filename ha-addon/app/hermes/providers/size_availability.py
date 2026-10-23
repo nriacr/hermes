@@ -176,7 +176,7 @@ def requested_size_state(html: str, requested_size: str) -> tuple[bool, bool]:
     requested = clean_size(requested_size)
     if not requested:
         return True, True
-    soup = BeautifulSoup(html, "html.parser")
+    soup = BeautifulSoup(html, "lxml")
     json_found, json_available = _json_size_states(soup, requested)
     dom_found, dom_available = _dom_size_states(soup, requested)
     return json_found or dom_found, json_available or dom_available

@@ -34,18 +34,27 @@ VARIATION_LIMIT = 60
 _page_timings: list = []
 
 
-def _note_page_timing(timing, size: int) -> None:
-    """Logs, every 20 product pages, where the time after a fetch goes (wall/CPU seconds)."""
-    parse_wall, parse_cpu = timing[2] - timing[0], timing[3] - timing[1]
-    rest_wall, rest_cpu = time.monotonic() - timing[2], time.thread_time() - timing[3]
-    _page_timings.append((parse_wall, parse_cpu, rest_wall, rest_cpu, size))
+def _mark(timing: list, name: str) -> None:
+    timing.append((time.monotonic(), time.thread_time(), name))
+
+
+def _note_page_timing(timing: list, size: int) -> None:
+    """Logs, every 20 product pages, where the time after a fetch goes (average wall/CPU seconds per step)."""
+    steps = {}
+    for before, after in zip(timing, timing[1:], strict=False):
+        steps[after[2]] = (after[0] - before[0], after[1] - before[1])
+    _page_timings.append((steps, size))
     if len(_page_timings) >= 20:
         n = len(_page_timings)
-        avg = [sum(item[i] for item in _page_timings) / n for i in range(5)]
-        log(f"Amazon sayfa işleme: sayfa={n} | çözümleme={avg[0]:.1f}/{avg[1]:.1f} sn | "
-            f"diğer={avg[2]:.1f}/{avg[3]:.1f} sn (duvar/işlemci, ort.) | html={avg[4] / 1024:.0f} KB")
+        names = [mark[2] for mark in timing[1:]]
+        parts = []
+        for name in names:
+            wall = sum(item[0].get(name, (0, 0))[0] for item in _page_timings) / n
+            cpu = sum(item[0].get(name, (0, 0))[1] for item in _page_timings) / n
+            parts.append(f"{name}={wall:.1f}/{cpu:.1f}")
+        log(f"Amazon sayfa işleme: sayfa={n} | {' '.join(parts)} sn (duvar/işlemci, ort.) | "
+            f"html={sum(item[1] for item in _page_timings) / n / 1024:.0f} KB")
         _page_timings.clear()
-
 
 class AmazonProvider(RhythmMixin, PageCacheMixin, Provider):
     site = SITE_AMAZON
@@ -385,16 +394,18 @@ class AmazonProvider(RhythmMixin, PageCacheMixin, Provider):
                 if snapshot is None or needs_variation_upgrade or needs_offer_upgrade:
                     page_was_reused = False
                     html = self.fetch(variation.url, ctx)
-                    timing = (time.monotonic(), time.thread_time())
+                    timing = [(time.monotonic(), time.thread_time())]
                     page_soup = parser.parse_product_page(html)
-                    timing += (time.monotonic(), time.thread_time())
+                    _mark(timing, "çözümleme")
                     discovered = None
                     if follow_variations:
                         discovery_pages += 1
                         discovered = parser.extract_product_variations(html, variation.url, limit, soup=page_soup)
                     enqueue(discovered)
+                    _mark(timing, "varyant")
                     selected_label = parser.selected_variation_label(html, soup=page_soup)
                     page_title = parser.extract_title(page_soup) or ""
+                    _mark(timing, "başlık")
                     # Exclusions are decided from the title and selected variant
                     # before any price is read; variant discovery still continues.
                     exclusion_term = excluded_term_in_title(watch, " ".join((page_title, selected_label, variation.label)))
@@ -419,6 +430,7 @@ class AmazonProvider(RhythmMixin, PageCacheMixin, Provider):
                         "offers_skipped_by_exclusion": bool(exclusion_term),
                         "offer_skip_excluded_terms": tuple(watch.excluded_terms) if exclusion_term else (),
                     }
+                    _mark(timing, "teklif")
                     _note_page_timing(timing, len(html))
                     if snapshot is None:
                         snapshot = {"label": selected_label or variation.label, "variations": discovered, **page_state}

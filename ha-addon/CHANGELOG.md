@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.20.17
+
+- HTML okuyucu hızlı lxml'e geçti (yeni bağımlılık lxml 6.0.2; sayfa çözümleme ~1,6 sn → daha kısa). Amazon'un 'bu seçenek hariç' hafızası diske yazılır, yeniden başlatmadan sonra hariç seçenekler tekrar okunmaz. Değişen özet tablosu günlüğe en çok 5 dk'da bir yazılır. Amazon sayfa işleme süresi adım adım günlüğe yazılır (20 sayfada bir). Ek yedek: ec840e92 (kısmi, Hermes).
+
 ## 4.20.16
 
 - Ölçüm: Amazon ürün sayfasının çözümlenme süresi 20 sayfada bir günlüğe yazılır (yalnız kayıt; hızlı okuyucuya geçiş öncesi doğrulama).

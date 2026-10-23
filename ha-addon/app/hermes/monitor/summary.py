@@ -29,6 +29,8 @@ from .state import sanitized_price_bounds, state_decimal, watch_key
 # The log repeats an unchanged table at most this often; idle cycles run every
 # few seconds and would otherwise fill the log with identical tables.
 UNCHANGED_TABLE_LOG_SECONDS = 30 * 60
+# A changed table is logged at most this often (multi-seller prices move on almost every read).
+CHANGED_TABLE_LOG_SECONDS = 5 * 60
 _last_logged_table: Dict[str, Any] = {"signature": None, "at": 0.0}
 
 
@@ -375,11 +377,12 @@ def reset_summary_price_ranges(path: Path) -> None:
 
 
 def log_price_summary(rows: List[PriceSummaryRow], now: float | None = None) -> None:
-    """Log the table when it changed, otherwise at most every 30 minutes."""
+    """Log a changed table at most every 5 minutes, an unchanged one at most every 30 minutes."""
     unique_rows = sorted_summary_rows(deduplicate_summary_rows(rows))
     signature = tuple((row.seller, row.product_title, str(row.price), str(row.target_price)) for row in unique_rows)
     now = time.monotonic() if now is None else now
-    if signature == _last_logged_table["signature"] and now - _last_logged_table["at"] < UNCHANGED_TABLE_LOG_SECONDS:
+    if now - _last_logged_table["at"] < (UNCHANGED_TABLE_LOG_SECONDS if signature == _last_logged_table["signature"]
+                                          else CHANGED_TABLE_LOG_SECONDS):
         return
     _last_logged_table.update(signature=signature, at=now)
     log(f"Özet: eşleşen={len(unique_rows)}")

@@ -30,7 +30,7 @@ PRICE_META_SELECTORS = [
 
 
 def soup_from_html(html: str) -> BeautifulSoup:
-    return BeautifulSoup(html, "html.parser")
+    return BeautifulSoup(html, "lxml")
 
 
 def extract_title(soup: BeautifulSoup) -> Optional[str]:

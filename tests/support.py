@@ -30,6 +30,9 @@ _storage.EXPORT_EVERY_SECONDS = 0
 
 # Request gaps are tested on their own; elsewhere tests must not sleep.
 from hermes import constants  # noqa: E402
+from hermes.providers.amazon import pagecache as _amazon_pagecache  # noqa: E402
+
+_amazon_pagecache.PERSIST_EXCLUDED_PAGES = False  # each test starts without remembered excluded pages
 
 for _site in list(constants.SITE_MIN_REQUEST_GAP_SECONDS):
     constants.SITE_MIN_REQUEST_GAP_SECONDS[_site] = 0

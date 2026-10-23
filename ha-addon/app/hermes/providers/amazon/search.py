@@ -212,7 +212,7 @@ def extract_result_candidates(
     max_items_to_scan: int,
     primary_is_warehouse: bool = False,
 ) -> List[AmazonSearchCandidate]:
-    soup = BeautifulSoup(html, "html.parser")
+    soup = BeautifulSoup(html, "lxml")
     raw_lower = html.casefold()
     notice = _find_no_results_notice(soup) if "bulunamad" in raw_lower or "bulamad" in raw_lower else ""
     if notice:

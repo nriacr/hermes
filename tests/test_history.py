@@ -543,7 +543,8 @@ class QuietLogTests(HistoryCase):
         summary.log_price_summary([row], now=10_000 + summary.UNCHANGED_TABLE_LOG_SECONDS)
         changed = summary.PriceSummaryRow(seller="Amazon", product_title="iPhone", product_url=AMAZON, price=Decimal("85"),
                                           target_price=Decimal("100"), min_price=Decimal("85"), max_price=Decimal("90"))
-        summary.log_price_summary([changed], now=10_000 + summary.UNCHANGED_TABLE_LOG_SECONDS + 1)
+        summary.log_price_summary([changed], now=10_000 + summary.UNCHANGED_TABLE_LOG_SECONDS + 1)  # too soon
+        summary.log_price_summary([changed], now=10_000 + summary.UNCHANGED_TABLE_LOG_SECONDS + summary.CHANGED_TABLE_LOG_SECONDS)
         self.assertEqual(sum(line.endswith("Özet: eşleşen=1") for line in LOG_LINES), 3)
 
 

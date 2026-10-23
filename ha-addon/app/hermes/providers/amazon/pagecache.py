@@ -5,9 +5,11 @@ import time
 import zlib
 from typing import Optional
 
-from ...constants import AMAZON_EXCLUDED_PAGE_REFRESH_SECONDS
+from ...constants import AMAZON_EXCLUDED_PAGE_REFRESH_SECONDS, DATA_DIR
 from ...logging_utils import log
 from ...models import WatchRule
+from ...storage import export_json, load_json
+from .parser import AmazonProductVariation
 
 # Bound repeated reads of an absent/unreadable offer independently of card priority.
 # Successful offers and access failures never enter this cache.
@@ -15,6 +17,11 @@ NO_OFFER_RECHECK_SECONDS = 5 * 60
 NO_OFFER_CACHE_LIMIT = 512
 PAGE_CACHE_LIMIT = 128
 EXCLUDED_PAGE_CACHE_LIMIT = 512
+# Excluded pages are remembered across restarts, so a restart does not spend its first
+# minutes re-reading every excluded variant (written at most once a minute).
+EXCLUDED_PAGES_PATH = DATA_DIR / "amazon_excluded_pages.json"
+EXCLUDED_PAGES_SAVE_SECONDS = 60
+PERSIST_EXCLUDED_PAGES = True  # tests switch it off so cases do not share memory
 
 
 class PageCacheMixin:
@@ -47,7 +54,42 @@ class PageCacheMixin:
         cache[cache_key] = {"snapshot": snapshot, "retry_at": now + NO_OFFER_RECHECK_SECONDS, "last_skip_logged_at": now}
         log(f"Amazon fiyat/teklif bulunmayan varyant: {cache_key} | yeniden kontrol={NO_OFFER_RECHECK_SECONDS} sn")
 
+    def _load_excluded_pages(self) -> None:
+        client = self.client
+        if vars(client).get("excluded_pages_loaded"):
+            return
+        client.excluded_pages_loaded = True
+        if not PERSIST_EXCLUDED_PAGES:
+            return
+        try:
+            stored = load_json(EXCLUDED_PAGES_PATH, {})
+            offset = time.monotonic() - time.time()
+            for key, item in (stored.items() if isinstance(stored, dict) else ()):
+                if key in client.excluded_pages or not isinstance(item, dict):
+                    continue
+                client.excluded_pages[key] = {
+                    "variations": [AmazonProductVariation(label=str(v[0]), url=str(v[1])) for v in item["variations"]],
+                    "terms": tuple(item["terms"]), "refresh_at": float(item["refresh_at"]) + offset}
+        except Exception as exc:  # noqa: BLE001 - the memory is only a saving; start empty
+            log(f"Amazon hariç sayfa hafızası okunamadı: {type(exc).__name__}")
+
+    def _save_excluded_pages(self) -> None:
+        client = self.client
+        now = time.monotonic()
+        if not PERSIST_EXCLUDED_PAGES or now - vars(client).get("excluded_pages_saved_at", -math.inf) < EXCLUDED_PAGES_SAVE_SECONDS:
+            return
+        client.excluded_pages_saved_at = now
+        offset = time.time() - now
+        payload = {key: {"variations": [[v.label, v.url] for v in item["variations"]], "terms": list(item["terms"]),
+                         "refresh_at": item["refresh_at"] + offset}
+                   for key, item in client.excluded_pages.items()}
+        try:
+            export_json(EXCLUDED_PAGES_PATH, payload, now=True)
+        except Exception as exc:  # noqa: BLE001
+            log(f"Amazon hariç sayfa hafızası yazılamadı: {type(exc).__name__}")
+
     def _remembered_exclusion(self, cache_key: str, watch: WatchRule) -> Optional[dict]:
+        self._load_excluded_pages()
         entry = self.client.excluded_pages.get(cache_key)
         if not entry:
             return None
@@ -64,3 +106,4 @@ class PageCacheMixin:
         spread = 0.5 + (zlib.crc32(cache_key.encode("utf-8")) % 100) / 100
         cache[cache_key] = {"variations": list(variations), "terms": tuple(watch.excluded_terms),
                             "refresh_at": time.monotonic() + AMAZON_EXCLUDED_PAGE_REFRESH_SECONDS * spread}
+        self._save_excluded_pages()

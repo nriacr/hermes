@@ -835,6 +835,28 @@ class OtherSiteTests(unittest.TestCase):
         self.assertEqual([first.url] + [item.url for item in rest], [main, keep])
         self.assertEqual(opened, [keep])  # the 512 GB variant was never opened
 
+    def test_amazon_excluded_pages_are_remembered_across_a_restart(self):
+        import tempfile
+        from pathlib import Path
+        from hermes.providers.amazon import pagecache
+
+        class Holder(pagecache.PageCacheMixin):
+            def __init__(self):
+                self.client = SimpleNamespace(excluded_pages={})
+
+        rule = SimpleNamespace(excluded_terms=["512 GB"])
+        neighbours = [amazon_parser.AmazonProductVariation("256 GB", "https://www.amazon.com.tr/dp/B000000001")]
+        with tempfile.TemporaryDirectory() as folder, \
+                patch.object(pagecache, "EXCLUDED_PAGES_PATH", Path(folder) / "excluded.json"), \
+                patch.object(pagecache, "PERSIST_EXCLUDED_PAGES", True):
+            before = Holder()
+            self.assertIsNone(before._remembered_exclusion("page-512", rule))
+            before._remember_exclusion("page-512", rule, neighbours)
+            after = Holder()  # a restarted Hermes starts with empty memory
+            remembered = after._remembered_exclusion("page-512", rule)
+            self.assertEqual(remembered["variations"], neighbours)
+            self.assertIsNone(after._remembered_exclusion("page-512", SimpleNamespace(excluded_terms=["1 TB"])))
+
     def test_beymenclub_fetch_uses_its_browser_shaped_headers(self):
         response = SimpleNamespace(status_code=200, headers={"content-type": "text/html; charset=utf-8"},
                                    text="<script>BEYMEN.productMain = {}</script>", raise_for_status=lambda: None)
