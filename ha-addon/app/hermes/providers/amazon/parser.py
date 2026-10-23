@@ -23,6 +23,7 @@ from ..base import (
     soup_from_html,
 )
 from .common import _step
+from .fastselect import indexed
 
 AMAZON_PRODUCT_SELECTORS = [
     "#corePriceDisplay_desktop_feature_div .a-price .a-offscreen",
@@ -201,8 +202,8 @@ def _script_product_variations(soup, source_url: str, limit: int) -> list[Amazon
 
 
 def parse_product_page(html: str):
-    """Parse an Amazon product page once for the provider's page-level readers."""
-    return soup_from_html(html)
+    """Parse an Amazon product page once for the provider's page-level readers (indexed selects)."""
+    return indexed(soup_from_html(html))
 
 
 def extract_product_variations(

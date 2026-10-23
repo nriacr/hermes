@@ -1,5 +1,10 @@
 # Değişiklik günlüğü
 
+## 4.20.22
+
+- Amazon ürün sayfası bir kez dizinlenir; fiyat, varyant, Depo ve stok aramaları tüm sayfayı her seferinde baştan taramaz (desteklenmeyen seçicide eski yöntem kullanılır, sonuçlar aynı).
+- Hepsiburada: bir seçeneği açmadan atlama kararı yalnız seçeneğin kendi adına bakar; ana sayfa başlığındaki bir terim başka bir seçeneği yanlışlıkla atlatamaz.
+
 ## 4.20.21
 
 - Amazon 'normalden yüksek fiyat' uyarısı kontrolü hızlandı: sayfada iki kez yerine bir kez ve tek geçişte yapılır (iç içe bölgeler bir kez okunur; gizli, ikinci el ve betik metinleri yine sayılmaz). Teklif çıkarma alt adımları günlüğe yazılır.

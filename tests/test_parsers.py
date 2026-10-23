@@ -2243,3 +2243,50 @@ class HighPriceWalkTests(unittest.TestCase):
         self.assertEqual(self.check(f"<div id='apex_desktop'><div id='usedBuySection'>{warning}</div></div>"), "")
         self.assertEqual(self.check(f"<div id='apex_desktop'><script>var t = '{warning}';</script><!-- {warning} --></div>"), "")
         self.assertEqual(self.check("<div id='buybox'>Normalden <b>yüksek</b> fiyat</div>"), "OutOfStockHermesError")
+
+
+class FastSelectTests(unittest.TestCase):
+    PAGE = """<html><head><meta property='og:title' content='Meta başlık'>
+    <script type='a-state' data-a-state='{"key":"x"}'>{}</script></head><body>
+    <h1 id='title'><span id='productTitle'>Apple iPhone</span></h1>
+    <div id='apex_desktop'><div id='corePriceDisplay_desktop_feature_div'>
+      <span class='a-price' data-a-color='price'><span class='a-offscreen'>1.000 TL</span><span class='a-price-whole'>1.000</span></span>
+      <div id='corePrice_feature_div'><span class='a-price'><span class='a-offscreen'>999 TL</span></span><span class='aok-offscreen'>x</span></div>
+    </div></div>
+    <div id='price'>dup</div><div id='price'>dup2</div>
+    <div id='inline-twister-row-color_name'><ul><li data-asin='A'>Mavi</li><li class='selected'>Gümüş</li></ul></div>
+    <div id='variation_size_name'><span class='selection'>256 GB</span><ul><li>256</li></ul></div>
+    <span id='inline-twister-expanded-dimension-text-color_name'>Gümüş</span>
+    <div id='usedAccordionRow'><a href='/gp/offer-listing/B01'>ikinci el</a><span class='a-price'><span class='a-offscreen'>800 TL</span></span></div>
+    <div data-csa-c-slot-id='usedAccordionRow' role='button'>u</div>
+    <div class='aod-offer' data-cy='aod-offer'>o</div><div id='olpOfferList'><div class='olpOffer'>p</div></div>
+    <input name='items[0.base][customerVisiblePrice][amount]' value='1000'>
+    <div id='availability'>Stokta</div><img src='a.png'><a>bos</a>
+    </body></html>"""
+
+    def test_indexed_selects_match_soupsieve_for_every_parser_selector(self):
+        from hermes.providers import base
+        from hermes.providers.amazon import parser as amazon_parser
+        selectors = [
+            ", ".join(amazon_parser.AMAZON_HIGH_PRICE_SELECTORS), ", ".join(amazon_parser.AMAZON_PRODUCT_SELECTORS),
+            *amazon_parser.AMAZON_PRODUCT_SELECTORS, *amazon_parser.AMAZON_VARIATION_SELECTORS,
+            *amazon_parser.AMAZON_USED_OFFER_CONTAINER_SELECTORS, *amazon_parser.AMAZON_PRIMARY_PRICE_CONTAINERS,
+            amazon_parser.AMAZON_USED_OFFER_LINK_SELECTOR, *base.PRODUCT_TITLE_SELECTORS,
+            "#availability, #availabilityInsideBuyBox_feature_div, #availability_feature_div, #outOfStock",
+            "#usedBuySection, #usedAccordionRow, [data-csa-c-slot-id='usedAccordionRow']", ".a-price",
+            "[id^='inline-twister-expanded-dimension-text-'], [id^='variation_'] .selection",
+            "input[name='items[0.base][customerVisiblePrice][amount]']", "script[type='a-state'][data-a-state]",
+            "#variation_color_name .selection, #variation_color .selection", ".a-offscreen", "a", "a[href]", "img",
+            "#price", "div > span", "li:first-child",
+        ]
+        plain = base.soup_from_html(self.PAGE)
+        fast = amazon_parser.parse_product_page(self.PAGE)
+        for selector in selectors:
+            with self.subTest(selector=selector):
+                self.assertEqual([str(item) for item in fast.select(selector)], [str(item) for item in plain.select(selector)])
+                self.assertEqual(str(fast.select_one(selector)), str(plain.select_one(selector)))
+        for section in fast.select("#usedAccordionRow"):
+            section.decompose()
+        for section in plain.select("#usedAccordionRow"):
+            section.decompose()
+        self.assertEqual([str(item) for item in fast.select(".a-offscreen")], [str(item) for item in plain.select(".a-offscreen")])
