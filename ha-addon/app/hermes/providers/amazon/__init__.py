@@ -38,6 +38,16 @@ def _mark(timing: list, name: str) -> None:
     timing.append((time.monotonic(), time.thread_time(), name))
 
 
+_current = threading.local()
+
+
+def _step(name: str) -> None:
+    """A finer mark inside the page being timed (no-op outside it)."""
+    timing = getattr(_current, "timing", None)
+    if timing is not None:
+        _mark(timing, name)
+
+
 def _note_page_timing(timing: list, size: int) -> None:
     """Logs, every 20 product pages, where the time after a fetch goes (average wall/CPU seconds per step)."""
     steps = {}
@@ -46,7 +56,7 @@ def _note_page_timing(timing: list, size: int) -> None:
     _page_timings.append((steps, size))
     if len(_page_timings) >= 20:
         n = len(_page_timings)
-        names = [mark[2] for mark in timing[1:]]
+        names = list(dict.fromkeys(name for item in _page_timings for name in item[0]))
         parts = []
         for name in names:
             wall = sum(item[0].get(name, (0, 0))[0] for item in _page_timings) / n
@@ -209,16 +219,19 @@ class AmazonProvider(RhythmMixin, PageCacheMixin, Provider):
         """
         soup = soup or parser.parse_product_page(html)
         parser.raise_if_high_price(soup, url)
+        _step("yüksek_fiyat")
         counters = self.client.access
         counters.count("depo_sayfa")
         # Capture the link before extract_offers removes the used accordion from the shared tree.
         used_listing_url = parser.extract_used_offer_listing_url(html, source_url=url, soup=soup)
+        _step("depo_linki")
         primary_error = None
         try:
             offers = parser.extract_offers(html, source_url=url, soup=soup)
         except HermesError as exc:
             primary_error = exc
             offers = []
+        _step("teklifler")
         if any(offer.is_warehouse for offer in offers):
             counters.count("depo_dogrulanan", sum(1 for offer in offers if offer.is_warehouse))
             return offers
@@ -229,7 +242,9 @@ class AmazonProvider(RhythmMixin, PageCacheMixin, Provider):
         try:
             counters.count("depo_liste")
             listing_html = self.fetch(used_listing_url, ctx)
+            _step("depo_isteği")
             warehouse_offers = parser.extract_verified_warehouse_offers_from_listing(listing_html, source_url=url)
+            _step("depo_çözüm")
         except Exception as exc:  # noqa: BLE001
             log(f"Amazon Depo teklif listesi okunamadı: {log_cell(url, 70)} | {exc}")
             self._remember_block(outcome, exc)
@@ -395,6 +410,7 @@ class AmazonProvider(RhythmMixin, PageCacheMixin, Provider):
                     page_was_reused = False
                     html = self.fetch(variation.url, ctx)
                     timing = [(time.monotonic(), time.thread_time())]
+                    _current.timing = timing
                     page_soup = parser.parse_product_page(html)
                     _mark(timing, "çözümleme")
                     discovered = None
@@ -430,7 +446,8 @@ class AmazonProvider(RhythmMixin, PageCacheMixin, Provider):
                         "offers_skipped_by_exclusion": bool(exclusion_term),
                         "offer_skip_excluded_terms": tuple(watch.excluded_terms) if exclusion_term else (),
                     }
-                    _mark(timing, "teklif")
+                    _mark(timing, "teklif_kalan")
+                    _current.timing = None
                     _note_page_timing(timing, len(html))
                     if snapshot is None:
                         snapshot = {"label": selected_label or variation.label, "variations": discovered, **page_state}

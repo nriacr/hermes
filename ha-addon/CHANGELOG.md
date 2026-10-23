@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.20.20
+
+- Ölçüm: Amazon teklif çıkarma adımı alt adımlarıyla günlüğe yazılır (yalnız kayıt).
+
 ## 4.20.19
 
 - lxml okuyucu geri alındı: Pi'de Amazon sayfasını çözmek 1,6 sn'den 14-15 sn'ye çıkardı (işlemci aynı, bekleme arttı). Eski okuyucuya dönüldü; hariç sayfa hafızası, özet günlüğü sınırı ve adım adım ölçüm kaldı.
