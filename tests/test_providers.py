@@ -668,7 +668,7 @@ class AmazonProductTests(AmazonTestCase):
         variations = [SimpleNamespace(label=label, url=url) for label, url in zip(("Antrasit", "Mavi", "Pembe"), urls)]
         with (self.serve(lambda url: url), patch.object(amazon_parser, "extract_product_variations", return_value=variations),
               patch.object(amazon_parser, "extract_offers",
-                           side_effect=lambda html, source_url, soup=None: [OfferResult("Örnek tablet", Decimal("18999"), "Amazon", source_url)])):
+                           side_effect=lambda html, source_url, soup=None, **_kwargs: [OfferResult("Örnek tablet", Decimal("18999"), "Amazon", source_url)])):
             offers = self.read(rule)
         self.assertEqual([offer.url for offer in offers], urls)
         self.assertEqual([offer.title for offer in offers],

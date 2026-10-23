@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.20.21
+
+- Amazon 'normalden yüksek fiyat' uyarısı kontrolü hızlandı: sayfada iki kez yerine bir kez ve tek geçişte yapılır (iç içe bölgeler bir kez okunur; gizli, ikinci el ve betik metinleri yine sayılmaz). Teklif çıkarma alt adımları günlüğe yazılır.
+
 ## 4.20.20
 
 - Ölçüm: Amazon teklif çıkarma adımı alt adımlarıyla günlüğe yazılır (yalnız kayıt).

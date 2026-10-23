@@ -1,4 +1,6 @@
 import re
+import threading
+import time
 from typing import Any
 
 from bs4 import Comment
@@ -86,3 +88,14 @@ def extract_verified_secondary_offer_price(container: Any, include_container_fal
         if has_explicit_used_offer_evidence(text):
             return _price_after_verified_secondary_offer_text(text)
     return None
+
+
+# Per-page step timings (see AmazonProvider's page log): the reading thread's current mark list.
+_current = threading.local()
+
+
+def _step(name: str) -> None:
+    """A finer timing mark inside the page being timed (no-op outside it)."""
+    timing = getattr(_current, "timing", None)
+    if timing is not None:
+        timing.append((time.monotonic(), time.thread_time(), name))

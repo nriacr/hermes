@@ -2222,3 +2222,24 @@ class SiteDetectionHostTests(unittest.TestCase):
 if __name__ == "__main__":
     unittest.main()
 
+
+
+class HighPriceWalkTests(unittest.TestCase):
+    def check(self, body):
+        from hermes.providers.amazon import parser as amazon_parser
+        soup = amazon_parser.parse_product_page(f"<html><body>{body}</body></html>")
+        try:
+            amazon_parser.raise_if_high_price(soup, "https://www.amazon.com.tr/dp/B000000001")
+        except Exception as exc:  # noqa: BLE001
+            return type(exc).__name__
+        return ""
+
+    def test_warning_is_found_once_in_nested_regions_but_not_when_hidden_used_or_in_scripts(self):
+        warning = "Normalden yüksek fiyat"
+        self.assertEqual(self.check(f"<div id='apex_desktop'><div id='price'><span>{warning}</span></div></div>"),
+                         "OutOfStockHermesError")
+        self.assertEqual(self.check(f"<div id='apex_desktop'><span class='aok-hidden'>{warning}</span></div>"), "")
+        self.assertEqual(self.check(f"<div style='display: none'><div id='price'>{warning}</div></div>"), "")
+        self.assertEqual(self.check(f"<div id='apex_desktop'><div id='usedBuySection'>{warning}</div></div>"), "")
+        self.assertEqual(self.check(f"<div id='apex_desktop'><script>var t = '{warning}';</script><!-- {warning} --></div>"), "")
+        self.assertEqual(self.check("<div id='buybox'>Normalden <b>yüksek</b> fiyat</div>"), "OutOfStockHermesError")

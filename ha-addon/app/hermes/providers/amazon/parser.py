@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from typing import Optional
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
+from bs4 import Comment, NavigableString, Tag
+
 from ...errors import HermesError, OutOfStockHermesError, PriceUnavailableHermesError
 from ...models import OfferResult
 from ...utils import (
@@ -20,7 +22,7 @@ from ..base import (
     extract_title,
     soup_from_html,
 )
-from .common import visible_text_nodes
+from .common import _step
 
 AMAZON_PRODUCT_SELECTORS = [
     "#corePriceDisplay_desktop_feature_div .a-price .a-offscreen",
@@ -577,11 +579,52 @@ def extract_verified_warehouse_offers_from_listing(html: str, source_url: str, s
     return offers
 
 
+_TEXTLESS_TAGS = {"script", "style", "template", "noscript"}
+_USED_OFFER_IDS = {"usedBuySection", "usedAccordionRow", "aod-offer", "aod-pinned-offer"}
+
+
+def _skipped_here(element) -> bool:
+    """One element's own hidden / used-offer / non-text marks (what the ancestor walks test at each level)."""
+    if element.name in _TEXTLESS_TAGS:
+        return True
+    classes = set(element.get("class", []) or [])
+    style = str(element.get("style", "")).casefold().replace(" ", "")
+    return (element.get("aria-hidden") == "true" or "aok-hidden" in classes
+            or "display:none" in style or "visibility:hidden" in style
+            or str(element.get("id") or "") in _USED_OFFER_IDS
+            or str(element.get("data-csa-c-slot-id") or "") == "usedAccordionRow"
+            or "aod-offer" in classes or element.get("data-cy") == "aod-offer")
+
+
+def _visible_new_offer_text(container) -> str:
+    """Visible text of a container outside used offers, in one walk down the tree.
+
+    Same text as checking every text node's ancestors one by one, which on a 1.3 MB page took
+    over a second of the Pi's time per call.
+    """
+    if any(getattr(element, "name", None) and _skipped_here(element) for element in (container, *container.parents)):
+        return ""
+    parts = []
+    stack = [iter(container.contents)]
+    while stack:
+        node = next(stack[-1], None)
+        if node is None:
+            stack.pop()
+        elif isinstance(node, Tag):
+            if not _skipped_here(node):
+                stack.append(iter(node.contents))
+        elif isinstance(node, NavigableString) and not isinstance(node, Comment):
+            parts.append(str(node).strip())
+    return " ".join(parts)
+
+
 def raise_if_high_price(soup, source_url: str = "") -> None:
     """Treat the selected offer's high-price warning as stock absence by user policy."""
-    for container in soup.select(", ".join(AMAZON_HIGH_PRICE_SELECTORS)):
-        text = " ".join(str(node).strip() for node in visible_text_nodes(container) if not _is_in_used_offer(node.parent))
-        if "normalden yuksek fiyat" in normalize_offer_text(text):
+    containers = soup.select(", ".join(AMAZON_HIGH_PRICE_SELECTORS))
+    selected = {id(container) for container in containers}
+    # A nested container's text is part of its outer container's text; read each region once.
+    for container in (item for item in containers if not any(id(parent) in selected for parent in item.parents)):
+        if "normalden yuksek fiyat" in normalize_offer_text(_visible_new_offer_text(container)):
             raise OutOfStockHermesError(
                 'Stokta yok kabul edildi; Amazon bu ürün için "Normalden yüksek fiyat" uyarısı gösteriyor.',
                 product_title=extract_title(soup) or "Amazon ürünü",
@@ -603,23 +646,29 @@ def selected_product_unavailable_reason(soup) -> str:
     return ""
 
 
-def extract_offers(html: str, source_url: str = "", soup=None) -> list[OfferResult]:
+def extract_offers(html: str, source_url: str = "", soup=None, high_price_checked: bool = False) -> list[OfferResult]:
     """Extract normal and used offers separately when Amazon shows both on one page."""
     soup = soup or parse_product_page(html)
-    raise_if_high_price(soup, source_url)
+    if not high_price_checked:
+        raise_if_high_price(soup, source_url)
     warehouse_offers = extract_verified_warehouse_offers_from_listing(html, source_url, soup=soup)
+    _step("t_depo")
     primary_seller = extract_primary_seller(soup)
+    _step("t_satıcı")
     # Amazon repeats corePrice IDs inside the USED accordion. Its form amount
     # and price must never become the selected new offer, even when active.
     for used_section in soup.select("#usedBuySection, #usedAccordionRow, [data-csa-c-slot-id='usedAccordionRow']"):
         used_section.decompose()
+    _step("t_ikinci_el_sil")
     jsonld_title, jsonld_price = extract_jsonld_product(soup)
     title: Optional[str] = jsonld_title or extract_title(soup) or "Amazon ürünü"
     stock_quantity = extract_low_stock_quantity(soup=soup)
+    _step("t_başlık_stok")
     offers: list[OfferResult] = []
 
     unavailable_reason = selected_product_unavailable_reason(soup)
     primary_price = None if unavailable_reason else _extract_visible_primary_price(soup)
+    _step("t_fiyat")
     if primary_price is not None:
         offers.append(
             OfferResult(

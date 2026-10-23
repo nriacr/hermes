@@ -22,6 +22,7 @@ from ..http import raise_if_age_verification
 from . import parser
 from .access import MAIN_LANE, AmazonAccess
 from .client import AmazonClient, is_protection_error
+from .common import _current, _step
 from .matching import is_platform_seller, offers_from_search_results
 from .pagecache import PageCacheMixin
 from .rhythm import RhythmMixin, WatchRhythm
@@ -38,14 +39,6 @@ def _mark(timing: list, name: str) -> None:
     timing.append((time.monotonic(), time.thread_time(), name))
 
 
-_current = threading.local()
-
-
-def _step(name: str) -> None:
-    """A finer mark inside the page being timed (no-op outside it)."""
-    timing = getattr(_current, "timing", None)
-    if timing is not None:
-        _mark(timing, name)
 
 
 def _note_page_timing(timing: list, size: int) -> None:
@@ -227,7 +220,7 @@ class AmazonProvider(RhythmMixin, PageCacheMixin, Provider):
         _step("depo_linki")
         primary_error = None
         try:
-            offers = parser.extract_offers(html, source_url=url, soup=soup)
+            offers = parser.extract_offers(html, source_url=url, soup=soup, high_price_checked=True)
         except HermesError as exc:
             primary_error = exc
             offers = []
