@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.22.1
+
+- Otomatik sepet: sepet sayfası Pi'de tam HTML ayrıştırması yerine hedefli okunur (ilk canlı denemede iş 15,6 sn sürdü). Adım süreleri günlüğe yazılır.
+
 ## 4.22.0
 
 - Kartta "Otomatik sepete ekle (Amazon)" kutusu (varsayılan kapalı). Fırsat bildirimi kuyruğa girdiği anda Alfred'deki Hermes Tarayıcı fırsatı 1 adet sepete ekler (Depo için o Depo teklifi), sonra sepetteki diğer her şeyi "Daha sonra al"a taşır. Satın alma/ödeme yok.

@@ -11,7 +11,7 @@ from support import TempData, config, monitor, notifier
 from hermes.cart import CartQueue
 from hermes.database import Database
 from hermes.models import OfferResult, WatchRule
-from hermes.providers.amazon.cart import CartError, add_to_cart, payload
+from hermes.providers.amazon.cart import Cart, CartError, add_to_cart, payload
 from hermes.providers.amazon.parser import extract_verified_warehouse_offers_from_listing
 from hermes.providers.amazon import AmazonProvider
 from hermes.providers.base import Provider
@@ -209,6 +209,24 @@ class AmazonCartFlowTests(unittest.TestCase):
         with self.assertRaises(CartError) as error:
             add_to_cart(self.job, amazon)
         self.assertTrue(error.exception.added)
+
+
+class CartPageTests(unittest.TestCase):
+    def test_amazon_attribute_order_and_multiline_button_are_read(self):
+        html = ('<span id="nav-link-accountList-nav-line-1" class="nav-line-1">Nuri&#8203;</span>'
+                '<form id="savedCartViewForm"><input type="hidden" name="anti-csrftoken-a2z" value="saved-token" ></form>'
+                '<form id="activeCartViewForm" method="post" action="/cart/ref=ord_cart_shr">'
+                '<input type="hidden" name="anti-csrftoken-a2z" value="cart-token" ><div id="sc-active-cart">'
+                '<div data-asin="B07SQ2FZTK" data-bundleitem="absent" data-itemid="a60b-1" data-itemtype="active" '
+                'data-price="4199" data-quantity="4" class="a-row sc-list-item">'
+                '<input name="submit.save-for-later.a60b-1"\n       value="Daha sonra kaydet"\n       type="submit"></div>'
+                '<div data-asin="B000SAVED1" data-itemid="s1" data-itemtype="saved"></div></div></form>'
+                '<form method="post" class="add-to-cart-data a-spacing-none"><input type="hidden" name="anti-csrftoken-a2z" value="add-token" ></form>')
+        cart = Cart(html)
+        self.assertEqual([(r['data-asin'], r['data-quantity']) for r in cart.rows], [('B07SQ2FZTK', '4')])
+        self.assertEqual(cart.token('id="activeCartViewForm"'), 'cart-token')
+        self.assertEqual(cart.token('class="add-to-cart-data'), 'add-token')
+        self.assertEqual(cart.save_button(cart.rows[0]), ('submit.save-for-later.a60b-1', 'Daha sonra kaydet'))
 
 
 class OfferIdParserTests(unittest.TestCase):

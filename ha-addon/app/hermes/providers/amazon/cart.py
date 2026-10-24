@@ -5,12 +5,14 @@ cart item is moved to "Daha sonra al", so the deal is the only item left.
 """
 import json
 import re
+import time
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from urllib.parse import urlencode
 
 import requests
 
+from ...logging_utils import log
 from ...utils import extract_asin_from_url
 from . import parser
 from .client import protection_reason
@@ -45,7 +47,19 @@ def payload(watch, offer, url):
 class BrowserTransport:
     """Sends one allow-listed request through the logged-in Chromium; cookies never leave it."""
 
+    def __init__(self):
+        self.started = time.monotonic()
+        self.steps = []
+
     def __call__(self, method, url, body=''):
+        begun = time.monotonic()
+        try:
+            return self._send(method, url, body)
+        finally:
+            kind = 'ekle' if 'add-to-cart' in url else 'sonra_al' if method == 'POST' else 'teklif' if 'cart' not in url else 'sepet'
+            self.steps.append(f'{kind} {time.monotonic() - begun:.1f}')
+
+    def _send(self, method, url, body):
         try:
             meta = json.loads(BRIDGE.read_text())
         except (OSError, ValueError):
@@ -72,21 +86,39 @@ class BrowserTransport:
         return html
 
 
+_NAV = re.compile(r'id="nav-link-accountList-nav-line-1"[^>]*>([^<]*)<')
+_ACTIVE_ROW = re.compile(r'<div\b[^>]*\bdata-itemtype="active"[^>]*>')
+_ATTR = re.compile(r'\b(data-[a-z-]+)="([^"]*)"')
+_TOKEN = re.compile(r'name="anti-csrftoken-a2z"\s+value="([^"]+)"')
+
+
 class Cart:
-    """One parsed, logged-in cart page."""
+    """One logged-in cart page, read with a few anchored patterns.
+
+    A full HTML parse of Amazon's ~1 MB cart takes seconds on the Pi; these
+    fields are all the cart flow needs.
+    """
 
     def __init__(self, html):
-        self.soup = parser.parse_product_page(html)
-        nav = self.soup.select_one('#nav-link-accountList-nav-line-1')
-        if nav is None or any(word in normalize_offer_text(nav.get_text(' ', strip=True)) for word in ('giris', 'sign in')):
+        self.html = html
+        nav = _NAV.search(html)
+        if nav is None or any(word in normalize_offer_text(nav.group(1)) for word in ('giris', 'sign in')):
             raise CartError("Amazon oturumu kapalı; Hermes Tarayıcı'dan giriş yap")
-        if self.soup.select_one('#sc-active-cart') is None:
+        if 'id="sc-active-cart"' not in html:
             raise CartError('Amazon sepet sayfası tanınamadı')
-        self.rows = self.soup.select(ACTIVE_ROWS)
+        self.rows = [dict(_ATTR.findall(match.group(0))) for match in _ACTIVE_ROW.finditer(html)]
+        self.rows = [row for row in self.rows if row.get('data-asin') and row.get('data-itemid')]
 
-    def token(self, selector):
-        field = self.soup.select_one(selector + ' input[name="anti-csrftoken-a2z"]')
-        return str(field['value']) if field is not None and field.get('value') else ''
+    def token(self, marker):
+        """The first form token after `marker` (the cart form, or a cart add-to-cart form)."""
+        start = self.html.find(marker)
+        match = _TOKEN.search(self.html, start) if start >= 0 else None
+        return match.group(1) if match else ''
+
+    def save_button(self, row):
+        name = 'submit.save-for-later.' + row['data-itemid']
+        match = re.search(re.escape(f'name="{name}"') + r'\s+value="([^"]*)"', self.html)
+        return name, match.group(1) if match else 'Daha sonra kaydet'
 
     def row(self, asin):
         return next((row for row in self.rows if row.get('data-asin') == asin), None)
@@ -104,12 +136,11 @@ def after_post(transport, html):
 
 
 def save_for_later(transport, cart, row):
-    button = row.select_one('input[name^="submit.save-for-later."]')
-    token = cart.token('#activeCartViewForm')
-    if button is None or not token or not re.fullmatch(r'submit\.save-for-later\.[A-Za-z0-9_-]{1,120}', button['name']):
+    name, value = cart.save_button(row)
+    token = cart.token('id="activeCartViewForm"')
+    if not token or not re.fullmatch(r'submit\.save-for-later\.[A-Za-z0-9_-]{1,120}', name):
         raise CartError('Sonra al düğmesi bulunamadı')
-    fields = {'anti-csrftoken-a2z': token, button['name']: str(button.get('value') or 'Daha sonra kaydet')}
-    return after_post(transport, transport('POST', SAVE_URL, urlencode(fields)))
+    return after_post(transport, transport('POST', SAVE_URL, urlencode({'anti-csrftoken-a2z': token, name: value})))
 
 
 def offer_from_page(transport, job):
@@ -161,6 +192,14 @@ def row_warning(row, job):
 
 def add_to_cart(job, transport=None):
     transport = transport or BrowserTransport()
+    try:
+        return _add_to_cart(job, transport)
+    finally:
+        if isinstance(transport, BrowserTransport):
+            log('Sepet adımları (sn): ' + ', '.join(transport.steps))
+
+
+def _add_to_cart(job, transport):
     cart = Cart(transport('GET', CART_URL))
     if len(cart.rows) > MAX_ACTIVE_ITEMS:
         raise CartError('Sepette çok fazla ürün var; sepet değişmedi')
@@ -168,7 +207,7 @@ def add_to_cart(job, transport=None):
         # The same product already sits in the cart: adding it again would make two.
         cart = save_for_later(transport, cart, cart.row(job['asin']))
     # Fast path: the offer id Hermes just read and the cart page's own add-to-cart token.
-    offer_id, token = job.get('offer_id'), cart.token('form.add-to-cart-data')
+    offer_id, token = job.get('offer_id'), cart.token('class="add-to-cart-data')
     if not offer_id or not token:
         offer_id, token = offer_from_page(transport, job)
     cart = add_offer(transport, token, job, offer_id)
