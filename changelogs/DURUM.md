@@ -24,9 +24,13 @@ sonuç, gerçek kontrol ve yayın/kurulum bilgisi yeterlidir. Ayrıntı Git geç
 
 ## Planlananlar
 
+- 2026-10-24 · Agent: Codex · Amazon otomatik sepet (Nuri): kart bazında kapalı gelen seçim; seçili kartın doğrulanmış fırsatından 1 adet, özellikle Amazon Depo teklif/satıcı/fiyat/koşul eşleşmesi; yinelenen ekleme yok, ödeme ekranı/sipariş yok. Mac bağımsızlığı zorunlu. Sonraki adım: Alfred’de Hermes Tarayıcı 0.1.9 üzerinden kullanıcının Amazon girişi, kalıcı oturum doğrulaması; sonra sağlayıcı içinde hafif sepet isteği + ayar kutusu + bildirim sonucu. Genel tarama ve bildirim kuyruğu yavaşlatılmayacak.
+
 - Bu düzenleme kapsamında yeni geliştirme planlanmadı; mevcut diğer işler hakkında çıkarım yapılmaz.
 
 ## Yapılamayanlar / engeller
+
+- Amazon otomatik sepet henüz uygulanmadı/kurulmadı: mevcut istemci anonim, doğru Depo teklif kimliği taşınmıyor; Alfred’de hesap oturumu ve sepete ekleme doğrulanmalı. Mac Chrome oturumu kullanılmadı/taşınmadı.
 
 - Bu düzenleme kapsamında engel yok. Canlı test/kurulum belge işi için uygulanmaz.
 
