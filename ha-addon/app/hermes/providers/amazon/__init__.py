@@ -60,6 +60,14 @@ def _note_page_timing(timing: list, size: int) -> None:
         _page_timings.clear()
 
 class AmazonProvider(RhythmMixin, PageCacheMixin, Provider):
+    def cart_payload(self, watch, offer, url):
+        from .cart import payload
+        return payload(watch, offer, url)
+
+    def add_to_cart(self, job):
+        from .cart import add_to_cart
+        return add_to_cart(job)
+
     site = SITE_AMAZON
     progress_timeout_seconds = 3 * 3600
     alert_shows_seller = False

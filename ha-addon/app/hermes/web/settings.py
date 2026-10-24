@@ -185,6 +185,7 @@ def watch_form(item: Dict[str, Any], index: int, is_new: bool = False, groups=No
     flags = "".join([
         _checkbox(prefix, "include_variations", "Varyasyonları ekle", False if is_new else item.get("include_variations", False)),
         _checkbox(prefix, "official_seller_only", "Yalnızca platformun kendi satıcısı", False if is_new else item.get("official_seller_only", False)),
+        _checkbox(prefix, "auto_add_to_cart", "Amazon fırsatını sepete ekle · diğerlerini Sonra al’a taşı", False if is_new else item.get("auto_add_to_cart", False)),
         _checkbox(prefix, "notify_once_in_24H", "24 saat sustur", True if is_new else item.get("notify_once_in_24H", True)),
         _checkbox(prefix, "notify_90_day_low", "90 günün en düşüğünde de bildir", False if is_new else item.get("notify_90_day_low", False)),
         _checkbox(prefix, "active", "Aktif", True if is_new else item.get("active", True)),
@@ -441,6 +442,7 @@ def build_watch(form: Dict[str, List[str]], index: int) -> Optional[Dict[str, An
         "include_variations": prefix + "include_variations" in form,
         "priority": priority,
         "official_seller_only": prefix + "official_seller_only" in form,
+        "auto_add_to_cart": prefix + "auto_add_to_cart" in form,
         "notify_once_in_24H": prefix + "notify_once_in_24H" in form,
         "notify_90_day_low": prefix + "notify_90_day_low" in form,
         "notify_window": normalize_notify_window(_first(form, prefix + "notify_window")),

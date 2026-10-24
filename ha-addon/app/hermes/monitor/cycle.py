@@ -27,6 +27,7 @@ from ..constants import (
 from ..errors import BotProtectionHermesError, HermesError, OutOfStockHermesError, error_status
 from ..history import History, SUCCESS_OUTCOMES, read_requests
 from ..delivery import DeliveryQueue
+from ..cart import CartQueue
 from ..diagnostics import Diagnostics
 from ..homeassistant import HomeAssistantBridge
 from ..logging_utils import log
@@ -156,6 +157,7 @@ class Monitor:
         for message in self.config.config_errors:
             self.diagnostics.incident("config", "watch", message, "Hatalı kart atlandı; geçerli takipler devam ediyor")
         self.delivery = DeliveryQueue(self.files.database, self.notifier, self._delivery_finished)
+        self.cart = CartQueue(self.delivery.db, self.providers, self.config.watches)
         self.results = ResultRecorder(self)
         # A restart must not forget the last hour of requests (Amazon's window and block counts).
         since = datetime.now(timezone.utc) - timedelta(hours=1)
@@ -163,6 +165,9 @@ class Monitor:
             provider.restore_requests(read_requests(self.files.database, provider.site, since))
 
     def close(self, shutdown=False) -> None:
+        self.cart.close()
+        if self.cart.thread is not None and self.cart.thread.is_alive():
+            return  # The in-flight cart operation retains its database until process exit.
         self.delivery.close()
         if self.delivery.thread is not None and self.delivery.thread.is_alive():
             return  # In-flight send retains its DB; process shutdown owns final termination.

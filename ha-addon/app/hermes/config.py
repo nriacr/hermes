@@ -214,6 +214,7 @@ def _prepare_watch(item):
                 include_variations=parse_bool(item.get("include_variations"), default=False),
                 priority=priority,
                 official_seller_only=parse_bool(item.get("official_seller_only"), default=False),
+                auto_add_to_cart=parse_bool(item.get("auto_add_to_cart"), default=False),
                 check_now_token=str(item.get("check_now_token") or "").strip(),
                 max_items_to_scan=SEARCH_RESULT_LIMIT,
                 notify_once_in_24h=parse_bool(item.get("notify_once_in_24H"), default=True),

@@ -221,6 +221,12 @@ class ResultRecorder:
                     updated["last_low_alert_price"] = str(offer.price)
                     updated["last_low_alert_at"] = utc_now()
                 state[item_key] = updated
+                if watch.auto_add_to_cart and window_open and offer.price <= watch.target_price:
+                    cart_payload = provider.cart_payload(watch, offer, matched_url)
+                    if cart_payload:
+                        cart_payload['appearance'] = offer_entry.get('last_missing_at', '')
+                        from ..cart import CartQueue
+                        price_statements.append(CartQueue.statement(watch.site, watch.tracking_id, cart_payload))
                 persistence_started = time.monotonic()
                 try:
                     # Observation and delivery intent commit together before any network send.

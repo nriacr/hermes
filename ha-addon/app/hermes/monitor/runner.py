@@ -199,6 +199,7 @@ class MonitorService:
         failures = {site: 0 for site in sites}
         self.site_started = {}
         self.monitor.delivery.start()
+        self.monitor.cart.start()
         maintenance_at = 0.0
         diagnostics_at = 0.0
         communicated = {}

@@ -24,13 +24,13 @@ sonuç, gerçek kontrol ve yayın/kurulum bilgisi yeterlidir. Ayrıntı Git geç
 
 ## Planlananlar
 
-- 2026-10-24 · Agent: Codex · Amazon otomatik sepet (Nuri): kart bazında kapalı gelen seçim; seçili kartın doğrulanmış fırsatından 1 adet, özellikle Amazon Depo teklif/satıcı/fiyat/koşul eşleşmesi; yinelenen ekleme yok, ödeme ekranı/sipariş yok. Mac bağımsızlığı zorunlu. Sonraki adım: Alfred’de Hermes Tarayıcı 0.1.9 üzerinden kullanıcının Amazon girişi, kalıcı oturum doğrulaması; sonra sağlayıcı içinde hafif sepet isteği + ayar kutusu. Nuri’nin son kararı: bildirim sepet sonucunu ASLA beklemez; fırsat doğrulandığı anda mevcut hızlı bildirim ve bağımsız sepet işi başlar. Sepetin 3–5 saniyede hazır olması hedef, garanti değil; başarısızlık bildirim akışını etkilemez. Kalıcı iş/tekrar önleme bildirimin yeniden denemelerinden ayrı tutulur.
+- 2026-10-24 · Agent: Codex · Amazon otomatik sepet taslağı: kartta varsayılan kapalı seçim; yalnız Amazon için bağımsız kalıcı iş kuyruğu, bildirim sepet işini beklemez. Son insan kararı: önce mevcut sepetin tamamı Sonra al’a, sonra fırsattan 1 adet; eski sepetle fiyat kıyası yok, ödeme/sipariş yok. Teklif ekleme aynı ASIN, Depo/yeni koşulu, satıcı ve yakalanan fiyat için doğrulanacak; tekrarlar/süresi geçmiş işler ve belirsiz POST tekrarları engellenir. 673 test ve ruff geçti. Taslak henüz sürümlenmedi/kurulmadı; gerçek Depo ekleme yolu doğrulanmadan etkinleştirme yok.
 
 - Bu düzenleme kapsamında yeni geliştirme planlanmadı; mevcut diğer işler hakkında çıkarım yapılmaz.
 
 ## Yapılamayanlar / engeller
 
-- Amazon otomatik sepet henüz uygulanmadı/kurulmadı: mevcut istemci anonim, doğru Depo teklif kimliği taşınmıyor; Alfred’de Hermes Tarayıcı 0.1.9 kuruldu (Alfred kaynak a0c5215; HA kenar çubuğu /local_hermes_browser, ingress erişimi doğrulandı). Kullanıcı oradan Amazon’a giriş yapmalı; oturum ve sepete ekleme henüz doğrulanmadı. Mac Chrome oturumu kullanılmadı/taşınmadı.
+- Amazon gerçek test bekliyor: Nuri B0HJB4W3JK iPhone ile ölçüm istedi. Alfred hesabı açık, salt okunur sayfada Depo 158.649,05 TL; normal Sepete Ekle formu 166.999 TL’lik sıfır ürüne ait ve kullanılmadı. Depo liste adresi ana sayfaya dönüyor; AOD salt okuma 404. Sepet değiştirilmedi, başarılı ekleme/süre ölçümü yok. Açılan Alfred sekmesinde HA girişi gerekiyor (Amazon tekrar girişi değil) ki gerçek Depo düğmesi görsel doğrulanabilsin. Sonraki somut adım: HA girişinden sonra yalnız Depo’dan 1 adet canlı test ve zaman ölçümü; sonra gerçek form uyarlaması ve runtime yayını.
 
 - Bu düzenleme kapsamında engel yok. Canlı test/kurulum belge işi için uygulanmaz.
 

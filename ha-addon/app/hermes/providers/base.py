@@ -264,6 +264,13 @@ class Provider:
         """False while the provider's own rhythm says this watch need not be read yet."""
         return True
 
+    def cart_payload(self, watch, offer, url):
+        """Only an explicitly supporting provider can produce a cart intent."""
+        return None
+
+    def add_to_cart(self, job):
+        raise NotImplementedError("Provider does not support cart actions")
+
     def close(self) -> None:
         """Release process-lived resources such as sessions or browsers."""
 

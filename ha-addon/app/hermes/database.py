@@ -43,6 +43,10 @@ def decode_payload(value) -> str:
     return value
 
 SCHEMA = """
+CREATE TABLE IF NOT EXISTS cart_jobs(
+ id TEXT PRIMARY KEY, site TEXT NOT NULL, tracking_id TEXT NOT NULL,
+ payload TEXT NOT NULL, state TEXT NOT NULL, created REAL NOT NULL,
+ updated REAL NOT NULL, error TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS successful_reads(component TEXT PRIMARY KEY, at REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS snapshots(name TEXT PRIMARY KEY, payload TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS outbox(

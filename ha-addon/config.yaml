@@ -20,6 +20,8 @@ hassio_api: true
 # Publishes Hermes sensors and the hermes_firsat event to Home Assistant.
 homeassistant_api: true
 panel_title: Hermes
+map:
+  - share:rw
 panel_icon: mdi:tag-heart
 ports:
   8100/tcp: 8100
@@ -93,6 +95,7 @@ schema:
       include_variations: "bool?"
       priority: "str?"
       official_seller_only: "bool?"
+      auto_add_to_cart: "bool?"
       check_now_token: "str?"
       url_1: "str?"
       url_2: "str?"
