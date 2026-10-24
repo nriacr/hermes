@@ -131,7 +131,7 @@ class FakeAmazon:
     def __call__(self, method, url, body='', view=''):
         self.requests.append((method, url, body))
         if method == 'GET':
-            return self.page() if view == 'cart' else self.listing
+            return self.page() if view == 'cart' else self.listing if view == 'offer' else None
         fields = dict(part.split('=', 1) for part in body.split('&'))
         if '/cart/add-to-cart/' in url:
             assert fields['anti-csrftoken-a2z'] in (ADD_CSRF, PAGE_CSRF)
@@ -149,6 +149,8 @@ class FakeAmazon:
         return self.page()
 
 
+DEPO_OFFER = {'captcha': False, 'new': {'offer_id': 'new-offer-id-0123456789', 'price': '120.0', 'token': PAGE_CSRF},
+              'depo': [{'offer_id': 'logged-in-offer-id-0123456789', 'price': '90.0', 'token': PAGE_CSRF}]}
 DEPO_LISTING = ('<div id="usedAccordionRow"><div data-csa-c-slot-id="usedAccordionRow" role="button">İkinci El - Çok İyi '
                 '<span class="a-price"><span class="a-offscreen">90,00 TL</span></span> Satıcı: Amazon Depo</div>'
                 '<form action="/gp/product/handle-buy-box/ref=dp_start-bbf_1_glance">'
@@ -180,11 +182,22 @@ class AmazonCartFlowTests(unittest.TestCase):
         self.assertTrue(all('checkout' not in url and 'buy' not in url for _, url, _ in amazon.requests))
 
     def test_cart_without_an_add_token_uses_the_listing_form_token(self):
-        amazon = FakeAmazon(listing=DEPO_LISTING)
+        amazon = FakeAmazon(listing=DEPO_OFFER)
         amazon.add_token = ''
         add_to_cart(self.job, amazon)
-        self.assertIn('offer-listing', amazon.requests[1][1])
+        self.assertIn('/dp/' + ASIN, amazon.requests[1][1])
         self.assertIn(PAGE_CSRF, amazon.requests[2][2])
+
+    def test_new_offer_uses_the_buy_box_offer_not_the_depo_one(self):
+        amazon = FakeAmazon(listing=DEPO_OFFER)
+        add_to_cart({**self.job, 'warehouse': False, 'price': '120', 'target': '130', 'offer_id': ''}, amazon)
+        self.assertEqual(amazon.active[0]['offer'], 'new-offer-id-0123456789')
+
+    def test_captcha_offer_page_changes_nothing(self):
+        amazon = FakeAmazon(listing={'captcha': True, 'new': None, 'depo': []})
+        with self.assertRaises(CartError):
+            add_to_cart({**self.job, 'offer_id': ''}, amazon)
+        self.assertFalse([r for r in amazon.requests if r[0] == 'POST'])
 
     def test_logged_out_cart_changes_nothing(self):
         amazon = FakeAmazon([{'asin': 'B0OTHER001', 'id': 'a1', 'price': '10'}], logged_in=False)
@@ -194,12 +207,12 @@ class AmazonCartFlowTests(unittest.TestCase):
         self.assertFalse([r for r in amazon.requests if r[0] == 'POST'])
 
     def test_missing_offer_id_is_read_from_the_logged_in_listing(self):
-        amazon = FakeAmazon(listing=DEPO_LISTING)
+        amazon = FakeAmazon(listing=DEPO_OFFER)
         add_to_cart({**self.job, 'offer_id': ''}, amazon)
         self.assertEqual(amazon.active[0]['offer'], 'logged-in-offer-id-0123456789')
 
     def test_listing_above_target_is_not_added(self):
-        amazon = FakeAmazon(listing=DEPO_LISTING.replace('90,00', '150,00'))
+        amazon = FakeAmazon(listing={**DEPO_OFFER, 'depo': [{**DEPO_OFFER['depo'][0], 'price': '150.0'}]})
         with self.assertRaises(CartError):
             add_to_cart({**self.job, 'offer_id': ''}, amazon)
         self.assertFalse([r for r in amazon.requests if r[0] == 'POST'])
@@ -211,7 +224,7 @@ class AmazonCartFlowTests(unittest.TestCase):
         self.assertEqual([i['id'] for i in amazon.saved], ['old'])
 
     def test_refused_add_retries_once_with_the_logged_in_id_then_reports(self):
-        amazon = FakeAmazon(accept_add=False, listing=DEPO_LISTING)
+        amazon = FakeAmazon(accept_add=False, listing=DEPO_OFFER)
         with self.assertRaises(CartError) as error:
             add_to_cart(self.job, amazon)
         self.assertFalse(error.exception.added)

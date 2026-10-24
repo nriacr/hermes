@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.23.2
+
+- Otomatik sepet: teklif numarası bilinmeyen fırsatlarda (arama kartındaki yeni ürün) ürün sayfası Hermes Tarayıcı içinde özetlenir; Pi'de 1,6 MB sayfa işlenmez. Hermes Tarayıcı 0.2.5 gerekir.
+
 ## 4.23.1
 
 - Otomatik sepet: hız için önce fırsat eklenir, sonra diğer ürünler "Daha sonra kaydet"e taşınır (Nuri: sıra önemsiz, hızlı olan). Aynı ürün sepetteyse önce o taşınır.

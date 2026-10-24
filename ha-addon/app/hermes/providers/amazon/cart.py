@@ -15,7 +15,6 @@ import requests
 
 from ...logging_utils import log
 from ...utils import extract_asin_from_url
-from . import parser
 from .client import protection_reason
 from .common import normalize_offer_text
 
@@ -75,11 +74,11 @@ class BrowserTransport:
         if result.get('error'):
             raise CartError('Hermes Tarayıcı isteği yapamadı (' + str(result['error'])[:40] + ')')
         status = result.get('status')
-        if view == 'cart':
-            # The browser already reduced the page to a cart summary (None: not a cart page).
+        if view:
+            # The browser already reduced the page to a summary (None: not that kind of page).
             if status not in (0, 200, 302, 303):
                 raise CartError('Amazon sepet isteğini kabul etmedi')
-            return result.get('cart')
+            return result.get(view)
         html = result.get('html', '')
         # A POST is not followed (status 0 = redirect); the caller re-reads the cart.
         if method == 'GET' and (status != 200 or not html):
@@ -131,21 +130,27 @@ def save_for_later(transport, cart, row):
 
 
 def offer_from_page(transport, job):
-    """The deal's listing id and form token from a logged-in read, re-checking price and condition."""
-    if job['warehouse']:
-        html = transport('GET', f"https://www.amazon.com.tr/gp/offer-listing/{job['asin']}?condition=used")
-        offers = parser.extract_verified_warehouse_offers_from_listing(html, source_url=job['url'])
-    else:
-        html = transport('GET', job['url'])
-        offers = [parser.extract_offer(html, source_url=job['url'])]
+    """The deal's offer id and form token from a logged-in product page, re-checking the price.
+
+    The browser reduces the page to its add-to-cart offers (view='offer'); the
+    ~1.6 MB page is never parsed on the Pi.
+    """
+    summary = transport('GET', job['url'], view='offer')
+    if not isinstance(summary, dict) or summary.get('captcha'):
+        raise CartError("Amazon ürün sayfası okunamadı (doğrulama sayfası olabilir)")
+    offers = (summary.get('depo') or []) if job['warehouse'] else [summary.get('new')]
     target = Decimal(job['target'])
-    usable = [offer for offer in offers if offer.offer_id and offer.is_warehouse == job['warehouse'] and offer.price <= target]
+    usable = []
+    for offer in offers:
+        try:
+            if offer and offer.get('offer_id') and offer.get('token') and Decimal(offer.get('price') or 'NaN') <= target:
+                usable.append(offer)
+        except InvalidOperation:
+            continue
     if not usable:
         raise CartError('Teklif artık hedef fiyatta değil veya tükendi; sepet değişmedi')
-    offer_id = min(usable, key=lambda offer: offer.price).offer_id
-    field = parser.parse_product_page(html).select_one(
-        f'form:has(input[value="{offer_id}"]) input[name="anti-csrftoken-a2z"]')
-    return offer_id, str(field.get('value') or '') if field is not None else ''
+    best = min(usable, key=lambda offer: Decimal(offer['price']))
+    return best['offer_id'], best['token']
 
 
 def add_offer(transport, token, job, offer_id):
