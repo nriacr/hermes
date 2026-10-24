@@ -6,7 +6,26 @@ from string import Template
 from typing import Optional
 
 from ..constants import APP_VERSION
+from ..utils import repair_mojibake
 from .icons import render_web_app_head
+
+SITE_THEME_CLASSES = (
+    ("amazon", "site-amazon"),
+    ("hepsiburada", "site-hepsiburada"),
+    ("network", "site-network"),
+    ("beymen club", "site-beymenclub"),
+    ("beymenclub", "site-beymenclub"),
+    ("trendyol", "site-trendyol"),
+    ("zara", "site-zara"),
+    ("h&m", "site-hm"),
+    ("togg", "site-togg"),
+)
+
+
+def site_theme_class(seller: str) -> str:
+    normalized = repair_mojibake(seller).casefold()
+    return next((css for marker, css in SITE_THEME_CLASSES if marker in normalized), "site-other")
+
 
 PAGE_TEMPLATE = Template((Path(__file__).with_name("templates") / "page.html").read_text(encoding="utf-8"))
 

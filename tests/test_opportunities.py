@@ -37,11 +37,10 @@ class OpportunityHistoryTests(unittest.TestCase):
         self.assertEqual(items[1].product, "Kulaklık")
         self.assertEqual(items[1].price, Decimal("900"))
 
-    def test_status_compares_with_the_current_price(self):
+    def test_rows_show_duration_and_current_price(self):
         item = opportunities.SentOpportunity(__import__("datetime").datetime.now().astimezone(), "t", "p", "u", Decimal("900"), Decimal("1000"), "target")
-        self.assertIn("hâlâ hedefte", opportunities.status_text(item, {("u", False): Decimal("950")}))
-        self.assertIn("yükseldi", opportunities.status_text(item, {("u", False): Decimal("1200")}))
-        self.assertIn("listede yok", opportunities.status_text(item, {}))
+        self.assertIn("şimdi 950", opportunities.render_rows([item], {("u", False): Decimal("950")}))
+        self.assertIn("kayıt yok", opportunities.render_rows([item], {}))
         self.assertIn("Son 30 günde", opportunities.render_rows([], {}))
 
     def test_duration_lasts_until_the_price_rises_above_the_target(self):
@@ -68,7 +67,7 @@ class OpportunityHistoryTests(unittest.TestCase):
                                            current, self.data.files.database, state, now)[0]
         self.assertEqual((gone.ongoing, gone.at_least), (False, True))
         self.assertAlmostEqual(gone.held.total_seconds(), 3 * 3600, delta=1)
-        self.assertIn("en az 3 sa", opportunities.held_html(gone))
+        self.assertEqual(opportunities.held_line(gone), ("en az 3 sa", "listeden çıktı"))
         self.assertEqual((ended.held, ended.ongoing), (timedelta(minutes=75), False))
         self.assertTrue(ongoing.ongoing)
         self.assertAlmostEqual(ongoing.held.total_seconds(), 3000, delta=1)
@@ -84,7 +83,7 @@ class OpportunityHistoryTests(unittest.TestCase):
         html = opportunities.render_rows([item], {})
         self.assertIn("site-amazon", html)
         self.assertIn("DEPO", html)
-        self.assertIn("satıcı Amazon Depo", html)
+        self.assertNotIn("· Amazon Depo", html)
 
 
 if __name__ == "__main__":

@@ -29,7 +29,6 @@ from .dashboard import clear_dashboard_cache, dashboard_live_html, render_dashbo
 from .icons import HERMES_ICON_PNG, HERMES_ICON_SVG, render_web_manifest
 from .pages import link
 from .pin import csrf_field, render_configure_page, render_pin_page, render_session_bar
-from .opportunities import render_opportunities_page
 from .statistics import clear_statistics_cache, render_statistics_page, statistics_live_html
 from .settings import handle_restart, handle_settings_save, render_restart_page, render_settings_page
 
@@ -254,7 +253,7 @@ class Router:
     def handle(self, request: Request) -> Response:
         path = request.path.rstrip("/") or "/"
         # An explicit guest allowlist keeps future management routes protected by default.
-        if request.method == "GET" and path in {"/", "/live/dashboard", "/opportunities", "/health", "/restarting", "/settings/restarting", *ASSETS}:
+        if request.method == "GET" and path in {"/", "/live/dashboard", "/health", "/restarting", "/settings/restarting", *ASSETS}:
             return self._get(request, path)
         if path == "/internal/runtime":
             # HA-authenticated maintenance only; never accessible on the public surface.
@@ -308,7 +307,6 @@ class Router:
         pages = {
             "/": lambda: render_dashboard_page(request.base, request.params, self.runtime.config_error),
             "/statistics": lambda: render_statistics_page(request.base, request.params),
-            "/opportunities": lambda: render_opportunities_page(request.base, request.params),
             "/settings": lambda: render_settings_page(request.base, request.params,
                                                        access_bar=render_session_bar(request.base, request.trusted_ingress),
                                                        open_http=not request.trusted_ingress and not request.secure),

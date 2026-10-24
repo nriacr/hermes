@@ -1,4 +1,4 @@
-"""Fırsat geçmişi: the notifications Hermes sent, newest first, and what each product costs now.
+"""Fırsat Geçmişi tab of the home screen: the alerts Hermes sent, newest first, and how long each deal lasted.
 
 Everything comes from the durable outbox of `hermes.db` (kept 30 days), the price changes recorded in the
 same database (how long the price stayed at or under the target) and the published summary.
@@ -16,8 +16,7 @@ from ..history import _read, read_prices_by_key
 from ..monitor import summary as summary_ops
 from ..storage import load_json
 from ..utils import format_tl, parse_iso_datetime
-from .dashboard import relative_time_text, site_theme_class
-from .pages import render_page
+from .pages import site_theme_class
 
 LIST_LIMIT = 100
 DAYS = 30
@@ -117,7 +116,7 @@ def add_durations(items: List[SentOpportunity], current: Current, path=DATABASE_
 def duration_label(span: timedelta) -> str:
     minutes = int(span.total_seconds() // 60)
     if minutes < 1:
-        return "1 dk'dan az"
+        return "<1 dk"
     days, rest = divmod(minutes, 1440)
     hours, minutes = divmod(rest, 60)
     parts = [f"{days} gün"] if days else []
@@ -128,63 +127,56 @@ def duration_label(span: timedelta) -> str:
     return " ".join(parts)
 
 
-def held_html(item: SentOpportunity) -> str:
-    if item.held is None:
-        return "<span class='ov-chg flat'>kayıt yok</span>"
-    label = escape(duration_label(item.held))
-    if item.at_least:
-        return f"<b>en az {label}</b><br><small>sonra listeden çıktı</small>"
-    return f"<b>{label}</b><br><small>{'hâlâ sürüyor' if item.ongoing else 'sonra fiyat yükseldi'}</small>"
-
-
 def current_prices(summary_path=SUMMARY_PATH) -> Current:
     # A Depo (used) offer shares its page with the new one, so it is told apart by the warehouse flag.
     return {(row.product_url, bool(row.is_warehouse)): row.price
             for row in summary_ops.rows_from_payload(load_json(summary_path, {}))}
 
 
-def status_text(item: SentOpportunity, current: Current) -> str:
-    now = current.get((item.url, item.warehouse))
-    if now is None:
-        return "<span class='ov-chg flat'>şu an listede yok</span>"
-    price = format_tl(now, with_currency=True)
-    if item.target is not None and now <= item.target:
-        return f"<span class='ov-chg flat'>hâlâ hedefte · {escape(price)}</span>"
-    if item.price is not None and now > item.price:
-        return f"<span class='ov-chg flat'>yükseldi · {escape(price)}</span>"
-    return f"<span class='ov-chg flat'>şimdi {escape(price)}</span>"
-
-
 KIND_LABELS = {"target": "Hedef fiyat", "stock": "Stoğa döndü", "low90": "90 günün dibi"}
 
 
+def held_line(item: SentOpportunity) -> Tuple[str, str]:
+    """How long the deal lasted and how it ended, as two short lines."""
+    if item.held is None:
+        return "süre yok", "kayıt yok"
+    label = duration_label(item.held)
+    if item.at_least:
+        return f"en az {label}", "listeden çıktı"
+    return label, "sürüyor" if item.ongoing else "bitti"
+
+
 def render_rows(items: List[SentOpportunity], current: Current) -> str:
+    """The Fırsat Geçmişi tab: the same row cards as the stock tab, one fixed layout for every alert."""
     if not items:
         return "<p class='ov-empty'>Son 30 günde gönderilmiş fırsat bildirimi yok.</p>"
     rows = []
     for item in items:
+        site = item.site or item.seller or "-"
         price = format_tl(item.price, with_currency=True) if item.price is not None else "-"
         target = format_tl(item.target, with_currency=True) if item.target is not None else "-"
-        site_css = site_theme_class(item.site or item.seller)
-        depo = " <span class='ov-depo'>DEPO</span>" if item.warehouse else ""
-        seller = f" · satıcı {escape(item.seller)}" if item.seller and item.seller.casefold() != item.site.casefold() else ""
-        site = (f"<span class='{site_css}'><span class='ov-site'>{escape(item.site)}</span></span>{depo}{seller}<br>"
-                if item.site else "")
-        when = f"{item.sent_at.strftime('%d.%m %H:%M')} · {relative_time_text(item.sent_at.strftime('%Y-%m-%d %H:%M:%S'))}"
+        # "Amazon Depo" says no more than the DEPO tag; a marketplace seller is shown.
+        seller = f" · {escape(item.seller)}" if item.seller and not item.seller.casefold().startswith(site.casefold()) else ""
+        depo = "<span class='ov-depo'>DEPO</span> " if item.warehouse else ""
+        listed = current.get((item.url, item.warehouse))
+        now = f" · şimdi {escape(format_tl(listed, with_currency=True))}" if listed is not None else ""
+        kind = "" if item.kind == "target" else f"{escape(KIND_LABELS[item.kind])} · "
+        held, ended = held_line(item)
         rows.append(
-            f"<tr><td>{escape(when)}</td>"
-            f"<td><a href='{escape(item.url, quote=True)}' target='_blank' rel='noopener noreferrer'>{escape(item.product)}</a>"
-            f"<br><small>{site}{escape(KIND_LABELS[item.kind])}</small></td>"
-            f"<td>{escape(price)}<br><small>hedef {escape(target)}</small></td><td>{held_html(item)}</td>"
-            f"<td>{status_text(item, current)}</td></tr>")
-    return ("<div class='table-wrap measure-wrap'><table class='statistics-table measure-table'><thead><tr>"
-            "<th>Zaman</th><th>Ürün</th><th>Yakalanan fiyat</th><th>Fırsat süresi</th><th>Şimdi</th></tr></thead>"
-            f"<tbody>{''.join(rows)}</tbody></table></div>")
+            f"<li class='ov-row ov-hist {site_theme_class(site)}'>"
+            f"<div class='ov-av'>{escape(site[:1].upper())}</div><div class='ov-tx'>"
+            f"<h4><a href='{escape(item.url, quote=True)}' target='_blank' rel='noopener noreferrer'>{escape(item.product)}</a></h4>"
+            f"<span>{escape(item.sent_at.strftime('%d.%m %H:%M'))} · {escape(site)}{seller}</span>"
+            f"<span>{depo}{kind}hedef {escape(target)}{now}</span></div>"
+            f"<div class='ov-hist-side'><b>{escape(price)}</b><small>{escape(held)}</small><small>{escape(ended)}</small></div></li>")
+    return f"<ul class='ov-rows'>{''.join(rows)}</ul>"
 
 
-def render_opportunities_page(base: str, params=None) -> bytes:
-    current = current_prices()
-    body = ("<div class='statistics-top'><h2 class='page-heading'>Fırsat geçmişi</h2></div>"
-            + render_rows(add_durations(read_sent(), current, state=load_json(STATE_PATH, {})), current)
-            + "<p class='ov-empty'>Süre, fiyatın hedefin altında kaldığı zamandır. Ürün listeden çıkarsa son görüldüğü ana kadar sayılır.</p>")
-    return render_page(base, "opportunities", "Hermes Fırsat geçmişi", body, body_class="public ov")
+def history_pane() -> Tuple[int, str]:
+    """Number of alerts and the tab content; a damaged record never breaks the home screen."""
+    try:
+        current = current_prices()
+        items = add_durations(read_sent(), current, state=load_json(STATE_PATH, {}))
+    except (OSError, ValueError, RuntimeError):
+        return 0, "<p class='ov-empty'>Fırsat geçmişi şu an okunamadı.</p>"
+    return len(items), render_rows(items, current)

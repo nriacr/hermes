@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from decimal import ROUND_DOWN, Decimal, InvalidOperation
 from html import escape
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from ..constants import (
     APP_VERSION,
@@ -24,22 +24,10 @@ from ..logging_utils import log
 from ..storage import load_json
 from ..diagnostics import Diagnostics
 from ..utils import PROCESS_STARTED_AT, format_tl, is_search_url, parse_bool, parse_iso_datetime, repair_mojibake, site_label
-from .pages import link, render_notice, render_page
+from .opportunities import history_pane
+from .pages import link, render_notice, render_page, site_theme_class
 from ..pricestats import MIN_HISTORY_DAYS, WINDOW_DAYS, window_stats
 from .pricechart import SPOT_SIZE, load_histories, load_targets, ranged_chart, offer_index, sparkline, with_current
-
-SITE_THEME_CLASSES = (
-    ("amazon", "site-amazon"),
-    ("hepsiburada", "site-hepsiburada"),
-    ("network", "site-network"),
-    ("beymen club", "site-beymenclub"),
-    ("beymenclub", "site-beymenclub"),
-    ("trendyol", "site-trendyol"),
-    ("zara", "site-zara"),
-    ("h&m", "site-hm"),
-    ("togg", "site-togg"),
-)
-
 
 # -- formatting ---------------------------------------------------------------------
 
@@ -97,11 +85,6 @@ def duration_text(seconds_value, fallback="-") -> str:
         return str(fallback or "-")
     minutes, seconds = divmod(total_seconds, 60)
     return f"{minutes} dk {seconds} sn" if minutes else f"{seconds} sn"
-
-
-def site_theme_class(seller: str) -> str:
-    normalized = repair_mojibake(seller).casefold()
-    return next((css for marker, css in SITE_THEME_CLASSES if marker in normalized), "site-other")
 
 
 def is_target_hit(row: Dict[str, Any]) -> bool:
@@ -445,7 +428,7 @@ def render_errors(errors: List[Dict[str, Any]]) -> str:
 
 
 def render_summary(payload: Dict[str, Any], state: Dict[str, Any], telegram_status: Dict[str, Any], errors: List[Dict[str, Any]],
-                   base: str = ".") -> str:
+                   history: Tuple[int, str] = (0, "<p class='ov-empty'>Yok.</p>")) -> str:
     rows = [row for row in payload.get("rows", []) if isinstance(row, dict)] if isinstance(payload.get("rows"), list) else []
     stock_rows = [row for row in payload.get("stock_rows", []) if isinstance(row, dict)] if isinstance(payload.get("stock_rows"), list) else []
     if not rows and not stock_rows:
@@ -469,13 +452,14 @@ def render_summary(payload: Dict[str, Any], state: Dict[str, Any], telegram_stat
         f"<button type='button' class='ov-tab' role='tab' data-tab='watch' aria-selected='true'>Takipte <small>{len(watching)}</small></button>"
         f"<button type='button' class='ov-tab' role='tab' data-tab='stock' aria-selected='false'>Stokta yok <small>{len(stock_rows)}</small></button>"
         f"<button type='button' class='ov-tab' role='tab' data-tab='tg' aria-selected='false'>Telegram <small>{telegram_count}</small></button>"
-        f"<a class='ov-tab' href='{escape(link(base, 'opportunities'), quote=True)}'>Fırsat Geçmişi</a></div>"
+        f"<button type='button' class='ov-tab' role='tab' data-tab='history' aria-selected='false'>Fırsat Geçmişi <small>{history[0]}</small></button></div>"
     )
     panes = (f"<div class='ov-pane' data-pane='watch'>{render_watch_pane(watching)}</div>"
              f"<div class='ov-pane' data-pane='stock' hidden>{render_stock_pane(stock_rows)}</div>"
-             f"<div class='ov-pane' data-pane='tg' hidden>{render_telegram_pane(telegram_status)}</div>")
+             f"<div class='ov-pane' data-pane='tg' hidden>{render_telegram_pane(telegram_status)}</div>"
+             f"<div class='ov-pane' data-pane='history' hidden>{history[1]}</div>")
     return (f"{status}<section class='ov-hero'><div><h1>Özet Tablo</h1></div>"
-            f"{numbers}</section><h2 class='ov-sec'>Fırsatlar</h2>{spot}{tabs}{panes}{render_errors(errors)}")
+            f"{numbers}</section><h2 class='ov-sec'>Fırsatlar</h2>{spot}{tabs}<div class='ov-panes'>{panes}</div>{render_errors(errors)}")
 
 # -- errors -------------------------------------------------------------------------
 
@@ -646,7 +630,7 @@ def _build_dashboard_live_html(base: str) -> str:
         error = {"title": "Takip hafızası okunamadı", "meta": "Mevcut kayıtlar korunuyor",
                  "message": "Takip hafızasının incelenmesi gerekiyor. Ayarlar sayfası açık.",
                  "url": "", "failed_links": [], "checked_at": datetime.now().astimezone()}
-        return render_summary({}, {}, {}, [error], base)
+        return render_summary({}, {}, {}, [error])
     telegram_status = load_json(TELEGRAM_STATUS_PATH, {})
     state = state if isinstance(state, dict) else {}
     with _stage("tanı"):
@@ -663,9 +647,11 @@ def _build_dashboard_live_html(base: str) -> str:
         if identity not in unique or unique[identity]["checked_at"] < error["checked_at"]:
             unique[identity] = error
     errors = sorted(unique.values(), key=lambda error: error["checked_at"], reverse=True)
+    with _stage("fırsat geçmişi"):
+        history = history_pane()
     with _stage("çizim"):
         return render_summary(payload if isinstance(payload, dict) else {}, state,
-                              telegram_status if isinstance(telegram_status, dict) else {}, errors, base)
+                              telegram_status if isinstance(telegram_status, dict) else {}, errors, history)
 
 
 def render_dashboard_page(base: str, params: Dict[str, List[str]], config_error: str = "") -> bytes:
