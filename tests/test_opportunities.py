@@ -39,8 +39,8 @@ class OpportunityHistoryTests(unittest.TestCase):
 
     def test_status_compares_with_the_current_price(self):
         item = opportunities.SentOpportunity(__import__("datetime").datetime.now().astimezone(), "t", "p", "u", Decimal("900"), Decimal("1000"), "target")
-        self.assertIn("hâlâ hedefte", opportunities.status_text(item, {"u": Decimal("950")}))
-        self.assertIn("yükseldi", opportunities.status_text(item, {"u": Decimal("1200")}))
+        self.assertIn("hâlâ hedefte", opportunities.status_text(item, {("u", False): Decimal("950")}))
+        self.assertIn("yükseldi", opportunities.status_text(item, {("u", False): Decimal("1200")}))
         self.assertIn("listede yok", opportunities.status_text(item, {}))
         self.assertIn("Son 30 günde", opportunities.render_rows([], {}))
 
@@ -58,8 +58,17 @@ class OpportunityHistoryTests(unittest.TestCase):
         def sent(key, price):
             at = now - timedelta(minutes=40) if key == "k2" else now - timedelta(hours=3) + timedelta(seconds=5)
             return opportunities.SentOpportunity(at, "t", "p", "u", Decimal(price), Decimal("1000"), "target", key)
+        history.record_price("k3", "amazon", "Depo", Decimal("700"), now - timedelta(hours=4))
+        current = {("u", False): Decimal("950")}
+        state = {"k3": {"last_price_checked_at": (now - timedelta(hours=1)).isoformat()}}
         ended, ongoing, unknown = opportunities.add_durations([sent("k1", "900"), sent("k2", "500"), sent("none", "1")],
-                                                             self.data.files.database, now)
+                                                             current, self.data.files.database, state, now)
+        gone = opportunities.add_durations([opportunities.SentOpportunity(now - timedelta(hours=4) + timedelta(seconds=5), "t", "p", "u",
+                                            Decimal("700"), Decimal("1000"), "target", "k3", warehouse=True)],
+                                           current, self.data.files.database, state, now)[0]
+        self.assertEqual((gone.ongoing, gone.at_least), (False, True))
+        self.assertAlmostEqual(gone.held.total_seconds(), 3 * 3600, delta=1)
+        self.assertIn("en az 3 sa", opportunities.held_html(gone))
         self.assertEqual((ended.held, ended.ongoing), (timedelta(minutes=75), False))
         self.assertTrue(ongoing.ongoing)
         self.assertAlmostEqual(ongoing.held.total_seconds(), 3000, delta=1)

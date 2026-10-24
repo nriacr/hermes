@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.21.1
+
+- Fırsat Geçmişi: listeden çıkan teklif (ör. biten Depo) artık "hâlâ sürüyor" görünmez; son görüldüğü ana kadar "en az" süre yazılır. Depo ve yeni teklif aynı sayfada olsa da şimdiki fiyat kendi teklifinden okunur.
+
 ## 4.21.0
 
 - Fırsat Geçmişi ana sayfaya taşındı: Takipte / Stokta yok / Telegram sekmelerinin yanındaki yeni butonla açılır (PIN gerekmez), Ayarlar'daki buton kaldırıldı.

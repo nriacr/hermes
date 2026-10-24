@@ -9,13 +9,13 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from html import escape
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
-from ..constants import DATABASE_PATH, SUMMARY_PATH
+from ..constants import DATABASE_PATH, STATE_PATH, SUMMARY_PATH
 from ..history import _read, read_prices_by_key
 from ..monitor import summary as summary_ops
 from ..storage import load_json
-from ..utils import format_tl
+from ..utils import format_tl, parse_iso_datetime
 from .dashboard import relative_time_text, site_theme_class
 from .pages import render_page
 
@@ -37,7 +37,8 @@ class SentOpportunity:
     seller: str = ""
     warehouse: bool = False
     held: Optional[timedelta] = None  # how long the price stayed at the alert level; None = no price record
-    ongoing: bool = False  # the price had not risen above the ceiling at the last record
+    ongoing: bool = False  # the offer is still listed at or under the ceiling
+    at_least: bool = False  # the offer left the list without a higher price: held is only what was seen
 
 
 def _decimal(value) -> Optional[Decimal]:
@@ -76,13 +77,19 @@ def read_sent(path=DATABASE_PATH, now: Optional[datetime] = None, limit: int = L
     return result
 
 
-def add_durations(items: List[SentOpportunity], path=DATABASE_PATH, now: Optional[datetime] = None) -> List[SentOpportunity]:
+Current = Dict[Tuple[str, bool], Decimal]
+
+
+def add_durations(items: List[SentOpportunity], current: Current, path=DATABASE_PATH, state=None,
+                  now: Optional[datetime] = None) -> List[SentOpportunity]:
     """How long each price stayed at the alert level: from the alert price to the first later price above the ceiling.
 
     The ceiling is the target (the alert price itself for a 90-day low). Prices are stored when they change,
-    so a price that never changed again is "ongoing" until now.
+    so an offer still listed at or under the ceiling is "ongoing" until now. An offer that left the list
+    (sold out, Depo gone) without a higher price is counted until it was last seen, as a lower bound.
     """
     now = now or datetime.now().astimezone()
+    state = state if isinstance(state, dict) else {}
     keys = sorted({item.offer_key for item in items if item.offer_key})
     points = read_prices_by_key(path, keys) if keys else {}
     for item in items:
@@ -95,7 +102,14 @@ def add_durations(items: List[SentOpportunity], path=DATABASE_PATH, now: Optiona
         if start is None:
             start = item.sent_at
         end = next((at for at, price in history if at > start and price > ceiling), None)
-        item.ongoing = end is None
+        if end is None:
+            listed = current.get((item.url, item.warehouse))
+            item.ongoing = listed is not None and listed <= ceiling
+            if not item.ongoing:
+                entry = state.get(item.offer_key)
+                seen = parse_iso_datetime(entry.get("last_price_checked_at")) if isinstance(entry, dict) else None
+                end = seen.astimezone() if seen and seen.tzinfo else start
+                item.at_least = True
         item.held = max(timedelta(0), (end or now) - start)
     return items
 
@@ -118,15 +132,19 @@ def held_html(item: SentOpportunity) -> str:
     if item.held is None:
         return "<span class='ov-chg flat'>kayıt yok</span>"
     label = escape(duration_label(item.held))
+    if item.at_least:
+        return f"<b>en az {label}</b><br><small>sonra listeden çıktı</small>"
     return f"<b>{label}</b><br><small>{'hâlâ sürüyor' if item.ongoing else 'sonra fiyat yükseldi'}</small>"
 
 
-def current_prices(summary_path=SUMMARY_PATH) -> Dict[str, Decimal]:
-    return {row.product_url: row.price for row in summary_ops.rows_from_payload(load_json(summary_path, {}))}
+def current_prices(summary_path=SUMMARY_PATH) -> Current:
+    # A Depo (used) offer shares its page with the new one, so it is told apart by the warehouse flag.
+    return {(row.product_url, bool(row.is_warehouse)): row.price
+            for row in summary_ops.rows_from_payload(load_json(summary_path, {}))}
 
 
-def status_text(item: SentOpportunity, current: Dict[str, Decimal]) -> str:
-    now = current.get(item.url)
+def status_text(item: SentOpportunity, current: Current) -> str:
+    now = current.get((item.url, item.warehouse))
     if now is None:
         return "<span class='ov-chg flat'>şu an listede yok</span>"
     price = format_tl(now, with_currency=True)
@@ -140,7 +158,7 @@ def status_text(item: SentOpportunity, current: Dict[str, Decimal]) -> str:
 KIND_LABELS = {"target": "Hedef fiyat", "stock": "Stoğa döndü", "low90": "90 günün dibi"}
 
 
-def render_rows(items: List[SentOpportunity], current: Dict[str, Decimal]) -> str:
+def render_rows(items: List[SentOpportunity], current: Current) -> str:
     if not items:
         return "<p class='ov-empty'>Son 30 günde gönderilmiş fırsat bildirimi yok.</p>"
     rows = []
@@ -165,7 +183,8 @@ def render_rows(items: List[SentOpportunity], current: Dict[str, Decimal]) -> st
 
 
 def render_opportunities_page(base: str, params=None) -> bytes:
+    current = current_prices()
     body = ("<div class='statistics-top'><h2 class='page-heading'>Fırsat geçmişi</h2></div>"
-            + render_rows(add_durations(read_sent()), current_prices())
-            + "<p class='ov-empty'>Süre, fiyatın bildirimdeki seviyede (hedefin altında) kaldığı zamandır; ürün listeden düşerse kayıt tutulmaz.</p>")
+            + render_rows(add_durations(read_sent(), current, state=load_json(STATE_PATH, {})), current)
+            + "<p class='ov-empty'>Süre, fiyatın hedefin altında kaldığı zamandır. Ürün listeden çıkarsa son görüldüğü ana kadar sayılır.</p>")
     return render_page(base, "opportunities", "Hermes Fırsat geçmişi", body, body_class="public ov")
