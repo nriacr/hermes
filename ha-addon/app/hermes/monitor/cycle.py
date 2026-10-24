@@ -157,7 +157,7 @@ class Monitor:
         for message in self.config.config_errors:
             self.diagnostics.incident("config", "watch", message, "Hatalı kart atlandı; geçerli takipler devam ediyor")
         self.delivery = DeliveryQueue(self.files.database, self.notifier, self._delivery_finished)
-        self.cart = CartQueue(self.delivery.db, self.providers, self.config.watches)
+        self.cart = CartQueue(self.delivery.db, self.providers, self.config.watches, self.delivery)
         self.results = ResultRecorder(self)
         # A restart must not forget the last hour of requests (Amazon's window and block counts).
         since = datetime.now(timezone.utc) - timedelta(hours=1)

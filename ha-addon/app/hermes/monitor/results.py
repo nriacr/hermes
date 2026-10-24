@@ -12,6 +12,7 @@ from itertools import chain
 from typing import Any, Dict, List, Optional
 from dataclasses import dataclass, field, asdict
 
+from ..cart import CartQueue
 from ..history import read_prices
 from ..pricestats import is_new_low
 from ..errors import HermesError, EmptySearchResultsHermesError, OutOfStockHermesError, error_status
@@ -221,11 +222,13 @@ class ResultRecorder:
                     updated["last_low_alert_price"] = str(offer.price)
                     updated["last_low_alert_at"] = utc_now()
                 state[item_key] = updated
-                if watch.auto_add_to_cart and window_open and offer.price <= watch.target_price:
+                # The cart job commits with its notification, so it exists only when an alert is queued;
+                # its own worker starts at once, in parallel with the Pushover delivery.
+                if alert_queued and watch.auto_add_to_cart:
                     cart_payload = provider.cart_payload(watch, offer, matched_url)
                     if cart_payload:
                         cart_payload['appearance'] = offer_entry.get('last_missing_at', '')
-                        from ..cart import CartQueue
+                        cart_payload['title'] = display_name
                         price_statements.append(CartQueue.statement(watch.site, watch.tracking_id, cart_payload))
                 persistence_started = time.monotonic()
                 try:

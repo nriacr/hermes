@@ -41,6 +41,7 @@ class SearchResultItem:
     is_warehouse: bool = False
     stock_quantity: Optional[int] = None
     seller: Optional[str] = None
+    offer_id: str = ""
 
 
 @dataclass
@@ -87,6 +88,8 @@ class OfferResult:
     source: str = ""
     currency: str = "TRY"
     conditions: str = ""
+    # Amazon offerListingId of this exact offer, used only by the opt-in cart action.
+    offer_id: str = ""
 
 
 @dataclass

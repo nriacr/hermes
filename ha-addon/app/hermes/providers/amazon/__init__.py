@@ -271,7 +271,8 @@ class AmazonProvider(RhythmMixin, PageCacheMixin, Provider):
             # The search-card title is the match context; Amazon's lightweight
             # detail HTML may omit a product title altogether.
             SearchResultItem(title=candidate.title or offer.title, url=offer.url or candidate.url, price=offer.price,
-                             is_warehouse=bool(offer.is_warehouse), stock_quantity=offer.stock_quantity, seller=offer.seller)
+                             is_warehouse=bool(offer.is_warehouse), stock_quantity=offer.stock_quantity, seller=offer.seller,
+                             offer_id=offer.offer_id)
             for offer in self.page_offers(candidate.url, html, ctx, outcome)
         ]
         if cache_key:
@@ -315,7 +316,7 @@ class AmazonProvider(RhythmMixin, PageCacheMixin, Provider):
                             # page only adds its seller and explicit low-stock count.
                             results.append(SearchResultItem(title=candidate.title, url=candidate.url, price=candidate.price,
                                                             is_warehouse=False, stock_quantity=normal.stock_quantity,
-                                                            seller=normal.seller))
+                                                            seller=normal.seller, offer_id=normal.offer_id))
                         used = [item for item in detailed if item.is_warehouse]
                         warehouse_hits += len(used)
                         results.extend(used)
@@ -512,6 +513,7 @@ class AmazonProvider(RhythmMixin, PageCacheMixin, Provider):
                     url=variation.url,
                     is_warehouse=offer.is_warehouse,
                     stock_quantity=offer.stock_quantity,
+                    offer_id=offer.offer_id,
                 )
             if outcome.blocked:
                 break

@@ -5,6 +5,7 @@ sonuç, gerçek kontrol ve yayın/kurulum bilgisi yeterlidir. Ayrıntı Git geç
 
 ## Yapılanlar
 
+- 2026-10-24 · Agent: Claude · 4.22.0 Amazon otomatik sepete ekleme (Codex taslağı devralındı; Nuri: işin tamamı Claude'a): kart kutusu; iş bildirimle aynı işlemde kuyruğa girer, bildirim beklemez; önce fırsat 1 adet eklenir (hız için), sonra diğerleri Sonra al'a; ödeme yok. Sepet satırında satıcı/durum yazmadığından Depo fiyatla doğrulanır. Canlı ön test (Mac üzerinden köprü, B0HJB4W3JK iPhone Depo 158.649,05 TL): ekleme 3,7 sn, sepette yalnız iPhone 7,7 sn; Hue GO Sonra al'da. Kontrol: tools/check.sh.
 - 2026-10-24 · Agent: Claude · 4.21.2 (Nuri geri bildirimi + "1"): Fırsat Geçmişi ayrı sayfadan ana sayfa 4. sekmesine (aynı sekme görünümü, Özet Tablo altında); sekmeler eşit/sabit genişlik, sekme değişiminde kayma yok (scrollbar-gutter, overflow-x clip); satırlar Stokta yok kart düzeninde. Ayrı /opportunities sayfası kaldırıldı. Testler OK, kuruldu, canlıda sekme ve 30 satır doğrulandı.
 - 2026-10-24 · Agent: Claude · 4.21.0 + 4.21.1 (Nuri "1"): Fırsat Geçmişi Ayarlar'dan ana sayfa sekme satırına taşındı (Takipte/Stokta yok/Telegram yanında, PIN'siz); site, satıcı, Depo, yakalanan fiyat ve fırsat süresi (mevcut prices tablosundan; listeden çıkan teklifte "en az"). 4.21.1 canlıda görülen Depo "hâlâ sürüyor" hatasını düzeltti. Testler OK, kuruldu, canlıda sekme ve 30 satır doğrulandı. Geri dönüş: tools/rollback_rpi.sh 4b9faed0.
 - 2026-10-23 · Agent: Claude · 4.20.23 (Nuri "bak": Depo doğrulama ~2,3 sn): özellik dizini (data-cy, data-csa-c-slot-id taramaları), kutuların kimlikle ayrılması (bs4 == tüm alt ağacı karşılaştırıyordu), ld+json için dizinli betik listesi. En içteki satır kuralı testle korunuyor. Kontrol: 659 test başarılı. Kurulum: 4.20.23 canlı; Depo adımı 2,3 → 0,15 sn, sayfa işleme toplam ~7,2 → ~3,5 sn (sabah ~9,4), Depo satırları panelde güncel, hata yok.
@@ -24,13 +25,11 @@ sonuç, gerçek kontrol ve yayın/kurulum bilgisi yeterlidir. Ayrıntı Git geç
 
 ## Planlananlar
 
-- 2026-10-24 · Agent: Codex · Amazon otomatik sepet taslağı: kartta varsayılan kapalı seçim; yalnız Amazon için bağımsız kalıcı iş kuyruğu, bildirim sepet işini beklemez. Son insan kararı: önce mevcut sepetin tamamı Sonra al’a, sonra fırsattan 1 adet; eski sepetle fiyat kıyası yok, ödeme/sipariş yok. Teklif ekleme aynı ASIN, Depo/yeni koşulu, satıcı ve yakalanan fiyat için doğrulanacak; tekrarlar/süresi geçmiş işler ve belirsiz POST tekrarları engellenir. 673 test ve ruff geçti. Taslak henüz sürümlenmedi/kurulmadı; gerçek Depo ekleme yolu doğrulanmadan etkinleştirme yok.
 
 - Bu düzenleme kapsamında yeni geliştirme planlanmadı; mevcut diğer işler hakkında çıkarım yapılmaz.
 
 ## Yapılamayanlar / engeller
 
-- Amazon gerçek test bekliyor: Nuri B0HJB4W3JK iPhone ile ölçüm istedi. Alfred hesabı açık, salt okunur sayfada Depo 158.649,05 TL; normal Sepete Ekle formu 166.999 TL’lik sıfır ürüne ait ve kullanılmadı. Depo liste adresi ana sayfaya dönüyor; AOD salt okuma 404. Sepet değiştirilmedi, başarılı ekleme/süre ölçümü yok. Açılan Alfred sekmesinde HA girişi gerekiyor (Amazon tekrar girişi değil) ki gerçek Depo düğmesi görsel doğrulanabilsin. Sonraki somut adım: HA girişinden sonra yalnız Depo’dan 1 adet canlı test ve zaman ölçümü; sonra gerçek form uyarlaması ve runtime yayını.
 
 - Bu düzenleme kapsamında engel yok. Canlı test/kurulum belge işi için uygulanmaz.
 

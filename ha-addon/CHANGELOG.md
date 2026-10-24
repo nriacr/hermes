@@ -1,5 +1,10 @@
 # Değişiklik günlüğü
 
+## 4.22.0
+
+- Kartta "Otomatik sepete ekle (Amazon)" kutusu (varsayılan kapalı). Fırsat bildirimi kuyruğa girdiği anda Alfred'deki Hermes Tarayıcı fırsatı 1 adet sepete ekler (Depo için o Depo teklifi), sonra sepetteki diğer her şeyi "Daha sonra al"a taşır. Satın alma/ödeme yok.
+- Sonuç ayrı kısa bildirim: başarı sessiz, hata (oturum kapalı, teklif tükendi vb.) normal öncelikte. 60 sn'den eski iş çalışmaz, günde en çok 5 ekleme, yarıda kalan istek tekrarlanmaz.
+
 ## 4.21.2
 
 - Fırsat Geçmişi ayrı sayfa yerine ana sayfada 4. sekme: diğer sekmelerle aynı görünüm, içerik Özet Tablo altında açılır; ayrı sayfa kaldırıldı.

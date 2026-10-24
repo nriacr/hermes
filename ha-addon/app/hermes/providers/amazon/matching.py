@@ -49,6 +49,7 @@ def offers_from_search_results(results: List[SearchResultItem], product_name: st
     # sellers unknown so the own-seller filter never trusts a marketplace card.
     return [
         OfferResult(title=item.title, price=item.price, seller=item.seller, url=item.url,
-                    is_warehouse=item.is_warehouse, stock_quantity=item.stock_quantity)
+                    is_warehouse=item.is_warehouse, stock_quantity=item.stock_quantity,
+                    offer_id=item.offer_id)
         for item in matches
     ]

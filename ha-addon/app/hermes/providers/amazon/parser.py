@@ -579,9 +579,31 @@ def extract_verified_warehouse_offers_from_listing(html: str, source_url: str, s
                 seller="Amazon Depo",
                 url=source_url,
                 is_warehouse=True,
+                offer_id=_used_offer_listing_id(container),
             )
         )
     return offers
+
+
+_OFFER_ID_FIELDS = "input[name='items[0.base][offerListingId]'], input[name='offerListingID']"
+
+
+def _offer_listing_id(element) -> str:
+    """Amazon's id of the exact offer, which its own add-to-cart form posts; empty when absent."""
+    field = element.select_one(_OFFER_ID_FIELDS) if element is not None else None
+    value = str(field.get("value") or "").strip() if field is not None else ""
+    return value if re.fullmatch(r"[A-Za-z0-9%+/=_-]{16,800}", value) else ""
+
+
+def _used_offer_listing_id(container) -> str:
+    """A used row's id: its own form, or the form of the used-offer block enclosing its header."""
+    for element in (container, *container.parents):
+        if getattr(element, "name", None) is None:
+            break
+        offer_id = _offer_listing_id(element)
+        if offer_id or element.get("id") in _USED_OFFER_IDS or "aod-offer" in (element.get("class") or []):
+            return offer_id
+    return ""
 
 
 _TEXTLESS_TAGS = {"script", "style", "template", "noscript"}
@@ -685,6 +707,8 @@ def extract_offers(html: str, source_url: str = "", soup=None, high_price_checke
                 # its own price and Amazon Depo seller are verified below.
                 is_warehouse=False,
                 stock_quantity=stock_quantity,
+                # Used sections are removed above, so the buy box form is the new offer's.
+                offer_id=_offer_listing_id(soup.select_one("#addToCart")),
             )
         )
 

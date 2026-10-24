@@ -1,23 +1,35 @@
-"""Amazon cart operations through the owner's Pi browser. No checkout actions."""
+"""Amazon cart operations through the owner's Pi browser. No checkout actions.
+
+The deal is added first (Amazon Depo stock goes fast), then every other active
+cart item is moved to "Daha sonra al", so the deal is the only item left.
+"""
 import json
+import re
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from urllib.parse import urlencode, urljoin, urlsplit
+from urllib.parse import urlencode
 
 import requests
 
 from ...utils import extract_asin_from_url
 from . import parser
 from .client import protection_reason
-from .common import has_explicit_used_offer_evidence, normalize_offer_text
+from .common import normalize_offer_text
 
 BRIDGE = Path('/share/hermes-cart/bridge.json')
+BRIDGE_URL = 'http://local-hermes-browser:8098/fetch'
 CART_URL = 'https://www.amazon.com.tr/gp/cart/view.html'
+ADD_URL = 'https://www.amazon.com.tr/cart/add-to-cart/ref=dp_start-bbf_1_glance'
+SAVE_URL = 'https://www.amazon.com.tr/cart/ref=ord_cart_shr'
+ACTIVE_ROWS = '#sc-active-cart [data-itemtype="active"][data-asin]'
+MAX_ACTIVE_ITEMS = 30
 
 
 class CartError(Exception):
-    def __init__(self, message):
+    def __init__(self, message, added=False):
         self.public_message = message
+        # True when the deal is already in the cart although a later step failed.
+        self.added = added
         super().__init__(message)
 
 
@@ -25,147 +37,155 @@ def payload(watch, offer, url):
     asin = extract_asin_from_url(url)
     if not asin or offer.price > watch.target_price:
         return None
-    return {'asin': asin, 'price': str(offer.price), 'warehouse': bool(offer.is_warehouse),
-            'seller': offer.seller or '', 'url': 'https://www.amazon.com.tr/dp/' + asin}
+    return {'asin': asin, 'price': str(offer.price), 'target': str(watch.target_price),
+            'warehouse': bool(offer.is_warehouse), 'seller': offer.seller or '',
+            'offer_id': offer.offer_id or '', 'url': 'https://www.amazon.com.tr/dp/' + asin}
 
 
 class BrowserTransport:
+    """Sends one allow-listed request through the logged-in Chromium; cookies never leave it."""
+
     def __call__(self, method, url, body=''):
-        meta = json.loads(BRIDGE.read_text())
-        if meta.get('url') != 'http://local-hermes-browser:8098/fetch':
-            raise CartError('Alfred tarayıcı bağlantısı geçersiz')
+        try:
+            meta = json.loads(BRIDGE.read_text())
+        except (OSError, ValueError):
+            raise CartError("Hermes Tarayıcı çalışmıyor; Alfred'de uygulamayı başlat") from None
+        if meta.get('url') != BRIDGE_URL:
+            raise CartError('Hermes Tarayıcı bağlantısı geçersiz')
         try:
             response = requests.post(meta['url'], json={'method': method, 'url': url, 'body': body},
-                                     headers={'Authorization': 'Bearer ' + meta['token']}, timeout=(2, 12))
-            response.raise_for_status()
+                                     headers={'Authorization': 'Bearer ' + meta['token']}, timeout=(2, 15))
             result = response.json()
         except Exception:
-            raise CartError('Alfred tarayıcısına ulaşılamadı; otomatik tekrar yok') from None
+            raise CartError('Hermes Tarayıcı yanıt vermedi') from None
+        if result.get('error'):
+            raise CartError('Hermes Tarayıcı isteği yapamadı (' + str(result['error'])[:40] + ')')
         html = result.get('html', '')
-        if result.get('status') != 200 or not html:
-            raise CartError('Amazon isteği doğrulanamadı')
-        if protection_reason(html):
-            raise CartError('Amazon doğrulama istiyor; tarayıcıda kontrol et')
+        status = result.get('status')
+        # A POST is not followed (status 0 = redirect); the caller re-reads the cart.
+        if method == 'GET' and (status != 200 or not html):
+            raise CartError('Amazon sayfası okunamadı')
+        if method == 'POST' and status not in (0, 200, 302, 303):
+            raise CartError('Amazon sepet isteğini kabul etmedi')
+        if html and protection_reason(html):
+            raise CartError("Amazon doğrulama istiyor; Hermes Tarayıcı'da kontrol et")
         return html
 
 
-def cart_row(html, asin):
-    soup = parser.parse_product_page(html)
-    nav = soup.select_one('#nav-link-accountList-nav-line-1') or soup.select_one('#nav-link-accountList .nav-line-1')
-    if not nav or any(word in normalize_offer_text(nav.get_text(' ', strip=True)) for word in ('giris', 'sign in')):
-        raise CartError('Amazon hesabı bağlı değil; Alfred tarayıcısında giriş yap')
-    rows = soup.select('#sc-active-cart [data-asin], #sc-active-cart-pane [data-asin]')
-    return next((row for row in rows if row.get('data-asin') == asin), None)
+class Cart:
+    """One parsed, logged-in cart page."""
+
+    def __init__(self, html):
+        self.soup = parser.parse_product_page(html)
+        nav = self.soup.select_one('#nav-link-accountList-nav-line-1')
+        if nav is None or any(word in normalize_offer_text(nav.get_text(' ', strip=True)) for word in ('giris', 'sign in')):
+            raise CartError("Amazon oturumu kapalı; Hermes Tarayıcı'dan giriş yap")
+        if self.soup.select_one('#sc-active-cart') is None:
+            raise CartError('Amazon sepet sayfası tanınamadı')
+        self.rows = self.soup.select(ACTIVE_ROWS)
+
+    def token(self, selector):
+        field = self.soup.select_one(selector + ' input[name="anti-csrftoken-a2z"]')
+        return str(field['value']) if field is not None and field.get('value') else ''
+
+    def row(self, asin):
+        return next((row for row in self.rows if row.get('data-asin') == asin), None)
+
+    def others(self, asin):
+        return [row for row in self.rows if row.get('data-asin') != asin]
 
 
-def verify_row(row, job):
+def after_post(transport, html):
+    """Amazon answers a cart POST with the updated cart; a GET is needed only when it did not."""
     try:
-        price = Decimal(str(row.get('data-price') or row.get('data-item-price') or ''))
-        quantity = int(row.get('data-quantity') or '')
-    except (InvalidOperation, ValueError):
-        raise CartError('Sepetteki birim fiyat/adet doğrulanamadı') from None
-    if price != Decimal(job['price']):
-        raise CartError('Sepetteki fiyat fırsat fiyatıyla uyuşmuyor')
-    if quantity != 1:
-        raise CartError('Sepetteki adet 1 değil; mevcut sepete dokunulmadı')
-    text = normalize_offer_text(row.get_text(' ', strip=True))
-    used = has_explicit_used_offer_evidence(text)
-    if used != job['warehouse']:
-        raise CartError('Sepetteki ürünün yeni/ikinci el durumu uyuşmuyor')
-    if job['warehouse'] and 'amazon depo' not in text:
-        raise CartError('Sepette Amazon Depo satıcısı doğrulanamadı')
-    if job.get('seller') and normalize_offer_text(job['seller']) not in text:
-        raise CartError('Sepetteki satıcı fırsat satıcısıyla uyuşmuyor')
+        return Cart(html)
+    except CartError:
+        return Cart(transport('GET', CART_URL))
 
 
-def cart_form(html, job):
-    soup = parser.parse_product_page(html)
+def save_for_later(transport, cart, row):
+    button = row.select_one('input[name^="submit.save-for-later."]')
+    token = cart.token('#activeCartViewForm')
+    if button is None or not token or not re.fullmatch(r'submit\.save-for-later\.[A-Za-z0-9_-]{1,120}', button['name']):
+        raise CartError('Sonra al düğmesi bulunamadı')
+    fields = {'anti-csrftoken-a2z': token, button['name']: str(button.get('value') or 'Daha sonra kaydet')}
+    return after_post(transport, transport('POST', SAVE_URL, urlencode(fields)))
+
+
+def offer_from_page(transport, job):
+    """The deal's listing id and form token from a logged-in read, re-checking price and condition."""
     if job['warehouse']:
-        containers = soup.select('#aod-offer, #aod-pinned-offer, #usedBuySection, #usedAccordionRow, .olpOffer')
-        matches = [c for c in containers if 'amazon depo' in normalize_offer_text(c.get_text(' ', strip=True))
-                   and has_explicit_used_offer_evidence(c.get_text(' ', strip=True))
-                   and parser._offer_container_price(c) == Decimal(job['price'])]
+        html = transport('GET', f"https://www.amazon.com.tr/gp/offer-listing/{job['asin']}?condition=used")
+        offers = parser.extract_verified_warehouse_offers_from_listing(html, source_url=job['url'])
     else:
-        offer = parser.extract_offer(html, source_url=job['url'])
-        if offer.is_warehouse or offer.price != Decimal(job['price']):
-            raise CartError('Amazon teklif fiyatı veya yeni/ikinci el durumu değişti')
-        if job.get('seller') and normalize_offer_text(offer.seller or '') != normalize_offer_text(job['seller']):
-            raise CartError('Amazon satıcısı değişti')
-        matches = [soup]
-    forms = {}
-    allowed = {'ASIN', 'ASIN.1', 'asin', 'offeringID.1', 'offerListingID', 'quantity', 'quantity.1',
-               'submit.addToCart', 'add-to-cart', 'anti-csrftoken-a2z', 'session-id', 'storeID',
-               'sellerID', 'smid', 'currencyCode'}
-    for container in matches:
-        for form in container.select('form'):
-            action = urljoin(job['url'], str(form.get('action') or ''))
-            parsed = urlsplit(action)
-            if parsed.netloc != 'www.amazon.com.tr' or not parsed.path.startswith('/gp/add-to-cart'):
-                continue
-            fields = {i.get('name'): str(i.get('value') or '') for i in form.select('input[name]')
-                      if i.get('name') in allowed and not i.has_attr('disabled')}
-            offering = fields.get('offeringID.1') or fields.get('offerListingID')
-            if not offering:
-                continue
-            explicit_asin = fields.get('ASIN') or fields.get('ASIN.1') or fields.get('asin')
-            if explicit_asin and explicit_asin != job['asin']:
-                continue
-            fields['quantity'] = '1'
-            if 'quantity.1' in fields:
-                fields['quantity.1'] = '1'
-            fields['submit.addToCart'] = '1'
-            forms[offering] = (action, fields)
-    if len(forms) != 1:
-        raise CartError('Tek ve kesin Amazon teklifi doğrulanamadı; sepet değişmedi')
-    return next(iter(forms.values()))
+        html = transport('GET', job['url'])
+        offers = [parser.extract_offer(html, source_url=job['url'])]
+    target = Decimal(job['target'])
+    usable = [offer for offer in offers if offer.offer_id and offer.is_warehouse == job['warehouse'] and offer.price <= target]
+    if not usable:
+        raise CartError('Teklif artık hedef fiyatta değil veya tükendi; sepet değişmedi')
+    offer_id = min(usable, key=lambda offer: offer.price).offer_id
+    field = parser.parse_product_page(html).select_one(
+        f'form:has(input[value="{offer_id}"]) input[name="anti-csrftoken-a2z"]')
+    return offer_id, str(field.get('value') or '') if field is not None else ''
 
 
-def save_all_for_later(transport):
-    html = transport('GET', CART_URL)
-    for _ in range(100):
-        # cart_row also verifies that this is the logged-in cart, not a sign-in page.
-        cart_row(html, '')
-        soup = parser.parse_product_page(html)
-        rows = soup.select('#sc-active-cart [data-asin], #sc-active-cart-pane [data-asin]')
-        if not rows:
-            return
-        row = rows[0]
-        asin = row.get('data-asin')
-        button = row.select_one('input[name^="submit.save-for-later."], button[name^="submit.save-for-later."]')
-        form = row.find_parent('form') or soup.select_one('#activeCartViewForm')
-        if not button or not form:
-            raise CartError('Sonra al işleminin kesin formu bulunamadı; sepet değiştirilmedi')
-        fields = {i.get('name'): str(i.get('value') or '') for i in form.select('input[name]')
-                  if i.get('name') in {'anti-csrftoken-a2z', 'csrfToken', 'hasMoreItems'}}
-        if not any(k in fields for k in ('anti-csrftoken-a2z', 'csrfToken')):
-            raise CartError('Sonra al güvenlik alanı bulunamadı')
-        fields[button.get('name')] = str(button.get('value') or '1')
-        action = urljoin(CART_URL, str(form.get('action') or ''))
-        parsed = urlsplit(action)
-        if parsed.netloc != 'www.amazon.com.tr' or not (parsed.path == '/cart' or parsed.path.startswith('/cart/ref=')
-                or parsed.path == '/gp/cart/view.html'):
-            raise CartError('Sonra al adresi doğrulanamadı')
-        transport('POST', action, urlencode(fields))
-        html = transport('GET', CART_URL)
-        check = parser.parse_product_page(html)
-        saved = check.select('#sc-saved-cart [data-asin], #sc-saved-cart-items [data-asin]')
-        if not any(i.get('data-asin') == asin for i in saved):
-            raise CartError('Sonra al taşıması doğrulanamadı; otomatik tekrar yok')
-        next_rows = check.select('#sc-active-cart [data-asin], #sc-active-cart-pane [data-asin]')
-        if len(next_rows) >= len(rows):
-            raise CartError('Sepetteki ürün sayısı azalmadı; işlem durdu')
-    raise CartError('Sepette çok fazla ürün var; işlem sınırında durdu')
+def add_offer(transport, token, job, offer_id):
+    if not token:
+        raise CartError('Amazon sepete ekleme güvenlik alanı bulunamadı; sepet değişmedi')
+    fields = {'anti-csrftoken-a2z': token, 'clientName': 'OffersX_OfferDisplay_DetailPage',
+              'items[0.base][asin]': job['asin'], 'items[0.base][offerListingId]': offer_id,
+              'items[0.base][quantity]': '1'}
+    return after_post(transport, transport('POST', ADD_URL, urlencode(fields)))
+
+
+def row_warning(row, job):
+    """Why the cart row differs from the deal; empty when it matches.
+
+    Amazon's cart row shows neither seller nor condition, so the Depo offer is
+    recognised by its own price.
+    """
+    try:
+        quantity = int(row.get('data-quantity') or '')
+        price = Decimal(str(row.get('data-price') or ''))
+    except (InvalidOperation, ValueError):
+        return 'sepetteki fiyat/adet okunamadı'
+    if quantity != 1:
+        return f'sepette adet {quantity}'
+    if price > Decimal(job['target']):
+        return 'sepetteki fiyat hedefin üstünde'
+    if price != Decimal(job['price']):
+        return 'sepetteki fiyat bildirimdekinden farklı'
+    return ''
 
 
 def add_to_cart(job, transport=None):
     transport = transport or BrowserTransport()
-    save_all_for_later(transport)
-    url = ('https://www.amazon.com.tr/gp/offer-listing/' + job['asin'] + '?condition=used'
-           if job['warehouse'] else job['url'])
-    action, fields = cart_form(transport('GET', url), job)
-    transport('POST', action, urlencode(fields))
-    row = cart_row(transport('GET', CART_URL), job['asin'])
-    if row is None:
-        raise CartError('Sepete ekleme doğrulanamadı; otomatik tekrar yok')
-    verify_row(row, job)
-    return 'Sepete 1 adet eklendi; fırsat fiyatı ve teklif doğrulandı'
+    cart = Cart(transport('GET', CART_URL))
+    if len(cart.rows) > MAX_ACTIVE_ITEMS:
+        raise CartError('Sepette çok fazla ürün var; sepet değişmedi')
+    if cart.row(job['asin']) is not None:
+        # The same product already sits in the cart: adding it again would make two.
+        cart = save_for_later(transport, cart, cart.row(job['asin']))
+    # Fast path: the offer id Hermes just read and the cart page's own add-to-cart token.
+    offer_id, token = job.get('offer_id'), cart.token('form.add-to-cart-data')
+    if not offer_id or not token:
+        offer_id, token = offer_from_page(transport, job)
+    cart = add_offer(transport, token, job, offer_id)
+    if cart.row(job['asin']) is None and job.get('offer_id'):
+        # An id read without the session may be refused; retry once with the logged-in page's id.
+        offer_id, token = offer_from_page(transport, job)
+        cart = add_offer(transport, token, job, offer_id)
+    if cart.row(job['asin']) is None:
+        raise CartError('Amazon ürünü sepete eklemedi')
+    for _ in range(MAX_ACTIVE_ITEMS):
+        others = cart.others(job['asin'])
+        if not others:
+            break
+        cart = save_for_later(transport, cart, others[0])
+        if len(cart.others(job['asin'])) >= len(others):
+            break
+    if cart.others(job['asin']):
+        raise CartError("Ürün sepete eklendi ama diğerleri Sonra al'a taşınamadı", added=True)
+    warning = row_warning(cart.row(job['asin']), job) if cart.row(job['asin']) is not None else 'ürün sepette görünmüyor'
+    return 'Sepette yalnız bu ürün var' + (f' (dikkat: {warning})' if warning else '')
