@@ -1,5 +1,10 @@
 # Değişiklik günlüğü
 
+## 4.21.0
+
+- Fırsat Geçmişi ana sayfaya taşındı: Takipte / Stokta yok / Telegram sekmelerinin yanındaki yeni butonla açılır (PIN gerekmez), Ayarlar'daki buton kaldırıldı.
+- Her fırsatta tarih-saat, site, varsa satıcı ve Depo etiketi, yakalanan fiyat ve fırsat süresi görünür. Süre, kayıtlı fiyat değişimlerinden hesaplanır: fiyatın hedefin (90 günün dibinde bildirim fiyatının) üstüne çıktığı ilk ana kadar; çıkmadıysa "hâlâ sürüyor".
+
 ## 4.20.23
 
 - Amazon Depo (ikinci el) teklif doğrulaması hızlandı: özellik seçicileri de dizinden yanıtlanır, kutular yapısal karşılaştırma yerine kimlikle ayırt edilir, ürün JSON verisi dizinli betik listesinden okunur. Kural aynı: yalnız en içteki ikinci el satırı okunur.
