@@ -11,6 +11,7 @@ from support import TempData, config, monitor, notifier
 from hermes.cart import CartQueue
 from hermes.database import Database
 from hermes.models import OfferResult, WatchRule
+from hermes.providers.amazon import cart as amazon_cart
 from hermes.providers.amazon.cart import Cart, CartError, add_to_cart, payload
 from hermes.providers.amazon.parser import extract_verified_warehouse_offers_from_listing
 from hermes.providers.amazon import AmazonProvider
@@ -71,7 +72,7 @@ class CartCase(unittest.TestCase):
         self.assertIsNone(payload(self.watch, OfferResult('x', Decimal('101')), self.watch.url))
 
 
-    def test_success_reports_quietly_after_the_job_and_limit_stops_more(self):
+    def test_success_sends_nothing_and_limit_reports(self):
         provider = Mock()
         provider.add_to_cart.return_value = 'Sepette yalnız bu ürün var'
         delivery = Mock()
@@ -82,12 +83,25 @@ class CartCase(unittest.TestCase):
         while queue.run_one():
             pass
         self.assertEqual(provider.add_to_cart.call_count, 5)
-        title, message, url, _ = delivery.send.call_args_list[0].args
-        self.assertEqual((title, url), ('Sepete eklendi', 'https://www.amazon.com.tr/gp/cart/view.html'))
-        self.assertIn('Kulaklık', message)
-        self.assertEqual(delivery.send.call_args_list[0].kwargs['metadata'], {'quiet': True})
-        self.assertEqual(delivery.send.call_args_list[-1].args[0], 'Sepete eklenemedi')
+        delivery.send.assert_called_once()
+        self.assertEqual(delivery.send.call_args.args[0], 'Sepete eklenemedi')
 
+    def test_session_problem_is_announced_once_until_it_clears(self):
+        provider = Mock()
+        provider.check_cart_session.side_effect = [CartError('Amazon oturumu kapalı'), CartError('Amazon oturumu kapalı'), None,
+                                                   CartError('Amazon oturumu kapalı')]
+        delivery = Mock()
+        queue = CartQueue(self.db, {'amazon': provider}, [self.watch], delivery)
+        self.assertFalse(queue.check_session(now=queue.next_session_check - 1))
+        for _ in range(4):
+            self.assertTrue(queue.check_session(now=queue.next_session_check))
+        self.assertEqual(provider.check_cart_session.call_count, 4)
+        self.assertEqual([c.args[0] for c in delivery.send.call_args_list], ['Amazon oturumu sorunlu'] * 2)
+
+    def test_no_session_check_without_an_enabled_card(self):
+        queue = CartQueue(self.db, {'amazon': Mock()}, [])
+        queue.start()
+        self.assertIsNone(queue.thread)
 
 ASIN = 'B012345678'
 CSRF = 'csrf-token-0123456789'
@@ -147,7 +161,10 @@ class AmazonCartFlowTests(unittest.TestCase):
     job = {'asin': ASIN, 'price': '90', 'target': '100', 'warehouse': True, 'seller': 'Amazon Depo',
            'offer_id': 'search-offer-id-0123456789', 'url': 'https://www.amazon.com.tr/dp/' + ASIN}
 
-    def test_deal_is_added_first_then_every_other_item_saved_for_later(self):
+    def setUp(self):
+        amazon_cart._last_add_token = ''
+
+    def test_cart_is_emptied_first_then_the_deal_is_added(self):
         amazon = FakeAmazon([{'asin': 'B0OTHER001', 'id': 'a1', 'price': '4199', 'quantity': 4},
                              {'asin': 'B0OTHER002', 'id': 'a2', 'price': '10'}])
         result = add_to_cart(self.job, amazon)
@@ -155,9 +172,9 @@ class AmazonCartFlowTests(unittest.TestCase):
         self.assertEqual([i['asin'] for i in amazon.active], [ASIN])
         self.assertEqual([i['id'] for i in amazon.saved], ['a1', 'a2'])
         posts = [url for method, url, _ in amazon.requests if method == 'POST']
-        self.assertIn('/cart/add-to-cart/', posts[0])
+        self.assertEqual(['add-to-cart' in url for url in posts], [False, False, True])
         # The provider's offer id is used directly: no product page read before the add.
-        self.assertEqual([m for m, _, _ in amazon.requests[:2]], ['GET', 'POST'])
+        self.assertFalse([url for method, url, _ in amazon.requests if method == 'GET' and 'cart' not in url])
         # Amazon answers each POST with the updated cart, so no extra cart read follows.
         self.assertEqual(len(amazon.requests), 4)
         self.assertTrue(all('checkout' not in url and 'buy' not in url for _, url, _ in amazon.requests))
@@ -200,11 +217,20 @@ class AmazonCartFlowTests(unittest.TestCase):
         self.assertFalse(error.exception.added)
         self.assertEqual(sum(1 for m, url, _ in amazon.requests if m == 'POST' and 'add-to-cart' in url), 2)
 
-    def test_failed_save_for_later_reports_the_deal_as_added(self):
+    def test_failed_save_for_later_stops_before_the_deal_is_added(self):
         amazon = FakeAmazon([{'asin': 'B0OTHER001', 'id': 'a1', 'price': '10'}], save_works=False)
         with self.assertRaises(CartError) as error:
             add_to_cart(self.job, amazon)
-        self.assertTrue(error.exception.added)
+        self.assertFalse(error.exception.added)
+        self.assertFalse([url for m, url, _ in amazon.requests if 'add-to-cart' in url])
+
+    def test_empty_cart_without_an_add_form_uses_the_last_seen_token(self):
+        add_to_cart(self.job, FakeAmazon())
+        amazon = FakeAmazon()
+        amazon.add_token = ''
+        add_to_cart(self.job, amazon)
+        self.assertIn(ADD_CSRF, amazon.requests[1][2])
+        self.assertEqual(len(amazon.requests), 2)
 
 
 class CartSummaryTests(unittest.TestCase):

@@ -10,6 +10,9 @@ CART_URL = 'https://www.amazon.com.tr/gp/cart/view.html'
 # A job older than this is a missed moment, not a deal to chase.
 MAX_JOB_AGE = 60
 DAILY_LIMIT = 5
+# A cart read every two hours keeps the Amazon session alive and finds a closed one early.
+SESSION_CHECK_SECONDS = 2 * 3600
+FIRST_SESSION_CHECK_SECONDS = 120
 
 
 class CartQueue:
@@ -20,6 +23,8 @@ class CartQueue:
         self.enabled = {(w.site, w.tracking_id) for w in watches if w.auto_add_to_cart and w.active}
         self.stop = threading.Event()
         self.thread = None
+        self.next_session_check = time.monotonic() + FIRST_SESSION_CHECK_SECONDS
+        self.session_problem = ''
 
     @staticmethod
     def statement(site, tracking_id, payload):
@@ -40,12 +45,34 @@ class CartQueue:
     def _run(self):
         while not self.stop.is_set():
             try:
-                if not self.run_one():
+                if not self.run_one() and not self.check_session():
                     self.stop.wait(0.25)
             except Exception:
                 # Do not expose response HTML, credentials or signed form tokens.
                 log('Sepet kuyruğu bekliyor; mevcut bildirim akışı etkilenmedi.')
                 self.stop.wait(5)
+
+    def check_session(self, now=None):
+        """Due session checks, one per site; a problem is announced once, until it clears."""
+        now = time.monotonic() if now is None else now
+        if now < self.next_session_check:
+            return False
+        self.next_session_check = now + SESSION_CHECK_SECONDS
+        for site in sorted({site for site, _ in self.enabled}):
+            try:
+                self.providers[site].check_cart_session()
+            except Exception as exc:  # noqa: BLE001 - only public provider messages are shown
+                problem = getattr(exc, 'public_message', 'Hermes Tarayıcı oturumu doğrulanamadı')
+                log(f'Sepet oturum kontrolü: {problem}')
+                if problem != self.session_problem and self.delivery is not None:
+                    self.delivery.send('Amazon oturumu sorunlu', problem + "\nOtomatik sepete ekleme bu sırada çalışmaz.",
+                                       CART_URL, 'Sepeti aç')
+                self.session_problem = problem
+            else:
+                if self.session_problem:
+                    log('Sepet oturum kontrolü: oturum yeniden açık')
+                self.session_problem = ''
+        return True
 
     def _added_today(self):
         with self.db.lock:
@@ -76,7 +103,6 @@ class CartQueue:
             result = self.providers[site].add_to_cart(job)
             self._finish(identity, 'succeeded', result)
             log(f'Sepet: {result} | süre={time.monotonic() - started:.1f} sn')
-            self._report(job, True, result)
         except Exception as exc:
             # Only provider-defined public codes are exposed; network exceptions may contain tokens.
             detail = getattr(exc, 'public_message', 'Sepete ekleme sonucu doğrulanamadı; otomatik tekrar yok')
@@ -87,13 +113,12 @@ class CartQueue:
         return True
 
     def _report(self, job, added, detail):
-        """A short follow-up to the deal notification; a success stays quiet."""
+        """Only a problem is reported; a successful add needs no second notification (owner's rule)."""
         if self.delivery is None:
             return
         try:
-            self.delivery.send('Sepete eklendi' if added else 'Sepete eklenemedi',
-                               f"{job.get('title') or job['asin']}\n{detail}", CART_URL, 'Sepeti aç',
-                               metadata={'quiet': True} if added else None)
+            self.delivery.send('Sepete eklendi, ama dikkat' if added else 'Sepete eklenemedi',
+                               f"{job.get('title') or job['asin']}\n{detail}", CART_URL, 'Sepeti aç')
         except Exception as exc:  # noqa: BLE001 - the cart result is already stored
             log(f'Sepet sonucu bildirilemedi: {type(exc).__name__}')
 

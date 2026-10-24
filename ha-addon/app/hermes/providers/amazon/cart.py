@@ -1,7 +1,7 @@
 """Amazon cart operations through the owner's Pi browser. No checkout actions.
 
-The deal is added first (Amazon Depo stock goes fast), then every other active
-cart item is moved to "Daha sonra al", so the deal is the only item left.
+The cart is always read and emptied first (every item to "Daha sonra kaydet"),
+then the deal is added, so the deal is the only item left (owner's order).
 """
 import json
 import re
@@ -176,6 +176,22 @@ def row_warning(row, job):
     return ''
 
 
+# Amazon's add-to-cart token is session wide; the last one seen covers a cart page
+# that happens to show no add-to-cart form (an empty cart can lack them).
+_last_add_token = ''
+
+
+def _remember(cart):
+    global _last_add_token
+    _last_add_token = cart.tokens['add'] or _last_add_token
+    return cart
+
+
+def check_session(transport=None):
+    """One cart read: raises CartError when the session is closed or Amazon asks for verification."""
+    _remember(read_cart(transport or BrowserTransport()))
+
+
 def add_to_cart(job, transport=None):
     transport = transport or BrowserTransport()
     try:
@@ -186,31 +202,25 @@ def add_to_cart(job, transport=None):
 
 
 def _add_to_cart(job, transport):
-    cart = read_cart(transport)
+    cart = _remember(read_cart(transport))
     if len(cart.rows) > MAX_ACTIVE_ITEMS:
         raise CartError('Sepette çok fazla ürün var; sepet değişmedi')
-    if cart.row(job['asin']) is not None:
-        # The same product already sits in the cart: adding it again would make two.
-        cart = save_for_later(transport, cart, cart.row(job['asin']))
-    # Fast path: the offer id Hermes just read and the cart page's own add-to-cart token.
-    offer_id, token = job.get('offer_id'), cart.tokens['add']
+    while cart.rows:
+        count = len(cart.rows)
+        cart = _remember(save_for_later(transport, cart, cart.rows[0]))
+        if len(cart.rows) >= count:
+            raise CartError("Sepetteki ürünler Daha sonra kaydet'e taşınamadı; fırsat eklenmedi")
+    # Fast path: the offer id Hermes just read and a token from the cart page.
+    offer_id, token = job.get('offer_id'), cart.tokens['add'] or _last_add_token
     if not offer_id or not token:
         offer_id, token = offer_from_page(transport, job)
     cart = add_offer(transport, token, job, offer_id)
     if cart.row(job['asin']) is None and job.get('offer_id'):
-        # An id read without the session may be refused; retry once with the logged-in page's id.
+        # A stale token or an id read without the session may be refused; retry once from the logged-in page.
         offer_id, token = offer_from_page(transport, job)
         cart = add_offer(transport, token, job, offer_id)
-    if cart.row(job['asin']) is None:
+    row = cart.row(job['asin'])
+    if row is None:
         raise CartError('Amazon ürünü sepete eklemedi')
-    for _ in range(MAX_ACTIVE_ITEMS):
-        others = cart.others(job['asin'])
-        if not others:
-            break
-        cart = save_for_later(transport, cart, others[0])
-        if len(cart.others(job['asin'])) >= len(others):
-            break
-    if cart.others(job['asin']):
-        raise CartError("Ürün sepete eklendi ama diğerleri Sonra al'a taşınamadı", added=True)
-    warning = row_warning(cart.row(job['asin']), job) if cart.row(job['asin']) is not None else 'ürün sepette görünmüyor'
+    warning = row_warning(row, job)
     return 'Sepette yalnız bu ürün var' + (f' (dikkat: {warning})' if warning else '')

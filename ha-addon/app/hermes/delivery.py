@@ -97,10 +97,12 @@ class DeliveryQueue:
             if row is None:
                 return False
             identity, raw, attempts, created = row
+            picked = time.time()
             payload = json.loads(raw)
             if not self._valid(payload, created):
                 self._complete(identity, payload, False, "expired")
                 return True
+            checked = time.time()
             try:
                 extra = {"quiet": True} if payload.get("quiet") else {}
                 self.transport.send(payload["title"], payload["message"], payload.get("url", ""),
@@ -119,7 +121,11 @@ class DeliveryQueue:
                 if stopped:
                     self._complete(identity, payload, False, "failed")
                 return True
-            self._complete(identity, payload, True, "sent")
+            sent = time.time()
+            self._complete(identity, payload, True, "sent", sent)
+            # Where a notification's time goes: queue wait, freshness check, Pushover, bookkeeping.
+            log(f"Bildirim süresi (ms): kuyruk={round((picked - created) * 1000)} kontrol={round((checked - picked) * 1000)} "
+                f"pushover={round((sent - checked) * 1000)} kayıt={round((time.time() - sent) * 1000)} | {payload['title'][:40]}")
             with self.db.lock:
                 failed = self.db.connect().execute("SELECT 1 FROM outbox WHERE state='failed' LIMIT 1").fetchone()
             if not failed:
@@ -130,12 +136,13 @@ class DeliveryQueue:
                 _record_recent_notification(channel, keyword, url, text)
             return True
 
-    def _complete(self, identity, payload, delivered, status):
+    def _complete(self, identity, payload, delivered, status, at=None):
+        # `delivered` is the moment Pushover accepted the message, not when bookkeeping finished.
+        at = (at or time.time()) if delivered else None
         if self.on_sent:
-            self.on_sent(payload, delivered, identity, status)
+            self.on_sent(payload, delivered, identity, status, at)
         else:
-            self.db.transaction([("UPDATE outbox SET state=?,delivered=? WHERE id=?",
-                                  (status, time.time() if delivered else None, identity))])
+            self.db.transaction([("UPDATE outbox SET state=?,delivered=? WHERE id=?", (status, at, identity))])
 
     def retry_failed(self):
         self.db.transaction([("UPDATE outbox SET state='pending',attempts=0,due=? WHERE state='failed'", (time.time(),))])

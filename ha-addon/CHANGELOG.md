@@ -1,5 +1,12 @@
 # Değişiklik günlüğü
 
+## 4.23.0
+
+- Otomatik sepet sırası: sepet her zaman okunur, içindekiler önce "Daha sonra kaydet"e taşınır, sonra fırsat eklenir. Taşıma başarısızsa fırsat eklenmez.
+- "Sepete eklendi" bildirimi kaldırıldı; yalnız sorun bildirilir.
+- Otomatik sepet kartı varsa 2 saatte bir sepet okunur: oturum kapalıysa/doğrulama istenirse bir kez bildirim, düzelince sessiz. Okuma oturumu da canlı tutar.
+- Bildirim süresi günlüğe adım adım yazılır (kuyruk, kontrol, Pushover, kayıt); teslim zamanı Pushover'ın kabul anıdır.
+
 ## 4.22.2
 
 - Otomatik sepet: sepet sayfası Hermes Tarayıcı içinde özetlenir (satırlar ve form alanları); 1 MB'lık sayfa Hermes'e taşınmaz. Hermes Tarayıcı 0.2.4 gerekir.

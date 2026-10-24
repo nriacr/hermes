@@ -271,6 +271,9 @@ class Provider:
     def add_to_cart(self, job):
         raise NotImplementedError("Provider does not support cart actions")
 
+    def check_cart_session(self):
+        raise NotImplementedError("Provider does not support cart actions")
+
     def close(self) -> None:
         """Release process-lived resources such as sessions or browsers."""
 

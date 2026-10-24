@@ -68,6 +68,10 @@ class AmazonProvider(RhythmMixin, PageCacheMixin, Provider):
         from .cart import add_to_cart
         return add_to_cart(job)
 
+    def check_cart_session(self):
+        from .cart import check_session
+        check_session()
+
     site = SITE_AMAZON
     progress_timeout_seconds = 3 * 3600
     alert_shows_seller = False

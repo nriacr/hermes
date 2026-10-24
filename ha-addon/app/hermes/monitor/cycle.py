@@ -280,7 +280,7 @@ class Monitor:
             self.delivery.drain()
         self.save_state(run.state)
 
-    def _delivery_finished(self, payload, delivered, identity, status):
+    def _delivery_finished(self, payload, delivered, identity, status, at=None):
         key = payload.get("offer_key")
         with self._lock:
             if key:
@@ -294,7 +294,7 @@ class Monitor:
             # Delivery acknowledgement and suppression are one durable transaction.
             self.delivery.db.transaction([
                 ("INSERT OR REPLACE INTO snapshots VALUES (?,?)", ("state.json", json.dumps(self._state, ensure_ascii=False))),
-                ("UPDATE outbox SET state=?,delivered=? WHERE id=?", (status, time.time() if delivered else None, identity)),
+                ("UPDATE outbox SET state=?,delivered=? WHERE id=?", (status, at if delivered else None, identity)),
             ])
             self.save_state(self._state, committed=True)
         if delivered and payload.get("opportunity"):
