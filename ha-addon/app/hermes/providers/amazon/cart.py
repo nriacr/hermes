@@ -1,7 +1,8 @@
 """Amazon cart operations through the owner's Pi browser. No checkout actions.
 
-The cart is always read and emptied first (every item to "Daha sonra kaydet"),
-then the deal is added, so the deal is the only item left (owner's order).
+The cart is always read; the deal is added first (fastest: Depo stock goes in
+seconds), then every other item moves to "Daha sonra kaydet", so the deal is the
+only item left. The owner chose the faster order.
 """
 import json
 import re
@@ -205,11 +206,9 @@ def _add_to_cart(job, transport):
     cart = _remember(read_cart(transport))
     if len(cart.rows) > MAX_ACTIVE_ITEMS:
         raise CartError('Sepette çok fazla ürün var; sepet değişmedi')
-    while cart.rows:
-        count = len(cart.rows)
-        cart = _remember(save_for_later(transport, cart, cart.rows[0]))
-        if len(cart.rows) >= count:
-            raise CartError("Sepetteki ürünler Daha sonra kaydet'e taşınamadı; fırsat eklenmedi")
+    if cart.row(job['asin']) is not None:
+        # The same product already sits in the cart: adding it again would make two.
+        cart = _remember(save_for_later(transport, cart, cart.row(job['asin'])))
     # Fast path: the offer id Hermes just read and a token from the cart page.
     offer_id, token = job.get('offer_id'), cart.tokens['add'] or _last_add_token
     if not offer_id or not token:
@@ -219,8 +218,17 @@ def _add_to_cart(job, transport):
         # A stale token or an id read without the session may be refused; retry once from the logged-in page.
         offer_id, token = offer_from_page(transport, job)
         cart = add_offer(transport, token, job, offer_id)
-    row = cart.row(job['asin'])
-    if row is None:
+    if cart.row(job['asin']) is None:
         raise CartError('Amazon ürünü sepete eklemedi')
-    warning = row_warning(row, job)
+    for _ in range(MAX_ACTIVE_ITEMS):
+        others = cart.others(job['asin'])
+        if not others:
+            break
+        cart = _remember(save_for_later(transport, cart, others[0]))
+        if len(cart.others(job['asin'])) >= len(others):
+            break
+    if cart.others(job['asin']):
+        raise CartError("Ürün sepete eklendi ama diğerleri Daha sonra kaydet'e taşınamadı", added=True)
+    row = cart.row(job['asin'])
+    warning = row_warning(row, job) if row is not None else 'ürün sepette görünmüyor'
     return 'Sepette yalnız bu ürün var' + (f' (dikkat: {warning})' if warning else '')

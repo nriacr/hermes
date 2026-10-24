@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.23.1
+
+- Otomatik sepet: hız için önce fırsat eklenir, sonra diğer ürünler "Daha sonra kaydet"e taşınır (Nuri: sıra önemsiz, hızlı olan). Aynı ürün sepetteyse önce o taşınır.
+
 ## 4.23.0
 
 - Otomatik sepet sırası: sepet her zaman okunur, içindekiler önce "Daha sonra kaydet"e taşınır, sonra fırsat eklenir. Taşıma başarısızsa fırsat eklenmez.

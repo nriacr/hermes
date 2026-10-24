@@ -164,7 +164,7 @@ class AmazonCartFlowTests(unittest.TestCase):
     def setUp(self):
         amazon_cart._last_add_token = ''
 
-    def test_cart_is_emptied_first_then_the_deal_is_added(self):
+    def test_deal_is_added_first_then_every_other_item_saved_for_later(self):
         amazon = FakeAmazon([{'asin': 'B0OTHER001', 'id': 'a1', 'price': '4199', 'quantity': 4},
                              {'asin': 'B0OTHER002', 'id': 'a2', 'price': '10'}])
         result = add_to_cart(self.job, amazon)
@@ -172,7 +172,7 @@ class AmazonCartFlowTests(unittest.TestCase):
         self.assertEqual([i['asin'] for i in amazon.active], [ASIN])
         self.assertEqual([i['id'] for i in amazon.saved], ['a1', 'a2'])
         posts = [url for method, url, _ in amazon.requests if method == 'POST']
-        self.assertEqual(['add-to-cart' in url for url in posts], [False, False, True])
+        self.assertEqual(['add-to-cart' in url for url in posts], [True, False, False])
         # The provider's offer id is used directly: no product page read before the add.
         self.assertFalse([url for method, url, _ in amazon.requests if method == 'GET' and 'cart' not in url])
         # Amazon answers each POST with the updated cart, so no extra cart read follows.
@@ -217,12 +217,11 @@ class AmazonCartFlowTests(unittest.TestCase):
         self.assertFalse(error.exception.added)
         self.assertEqual(sum(1 for m, url, _ in amazon.requests if m == 'POST' and 'add-to-cart' in url), 2)
 
-    def test_failed_save_for_later_stops_before_the_deal_is_added(self):
+    def test_failed_save_for_later_reports_the_deal_as_added(self):
         amazon = FakeAmazon([{'asin': 'B0OTHER001', 'id': 'a1', 'price': '10'}], save_works=False)
         with self.assertRaises(CartError) as error:
             add_to_cart(self.job, amazon)
-        self.assertFalse(error.exception.added)
-        self.assertFalse([url for m, url, _ in amazon.requests if 'add-to-cart' in url])
+        self.assertTrue(error.exception.added)
 
     def test_empty_cart_without_an_add_form_uses_the_last_seen_token(self):
         add_to_cart(self.job, FakeAmazon())
