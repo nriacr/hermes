@@ -44,6 +44,39 @@ class OpportunityHistoryTests(unittest.TestCase):
         self.assertIn("listede yok", opportunities.status_text(item, {}))
         self.assertIn("Son 30 günde", opportunities.render_rows([], {}))
 
+    def test_duration_lasts_until_the_price_rises_above_the_target(self):
+        from datetime import datetime, timedelta
+        from hermes.history import History
+        now = datetime.now().astimezone()
+        history = History.at(self.data.files.database)
+        history.record_price("k1", "amazon", "Kulaklık", Decimal("1200"), now - timedelta(hours=5))
+        history.record_price("k1", "amazon", "Kulaklık", Decimal("900"), now - timedelta(hours=3))
+        history.record_price("k1", "amazon", "Kulaklık", Decimal("950"), now - timedelta(hours=2))
+        history.record_price("k1", "amazon", "Kulaklık", Decimal("1100"), now - timedelta(minutes=105))
+        history.record_price("k2", "trendyol", "Saat", Decimal("500"), now - timedelta(minutes=50))
+
+        def sent(key, price):
+            at = now - timedelta(minutes=40) if key == "k2" else now - timedelta(hours=3) + timedelta(seconds=5)
+            return opportunities.SentOpportunity(at, "t", "p", "u", Decimal(price), Decimal("1000"), "target", key)
+        ended, ongoing, unknown = opportunities.add_durations([sent("k1", "900"), sent("k2", "500"), sent("none", "1")],
+                                                             self.data.files.database, now)
+        self.assertEqual((ended.held, ended.ongoing), (timedelta(minutes=75), False))
+        self.assertTrue(ongoing.ongoing)
+        self.assertAlmostEqual(ongoing.held.total_seconds(), 3000, delta=1)
+        self.assertIsNone(unknown.held)
+        self.assertEqual(opportunities.duration_label(timedelta(minutes=75)), "1 sa 15 dk")
+        self.assertEqual(opportunities.duration_label(timedelta(days=2, hours=3, minutes=4)), "2 gün 3 sa")
+
+    def test_site_and_seller_come_from_the_alert(self):
+        self.put("a", {"title": "Amazon Depo fırsatı", "message": "Site: Amazon\nKulaklık", "url": "https://a/1", "price": "900",
+                       "target": "1000", "offer_key": "k", "opportunity": [{}, {"seller": "Amazon Depo", "is_warehouse": True}, "K", "u"]})
+        item = opportunities.read_sent(self.data.files.database)[0]
+        self.assertEqual((item.site, item.seller, item.warehouse, item.offer_key), ("Amazon", "Amazon Depo", True, "k"))
+        html = opportunities.render_rows([item], {})
+        self.assertIn("site-amazon", html)
+        self.assertIn("DEPO", html)
+        self.assertIn("satıcı Amazon Depo", html)
+
 
 if __name__ == "__main__":
     unittest.main()

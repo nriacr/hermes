@@ -444,7 +444,8 @@ def render_errors(errors: List[Dict[str, Any]]) -> str:
             f"<ul>{''.join(compact_error_row(detail) for detail in errors)}</ul></section>")
 
 
-def render_summary(payload: Dict[str, Any], state: Dict[str, Any], telegram_status: Dict[str, Any], errors: List[Dict[str, Any]]) -> str:
+def render_summary(payload: Dict[str, Any], state: Dict[str, Any], telegram_status: Dict[str, Any], errors: List[Dict[str, Any]],
+                   base: str = ".") -> str:
     rows = [row for row in payload.get("rows", []) if isinstance(row, dict)] if isinstance(payload.get("rows"), list) else []
     stock_rows = [row for row in payload.get("stock_rows", []) if isinstance(row, dict)] if isinstance(payload.get("stock_rows"), list) else []
     if not rows and not stock_rows:
@@ -467,7 +468,8 @@ def render_summary(payload: Dict[str, Any], state: Dict[str, Any], telegram_stat
         "<div class='ov-tabs' role='tablist'>"
         f"<button type='button' class='ov-tab' role='tab' data-tab='watch' aria-selected='true'>Takipte <small>{len(watching)}</small></button>"
         f"<button type='button' class='ov-tab' role='tab' data-tab='stock' aria-selected='false'>Stokta yok <small>{len(stock_rows)}</small></button>"
-        f"<button type='button' class='ov-tab' role='tab' data-tab='tg' aria-selected='false'>Telegram <small>{telegram_count}</small></button></div>"
+        f"<button type='button' class='ov-tab' role='tab' data-tab='tg' aria-selected='false'>Telegram <small>{telegram_count}</small></button>"
+        f"<a class='ov-tab' href='{escape(link(base, 'opportunities'), quote=True)}'>Fırsat Geçmişi</a></div>"
     )
     panes = (f"<div class='ov-pane' data-pane='watch'>{render_watch_pane(watching)}</div>"
              f"<div class='ov-pane' data-pane='stock' hidden>{render_stock_pane(stock_rows)}</div>"
@@ -644,7 +646,7 @@ def _build_dashboard_live_html(base: str) -> str:
         error = {"title": "Takip hafızası okunamadı", "meta": "Mevcut kayıtlar korunuyor",
                  "message": "Takip hafızasının incelenmesi gerekiyor. Ayarlar sayfası açık.",
                  "url": "", "failed_links": [], "checked_at": datetime.now().astimezone()}
-        return render_summary({}, {}, {}, [error])
+        return render_summary({}, {}, {}, [error], base)
     telegram_status = load_json(TELEGRAM_STATUS_PATH, {})
     state = state if isinstance(state, dict) else {}
     with _stage("tanı"):
@@ -663,7 +665,7 @@ def _build_dashboard_live_html(base: str) -> str:
     errors = sorted(unique.values(), key=lambda error: error["checked_at"], reverse=True)
     with _stage("çizim"):
         return render_summary(payload if isinstance(payload, dict) else {}, state,
-                              telegram_status if isinstance(telegram_status, dict) else {}, errors)
+                              telegram_status if isinstance(telegram_status, dict) else {}, errors, base)
 
 
 def render_dashboard_page(base: str, params: Dict[str, List[str]], config_error: str = "") -> bytes:

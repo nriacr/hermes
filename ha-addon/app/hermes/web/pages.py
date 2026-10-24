@@ -61,7 +61,6 @@ def render_tool_actions(base: str) -> str:
         "data-confirm='Min/maks fiyat geçmişi silinecek. Devam?'>"
         "<button class='button secondary' type='submit'>Min/Maks Sıfırla</button></form>"
         f"<a class='button secondary' href='{escape(link(base, 'statistics'), quote=True)}'>İstatistik</a>"
-        f"<a class='button secondary' href='{escape(link(base, 'opportunities'), quote=True)}'>Fırsat geçmişi</a>"
         f"<form class='inline-form' method='post' action='{escape(link(base, 'restart'), quote=True)}' "
         "data-confirm='Hermes yeniden başlatılacak, süren tarama yarıda kalır. Devam?'>"
         "<button class='button secondary' type='submit'>Hermes'i yeniden başlat</button></form></div>"

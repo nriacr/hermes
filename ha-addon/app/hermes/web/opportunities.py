@@ -1,6 +1,7 @@
 """Fırsat geçmişi: the notifications Hermes sent, newest first, and what each product costs now.
 
-Everything comes from the durable outbox of `hermes.db` (kept 30 days) and the published summary.
+Everything comes from the durable outbox of `hermes.db` (kept 30 days), the price changes recorded in the
+same database (how long the price stayed at or under the target) and the published summary.
 """
 
 import json
@@ -11,11 +12,11 @@ from html import escape
 from typing import Dict, List, Optional
 
 from ..constants import DATABASE_PATH, SUMMARY_PATH
-from ..history import _read
+from ..history import _read, read_prices_by_key
 from ..monitor import summary as summary_ops
 from ..storage import load_json
 from ..utils import format_tl
-from .dashboard import relative_time_text
+from .dashboard import relative_time_text, site_theme_class
 from .pages import render_page
 
 LIST_LIMIT = 100
@@ -31,6 +32,12 @@ class SentOpportunity:
     price: Optional[Decimal]
     target: Optional[Decimal]
     kind: str  # "target", "stock" or "low90"
+    offer_key: str = ""
+    site: str = ""
+    seller: str = ""
+    warehouse: bool = False
+    held: Optional[timedelta] = None  # how long the price stayed at the alert level; None = no price record
+    ongoing: bool = False  # the price had not risen above the ceiling at the last record
 
 
 def _decimal(value) -> Optional[Decimal]:
@@ -57,11 +64,61 @@ def read_sent(path=DATABASE_PATH, now: Optional[datetime] = None, limit: int = L
         lines = str(payload.get("message") or "").splitlines()
         product = lines[1] if len(lines) > 1 and lines[0].startswith("Site:") else str(payload.get("title") or "")
         kind = "low90" if payload.get("kind") == "low90" else "stock" if payload.get("stock_return") else "target"
+        site = lines[0][5:].strip() if lines and lines[0].startswith("Site:") else ""
+        opportunity = payload.get("opportunity")
+        offer = opportunity[1] if isinstance(opportunity, list) and len(opportunity) > 1 and isinstance(opportunity[1], dict) else {}
         result.append(SentOpportunity(datetime.fromtimestamp(delivered).astimezone(), str(payload.get("title") or ""),
-                                      product, str(payload["url"]), _decimal(payload["price"]), _decimal(payload.get("target")), kind))
+                                      product, str(payload["url"]), _decimal(payload["price"]), _decimal(payload.get("target")), kind,
+                                      str(payload.get("offer_key") or ""), site, str(offer.get("seller") or ""),
+                                      bool(offer.get("is_warehouse"))))
         if len(result) >= limit:
             break
     return result
+
+
+def add_durations(items: List[SentOpportunity], path=DATABASE_PATH, now: Optional[datetime] = None) -> List[SentOpportunity]:
+    """How long each price stayed at the alert level: from the alert price to the first later price above the ceiling.
+
+    The ceiling is the target (the alert price itself for a 90-day low). Prices are stored when they change,
+    so a price that never changed again is "ongoing" until now.
+    """
+    now = now or datetime.now().astimezone()
+    keys = sorted({item.offer_key for item in items if item.offer_key})
+    points = read_prices_by_key(path, keys) if keys else {}
+    for item in items:
+        history = points.get(item.offer_key) or []
+        if item.price is None or not history:
+            continue
+        ceiling = item.target if item.kind != "low90" and item.target is not None and item.target >= item.price else item.price
+        # The price row of this alert is the latest one at the alert price written before the message was delivered.
+        start = next((at for at, price in reversed(history) if price == item.price and at <= item.sent_at), None)
+        if start is None:
+            start = item.sent_at
+        end = next((at for at, price in history if at > start and price > ceiling), None)
+        item.ongoing = end is None
+        item.held = max(timedelta(0), (end or now) - start)
+    return items
+
+
+def duration_label(span: timedelta) -> str:
+    minutes = int(span.total_seconds() // 60)
+    if minutes < 1:
+        return "1 dk'dan az"
+    days, rest = divmod(minutes, 1440)
+    hours, minutes = divmod(rest, 60)
+    parts = [f"{days} gün"] if days else []
+    if hours:
+        parts.append(f"{hours} sa")
+    if minutes and not days:
+        parts.append(f"{minutes} dk")
+    return " ".join(parts)
+
+
+def held_html(item: SentOpportunity) -> str:
+    if item.held is None:
+        return "<span class='ov-chg flat'>kayıt yok</span>"
+    label = escape(duration_label(item.held))
+    return f"<b>{label}</b><br><small>{'hâlâ sürüyor' if item.ongoing else 'sonra fiyat yükseldi'}</small>"
 
 
 def current_prices(summary_path=SUMMARY_PATH) -> Dict[str, Decimal]:
@@ -74,9 +131,9 @@ def status_text(item: SentOpportunity, current: Dict[str, Decimal]) -> str:
         return "<span class='ov-chg flat'>şu an listede yok</span>"
     price = format_tl(now, with_currency=True)
     if item.target is not None and now <= item.target:
-        return f"<span class='ov-chg down'>hâlâ hedefte · {escape(price)}</span>"
+        return f"<span class='ov-chg flat'>hâlâ hedefte · {escape(price)}</span>"
     if item.price is not None and now > item.price:
-        return f"<span class='ov-chg up'>yükseldi · {escape(price)}</span>"
+        return f"<span class='ov-chg flat'>yükseldi · {escape(price)}</span>"
     return f"<span class='ov-chg flat'>şimdi {escape(price)}</span>"
 
 
@@ -90,18 +147,25 @@ def render_rows(items: List[SentOpportunity], current: Dict[str, Decimal]) -> st
     for item in items:
         price = format_tl(item.price, with_currency=True) if item.price is not None else "-"
         target = format_tl(item.target, with_currency=True) if item.target is not None else "-"
+        site_css = site_theme_class(item.site or item.seller)
+        depo = " <span class='ov-depo'>DEPO</span>" if item.warehouse else ""
+        seller = f" · satıcı {escape(item.seller)}" if item.seller and item.seller.casefold() != item.site.casefold() else ""
+        site = (f"<span class='{site_css}'><span class='ov-site'>{escape(item.site)}</span></span>{depo}{seller}<br>"
+                if item.site else "")
         when = f"{item.sent_at.strftime('%d.%m %H:%M')} · {relative_time_text(item.sent_at.strftime('%Y-%m-%d %H:%M:%S'))}"
         rows.append(
             f"<tr><td>{escape(when)}</td>"
             f"<td><a href='{escape(item.url, quote=True)}' target='_blank' rel='noopener noreferrer'>{escape(item.product)}</a>"
-            f"<br><small>{escape(KIND_LABELS[item.kind])}</small></td>"
-            f"<td>{escape(price)}<br><small>hedef {escape(target)}</small></td><td>{status_text(item, current)}</td></tr>")
+            f"<br><small>{site}{escape(KIND_LABELS[item.kind])}</small></td>"
+            f"<td>{escape(price)}<br><small>hedef {escape(target)}</small></td><td>{held_html(item)}</td>"
+            f"<td>{status_text(item, current)}</td></tr>")
     return ("<div class='table-wrap measure-wrap'><table class='statistics-table measure-table'><thead><tr>"
-            "<th>Zaman</th><th>Ürün</th><th>Bildirimde</th><th>Şimdi</th></tr></thead>"
+            "<th>Zaman</th><th>Ürün</th><th>Yakalanan fiyat</th><th>Fırsat süresi</th><th>Şimdi</th></tr></thead>"
             f"<tbody>{''.join(rows)}</tbody></table></div>")
 
 
 def render_opportunities_page(base: str, params=None) -> bytes:
     body = ("<div class='statistics-top'><h2 class='page-heading'>Fırsat geçmişi</h2></div>"
-            + render_rows(read_sent(), current_prices()))
+            + render_rows(add_durations(read_sent()), current_prices())
+            + "<p class='ov-empty'>Süre, fiyatın bildirimdeki seviyede (hedefin altında) kaldığı zamandır; ürün listeden düşerse kayıt tutulmaz.</p>")
     return render_page(base, "opportunities", "Hermes Fırsat geçmişi", body, body_class="public ov")

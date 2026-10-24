@@ -254,7 +254,7 @@ class Router:
     def handle(self, request: Request) -> Response:
         path = request.path.rstrip("/") or "/"
         # An explicit guest allowlist keeps future management routes protected by default.
-        if request.method == "GET" and path in {"/", "/live/dashboard", "/health", "/restarting", "/settings/restarting", *ASSETS}:
+        if request.method == "GET" and path in {"/", "/live/dashboard", "/opportunities", "/health", "/restarting", "/settings/restarting", *ASSETS}:
             return self._get(request, path)
         if path == "/internal/runtime":
             # HA-authenticated maintenance only; never accessible on the public surface.
@@ -269,7 +269,7 @@ class Router:
         if request.method == "POST" and path in {"/auth/unlock", "/auth/configure", "/auth/lock", "/auth/touch"}:
             return self._auth_action(request, path, session)
         if not session or not session.authenticated:
-            if request.method == "GET" and path in {"/settings", "/statistics", "/opportunities"}:
+            if request.method == "GET" and path in {"/settings", "/statistics"}:
                 return self._pin_reply(request)
             return Response(401, b"PIN required\n")
         if request.method == "GET" and path == "/auth/status":
