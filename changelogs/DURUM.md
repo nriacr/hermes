@@ -30,7 +30,7 @@ sonuç, gerçek kontrol ve yayın/kurulum bilgisi yeterlidir. Ayrıntı Git geç
 
 ## Yapılamayanlar / engeller
 
-- Amazon otomatik sepet henüz uygulanmadı/kurulmadı: mevcut istemci anonim, doğru Depo teklif kimliği taşınmıyor; Alfred’de hesap oturumu ve sepete ekleme doğrulanmalı. Mac Chrome oturumu kullanılmadı/taşınmadı.
+- Amazon otomatik sepet henüz uygulanmadı/kurulmadı: mevcut istemci anonim, doğru Depo teklif kimliği taşınmıyor; Alfred’de Hermes Tarayıcı 0.1.9 kuruldu (Alfred kaynak a0c5215; HA kenar çubuğu /local_hermes_browser, ingress erişimi doğrulandı). Kullanıcı oradan Amazon’a giriş yapmalı; oturum ve sepete ekleme henüz doğrulanmadı. Mac Chrome oturumu kullanılmadı/taşınmadı.
 
 - Bu düzenleme kapsamında engel yok. Canlı test/kurulum belge işi için uygulanmaz.
 
