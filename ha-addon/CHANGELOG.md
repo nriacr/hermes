@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.22.2
+
+- Otomatik sepet: sepet sayfası Hermes Tarayıcı içinde özetlenir (satırlar ve form alanları); 1 MB'lık sayfa Hermes'e taşınmaz. Hermes Tarayıcı 0.2.4 gerekir.
+
 ## 4.22.1
 
 - Otomatik sepet: sepet sayfası Pi'de tam HTML ayrıştırması yerine hedefli okunur (ilk canlı denemede iş 15,6 sn sürdü). Adım süreleri günlüğe yazılır.

@@ -23,7 +23,6 @@ BRIDGE_URL = 'http://local-hermes-browser:8098/fetch'
 CART_URL = 'https://www.amazon.com.tr/gp/cart/view.html'
 ADD_URL = 'https://www.amazon.com.tr/cart/add-to-cart/ref=dp_start-bbf_1_glance'
 SAVE_URL = 'https://www.amazon.com.tr/cart/ref=ord_cart_shr'
-ACTIVE_ROWS = '#sc-active-cart [data-itemtype="active"][data-asin]'
 MAX_ACTIVE_ITEMS = 30
 
 
@@ -51,15 +50,15 @@ class BrowserTransport:
         self.started = time.monotonic()
         self.steps = []
 
-    def __call__(self, method, url, body=''):
+    def __call__(self, method, url, body='', view=''):
         begun = time.monotonic()
         try:
-            return self._send(method, url, body)
+            return self._send(method, url, body, view)
         finally:
             kind = 'ekle' if 'add-to-cart' in url else 'sonra_al' if method == 'POST' else 'teklif' if 'cart' not in url else 'sepet'
             self.steps.append(f'{kind} {time.monotonic() - begun:.1f}')
 
-    def _send(self, method, url, body):
+    def _send(self, method, url, body, view):
         try:
             meta = json.loads(BRIDGE.read_text())
         except (OSError, ValueError):
@@ -67,15 +66,20 @@ class BrowserTransport:
         if meta.get('url') != BRIDGE_URL:
             raise CartError('Hermes Tarayıcı bağlantısı geçersiz')
         try:
-            response = requests.post(meta['url'], json={'method': method, 'url': url, 'body': body},
+            response = requests.post(meta['url'], json={'method': method, 'url': url, 'body': body, 'view': view},
                                      headers={'Authorization': 'Bearer ' + meta['token']}, timeout=(2, 15))
             result = response.json()
         except Exception:
             raise CartError('Hermes Tarayıcı yanıt vermedi') from None
         if result.get('error'):
             raise CartError('Hermes Tarayıcı isteği yapamadı (' + str(result['error'])[:40] + ')')
-        html = result.get('html', '')
         status = result.get('status')
+        if view == 'cart':
+            # The browser already reduced the page to a cart summary (None: not a cart page).
+            if status not in (0, 200, 302, 303):
+                raise CartError('Amazon sepet isteğini kabul etmedi')
+            return result.get('cart')
+        html = result.get('html', '')
         # A POST is not followed (status 0 = redirect); the caller re-reads the cart.
         if method == 'GET' and (status != 200 or not html):
             raise CartError('Amazon sayfası okunamadı')
@@ -86,61 +90,43 @@ class BrowserTransport:
         return html
 
 
-_NAV = re.compile(r'id="nav-link-accountList-nav-line-1"[^>]*>([^<]*)<')
-_ACTIVE_ROW = re.compile(r'<div\b[^>]*\bdata-itemtype="active"[^>]*>')
-_ATTR = re.compile(r'\b(data-[a-z-]+)="([^"]*)"')
-_TOKEN = re.compile(r'name="anti-csrftoken-a2z"\s+value="([^"]+)"')
-
-
 class Cart:
-    """One logged-in cart page, read with a few anchored patterns.
+    """The browser's summary of one logged-in cart page.
 
-    A full HTML parse of Amazon's ~1 MB cart takes seconds on the Pi; these
-    fields are all the cart flow needs.
+    Chromium reduces Amazon's ~1 MB cart to rows and form tokens (view='cart'),
+    so the page never crosses to Hermes and nothing heavy is parsed on the Pi.
     """
 
-    def __init__(self, html):
-        self.html = html
-        nav = _NAV.search(html)
-        if nav is None or any(word in normalize_offer_text(nav.group(1)) for word in ('giris', 'sign in')):
+    def __init__(self, summary):
+        if not isinstance(summary, dict):
+            raise CartError('Amazon sepeti okunamadı (doğrulama sayfası olabilir)')
+        if any(word in normalize_offer_text(str(summary.get('nav') or 'giris')) for word in ('giris', 'sign in')):
             raise CartError("Amazon oturumu kapalı; Hermes Tarayıcı'dan giriş yap")
-        if 'id="sc-active-cart"' not in html:
-            raise CartError('Amazon sepet sayfası tanınamadı')
-        self.rows = [dict(_ATTR.findall(match.group(0))) for match in _ACTIVE_ROW.finditer(html)]
-        self.rows = [row for row in self.rows if row.get('data-asin') and row.get('data-itemid')]
-
-    def token(self, marker):
-        """The first form token after `marker` (the cart form, or a cart add-to-cart form)."""
-        start = self.html.find(marker)
-        match = _TOKEN.search(self.html, start) if start >= 0 else None
-        return match.group(1) if match else ''
-
-    def save_button(self, row):
-        name = 'submit.save-for-later.' + row['data-itemid']
-        match = re.search(re.escape(f'name="{name}"') + r'\s+value="([^"]*)"', self.html)
-        return name, match.group(1) if match else 'Daha sonra kaydet'
+        self.rows = [row for row in summary.get('rows') or [] if row.get('asin') and row.get('itemid')]
+        self.tokens = {'cart': str(summary.get('cart_token') or ''), 'add': str(summary.get('add_token') or '')}
 
     def row(self, asin):
-        return next((row for row in self.rows if row.get('data-asin') == asin), None)
+        return next((row for row in self.rows if row['asin'] == asin), None)
 
     def others(self, asin):
-        return [row for row in self.rows if row.get('data-asin') != asin]
+        return [row for row in self.rows if row['asin'] != asin]
 
 
-def after_post(transport, html):
-    """Amazon answers a cart POST with the updated cart; a GET is needed only when it did not."""
-    try:
-        return Cart(html)
-    except CartError:
-        return Cart(transport('GET', CART_URL))
+def read_cart(transport):
+    return Cart(transport('GET', CART_URL, view='cart'))
+
+
+def after_post(transport, summary):
+    """Amazon answers a cart POST with the updated cart; a read is needed only when it did not."""
+    return Cart(summary) if isinstance(summary, dict) else read_cart(transport)
 
 
 def save_for_later(transport, cart, row):
-    name, value = cart.save_button(row)
-    token = cart.token('id="activeCartViewForm"')
-    if not token or not re.fullmatch(r'submit\.save-for-later\.[A-Za-z0-9_-]{1,120}', name):
+    name = 'submit.save-for-later.' + row['itemid']
+    if not cart.tokens['cart'] or not re.fullmatch(r'submit\.save-for-later\.[A-Za-z0-9_-]{1,120}', name):
         raise CartError('Sonra al düğmesi bulunamadı')
-    return after_post(transport, transport('POST', SAVE_URL, urlencode({'anti-csrftoken-a2z': token, name: value})))
+    fields = {'anti-csrftoken-a2z': cart.tokens['cart'], name: row.get('save_value') or 'Daha sonra kaydet'}
+    return after_post(transport, transport('POST', SAVE_URL, urlencode(fields), view='cart'))
 
 
 def offer_from_page(transport, job):
@@ -167,7 +153,7 @@ def add_offer(transport, token, job, offer_id):
     fields = {'anti-csrftoken-a2z': token, 'clientName': 'OffersX_OfferDisplay_DetailPage',
               'items[0.base][asin]': job['asin'], 'items[0.base][offerListingId]': offer_id,
               'items[0.base][quantity]': '1'}
-    return after_post(transport, transport('POST', ADD_URL, urlencode(fields)))
+    return after_post(transport, transport('POST', ADD_URL, urlencode(fields), view='cart'))
 
 
 def row_warning(row, job):
@@ -177,8 +163,8 @@ def row_warning(row, job):
     recognised by its own price.
     """
     try:
-        quantity = int(row.get('data-quantity') or '')
-        price = Decimal(str(row.get('data-price') or ''))
+        quantity = int(row.get('quantity') or '')
+        price = Decimal(str(row.get('price') or ''))
     except (InvalidOperation, ValueError):
         return 'sepetteki fiyat/adet okunamadı'
     if quantity != 1:
@@ -200,14 +186,14 @@ def add_to_cart(job, transport=None):
 
 
 def _add_to_cart(job, transport):
-    cart = Cart(transport('GET', CART_URL))
+    cart = read_cart(transport)
     if len(cart.rows) > MAX_ACTIVE_ITEMS:
         raise CartError('Sepette çok fazla ürün var; sepet değişmedi')
     if cart.row(job['asin']) is not None:
         # The same product already sits in the cart: adding it again would make two.
         cart = save_for_later(transport, cart, cart.row(job['asin']))
     # Fast path: the offer id Hermes just read and the cart page's own add-to-cart token.
-    offer_id, token = job.get('offer_id'), cart.token('class="add-to-cart-data')
+    offer_id, token = job.get('offer_id'), cart.tokens['add']
     if not offer_id or not token:
         offer_id, token = offer_from_page(transport, job)
     cart = add_offer(transport, token, job, offer_id)

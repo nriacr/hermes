@@ -106,22 +106,18 @@ class FakeAmazon:
         self.save_works = save_works
         self.listing = listing
         self.requests = []
+        self.add_token = ADD_CSRF
 
     def page(self):
-        rows = ''.join(
-            f'<div data-itemtype="active" data-asin="{i["asin"]}" data-itemid="{i["id"]}" data-price="{i["price"]}" '
-            f'data-quantity="{i.get("quantity", 1)}">{i.get("text", "")}'
-            f'<input name="submit.save-for-later.{i["id"]}" value="Daha sonra kaydet" type="submit"></div>'
-            for i in self.active)
-        name = 'Nuri' if self.logged_in else 'Merhaba, giriş yapın'
-        return (f'<span id="nav-link-accountList-nav-line-1">{name}</span><form id="activeCartViewForm" action="/cart/ref=ord_cart_shr">'
-                f'<input type="hidden" name="anti-csrftoken-a2z" value="{CSRF}"><div id="sc-active-cart">{rows}</div></form>'
-                f'<form class="add-to-cart-data"><input type="hidden" name="anti-csrftoken-a2z" value="{ADD_CSRF}"></form>')
+        """What the browser bridge returns for view='cart'."""
+        return {'nav': 'Nuri' if self.logged_in else 'Merhaba, giriş yapın', 'cart_token': CSRF, 'add_token': self.add_token,
+                'rows': [{'asin': i['asin'], 'itemid': i['id'], 'price': i['price'], 'quantity': str(i.get('quantity', 1)),
+                          'save_value': 'Daha sonra kaydet'} for i in self.active]}
 
-    def __call__(self, method, url, body=''):
+    def __call__(self, method, url, body='', view=''):
         self.requests.append((method, url, body))
         if method == 'GET':
-            return self.listing if 'offer-listing' in url or '/dp/' in url else self.page()
+            return self.page() if view == 'cart' else self.listing
         fields = dict(part.split('=', 1) for part in body.split('&'))
         if '/cart/add-to-cart/' in url:
             assert fields['anti-csrftoken-a2z'] in (ADD_CSRF, PAGE_CSRF)
@@ -168,7 +164,7 @@ class AmazonCartFlowTests(unittest.TestCase):
 
     def test_cart_without_an_add_token_uses_the_listing_form_token(self):
         amazon = FakeAmazon(listing=DEPO_LISTING)
-        amazon.page = lambda original=amazon.page: original().replace(ADD_CSRF, '')
+        amazon.add_token = ''
         add_to_cart(self.job, amazon)
         self.assertIn('offer-listing', amazon.requests[1][1])
         self.assertIn(PAGE_CSRF, amazon.requests[2][2])
@@ -211,22 +207,14 @@ class AmazonCartFlowTests(unittest.TestCase):
         self.assertTrue(error.exception.added)
 
 
-class CartPageTests(unittest.TestCase):
-    def test_amazon_attribute_order_and_multiline_button_are_read(self):
-        html = ('<span id="nav-link-accountList-nav-line-1" class="nav-line-1">Nuri&#8203;</span>'
-                '<form id="savedCartViewForm"><input type="hidden" name="anti-csrftoken-a2z" value="saved-token" ></form>'
-                '<form id="activeCartViewForm" method="post" action="/cart/ref=ord_cart_shr">'
-                '<input type="hidden" name="anti-csrftoken-a2z" value="cart-token" ><div id="sc-active-cart">'
-                '<div data-asin="B07SQ2FZTK" data-bundleitem="absent" data-itemid="a60b-1" data-itemtype="active" '
-                'data-price="4199" data-quantity="4" class="a-row sc-list-item">'
-                '<input name="submit.save-for-later.a60b-1"\n       value="Daha sonra kaydet"\n       type="submit"></div>'
-                '<div data-asin="B000SAVED1" data-itemid="s1" data-itemtype="saved"></div></div></form>'
-                '<form method="post" class="add-to-cart-data a-spacing-none"><input type="hidden" name="anti-csrftoken-a2z" value="add-token" ></form>')
-        cart = Cart(html)
-        self.assertEqual([(r['data-asin'], r['data-quantity']) for r in cart.rows], [('B07SQ2FZTK', '4')])
-        self.assertEqual(cart.token('id="activeCartViewForm"'), 'cart-token')
-        self.assertEqual(cart.token('class="add-to-cart-data'), 'add-token')
-        self.assertEqual(cart.save_button(cart.rows[0]), ('submit.save-for-later.a60b-1', 'Daha sonra kaydet'))
+class CartSummaryTests(unittest.TestCase):
+    def test_missing_summary_or_signed_out_nav_is_an_error(self):
+        for summary in (None, {'nav': 'Merhaba, Giriş yapın', 'rows': []}, {'rows': []}):
+            with self.subTest(summary=summary), self.assertRaises(CartError):
+                Cart(summary)
+        cart = Cart({'nav': 'Nuri&#8203;', 'rows': [{'asin': ASIN, 'itemid': 'i1'}, {'asin': '', 'itemid': 'x'}],
+                     'cart_token': 'c', 'add_token': 'a'})
+        self.assertEqual([r['itemid'] for r in cart.rows], ['i1'])
 
 
 class OfferIdParserTests(unittest.TestCase):
