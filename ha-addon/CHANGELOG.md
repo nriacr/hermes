@@ -1,5 +1,11 @@
 # Değişiklik günlüğü
 
+## 4.21.2
+
+- Fırsat Geçmişi ayrı sayfa yerine ana sayfada 4. sekme: diğer sekmelerle aynı görünüm, içerik Özet Tablo altında açılır; ayrı sayfa kaldırıldı.
+- Sekmeler eşit ve sabit genişlikte; sekme değiştirince sayfa sağa sola kaymaz (sabit kaydırma çubuğu alanı, yatay taşma yok).
+- Fırsat satırları Stokta yok listesiyle aynı kart düzeninde; uzun adlar 2 satırda kesilir, fiyat ve süre sabit sütunda.
+
 ## 4.21.1
 
 - Fırsat Geçmişi: listeden çıkan teklif (ör. biten Depo) artık "hâlâ sürüyor" görünmez; son görüldüğü ana kadar "en az" süre yazılır. Depo ve yeni teklif aynı sayfada olsa da şimdiki fiyat kendi teklifinden okunur.
