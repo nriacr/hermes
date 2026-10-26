@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.23.4
+
+- Hepsiburada tanı: Premium fiyatı bulunamayan ürün sayfalarında günlüğe (30 dk'da bir) sayfada "premium" geçen yerlerden kısa örnek yazılır; ek istek yok.
+
 ## 4.23.3
 
 - Hepsiburada: sayfada "Premium'a Özel N TL İndirim" bandı varsa fiyattan N TL düşülür (iPhone 17 Pro Max 113.499 → 112.999). Giriş yapmadan okunan sayfa bu indirimi fiyata yansıtmıyordu.

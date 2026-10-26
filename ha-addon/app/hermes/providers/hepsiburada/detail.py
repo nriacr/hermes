@@ -125,6 +125,14 @@ def extract_embedded_variant_offer(html: str, source_url: str) -> Optional[Offer
 
 # The same page fails the same way every round; one line per product per 30 minutes is enough.
 _PREMIUM_PROBLEMS = ProblemLog(interval=1800)
+_PREMIUM_PROBE = ProblemLog(interval=1800)
+
+
+def _premium_probe(soup, title: str, html_length: int) -> None:
+    """Diagnostic: what the fetched page says about Premium when no Premium price was found."""
+    text = soup.get_text(" ", strip=True)
+    snippets = [_clean_text(text[max(0, m.start() - 40) : m.end() + 80]) for m in re.finditer(r"(?i)premium", text)][:3]
+    _PREMIUM_PROBE.failure(title, f"Premium tanı: sayfa={html_length} bayt, premium geçen={len(snippets)}, örnek={snippets}")
 
 
 def _detail_candidate(soup) -> Optional[HepsiburadaCandidate]:
@@ -191,6 +199,8 @@ def extract_offer(html: str, source_url: str = "") -> OfferResult:
         if discount is not None and discount < price / 10:
             # Hepsiburada lists the base price and shows the Premium price only after the banner's discount.
             price -= discount
+        elif discount is None:
+            _premium_probe(soup, best.title, len(html))
     return OfferResult(
         title=repair_mojibake(best.title),
         price=price,
