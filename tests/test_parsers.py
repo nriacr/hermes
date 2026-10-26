@@ -807,6 +807,33 @@ class HepsiburadaParserTests(unittest.TestCase):
 
         self.assertEqual(offer.price, Decimal("17949"))
 
+    def test_hepsiburada_product_url_subtracts_premium_discount_banner(self):
+        html = """
+        <html><head><title>Apple iPhone 17 Pro Max 256 GB Abis Fiyatı</title></head>
+        <body>
+          <h1>Apple iPhone 17 Pro Max 256 GB Abis</h1>
+          <span>Satıcı: Hepsiburada</span>
+          <div>Seçili Cep Telefonlarında Premium'a Özel 500 TL İndirim Fırsatı</div>
+          <script>
+            window.__HB_STATE__ = {
+              "variants": [
+                {"sku": "HBCV00009Z3XOE", "variantListing": [
+                  {"aiBasedShipmentDay": null, "listingId": "listing-hb", "merchantName": "Hepsiburada",
+                   "finalPriceOnSale": 113499,
+                   "minimumPrices": [{"name": "non-segmented-price", "value": 113499}]}
+                ]}
+              ]
+            };
+          </script>
+        </body></html>
+        """
+
+        offer = extract_hepsiburada_offer(
+            html, "https://www.hepsiburada.com/apple-iphone-17-pro-max-256-gb-abis-p-HBCV00009Z3XOE"
+        )
+
+        self.assertEqual(offer.price, Decimal("112999"))
+
     def test_hepsiburada_product_url_compares_embedded_and_visible_premium_price(self):
         html = """
         <html><head><title>Samsung Galaxy Tab S10 FE+ Fiyatı</title></head>

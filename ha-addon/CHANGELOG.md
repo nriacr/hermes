@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.23.3
+
+- Hepsiburada: sayfada "Premium'a Özel N TL İndirim" bandı varsa fiyattan N TL düşülür (iPhone 17 Pro Max 113.499 → 112.999). Giriş yapmadan okunan sayfa bu indirimi fiyata yansıtmıyordu.
+
 ## 4.23.2
 
 - Otomatik sepet: teklif numarası bilinmeyen fırsatlarda (arama kartındaki yeni ürün) ürün sayfası Hermes Tarayıcı içinde özetlenir; Pi'de 1,6 MB sayfa işlenmez. Hermes Tarayıcı 0.2.5 gerekir.

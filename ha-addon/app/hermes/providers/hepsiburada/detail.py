@@ -25,6 +25,7 @@ from .prices import (
     _cart_special_prices,
     _has_premium_marker,
     _listing_mapping_price,
+    _premium_discount,
     _premium_prices,
     _valid_prices_from_text,
 )
@@ -184,9 +185,15 @@ def extract_offer(html: str, source_url: str = "") -> OfferResult:
 
     _log_candidates(candidates)
     best = candidates[0]
+    price = best.price
+    if selected_product_id and not best.has_preferred_price:
+        discount = _premium_discount(soup.get_text(" ", strip=True))
+        if discount is not None and discount < price / 10:
+            # Hepsiburada lists the base price and shows the Premium price only after the banner's discount.
+            price -= discount
     return OfferResult(
         title=repair_mojibake(best.title),
-        price=best.price,
+        price=price,
         seller=best.seller,
         url=best.url or None,
     )

@@ -45,3 +45,4 @@ sonuç, gerçek kontrol ve yayın/kurulum bilgisi yeterlidir. Ayrıntı Git geç
   yalnız yayın sonucunu tekrar raporlamak için ayrı belge/commit oluşturulmaz.
 - Yedek/geri alma: canlı yazma yok; sistem yedeği gerekmiyor. Belge commitini
   geri almak yeterli; kimlik bilgileri ve kullanıcı verisi değişmedi.
+- 2026-10-26 · Agent: Claude · Hermes 4.23.3: Hepsiburada "Premium'a Özel N TL İndirim" bandı fiyattan düşülür (113.499 → 112.999); test eklendi, 688 test geçti. Kurulum bekliyor.
