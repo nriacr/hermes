@@ -192,6 +192,7 @@ def _prepare_watch(item):
         raise HermesError("Arama linkleri için name alanı zorunlu. Ürün linklerinde boş bırakılabilir.")
     target_price = parse_decimal(_required_value(item, "target_price", f"Takip edilen ({context_name})"))
     minimum_price = _optional_price(item, "minimum_price")
+    premium_discount = _optional_price(item, "premium_discount")
     if minimum_price is not None and minimum_price > target_price:
         raise HermesError(f"Takip edilen ({context_name}) için minimum fiyat hedef fiyattan büyük olamaz.")
     # Pre-3.12 cards (high/medium/low or none) are read every 6 hours until they are saved again.
@@ -208,6 +209,7 @@ def _prepare_watch(item):
                 url=url,
                 target_price=target_price,
                 minimum_price=minimum_price,
+                premium_discount=premium_discount,
                 excluded_terms=string_list(item.get("exclude_terms")),
                 group=watch_group(item),
                 size=size,

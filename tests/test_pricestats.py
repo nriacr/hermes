@@ -39,6 +39,15 @@ class WindowStatsTests(unittest.TestCase):
 
 
 class CardIntegrationTests(unittest.TestCase):
+    def test_premium_discount_is_read_from_the_card(self):
+        from decimal import Decimal
+
+        from hermes.config import prepare_watches
+
+        base = {"name": "x", "target_price": 100, "url_1": "https://www.hepsiburada.com/x-p-HBCV00009Z3XOE"}
+        self.assertIsNone(prepare_watches([base])[0].premium_discount)
+        self.assertEqual(prepare_watches([{**base, "premium_discount": 500}])[0].premium_discount, Decimal("500"))
+
     def test_option_is_read_from_the_card(self):
         from hermes.config import prepare_watches
 

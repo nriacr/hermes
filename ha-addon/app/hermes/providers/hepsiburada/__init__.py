@@ -325,7 +325,8 @@ class HepsiburadaProvider(Provider):
                     continue
                 seen_offer_keys.add(dedupe_key)
                 found += 1
-                yield OfferResult(title=offer_title, price=offer.price, seller=offer.seller, url=variant_url)
+                price = offer.price - watch.premium_discount if watch.premium_discount and watch.premium_discount < offer.price else offer.price
+                yield OfferResult(title=offer_title, price=price, seller=offer.seller, url=variant_url)
             except Exception as exc:  # noqa: BLE001
                 errors.append(f"{variant_url} | {exc}")
                 log(f"Hepsiburada varyasyon okunamadı: {variant_url} | {exc}")

@@ -303,6 +303,8 @@ class Monitor:
             watch["target_price"] = Decimal(watch["target_price"])
             if watch.get("minimum_price") is not None:
                 watch["minimum_price"] = Decimal(watch["minimum_price"])
+            if watch.get("premium_discount") is not None:
+                watch["premium_discount"] = Decimal(watch["premium_discount"])
             offer["price"] = Decimal(offer["price"])
             self.on_opportunity(WatchRule(**watch), OfferResult(**offer), title, url)
 

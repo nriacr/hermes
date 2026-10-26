@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.24.0
+
+- Hepsiburada: takip kartına "Premium indirimi (TL)" alanı eklendi. Premium fiyatı giriş gerektirdiği için Hermes göremiyor; girilen tutar ürünün sayfa fiyatından düşülür (iPhone 17 Pro Max: 500 → 112.999). Boşsa davranış değişmez.
+
 ## 4.23.4
 
 - Hepsiburada tanı: Premium fiyatı bulunamayan ürün sayfalarında günlüğe (30 dk'da bir) sayfada "premium" geçen yerlerden kısa örnek yazılır; ek istek yok.
