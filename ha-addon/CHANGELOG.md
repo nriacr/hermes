@@ -1,5 +1,10 @@
 # Değişiklik günlüğü
 
+## 4.24.1
+
+- 4.24.0'daki elle Premium indirimi ayarı geri alındı (kurulmamıştı).
+- Hepsiburada tanı: Premium fiyatı bulunamayan sayfada gömülü veride de premium/indirim/kampanya geçen yerler günlüğe yazılır; ek istek yok.
+
 ## 4.23.4
 
 - Hepsiburada tanı: Premium fiyatı bulunamayan ürün sayfalarında günlüğe (30 dk'da bir) sayfada "premium" geçen yerlerden kısa örnek yazılır; ek istek yok.

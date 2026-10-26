@@ -47,3 +47,4 @@ sonuç, gerçek kontrol ve yayın/kurulum bilgisi yeterlidir. Ayrıntı Git geç
   geri almak yeterli; kimlik bilgileri ve kullanıcı verisi değişmedi.
 - 2026-10-26 · Agent: Claude · Hermes 4.23.3: Hepsiburada "Premium'a Özel N TL İndirim" bandı fiyattan düşülür (113.499 → 112.999); test eklendi, 688 test geçti. Kurulum bekliyor.
 - 2026-10-26 · Agent: Claude · Hermes 4.23.3 kuruldu ama iPhone 17 Pro Max Abis hâlâ 113.499 okundu: indirim bandı Hermes'in gördüğü sayfada yok. 4.23.4: günlüğe Premium tanı satırı (ek istek yok). Kurulum bekliyor.
+- 2026-10-26 · Agent: Claude · Hermes 4.24.1: 4.24.0 (elle Premium indirimi) Nuri istemedi, geri alındı, hiç kurulmadı. Tanı gömülü JSON'u da tarar (premium/indirim/kampanya örnekleri). Kurulum bekliyor.

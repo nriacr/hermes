@@ -128,11 +128,20 @@ _PREMIUM_PROBLEMS = ProblemLog(interval=1800)
 _PREMIUM_PROBE = ProblemLog(interval=1800)
 
 
-def _premium_probe(soup, title: str, html_length: int) -> None:
-    """Diagnostic: what the fetched page says about Premium when no Premium price was found."""
-    text = soup.get_text(" ", strip=True)
-    snippets = [_clean_text(text[max(0, m.start() - 40) : m.end() + 80]) for m in re.finditer(r"(?i)premium", text)][:3]
-    _PREMIUM_PROBE.failure(title, f"Premium tanı: sayfa={html_length} bayt, premium geçen={len(snippets)}, örnek={snippets}")
+def _premium_probe(html: str, title: str) -> None:
+    """Diagnostic: where the fetched page, including its embedded data, mentions Premium or a TL discount."""
+    pattern = re.compile(r"(?i)premium|segment|indirim|discount|campaign|kampanya")
+    snippets, seen = [], set()
+    for match in pattern.finditer(html):
+        snippet = re.sub(r"\s+", " ", html[max(0, match.start() - 60) : match.end() + 140])
+        key = snippet[50:110]
+        if key in seen or not re.search(r"\d", snippet):
+            continue
+        seen.add(key)
+        snippets.append(snippet)
+        if len(snippets) == 12:
+            break
+    _PREMIUM_PROBE.failure(title, f"Premium tanı: sayfa={len(html)} bayt, örnek={snippets}")
 
 
 def _detail_candidate(soup) -> Optional[HepsiburadaCandidate]:
@@ -200,7 +209,7 @@ def extract_offer(html: str, source_url: str = "") -> OfferResult:
             # Hepsiburada lists the base price and shows the Premium price only after the banner's discount.
             price -= discount
         elif discount is None:
-            _premium_probe(soup, best.title, len(html))
+            _premium_probe(html, best.title)
     return OfferResult(
         title=repair_mojibake(best.title),
         price=price,
