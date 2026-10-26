@@ -25,7 +25,6 @@ from .prices import (
     _cart_special_prices,
     _has_premium_marker,
     _listing_mapping_price,
-    _premium_discount,
     _premium_prices,
     _valid_prices_from_text,
 )
@@ -125,23 +124,6 @@ def extract_embedded_variant_offer(html: str, source_url: str) -> Optional[Offer
 
 # The same page fails the same way every round; one line per product per 30 minutes is enough.
 _PREMIUM_PROBLEMS = ProblemLog(interval=1800)
-_PREMIUM_PROBE = ProblemLog(interval=1800)
-
-
-def _premium_probe(html: str, title: str) -> None:
-    """Diagnostic: where the fetched page, including its embedded data, mentions Premium or a TL discount."""
-    pattern = re.compile(r"(?i)premium|segment|indirim|discount|campaign|kampanya")
-    snippets, seen = [], set()
-    for match in pattern.finditer(html):
-        snippet = re.sub(r"\s+", " ", html[max(0, match.start() - 60) : match.end() + 140])
-        key = snippet[50:110]
-        if key in seen or not re.search(r"\d", snippet):
-            continue
-        seen.add(key)
-        snippets.append(snippet)
-        if len(snippets) == 12:
-            break
-    _PREMIUM_PROBE.failure(title, f"Premium tanı: sayfa={len(html)} bayt, örnek={snippets}")
 
 
 def _detail_candidate(soup) -> Optional[HepsiburadaCandidate]:
@@ -202,17 +184,9 @@ def extract_offer(html: str, source_url: str = "") -> OfferResult:
 
     _log_candidates(candidates)
     best = candidates[0]
-    price = best.price
-    if selected_product_id and not best.has_preferred_price:
-        discount = _premium_discount(soup.get_text(" ", strip=True))
-        if discount is not None and discount < price / 10:
-            # Hepsiburada lists the base price and shows the Premium price only after the banner's discount.
-            price -= discount
-        elif discount is None:
-            _premium_probe(html, best.title)
     return OfferResult(
         title=repair_mojibake(best.title),
-        price=price,
+        price=best.price,
         seller=best.seller,
         url=best.url or None,
     )

@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.24.3
+
+- Bugünkü Hepsiburada Premium değişiklikleri (4.23.3, 4.23.4, 4.24.1) Nuri'nin isteğiyle geri alındı; Hepsiburada okuma 4.23.2 ile aynı.
+
 ## 4.24.1
 
 - 4.24.0'daki elle Premium indirimi ayarı geri alındı (kurulmamıştı).

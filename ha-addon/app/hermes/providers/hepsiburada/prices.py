@@ -139,18 +139,6 @@ def _premium_prices(text: str) -> list[Decimal]:
     return _prices_after_markers(text, PREMIUM_PRICE_MARKERS, skip_campaign_amounts=True)
 
 
-_PREMIUM_DISCOUNT_RE = re.compile(r"premium'?a ozel (\d{1,3}(?:\.\d{3})*|\d+) ?tl indirim")
-
-
-def _premium_discount(text: str) -> Optional[Decimal]:
-    """The TL amount of a "Premium'a Özel N TL İndirim" banner; the page price excludes it."""
-    normalized = normalize_offer_text(text.replace("’", "'").replace("`", "'").replace("´", "'"))
-    match = _PREMIUM_DISCOUNT_RE.search(normalized)
-    if not match:
-        return None
-    return Decimal(match.group(1).replace(".", ""))
-
-
 def _has_premium_marker(text: str) -> bool:
     normalized = normalize_offer_text(text)
     return any(marker in normalized for marker in PREMIUM_PRICE_MARKERS_NORMALIZED)
