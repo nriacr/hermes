@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.24.4
+
+- Hepsiburada: ürün/satıcıya bağlı sabit Premium kuponu sayfanın kampanya etiketinden otomatik düşülür; açık Premium fiyatı ikinci kez indirilmez. Güncel ürün teklifi eski varyant fiyatının önüne geçer.
+
 ## 4.24.3
 
 - Bugünkü Hepsiburada Premium değişiklikleri (4.23.3, 4.23.4, 4.24.1) Nuri'nin isteğiyle geri alındı; Hepsiburada okuma 4.23.2 ile aynı.

@@ -25,6 +25,7 @@ from .prices import (
     _cart_special_prices,
     _has_premium_marker,
     _listing_mapping_price,
+    _premium_tag_discount,
     _premium_prices,
     _valid_prices_from_text,
 )
@@ -45,9 +46,12 @@ def _detail_seller(lines: list[str]) -> str:
 
 def _embedded_listing_mappings(text: str, selected_product_id: str = "") -> Iterable[dict]:
     selected_mappings = _selected_variant_listing_mappings(text, selected_product_id)
-    if selected_mappings:
+    current = _current_product_listing_mapping(text, selected_product_id)
+    if current or selected_mappings:
         seen = set()
-        for mapping in selected_mappings:
+        # The current product carries its live price and campaign tags. The
+        # compact variant list can contain an older price for the same listing.
+        for mapping in ([current] if current else []) + selected_mappings:
             listing_id = str(mapping.get("listingId") or "").strip()
             seller = str(mapping.get("merchantName") or "").strip()
             if not seller:
@@ -78,9 +82,35 @@ def _embedded_listing_mappings(text: str, selected_product_id: str = "") -> Iter
         yield mapping
 
 
+def _current_product_listing_mapping(text: str, selected_product_id: str) -> Optional[dict]:
+    if not selected_product_id:
+        return None
+    pattern = re.compile(r'"sku"\s*:\s*"' + re.escape(selected_product_id) + r'"', re.IGNORECASE)
+    for match in pattern.finditer(text):
+        position = match.start()
+        for _ in range(20):
+            position = text.rfind("{", 0, position)
+            if position < 0:
+                break
+            mapping = _json_object_at(text, position)
+            if (
+                mapping
+                and str(mapping.get("sku") or "").upper() == selected_product_id.upper()
+                and mapping.get("listingId")
+                and mapping.get("merchantName")
+                and isinstance(mapping.get("prices"), list)
+            ):
+                # Keep only this seller's own pricing fields. Nested variants,
+                # recommendations and other sellers must not supply prices/tags.
+                keys = ("sku", "listingId", "merchantName", "prices", "minimumPrices", "paymentTag", "tagList")
+                return {key: mapping[key] for key in keys if key in mapping}
+            position -= 1
+    return None
+
+
 def _embedded_detail_candidates(soup, source_url: str = "") -> list[HepsiburadaCandidate]:
     html = _embedded_text(soup)
-    if '"merchantName"' not in html or not any(key in html for key in ('"minimumPrice"', '"finalPriceOnSale"')):
+    if '"merchantName"' not in html or not any(key in html for key in ('"minimumPrice"', '"finalPriceOnSale"', '"prices"')):
         return []
     selected_product_id = _product_id_from_url(source_url)
     title = extract_title(soup) or "Hepsiburada ürünü"
@@ -90,6 +120,11 @@ def _embedded_detail_candidates(soup, source_url: str = "") -> list[HepsiburadaC
         if price is None:
             continue
         seller = _clean_text(mapping.get("merchantName") or "")
+        has_coupon = _premium_tag_discount(mapping) > 0
+        if mapping.get("sku") and has_coupon:
+            detail = _detail_candidate(soup, warn_missing_premium=False)
+            if detail and detail.has_preferred_price and normalize_offer_text(detail.seller) == normalize_offer_text(seller):
+                price = detail.price
         listing_id = str(mapping.get("listingId") or "").strip()
         url = _absolute_url(str(mapping.get("url") or "")) if PRODUCT_URL_RE.search(str(mapping.get("url") or "")) else ""
         seller_key = normalize_offer_text(seller)
@@ -102,6 +137,7 @@ def _embedded_detail_candidates(soup, source_url: str = "") -> list[HepsiburadaC
                 url=url,
                 seller=seller,
                 identity=identity,
+                has_preferred_price=has_coupon,
             )
         )
     return _dedupe_candidates(candidates)
@@ -126,7 +162,7 @@ def extract_embedded_variant_offer(html: str, source_url: str) -> Optional[Offer
 _PREMIUM_PROBLEMS = ProblemLog(interval=1800)
 
 
-def _detail_candidate(soup) -> Optional[HepsiburadaCandidate]:
+def _detail_candidate(soup, *, warn_missing_premium: bool = True) -> Optional[HepsiburadaCandidate]:
     title = extract_title(soup) or "Hepsiburada ürünü"
     lines = _visible_lines_until_details(soup)
     seller = _detail_seller(lines)
@@ -140,7 +176,7 @@ def _detail_candidate(soup) -> Optional[HepsiburadaCandidate]:
             cart_special_prices = _cart_special_prices(readable_source_text)
         if not premium_prices:
             premium_prices = _premium_prices(readable_source_text)
-    if not premium_prices and (_has_premium_marker(line_text) or _has_premium_marker(readable_source_text)):
+    if warn_missing_premium and not premium_prices and (_has_premium_marker(line_text) or _has_premium_marker(readable_source_text)):
         _PREMIUM_PROBLEMS.failure(title, "Hepsiburada Premium metni bulundu ama fiyat ayrıştırılamadı.")
     preferred_prices = [*cart_special_prices, *premium_prices]
     price = min(preferred_prices) if preferred_prices else None
@@ -165,7 +201,7 @@ def extract_offer(html: str, source_url: str = "") -> OfferResult:
     selected_product_id = _product_id_from_url(source_url)
     if selected_product_id:
         candidates = _embedded_detail_candidates(soup, source_url=source_url)
-        detail = _detail_candidate(soup)
+        detail = _detail_candidate(soup, warn_missing_premium=not any(item.has_preferred_price for item in candidates))
         if detail and (detail.has_preferred_price or not candidates):
             detail.identity = f"{selected_product_id}:{normalize_offer_text(detail.seller)}"
             candidates.append(detail)

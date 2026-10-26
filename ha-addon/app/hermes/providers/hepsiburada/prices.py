@@ -139,6 +139,29 @@ def _premium_prices(text: str) -> list[Decimal]:
     return _prices_after_markers(text, PREMIUM_PRICE_MARKERS, skip_campaign_amounts=True)
 
 
+def _premium_tag_discount(mapping: dict) -> Decimal:
+    """Fixed automatic Premium coupons, scoped to this product/seller listing.
+
+    Repeated paymentTag/tagList entries describe one discount. Generic coupons,
+    card campaigns and 'up to' amounts do not state an exact Premium reduction.
+    """
+    tags = str(mapping.get("paymentTag") or "").split(",")
+    tags.extend(
+        str(item.get("tagId") or "")
+        for item in mapping.get("tagList", []) or []
+        if isinstance(item, dict)
+    )
+    amounts = []
+    for tag in tags:
+        match = re.search(
+            r"(?:^|-)premium-?a-ozel-(\d+(?:-\d{3})*)-tl-(?:kupon|indirim)-firsati$",
+            tag.strip().lower(),
+        )
+        if match:
+            amounts.append(Decimal(match.group(1).replace("-", "")))
+    return max(amounts, default=Decimal("0"))
+
+
 def _has_premium_marker(text: str) -> bool:
     normalized = normalize_offer_text(text)
     return any(marker in normalized for marker in PREMIUM_PRICE_MARKERS_NORMALIZED)
@@ -295,7 +318,10 @@ def _listing_mapping_price(mapping: dict) -> Optional[Decimal]:
             if price >= lowest_reasonable_price or _price_context_is_premium(context)
         ]
     if entries:
-        return min(price for price, _context in entries)
+        price = min(price for price, _context in entries)
+        discount = _premium_tag_discount(mapping)
+        # Explicit Premium prices returned above already include the benefit.
+        return price - discount if discount > 0 and _valid_price(price - discount) else price
 
     final_price = _number_price(mapping.get("finalPriceOnSale"))
     if final_price is not None:
