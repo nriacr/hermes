@@ -1281,6 +1281,25 @@ class HepsiburadaParserTests(unittest.TestCase):
         self.assertIn("https://www.hepsiburada.com/samsung-galaxy-tab-s10-fe-gri-p-HBCV00008E1ABC", urls)
         self.assertFalse(any("BAD" in url for url in urls))
 
+    def test_hepsiburada_variant_urls_skip_the_family_page(self):
+        html = """
+        <html><body>
+          <div aria-label="Renk seçenekleri">
+            <a href="/apple-iphone-17-pro-max-256-gb-abis-pm-HBC00009Z3SG3">Tüm renkler</a>
+            <a href="/apple-iphone-17-pro-max-256-gb-kozmik-turuncu-p-HBCV00009Z3Z8C">Kozmik Turuncu</a>
+          </div>
+        </body></html>
+        """
+        urls = extract_variant_urls(html, "https://www.hepsiburada.com/apple-iphone-17-pro-max-256-gb-abis-p-HBCV00009Z3XOE")
+
+        self.assertEqual(
+            urls,
+            [
+                "https://www.hepsiburada.com/apple-iphone-17-pro-max-256-gb-abis-p-HBCV00009Z3XOE",
+                "https://www.hepsiburada.com/apple-iphone-17-pro-max-256-gb-kozmik-turuncu-p-HBCV00009Z3Z8C",
+            ],
+        )
+
     def test_hepsiburada_selected_variant_label_is_added_to_title(self):
         html = """
         <html><body>

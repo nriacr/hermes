@@ -339,6 +339,9 @@ def _variant_context_allows(segment: str) -> bool:
     return any(marker in normalized for marker in ("variant", "varyant", "renk", "color", "secenek", "seçenek"))
 
 
+FAMILY_URL_RE = re.compile(r"-pm-[A-Z0-9]+", re.IGNORECASE)
+
+
 def extract_variant_urls(html: str, source_url: str, limit: int = 8) -> list[str]:
     """Return detail-page variant URLs without mixing their prices on the current page."""
     selected_product_id = _product_id_from_url(source_url)
@@ -352,6 +355,9 @@ def extract_variant_urls(html: str, source_url: str, limit: int = 8) -> list[str
         absolute = _canonical_product_url(candidate)
         product_id = _product_id_from_url(absolute)
         if not product_id or product_id in seen_product_ids:
+            return
+        if urls and FAMILY_URL_RE.search(absolute):
+            # A "-pm-" family page opens one of the variants already listed under its own "-p-" address.
             return
         seen_product_ids.add(product_id)
         urls.append(absolute)

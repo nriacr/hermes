@@ -51,3 +51,4 @@ sonuç, gerçek kontrol ve yayın/kurulum bilgisi yeterlidir. Ayrıntı Git geç
 - 2026-10-26 · Agent: Claude · Hermes 4.23.3 kuruldu ama iPhone 17 Pro Max Abis hâlâ 113.499 okundu: indirim bandı Hermes'in gördüğü sayfada yok. 4.23.4: günlüğe Premium tanı satırı (ek istek yok). Kurulum bekliyor.
 - 2026-10-26 · Agent: Claude · Hermes 4.24.1: 4.24.0 (elle Premium indirimi) Nuri istemedi, geri alındı, hiç kurulmadı. Tanı gömülü JSON'u da tarar (premium/indirim/kampanya örnekleri). Kurulum bekliyor.
 - 2026-10-26 · Agent: Claude · Hermes 4.24.3: Nuri isteğiyle bugünkü Hepsiburada Premium değişiklikleri geri alındı (kod 4.23.2 ile aynı).
+- 2026-10-26 · Agent: Claude · Hermes 4.24.5: Hepsiburada varyasyon listesinde -pm- aile sayfası atlanır (Kozmik Turuncu çift fırsat). Test eklendi.

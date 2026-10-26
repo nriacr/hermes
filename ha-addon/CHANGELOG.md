@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.24.5
+
+- Hepsiburada varyasyonları: ürünün "-pm-" aile sayfası ayrı varyasyon sayılmaz; aynı renk (ör. iPhone 17 Pro Max Kozmik Turuncu) fırsatlarda iki kez çıkmaz.
+
 ## 4.24.4
 
 - Hepsiburada: ürün/satıcıya bağlı sabit Premium kuponu sayfanın kampanya etiketinden otomatik düşülür; açık Premium fiyatı ikinci kez indirilmez. Güncel ürün teklifi eski varyant fiyatının önüne geçer.
