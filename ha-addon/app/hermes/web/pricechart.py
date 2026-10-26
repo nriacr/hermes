@@ -174,8 +174,9 @@ def detail_chart(points: List[Point], target: float, other: List[Point] = (),
                              "stroke='#0a0814' stroke-width='2'/>" for moment, price in other))
         partner_hover = " data-points-b='" + json.dumps([[round(x(moment), 1), round(y(price), 1), int(moment.timestamp()), round(price)]
                                                         for moment, price in other]) + "'"
-    labels = (f"<text x='{x(first):.1f}' y='{CHART_HEIGHT - 7}' font-size='11' fill='#9a95b8'>{_day(first)}</text>"
-              f"<text x='{x(last):.1f}' y='{CHART_HEIGHT - 7}' text-anchor='end' font-size='11' fill='#9a95b8'>{_day(last)}</text>")
+    short = last - first < timedelta(days=4)
+    labels = (f"<text x='{x(first):.1f}' y='{CHART_HEIGHT - 7}' font-size='11' fill='#9a95b8'>{_day(first, short)}</text>"
+              f"<text x='{x(last):.1f}' y='{CHART_HEIGHT - 7}' text-anchor='end' font-size='11' fill='#9a95b8'>{_day(last, short)}</text>")
     goal_path = _steps(goal, x, y) if len(goal) > 1 else f"M{x(begin):.1f} {y(target):.1f}"
     # Each stored change as [x, y, epoch seconds, price]: the page script answers "what was the price then" on hover.
     hover = json.dumps([[round(x(moment), 1), round(y(price), 1), int(moment.timestamp()), round(price)] for moment, price in points])
@@ -191,7 +192,7 @@ def detail_chart(points: List[Point], target: float, other: List[Point] = (),
     )
 
 
-RANGE_DAYS = (7, 30, 90)
+RANGE_DAYS = (1, 3, 7, 30, 90)
 
 
 def window_points(points: List[Point], now: datetime, days: int) -> List[Point]:
@@ -214,7 +215,7 @@ def ranged_chart(points: List[Point], target: float, now: datetime, other: List[
     start = min([points[0][0]] + [moment for moment, _ in other[:1]]) if points else None
     end = max([points[-1][0]] + [moment for moment, _ in other[-1:]]) if points else None
     span = (end - start).days if points else 0
-    options = [(f"{days} gün", str(days), window_points(points, now, days)) for days in RANGE_DAYS if days < span]
+    options = [("24 saat" if days == 1 else f"{days} gün", str(days), window_points(points, now, days)) for days in RANGE_DAYS if days < span]
     if not options:
         return legend + detail_chart(points, target, other, names, targets)
     options.append(("Tümü", "all", points))
@@ -231,6 +232,6 @@ def _other_window(other: List[Point], now: datetime, key: str) -> List[Point]:
     return other if key == "all" or not other else window_points(other, now, int(key))
 
 
-def _day(moment: datetime) -> str:
+def _day(moment: datetime, with_time: bool = False) -> str:
     months = ("Oca", "Şub", "Mar", "Nis", "May", "Haz", "Tem", "Ağu", "Eyl", "Eki", "Kas", "Ara")
-    return f"{moment.day} {months[moment.month - 1]}"
+    return f"{moment.day} {months[moment.month - 1]}" + (moment.strftime(" %H:%M") if with_time else "")

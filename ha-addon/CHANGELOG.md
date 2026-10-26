@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.24.6
+
+- Fiyat geçmişi grafiğine "24 saat" ve "3 gün" sekmeleri eklendi; 4 günden kısa aralıklarda eksen tarihine saat yazılır.
+
 ## 4.24.5
 
 - Hepsiburada varyasyonları: ürünün "-pm-" aile sayfası ayrı varyasyon sayılmaz; aynı renk (ör. iPhone 17 Pro Max Kozmik Turuncu) fırsatlarda iki kez çıkmaz.
