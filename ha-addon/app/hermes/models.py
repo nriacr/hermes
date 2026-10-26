@@ -14,8 +14,6 @@ class WatchRule:
     url: str
     target_price: Decimal
     minimum_price: Optional[Decimal] = None
-    # Hepsiburada: Premium members' extra TL discount, which the signed-out page never shows.
-    premium_discount: Optional[Decimal] = None
     excluded_terms: List[str] = field(default_factory=list)
     group: str = ""
     size: str = ""

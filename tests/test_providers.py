@@ -819,7 +819,7 @@ class OtherSiteTests(unittest.TestCase):
                             "https://www.hepsiburada.com/x-p-DROP")
         labels = {main: "256 GB / Abis", keep: "256 GB / Gümüş", drop: "512 GB / Abis"}
         provider = HepsiburadaProvider()
-        watch = SimpleNamespace(url=main, name="iPhone", excluded_terms=["512 GB"], max_items_to_scan=10, premium_discount=None)
+        watch = SimpleNamespace(url=main, name="iPhone", excluded_terms=["512 GB"], max_items_to_scan=10)
         offer = OfferResult("Apple iPhone", Decimal("100"), "Hepsiburada", main)
         opened = []
         with patch.object(hb_parser, "extract_variant_urls", return_value=[main, keep, drop]), \
@@ -835,27 +835,12 @@ class OtherSiteTests(unittest.TestCase):
         self.assertEqual([first.url] + [item.url for item in rest], [main, keep])
         self.assertEqual(opened, [keep])  # the 512 GB variant was never opened
 
-    def test_hepsiburada_premium_discount_is_subtracted_from_the_offer(self):
-        from hermes.providers.hepsiburada import parser as hb_parser
-        main = "https://www.hepsiburada.com/x-p-MAIN"
-        provider = HepsiburadaProvider()
-        watch = SimpleNamespace(url=main, name="iPhone", excluded_terms=[], max_items_to_scan=10, premium_discount=Decimal("500"))
-        offer = OfferResult("Apple iPhone", Decimal("113499"), "Hepsiburada", main)
-        with patch.object(hb_parser, "extract_variant_urls", return_value=[main]), \
-                patch.object(hb_parser, "extract_embedded_variant_label", return_value=""), \
-                patch.object(hb_parser, "extract_embedded_variant_offer", return_value=offer), \
-                patch.object(hb_parser, "extract_offer", return_value=offer), \
-                patch.object(hb_parser, "extract_selected_variant_label", return_value=""), \
-                patch.object(provider, "_page", return_value="<html></html>"):
-            prices = [item.price for item in provider._product_offers(context(), watch, "<html></html>")]
-        self.assertEqual(prices, [Decimal("112999")])
-
     def test_hepsiburada_main_title_never_excludes_another_variant(self):
         from hermes.providers.hepsiburada import parser as hb_parser
         main, wanted = "https://www.hepsiburada.com/x-p-MAIN", "https://www.hepsiburada.com/x-p-512"
         labels = {main: "256 GB", wanted: "512 GB"}
         provider = HepsiburadaProvider()
-        watch = SimpleNamespace(url=main, name="iPhone 512", excluded_terms=["256 GB"], max_items_to_scan=10, premium_discount=None)
+        watch = SimpleNamespace(url=main, name="iPhone 512", excluded_terms=["256 GB"], max_items_to_scan=10)
         offer = OfferResult("Apple iPhone 17 Pro 256 GB", Decimal("100"), "Hepsiburada", main)
         opened = []
         with patch.object(hb_parser, "extract_variant_urls", return_value=[main, wanted]), \

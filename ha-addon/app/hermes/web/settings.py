@@ -203,7 +203,6 @@ def watch_form(item: Dict[str, Any], index: int, is_new: bool = False, groups=No
         f"{_field(prefix, 'name', 'Ad', item.get('name', ''))}"
         f"{_field(prefix, 'target_price', 'Hedef Fiyat Maks', _price_input_value(item.get('target_price', '')))}"
         f"{_field(prefix, 'minimum_price', 'Hedef Fiyat Min', _price_input_value(item.get('minimum_price', '')))}"
-        f"{_field(prefix, 'premium_discount', 'Premium indirimi (TL, Hepsiburada)', _price_input_value(item.get('premium_discount', '')))}"
         f"{_field(prefix, 'size', 'Beden', item.get('size', ''))}"
         f"</div><div class='watch-links'>{link_fields}</div>"
         f"<div class='watch-bottom'>{priority_field}{window_field}{exclude_field}{flags}{actions}</div></div>"
@@ -424,7 +423,6 @@ def build_watch(form: Dict[str, List[str]], index: int) -> Optional[Dict[str, An
     group = _first(form, prefix + "group")
     target = _first(form, prefix + "target_price")
     minimum_price = _first(form, prefix + "minimum_price")
-    premium_discount = _first(form, prefix + "premium_discount")
     size = _first(form, prefix + "size")
     exclude_terms = _first(form, prefix + "exclude_terms")
     priority = _first(form, prefix + "priority", DEFAULT_PRIORITY).casefold()
@@ -452,8 +450,6 @@ def build_watch(form: Dict[str, List[str]], index: int) -> Optional[Dict[str, An
     }
     if minimum_price:
         item["minimum_price"] = _price_from_form(minimum_price)
-    if premium_discount:
-        item["premium_discount"] = _price_from_form(premium_discount)
     if exclude_terms:
         item["exclude_terms"] = exclude_terms
     if size:

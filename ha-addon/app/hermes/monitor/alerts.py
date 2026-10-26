@@ -95,7 +95,7 @@ def _cooldown_passed(meta_values: Dict[str, Any], field_name: str, now) -> bool:
 
 def summary_config_signature(config: HermesConfig) -> str:
     return "watches=" + ",".join(
-        f"{watch.site}:{watch.url}:{watch.target_price}:{watch.minimum_price}:{watch.premium_discount}:{watch.excluded_terms}:"
+        f"{watch.site}:{watch.url}:{watch.target_price}:{watch.minimum_price}:{watch.excluded_terms}:"
         f"{watch.size}:{watch.include_variations}:{watch.active}"
         for watch in config.watches
     )
