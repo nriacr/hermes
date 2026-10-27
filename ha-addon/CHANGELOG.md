@@ -1,5 +1,12 @@
 # Değişiklik günlüğü
 
+## 4.26.0
+
+- Ayarlar yeni takip: önce link ve "Kontrol et"; site tanınır, ürün, varyantlar (tükenenler dahil), fiyat ve stok canlı okunur, yalnız o sitenin kutuları açılır. Desteklenmeyen sitede hata verir.
+- Kutular: ortak Hedef fiyat (büyük), Öncelik; Aktif kartın sağ üstünde anahtar. Amazon: satıcı, otomatik sepet, hariç tut, varyant seçimi (Renk/Ölçü…); Hepsiburada: Hepsiburada satıcısı (yeni filtre), hariç tut; Network/Zara/H&M/Beymen: sayfadaki bedenlerden seçim; IKEA: İnternet/Bayrampaşa/Kartal/Ümraniye mağaza seçimi. Ürün adı ve Hedef fiyat min yalnız Amazon/Hepsiburada arama linklerinde.
+- Amazon "Varyasyonları ekle" kutusu kalktı: varyant seçimi yapılırsa yalnız seçilen değerler taranır ve bildirilir.
+- 24 saat susturma her takipte otomatik açık; Bildirim zamanı ve 90 gün en düşük kutuları kalktı.
+- Takip edilenler satıcıya göre alt alta açılır bölümlerde. Gruplar (ve kayıtlı grup bilgisi), günlük özet bildirimi, Görünenleri seç/Seçimi kaldır düğmeleri kaldırıldı.
 ## 4.25.0
 
 - Yeni site: IKEA (ikea.com.tr ürün linki). Fiyat sayfadan; İnternet Mağazası veya IKEA Bayrampaşa "Stokta Var"/"Kritik Stok" ise stokta sayılır, stok gelince bildirim. Panel rengi bakır-kahve.
