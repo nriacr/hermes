@@ -178,7 +178,8 @@ class ResultRecorder:
                 )])
                 window_open = alerts.window_open(watch.notify_window, local_now())
                 wants_alert = window_open and not replayed and not stock_return_sent and state_ops.should_alert(
-                    offer_entry, offer.price, watch.target_price, watch.notify_once_in_24h)
+                    offer_entry, offer.price, watch.target_price, watch.notify_once_in_24h,
+                    offer.is_warehouse)
                 # Read before this price is stored, so "new low" compares with what was seen earlier.
                 low_alert = (watch.notify_on_90_day_low and window_open and not replayed and not stock_return_sent and not wants_alert
                              and self._is_90_day_low(item_key, offer.price, offer_entry))

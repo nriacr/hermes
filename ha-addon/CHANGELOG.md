@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.26.1
+
+- Depo fırsatı: hedefin altındaki Depo fiyatı değişirse (artsa da) yeniden bildirim gönderilir; Depo'da fiyat değişimi çoğu zaman başka bir ürün demektir. Normal ürünlerde son bildirilen fiyattan yüksek fiyat yine 24 saat sessiz kalır. (Hue Go V2: 2.245 TL bildirildi, 2.369 TL'lik yeni Depo ürünü sessiz kalmıştı.)
+
 ## 4.26.0
 
 - Ayarlar yeni takip: önce link ve "Kontrol et"; site tanınır, ürün, varyantlar (tükenenler dahil), fiyat ve stok canlı okunur, yalnız o sitenin kutuları açılır. Desteklenmeyen sitede hata verir.

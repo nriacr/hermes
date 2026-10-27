@@ -142,17 +142,20 @@ def clear_price_history(state: Dict[str, Any]) -> int:
 # -- notification suppression ---------------------------------------------------
 
 
-def should_alert(state_entry: Dict[str, Any], current_price: Decimal, target_price: Decimal, repeat_after_24h: bool) -> bool:
+def should_alert(state_entry: Dict[str, Any], current_price: Decimal, target_price: Decimal, repeat_after_24h: bool,
+                 warehouse: bool = False) -> bool:
+    # A warehouse (Depo) price change usually means another unit, so any change under target alerts again.
     if current_price > target_price:
         return False
     pending = state_decimal(state_entry.get("pending_alert_price"))
-    if pending is not None and current_price >= pending:
+    if pending is not None and (current_price == pending if warehouse else current_price >= pending):
         return False
     last_alerted_price = state_entry.get("last_alerted_price")
     if last_alerted_price is None:
         return True
     try:
-        if current_price < Decimal(str(last_alerted_price)):
+        last = Decimal(str(last_alerted_price))
+        if current_price < last or (warehouse and current_price != last):
             return True
     except InvalidOperation:
         return True

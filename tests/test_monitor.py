@@ -201,6 +201,18 @@ class NotificationTests(CycleTestCase):
         entry["last_alerted_at"] = (datetime.now(timezone.utc) - timedelta(hours=25)).isoformat()
         self.assertTrue(state_ops.should_alert(entry, Decimal("900"), Decimal("1000"), True))
 
+    def test_warehouse_price_change_under_target_alerts_again(self):
+        entry = {"last_alerted_price": "2245.02", "last_alerted_at": datetime.now(timezone.utc).isoformat(),
+                 "was_below_target": True}
+        # A higher Depo price is usually another unit; a normal offer stays quiet for 24 hours.
+        self.assertTrue(state_ops.should_alert(entry, Decimal("2369.75"), Decimal("3000"), True, True))
+        self.assertFalse(state_ops.should_alert(entry, Decimal("2369.75"), Decimal("3000"), True))
+        self.assertFalse(state_ops.should_alert(entry, Decimal("2245.02"), Decimal("3000"), True, True))
+        self.assertFalse(state_ops.should_alert(entry, Decimal("3100"), Decimal("3000"), True, True))
+        entry["pending_alert_price"] = "2369.75"
+        self.assertFalse(state_ops.should_alert(entry, Decimal("2369.75"), Decimal("3000"), True, True))
+        self.assertTrue(state_ops.should_alert(entry, Decimal("2400"), Decimal("3000"), True, True))
+
     def _age_price_history(self, days):
         from hermes.database import Database
         old = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
