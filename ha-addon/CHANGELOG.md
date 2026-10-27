@@ -1,5 +1,10 @@
 # Değişiklik günlüğü
 
+## 4.26.3
+
+- Ayarlar: Kontrol sonrası yeşil "Ekle" ile birden çok yeni takip biriktirilir, hepsi tek "Değişiklikleri uygula" ve tek yeniden başlatmayla kaydedilir.
+- Takip edilenler satıcı grubunda en yeni üstte; tutamaktan sürükleyerek sıralanır, sıra kaydedilir.
+- "Ayarlar açık" satırı yerine üstte dişlinin solunda kilit simgesi; Uygula alt düğme sırasının sağında, çerçevesiz.
 ## 4.26.2
 
 - Ayarlar Kontrol et (Amazon): her renk/ölçü birleşiminin sayfası okunur; tablo her varyantı kendi fiyatı ve stoğuyla gösterir (en çok 24 sayfa, koruma sayfasında durur).
