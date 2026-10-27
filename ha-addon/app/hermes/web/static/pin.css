@@ -19,12 +19,6 @@
 .pin-foot { border-top:1px solid var(--edge); margin-top:14px; padding-top:18px; }
 .pin-foot p { font-size:11px; line-height:1.6; color:#aaa5be; }
 .pin-foot p + p { margin-top:9px; }
-.session-bar { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px; border:1px solid var(--edge); border-radius:16px; background:rgba(255,255,255,.04); padding:12px 14px; margin:16px 0; }
-.session-bar strong { display:flex; align-items:center; gap:7px; font-size:13px; font-weight:600; }
-.session-bar p { margin-top:3px; font-size:11px; color:#b9b5cd; }
-.session-bar .button { min-height:38px; font-size:12px; background:#292633!important; }
-.session-bar svg { color:#b6ff3b; }
 [hidden] { display:none!important; }
-@media(max-width:560px) { .pin-stage { min-height:calc(100svh - 205px); padding:18px 0 34px; } .pin-card { padding:26px 22px; border-radius:22px; } .pin-card h1 { font-size:22px; } .session-bar { align-items:flex-start; } }
+@media(max-width:560px) { .pin-stage { min-height:calc(100svh - 205px); padding:18px 0 34px; } .pin-card { padding:26px 22px; border-radius:22px; } .pin-card h1 { font-size:22px; } }
 .pin-config-input { display:block; width:100%; height:48px; margin:0 0 18px; border:1px solid var(--edge); border-radius:12px; background:#0e0d15; color:var(--text); text-align:center; font-size:22px; letter-spacing:.5em; }
-.session-actions { display:flex; align-items:center; gap:8px; } .session-actions form { margin:0; }

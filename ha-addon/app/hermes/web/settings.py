@@ -252,6 +252,7 @@ def watch_form(item: Dict[str, Any], index: int, known_titles=None) -> str:
         + "<div class='watch-actions'><button class='button danger' type='button' data-delete-watch>Sil</button></div>"
     )
     return (f"<details data-watch-card data-watch-search='{escape(display_name, quote=True)}'><summary>"
+            "<span class='drag-handle' draggable='true' data-drag-handle title='Sürükleyerek sırala' aria-hidden='true'></span>"
             "<input type='checkbox' class='bulk-pick' data-bulk-pick aria-label='Toplu işlem için seç'>"
             f"{priority_dot(_card_priority(item, False))}<span class='watch-title'>{escape(display_name)}</span>"
             f"{_active_switch(prefix, item.get('active', True))}</summary><div class='form-grid'>{inner}</div></details>")
@@ -293,9 +294,9 @@ def new_watch_form(index: int, check_path: str) -> str:
 
 
 def sites_in_order(watches) -> List[tuple]:
-    """(site label, [(index, card)]) in the supported-site order; unknown links last."""
+    """(site label, [(index, card)]) in the supported-site order, unknown links last; newest card first."""
     grouped: Dict[str, List[tuple]] = {}
-    for index, item in enumerate(watches):
+    for index, item in reversed(list(enumerate(watches))):
         item = item if isinstance(item, dict) else {}
         site = _watch_site(item)
         grouped.setdefault(SITE_LABELS.get(site, OTHER_SITE), []).append((index, item))
@@ -399,7 +400,8 @@ def _site_groups(watches, known_titles) -> str:
     )
 
 
-def render_settings_page(base: str, params: Dict[str, List[str]], *, access_bar: str = "", open_http: bool = False) -> bytes:
+def render_settings_page(base: str, params: Dict[str, List[str]], *, lock_button: str = "", pin_change: str = "",
+                         open_http: bool = False) -> bytes:
     options = read_options()
     known_titles = stored_watch_titles()
     watches = _as_list(options.get("takip_edilenler"))
@@ -407,9 +409,10 @@ def render_settings_page(base: str, params: Dict[str, List[str]], *, access_bar:
     notice = render_notice(params.get("saved", [""])[0], params.get("msg", [""])[0])
     http_notice = render_notice("warn", HTTP_WARNING) if open_http else ""
     body = (
-        f"<h2 class='page-heading'>Ayarlar</h2>{access_bar}{http_notice}{notice}"
+        f"<h2 class='page-heading'>Ayarlar</h2>{http_notice}{notice}"
         f"<form id='settings-form' method='post' action='{escape(link(base, 'settings/save'), quote=True)}' data-settings-save>"
         "<input type='hidden' name='operation' value='update_existing'>"
+        "<input type='hidden' name='watch_order' data-watch-order>"
         f"<input type='hidden' name='watches_count' id='watches-count' value='{new_index + 1}'>"
         "<section class='settings-section'><h2>Yeni takip</h2>"
         f"{new_watch_form(new_index, link(base, 'settings/check'))}<div class='queued-watches' data-queued-list></div></section>"
@@ -419,13 +422,14 @@ def render_settings_page(base: str, params: Dict[str, List[str]], *, access_bar:
         + bulk_toolbar()
         + _telegram_section(options)
         + _timing_section(options)
-        + "<div class='apply-bar'><p>Uygulayınca Hermes yeniden başlar.</p><button class='button primary' type='submit'>Değişiklikleri uygula</button></div></form>"
-        + render_tool_actions(base)
+        + "</form>"
+        + render_tool_actions(base, pin_change + "<button class='button primary apply-button' type='submit' form='settings-form'>Değişiklikleri uygula</button>")
     )
     overlay = ("<div id='saving-overlay' class='saving-overlay' hidden><div class='saving-dialog'><div class='saving-spinner'></div>"
                "<h2 id='saving-title'>Ayarlar kaydediliyor</h2><p id='saving-message'>Kaydediliyor, Hermes yeniden başlıyor…</p></div></div>")
     script = f"<script src='{escape(link(base, 'settings.js'), quote=True)}?v={escape(APP_VERSION)}' defer></script>"
-    return render_page(base, "settings", "Hermes Ayarlar", body, body_class="public ov settings-page", after_main=overlay, scripts=confirm_script_tag(base) + script)
+    return render_page(base, "settings", "Hermes Ayarlar", body, body_class="public ov settings-page", after_main=overlay,
+                       scripts=confirm_script_tag(base) + script, topbar_extra=lock_button)
 
 
 def render_restart_page(base: str, params: Dict[str, List[str]]) -> bytes:
@@ -655,6 +659,11 @@ def _update_all_watches(options, form, existing_watches):
             if index < len(existing_watches):
                 item["id"] = existing_watches[index]["id"]
             built.append(item)
+    # The page lists the newest card first; a dragged order is saved oldest first (new cards stay newest).
+    shown = [card_id for card_id in _first(form, "watch_order").split(",") if card_id]
+    if shown:
+        rank = {card_id: position for position, card_id in enumerate(reversed(shown))}
+        built.sort(key=lambda item: rank.get(str(item.get("id") or ""), len(rank)))
     options["takip_edilenler"] = built
     _update_telegram_options(options, form)
     _update_timing_options(options, form)

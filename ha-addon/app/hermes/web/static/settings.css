@@ -20,9 +20,6 @@ body.ov .button.primary, .period-switch .button[aria-current='page'] { border-co
 body.ov .button.danger { border-color:transparent; background:linear-gradient(95deg,#ff3d9a,#ff6b6b); color:#fff; }
 body.ov .notice { margin:0 0 12px; border-radius:16px; }
 body.ov .notice-warn { color:var(--warn); background:rgba(255,200,87,.1); border-color:rgba(255,200,87,.3); } body.ov .notice-ok { color:var(--lime); background:rgba(182,255,59,.08); border-color:rgba(182,255,59,.25); } body.ov .notice-fail { color:#ffb3d3; background:rgba(255,61,154,.1); border-color:rgba(255,61,154,.3); }
-.settings-page .apply-bar p { color:var(--mute); }
-.settings-page .apply-bar .button.primary { min-height:36px; padding:0 14px; border-radius:99px; border:1px solid rgba(182,255,59,.45); background:rgba(182,255,59,.14); color:var(--text); font:600 13px var(--display); transition:transform .2s,background .2s; } .settings-page .apply-bar .button.primary:hover { transform:translateY(-2px); border-color:rgba(255,255,255,.28); }
-.settings-page .apply-bar { bottom:10px; margin-top:20px; padding:12px 14px; border:1px solid var(--edge); border-radius:20px; background:rgba(14,11,28,.82); backdrop-filter:blur(14px); box-shadow:0 12px 40px rgba(0,0,0,.45); }
 .settings-page .tool-actions { margin-top:22px; }
 body.ov .footer-note { border-left:0; border-radius:16px; background:var(--glass); border:1px solid var(--edge); color:var(--mute); }
 .settings-page .saving-dialog { border-color:var(--edge); border-radius:24px; background:linear-gradient(170deg,#161233,#0a0814); } .settings-page .saving-spinner { border-color:rgba(255,255,255,.14); border-top-color:var(--lime); }
@@ -57,4 +54,8 @@ body.ov.settings-page .button.primary { border:1px solid rgba(201,229,154,.35); 
 .settings-page .queued-watch { display:flex; align-items:center; gap:12px; min-height:44px; padding:0 8px 0 14px; border-radius:14px; border:1px solid rgba(134,214,160,.3); background:rgba(134,214,160,.06); }
 .settings-page .queued-name { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text); font:600 13.5px var(--display); } .settings-page .queued-price { color:var(--mute); font-variant-numeric:tabular-nums; white-space:nowrap; }
 .settings-page .queued-remove { min-height:32px; padding:0 12px; border-radius:10px; border:1px solid var(--edge); background:transparent; color:var(--mute); font:600 12px var(--display); cursor:pointer; }
+.topbar .lock-form { margin:0 0 0 auto; } .topbar .lock-form + .gear-button { margin-left:0; } body.ov .lock-button:hover { transform:none; color:var(--text); } .topbar .lock-button { cursor:pointer; font:inherit; }
+.settings-page .tool-actions { flex-wrap:wrap; } .settings-page .tool-actions .apply-button { margin-left:auto; }
+.settings-page .drag-handle { flex:none; width:14px; height:18px; margin:0 8px 0 -4px; cursor:grab; opacity:.55; background:radial-gradient(circle,var(--mute) 1.4px,transparent 1.6px) 0 0/7px 6px; } .settings-page .drag-handle:hover { opacity:1; }
+.settings-page details.is-dragging { opacity:.45; }
 .settings-page [hidden] { display:none !important; }

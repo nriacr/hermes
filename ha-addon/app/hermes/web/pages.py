@@ -33,6 +33,11 @@ PAGE_TEMPLATE = Template((Path(__file__).with_name("templates") / "page.html").r
 # The top bar carries only the logo (home) and the settings gear; İstatistik is
 # reached from the button row at the bottom of the settings page.
 
+TOPBAR_LOCK_ICON = (
+    "<svg viewBox='0 0 24 24' width='22' height='22' fill='none' stroke='currentColor' stroke-width='2' "
+    "stroke-linecap='round' stroke-linejoin='round' aria-hidden='true'><rect x='4' y='11' width='16' height='10' rx='2'/>"
+    "<path d='M8 11V7a4 4 0 0 1 8 0v4'/></svg>"
+)
 GEAR_ICON = (
     "<svg viewBox='0 0 24 24' width='22' height='22' fill='none' stroke='currentColor' stroke-width='2' "
     "stroke-linecap='round' stroke-linejoin='round' aria-hidden='true'><circle cx='12' cy='12' r='3'/>"
@@ -59,17 +64,18 @@ def link(base: str, target: str = "") -> str:
     return f"{base}/{target}" if target else f"{base}/"
 
 
-def render_topbar(base: str, current: str) -> str:
+def render_topbar(base: str, current: str, extra: str = "") -> str:
+    """Hermes badge, then (right) the page's own topbar buttons and the gear."""
     gear_current = " aria-current='page'" if current == "settings" else ""
     return (
-        f"<div class='topbar'><a class='badge' href='{escape(link(base), quote=True)}' aria-label='Özet Tablo'>Hermes</a>"
+        f"<div class='topbar'><a class='badge' href='{escape(link(base), quote=True)}' aria-label='Özet Tablo'>Hermes</a>{extra}"
         f"<a class='gear-button' href='{escape(link(base, 'settings'), quote=True)}' aria-label='Ayarlar' "
         f"title='Ayarlar'{gear_current}>{GEAR_ICON}</a></div>"
     )
 
 
-def render_tool_actions(base: str) -> str:
-    """One row at the bottom of Ayarlar: Pushover test, the two confirmed resets, İstatistik and the confirmed restart."""
+def render_tool_actions(base: str, extra: str = "") -> str:
+    """One row at the bottom of Ayarlar: Pushover test, the two confirmed resets, İstatistik, the confirmed restart, then `extra`."""
     return (
         "<div class='actions public-actions tool-actions'>"
         f"<form class='inline-form' method='post' action='{escape(link(base, 'test-pushover'), quote=True)}'>"
@@ -83,7 +89,7 @@ def render_tool_actions(base: str) -> str:
         f"<a class='button secondary' href='{escape(link(base, 'statistics'), quote=True)}'>İstatistik</a>"
         f"<form class='inline-form' method='post' action='{escape(link(base, 'restart'), quote=True)}' "
         "data-confirm='Hermes yeniden başlatılacak, süren tarama yarıda kalır. Devam?'>"
-        "<button class='button secondary' type='submit'>Hermes'i yeniden başlat</button></form></div>"
+        f"<button class='button secondary' type='submit'>Hermes'i yeniden başlat</button></form>{extra}</div>"
     )
 
 
@@ -95,7 +101,7 @@ def render_notice(status: str, message: str) -> str:
 
 
 def render_page(base: str, current: str, title: str, body: str, *, body_class: str = "public",
-                refresh_seconds: Optional[int] = None, scripts: str = "", after_main: str = "") -> bytes:
+                refresh_seconds: Optional[int] = None, scripts: str = "", after_main: str = "", topbar_extra: str = "") -> bytes:
     # Pages with live data refresh in place; the full reload stays only as the
     # fallback for a browser without JavaScript.
     refresh = (f"<noscript><meta http-equiv='refresh' content='{int(refresh_seconds)}'></noscript>"
@@ -103,6 +109,6 @@ def render_page(base: str, current: str, title: str, body: str, *, body_class: s
     html = PAGE_TEMPLATE.substitute(
         head=render_web_app_head(base), refresh=refresh, title=escape(title),
         stylesheet=escape(link(base, "app.css"), quote=True) + "?v=" + escape(APP_VERSION),
-        body_class=escape(body_class, quote=True), topbar=render_topbar(base, current),
+        body_class=escape(body_class, quote=True), topbar=render_topbar(base, current, topbar_extra),
         body=body, after_main=after_main, scripts=scripts)
     return html.encode("utf-8")

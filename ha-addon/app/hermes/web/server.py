@@ -29,7 +29,7 @@ from .access import Session, WebAccess
 from .dashboard import clear_dashboard_cache, dashboard_live_html, render_dashboard_page
 from .icons import HERMES_ICON_PNG, HERMES_ICON_SVG, render_web_manifest
 from .pages import link
-from .pin import csrf_field, render_configure_page, render_pin_page, render_session_bar
+from .pin import csrf_field, render_configure_page, render_lock_button, render_pin_change_link, render_pin_page
 from .statistics import clear_statistics_cache, render_statistics_page, statistics_live_html
 from .settings import check_link, handle_restart, handle_settings_save, render_restart_page, render_settings_page
 
@@ -310,7 +310,8 @@ class Router:
             "/": lambda: render_dashboard_page(request.base, request.params, self.runtime.config_error),
             "/statistics": lambda: render_statistics_page(request.base, request.params),
             "/settings": lambda: render_settings_page(request.base, request.params,
-                                                       access_bar=render_session_bar(request.base, request.trusted_ingress),
+                                                       lock_button=render_lock_button(request.base),
+                                                       pin_change=render_pin_change_link(request.base, request.trusted_ingress),
                                                        open_http=not request.trusted_ingress and not request.secure),
             "/restarting": lambda: render_restart_page(request.base, request.params),
             "/settings/restarting": lambda: render_restart_page(request.base, request.params),

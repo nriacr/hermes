@@ -157,8 +157,10 @@ class RouterTests(DataFilesMixin, unittest.TestCase):
         for label in ("Pushover testi", "Bildirim Sıfırla", "Min/Maks Sıfırla"):
             self.assertIn(label, row)
             self.assertNotIn(label, self.request("/").payload.decode())
-        self.assertGreater(settings_page.index("Pushover testi"), settings_page.index("Değişiklikleri uygula"))
-        self.assertGreater(settings_page.index("tool-actions"), settings_page.index("Değişiklikleri uygula"))
+        self.assertGreater(row.index("form='settings-form'>Değişiklikleri uygula"), row.index("Hermes'i yeniden başlat"))
+        self.assertNotIn("Ayarlar açık", settings_page)
+        topbar = settings_page[settings_page.index("class='topbar'"):settings_page.index("page-heading")]
+        self.assertLess(topbar.index("aria-label='Kilitle'"), topbar.index("aria-label='Ayarlar'"))
 
     def test_settings_page_has_bulk_tools_and_one_picker_per_saved_card(self):
         page = self.request("/settings").payload.decode()
@@ -839,7 +841,7 @@ class SettingsTests(DataFilesMixin, unittest.TestCase):
     def test_timing_options_sit_at_the_bottom_and_are_saved_with_the_page(self):
         self.write_options({"interval_seconds": 5, "request_delay_min_seconds": 1, "request_delay_max_seconds": 4, "takip_edilenler": []})
         page = settings.render_settings_page(".", {}).decode()
-        timing = page[page.index("timing-settings"):page.index("apply-bar")]
+        timing = page[page.index("timing-settings"):page.index("tool-actions")]
         for label, name, value in (("Çevrim aralığı", "interval_seconds", 5), ("Bekleme süresi min", "request_delay_min_seconds", 1),
                                    ("Bekleme süresi maks", "request_delay_max_seconds", 4)):
             self.assertIn(f"{label}<input type='number' inputmode='numeric' name='{name}'", timing)
@@ -889,6 +891,21 @@ class SettingsTests(DataFilesMixin, unittest.TestCase):
         trendyol = settings.watch_form({"name": "Çanta", "url_1": "https://www.trendyol.com/stark"}, 4)
         self.assertNotIn("watch-site-options", trendyol)
         self.assertNotIn(">Beden<", trendyol)
+
+    def test_newest_card_is_listed_first_and_a_dragged_order_is_saved(self):
+        stored = {"takip_edilenler": [
+            {"id": "a", "name": "A", "target_price": 100, "url_1": "https://www.amazon.com.tr/dp/B000000001"},
+            {"id": "b", "name": "B", "target_price": 200, "url_1": "https://www.amazon.com.tr/dp/B000000002"},
+            {"id": "c", "name": "C", "target_price": 300, "url_1": "https://www.amazon.com.tr/dp/B000000003"}]}
+        self.assertEqual([index for index, _ in settings.sites_in_order(stored["takip_edilenler"])[0][1]], [2, 1, 0])
+        page = {"operation": ["update_existing"], "watches_count": ["4"], "watch_order": ["a,c,b"]}
+        for index, item in enumerate(stored["takip_edilenler"]):
+            page.update({f"watches_{index}_id": [item["id"]], f"watches_{index}_name": [item["name"]],
+                         f"watches_{index}_target_price": [str(item["target_price"])], f"watches_{index}_url_1": [item["url_1"]]})
+        page.update(watches_3_name=["D"], watches_3_target_price=["400"], watches_3_url_1=["https://www.amazon.com.tr/dp/B000000004"])
+        options, _ = settings.apply_settings_operation(stored, page)
+        # Shown a, c, b (newest first) is stored b, c, a; the new card D is newest.
+        self.assertEqual([item["name"] for item in options["takip_edilenler"]], ["B", "C", "A", "D"])
 
     def test_choosing_variant_values_reads_the_variant_family(self):
         watches = settings.build_watches({"watches_count": ["1"], "watches_0_name": ["Kulaklık"], "watches_0_target_price": ["1000"],

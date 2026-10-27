@@ -3,7 +3,7 @@
 from html import escape
 
 from ..constants import APP_VERSION
-from .pages import link, render_page
+from .pages import TOPBAR_LOCK_ICON, link, render_page
 
 LOCK_ICON = ("<svg width='25' height='25' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.7' "
              "stroke-linecap='round' aria-hidden='true'><rect x='5' y='10' width='14' height='11' rx='3'/>"
@@ -65,9 +65,13 @@ def render_configure_page(base: str, csrf: str, *, configured: bool, error: str 
     return render_page(base, "settings", "Hermes • PIN belirle", body, body_class="public ov settings-page")
 
 
-def render_session_bar(base: str, trusted: bool = False) -> str:
-    recovery = (f"<a class='button secondary' href='{escape(link(base, 'auth/configure'), quote=True)}'>PIN’i değiştir</a>"
-                if trusted else "")
-    return ("<div class='session-bar'><div><strong>Ayarlar açık</strong></div><div class='session-actions'>"
-            f"{recovery}<form method='post' action='{escape(link(base, 'auth/lock'), quote=True)}'>"
-            "<button class='button secondary' type='submit'>Kilitle</button></form></div></div>")
+def render_lock_button(base: str) -> str:
+    """The topbar lock beside the gear: ends the settings session."""
+    return (f"<form class='lock-form' method='post' action='{escape(link(base, 'auth/lock'), quote=True)}'>"
+            f"<button class='gear-button lock-button' type='submit' aria-label='Kilitle' title='Kilitle'>{TOPBAR_LOCK_ICON}</button></form>")
+
+
+def render_pin_change_link(base: str, trusted: bool = False) -> str:
+    """PIN recovery stays available inside Home Assistant only."""
+    return (f"<a class='button secondary' href='{escape(link(base, 'auth/configure'), quote=True)}'>PIN’i değiştir</a>"
+            if trusted else "")

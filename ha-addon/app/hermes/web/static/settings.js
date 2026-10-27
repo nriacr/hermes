@@ -121,7 +121,7 @@
     error.hidden = true;
     if (!url) return;
     button.disabled = true;
-    button.textContent = 'Okunuyor…';
+    button.textContent = 'Okunuyor';
     try {
       const form = new URLSearchParams({ url, csrf_token: settingsForm.querySelector("[name='csrf_token']")?.value || '' });
       const response = await fetch(newWatch.dataset.checkPath, { method: 'POST', body: form, credentials: 'same-origin' });
@@ -243,6 +243,37 @@
   };
   document.querySelectorAll('[data-bulk-active]').forEach((button) => button.addEventListener('click', () => bulk("input[type='checkbox'][name$='_active']", button.dataset.bulkActive === '1')));
   document.querySelector('[data-bulk-set-priority]')?.addEventListener('click', () => bulk('[data-watch-priority]', document.querySelector('[data-bulk-priority]').value));
+
+  // Cards are dragged by their handle inside their own site; the shown order is saved with the page.
+  let dragged = null;
+  const orderField = document.querySelector('[data-watch-order]');
+  const writeOrder = () => {
+    orderField.value = [...document.querySelectorAll('[data-watch-card]')]
+      .map((card) => card.querySelector("input[name$='_id']")?.value || '').join(',');
+    dirty = true;
+  };
+  document.addEventListener('click', (event) => { if (event.target.closest('[data-drag-handle]')) event.preventDefault(); });
+  document.addEventListener('dragstart', (event) => {
+    const handle = event.target.closest?.('[data-drag-handle]');
+    if (!handle) return;
+    dragged = handle.closest('[data-watch-card]');
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setDragImage(dragged, 20, 20);
+    dragged.classList.add('is-dragging');
+  });
+  document.addEventListener('dragover', (event) => {
+    const card = event.target.closest?.('[data-watch-card]');
+    if (!dragged || !card || card === dragged || card.parentElement !== dragged.parentElement) return;
+    event.preventDefault();
+    const box = card.getBoundingClientRect();
+    card.parentElement.insertBefore(dragged, event.clientY < box.top + box.height / 2 ? card : card.nextSibling);
+  });
+  document.addEventListener('dragend', () => {
+    if (!dragged) return;
+    dragged.classList.remove('is-dragging');
+    dragged = null;
+    writeOrder();
+  });
 
   const savingOverlay = document.getElementById('saving-overlay');
   const savingTitle = document.getElementById('saving-title');
