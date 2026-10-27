@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 
-APP_VERSION = "4.24.6"
+APP_VERSION = "4.25.0"
 
 # Persistent add-on data. File names are a public interface: 2.x releases read
 # the same files, so a rollback never loses history or notification state.
@@ -36,6 +36,7 @@ SITE_BEYMENCLUB = "beymenclub"
 SITE_ZARA = "zara"
 SITE_HM = "hm"
 SITE_TOGG = "togg"
+SITE_IKEA = "ikea"
 SITE_LABELS = {
     SITE_AMAZON: "Amazon",
     SITE_HEPSIBURADA: "Hepsiburada",
@@ -45,6 +46,7 @@ SITE_LABELS = {
     SITE_ZARA: "Zara",
     SITE_HM: "H&M",
     SITE_TOGG: "Togg",
+    SITE_IKEA: "IKEA",
 }
 # Host fragments are checked in this order; "amazon" stays last because other
 # hosts never contain it, while a broad match must not shadow a specific site.
@@ -56,6 +58,7 @@ SITE_HOST_MARKERS = (
     ("zara", SITE_ZARA),
     ("hm.com", SITE_HM),
     ("togg", SITE_TOGG),
+    ("ikea", SITE_IKEA),
     ("amazon", SITE_AMAZON),
 )
 # Zara and H&M cards without a group are shown under this group.

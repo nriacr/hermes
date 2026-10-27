@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.25.0
+
+- Yeni site: IKEA (ikea.com.tr ürün linki). Fiyat sayfadan; İnternet Mağazası veya IKEA Bayrampaşa "Stokta Var"/"Kritik Stok" ise stokta sayılır, stok gelince bildirim. Panel rengi bakır-kahve.
+
 ## 4.24.6
 
 - Fiyat geçmişi grafiğine "24 saat" ve "3 gün" sekmeleri eklendi; 4 günden kısa aralıklarda eksen tarihine saat yazılır.

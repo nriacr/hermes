@@ -295,6 +295,7 @@ screen: automatic submit after the fourth digit and explicit/manual locking.
   sizes are case-insensitive; a missing size is a stock state.
 - Zara, H&M: colors and the requested size; a missing size is a stock state.
 - Togg: the configurator's public model list (one request per cycle for all Togg cards); the card `name` is the model, matched as a phrase. A model in the list is in stock, a missing one is a stock state; stock-return notice.
+- IKEA: product pages only. Price from the product JSON-LD; stock from the page's own `CheckStoreStocks` service. In stock when the online store or IKEA Bayrampaşa reports `full`/`critical`; other stores are ignored, both missing is a stock state, stock-return notifies. Every page loads reCAPTCHA, so only a page without product data is a challenge.
 
 
 ## Release gate
