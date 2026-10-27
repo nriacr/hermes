@@ -247,6 +247,14 @@ def fetch_hepsiburada_page(session: requests.Session, url: str, timeout: int):
 class HepsiburadaProvider(Provider):
     site = SITE_HEPSIBURADA
     alert_shows_seller = True
+    card_options = ("name", "official_seller_only", "exclude_terms")
+
+    def keeps_offer(self, watch, offer) -> bool:
+        """With the own-seller option, only offers sold by Hepsiburada itself."""
+        if not watch.official_seller_only or normalize_offer_text(offer.seller or "") == "hepsiburada":
+            return True
+        log(f"Hepsiburada satıcısı filtresi nedeniyle sonuç atlandı: {offer.seller or 'satıcı bilgisi yok'} | {offer.title}")
+        return False
 
     def is_search_url(self, url: str) -> bool:
         return is_hepsiburada_search_url(url)

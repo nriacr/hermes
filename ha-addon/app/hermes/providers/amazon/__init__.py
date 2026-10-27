@@ -146,7 +146,7 @@ class AmazonProvider(RhythmMixin, PageCacheMixin, Provider):
     def is_protection_error(self, exc: BaseException) -> bool:
         return is_protection_error(exc)
 
-    card_options = ("include_variations", "official_seller_only", "auto_add_to_cart", "variant_filter")
+    card_options = ("name", "include_variations", "official_seller_only", "auto_add_to_cart", "exclude_terms", "variant_filter")
 
     def inspect(self, url: str, ctx: ReadContext) -> ProductPreview:
         """The configured page only: its dimensions with stock state and the selected variant's price.

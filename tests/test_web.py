@@ -804,7 +804,7 @@ class SettingsTests(DataFilesMixin, unittest.TestCase):
         self.assertEqual(watches[0]["priority"], "3h")
         self.assertTrue(watches[0]["official_seller_only"])
         html = settings.watch_form(watches[0], 0)
-        for text in ("Yalnızca Amazon satıcısı", ">1 dk</option>", ">5 dk</option>", ">15 dk</option>", ">30 dk</option>", ">60 dk</option>",
+        for text in ("Amazon.com.tr satıcısı", ">1 dk</option>", ">5 dk</option>", ">15 dk</option>", ">30 dk</option>", ">60 dk</option>",
                      "selected>3 saat</option>", ">6 saat</option>", ">12 saat</option>", "<i class=\"priority-dot priority-3h\""):
             self.assertIn(text, html)
         for old in ("Yüksek", "Orta", "Düşük"):
@@ -870,13 +870,22 @@ class SettingsTests(DataFilesMixin, unittest.TestCase):
         self.assertLess(page.index("Hepsiburada<span"), page.index("Zara<span"))
         zara = settings.watch_form({"name": "Polo", "url_1": "https://www.zara.com/tr/tr/polo-p01234567.html"}, 0)
         self.assertIn(">Beden<", zara)
-        self.assertNotIn("Varyasyonları ekle", zara)
+        self.assertNotIn(">Varyant<", zara)
+        for removed in ("Bildirim zamanı", "90 gün", "24 saat sustur", "Hariç tut", ">Ürün adı<"):
+            self.assertNotIn(removed, zara)
+        self.assertIn("data-active-switch", zara)
         amazon = settings.watch_form({"name": "Kulaklık", "variant_filter": "Renk=Siyah", "url_1": "https://www.amazon.com.tr/dp/B000000001"}, 1)
-        for text in ("Varyasyonları ekle", "Yalnızca Amazon satıcısı", "Otomatik sepete ekle", "value='Renk=Siyah'"):
+        for text in (">Varyant<", "Amazon.com.tr satıcısı", "Otomatik sepete ekle", "Hariç tut", "value='Renk=Siyah'"):
             self.assertIn(text, amazon)
         self.assertNotIn(">Beden<", amazon)
         hepsiburada = settings.watch_form({"name": "Fırın", "url_1": "https://www.hepsiburada.com/firin-p-HBC1"}, 2)
-        self.assertNotIn("watch-site-options", hepsiburada)
+        self.assertIn("Hepsiburada satıcısı", hepsiburada)
+        self.assertNotIn(">Ürün adı<", hepsiburada)  # a product page takes its name from the page
+        search = settings.watch_form({"name": "fırın", "url_1": "https://www.hepsiburada.com/ara?q=firin"}, 3)
+        self.assertIn(">Ürün adı<", search)
+        trendyol = settings.watch_form({"name": "Çanta", "url_1": "https://www.trendyol.com/stark"}, 4)
+        self.assertNotIn("watch-site-options", trendyol)
+        self.assertNotIn(">Beden<", trendyol)
 
     def test_choosing_variant_values_reads_the_variant_family(self):
         watches = settings.build_watches({"watches_count": ["1"], "watches_0_name": ["Kulaklık"], "watches_0_target_price": ["1000"],
@@ -884,6 +893,7 @@ class SettingsTests(DataFilesMixin, unittest.TestCase):
                                           "watches_0_variant_filter": ["Renk=Siyah, Gümüş; Boyut="], "watches_0_active": ["1"]})
         self.assertEqual(watches[0]["variant_filter"], "Renk=Siyah, Gümüş")
         self.assertTrue(watches[0]["include_variations"])
+        self.assertTrue(watches[0]["notify_once_in_24H"])  # always muted for 24 hours
         self.assertEqual(prepare_watches(watches)[0].variant_filter, {"Renk": ["Siyah", "Gümüş"]})
 
     def test_link_check_reports_the_site_its_options_and_the_live_variants(self):
@@ -1010,7 +1020,7 @@ class SettingsTests(DataFilesMixin, unittest.TestCase):
     def test_cards_without_a_name_use_learned_titles(self):
         html = settings.watch_form({"url_1": "https://www.zara.com/tr/tr/dokulu-p03166301.html?v1=567"}, 8,
                                    known_titles={"https://www.zara.com/tr/tr/dokulu-p03166301.html": "Dokulu Polo"})
-        self.assertIn(">Dokulu Polo</summary>", html)
+        self.assertIn(">Dokulu Polo</span>", html)
         self.data.write_summary({"stock_rows": [{"product_url": "https://www2.hm.com/tr_tr/productpage.1286182003.html?color=009",
                                                  "product_title": "Keten Gömlek / Kahverengi / XL"}]})
         html = settings.watch_form({"url_1": "https://www2.hm.com/tr_tr/productpage.1286182003.html"}, 3,

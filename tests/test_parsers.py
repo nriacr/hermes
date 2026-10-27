@@ -21,6 +21,7 @@ from hermes.providers.amazon.parser import (
 )
 from hermes.providers.amazon.search import dedupe_results, extract_result_candidates
 from hermes.providers.base import soup_from_html
+from hermes.providers.hepsiburada import HepsiburadaProvider
 from hermes.providers.beymenclub import (
     extract_offer as extract_beymenclub_offer,
     extract_offers as extract_beymenclub_offers,
@@ -2154,6 +2155,15 @@ class WatchCardTests(unittest.TestCase):
         </script>'''
         self.assertEqual(amazon_parser.product_dimensions(html),
                          {"Renk": [("Siyah", True), ("Gümüş", False)], "Boyut": [("256 GB", True)]})
+
+    def test_hepsiburada_own_seller_option_keeps_only_hepsiburada_offers(self):
+        provider = HepsiburadaProvider()
+        watch = WatchRule(name="", site="hepsiburada", url="https://www.hepsiburada.com/x-p-HBC1", target_price=Decimal("1"),
+                          official_seller_only=True)
+        self.assertTrue(provider.keeps_offer(watch, OfferResult(title="x", price=Decimal("1"), seller="Hepsiburada")))
+        self.assertFalse(provider.keeps_offer(watch, OfferResult(title="x", price=Decimal("1"), seller="Ceptemax")))
+        watch.official_seller_only = False
+        self.assertTrue(provider.keeps_offer(watch, OfferResult(title="x", price=Decimal("1"), seller="Ceptemax")))
 
     def test_amazon_keeps_only_the_chosen_variant_values(self):
         provider = AmazonProvider(client=Mock())

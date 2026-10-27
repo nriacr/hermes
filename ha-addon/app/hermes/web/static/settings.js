@@ -39,7 +39,7 @@
     const variants = data.variants || [];
     const priced = variants.filter((item) => item.price);
     newWatch.querySelector('[data-product-sub]').textContent = variants.length > 1
-      ? `${variants.length} varyant` : (priced[0]?.price || '');
+      ? `${variants.length} ${'Mağaza' in (data.dimensions || {}) ? 'mağaza' : 'varyant'}` : (priced[0]?.price || '');
     const table = newWatch.querySelector('[data-variant-table]');
     table.replaceChildren();
     if (variants.length > 1) {
@@ -57,7 +57,10 @@
     }
     const options = new Set(data.options || []);
     const dimensions = data.dimensions || {};
-    newWatch.querySelectorAll('[data-site-option]').forEach((node) => { node.hidden = !options.has(node.dataset.siteOption); });
+    newWatch.querySelectorAll('[data-site-option]').forEach((node) => {
+      node.hidden = !options.has(node.dataset.siteOption) || ('searchOnly' in node.dataset && !data.search);
+    });
+    newWatch.querySelector('[data-seller-label]').textContent = data.seller_label || '';
     const sizeSelect = newWatch.querySelector('[data-size-select]');
     sizeSelect.replaceChildren(new Option('Hepsi', ''));
     (dimensions.Beden || []).forEach((size) => sizeSelect.appendChild(new Option(size, size)));
@@ -74,6 +77,7 @@
           const box = element('input');
           box.type = 'checkbox';
           box.value = value;
+          box.checked = (data.defaults?.[name] || []).includes(value);
           box.addEventListener('change', writeVariantFilter);
           chip.append(box, value);
           chips.appendChild(chip);
@@ -83,9 +87,10 @@
       });
       dims.hidden = !Object.keys(dimensions).length;
     }
+    table.hidden = !variants.length;
     writeVariantFilter();
-    const nameField = newWatch.querySelector("input[name$='_name']");
-    if (nameField && !nameField.value) nameField.value = data.title || '';
+    const nameField = newWatch.querySelector('[data-product-name]');
+    if (nameField && (!nameField.value || !data.search)) nameField.value = data.search ? nameField.value : (data.title || '');
     body.hidden = false;
   };
   newWatch?.querySelector('[data-check-link]')?.addEventListener('click', async (event) => {
@@ -119,6 +124,15 @@
   });
 
   document.addEventListener('click', (event) => {
+    const activeSwitch = event.target.closest('[data-active-switch]');
+    if (activeSwitch) {
+      // Inside a card's summary a click would also open the card; the switch only flips Aktif.
+      event.preventDefault();
+      const box = activeSwitch.querySelector('input');
+      box.checked = !box.checked;
+      box.dispatchEvent(new Event('change', { bubbles: true }));
+      return;
+    }
     const deleteButton = event.target.closest('[data-delete-watch]');
     if (!deleteButton) return;
     const card = deleteButton.closest('[data-watch-card]');

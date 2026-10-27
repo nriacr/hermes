@@ -14,7 +14,7 @@ from ..config import (
     DEFAULT_TELEGRAM_CHANNELS, WATCH_URL_FIELDS, format_variant_filter, options_with_defaults, parse_variant_filter, read_options, watch_urls,
 )
 from ..constants import (
-    APP_VERSION, DEFAULT_PRIORITY, DEFAULT_REQUEST_TIMEOUT_SECONDS, PRIORITIES, PRIORITY_DESCRIPTIONS, PRIORITY_LABELS, STATE_PATH, NOTIFY_WINDOWS, normalize_notify_window, SUMMARY_PATH, SITE_LABELS, normalize_priority,
+    APP_VERSION, DEFAULT_PRIORITY, DEFAULT_REQUEST_TIMEOUT_SECONDS, PRIORITIES, PRIORITY_DESCRIPTIONS, PRIORITY_LABELS, STATE_PATH, SUMMARY_PATH, SITE_LABELS, normalize_priority,
 )
 from ..errors import HermesError
 from ..logging_utils import log
@@ -169,54 +169,54 @@ def _watch_site(item) -> str:
     return ""
 
 
-OPTION_LABELS = {
-    "include_variations": "Varyasyonları ekle",
-    "official_seller_only": "Yalnızca Amazon satıcısı",
-    "auto_add_to_cart": "Otomatik sepete ekle",
-}
+OPTION_LABELS = {"include_variations": "Varyant", "auto_add_to_cart": "Otomatik sepete ekle"}
+SELLER_LABELS = {"amazon": "Amazon.com.tr satıcısı", "hepsiburada": "Hepsiburada satıcısı"}
+CHOICE_LABELS = {"ikea": "Mağazalar"}
 
 
-def _site_options(prefix, item, site) -> str:
-    """The site's own fields of a saved card."""
-    parts = []
+def _active_switch(prefix, checked) -> str:
+    """Aktif as an on/off switch in the card's top-right corner."""
+    return (f"<label class='active-switch' data-active-switch title='Aktif'><input type='checkbox' name='{escape(prefix + 'active', quote=True)}' "
+            f"value='1'{' checked' if parse_bool(checked, default=True) else ''} aria-label='Aktif'><span></span></label>")
+
+
+def _site_options(prefix, item, site, search) -> tuple:
+    """The site's own (text fields, checkboxes) of a saved card; the product name only on search pages."""
+    parts, flags = [], []
     for option in SITE_OPTIONS.get(site, ()):
-        if option == "size":
+        if option == "name":
+            if search:
+                parts.append(_field(prefix, "name", "Ürün adı", item.get("name", "")))
+        elif option == "size":
             parts.append(_field(prefix, "size", "Beden", item.get("size", "")))
+        elif option == "exclude_terms":
+            terms = item.get("exclude_terms", "")
+            terms = ", ".join(str(term).strip() for term in terms if str(term).strip()) if isinstance(terms, list) else terms
+            parts.append(_field(prefix, "exclude_terms", "Hariç tut", terms))
         elif option == "variant_filter":
-            parts.append(_field(prefix, "variant_filter", "Varyant seçimi", item.get("variant_filter", "")))
+            parts.append(_field(prefix, "variant_filter", CHOICE_LABELS.get(site, "Varyant seçimi"), item.get("variant_filter", "")))
+        elif option == "official_seller_only":
+            flags.append(_checkbox(prefix, option, SELLER_LABELS.get(site, "Platform satıcısı"), item.get(option, False)))
         else:
-            parts.append(_checkbox(prefix, option, OPTION_LABELS[option], item.get(option, False)))
-    return "".join(parts)
+            flags.append(_checkbox(prefix, option, OPTION_LABELS[option], item.get(option, False)))
+    return "".join(parts), "".join(flags)
 
 
-def _common_fields(prefix, item, is_new) -> str:
-    exclude_terms = item.get("exclude_terms", "")
-    if isinstance(exclude_terms, list):
-        exclude_terms = ", ".join(str(term).strip() for term in exclude_terms if str(term).strip())
+def _priority_field(prefix, item, is_new) -> str:
     priority = _card_priority(item, is_new)
-    priority_field = (
+    return (
         f"<label class='watch-priority'>Öncelik<select name='{escape(prefix + 'priority', quote=True)}' data-watch-priority>"
         + "".join(f"<option value='{value}' title='{escape(PRIORITY_DESCRIPTIONS[value], quote=True)}'"
                   f"{' selected' if priority == value else ''}>{escape(PRIORITY_LABELS[value])}</option>" for value in PRIORITIES)
         + "</select></label>"
     )
-    window_field = (
-        f"<label class='watch-window'>Bildirim zamanı<select name='{escape(prefix + 'notify_window', quote=True)}'>"
-        + "".join(f"<option value='{value}'{' selected' if normalize_notify_window(item.get('notify_window')) == value else ''}>"
-                  f"{escape(label)}</option>" for value, label in NOTIFY_WINDOWS.items())
-        + "</select></label>"
-    )
+
+
+def _common_fields(prefix, item, is_new) -> str:
     return (
-        "<div class='watch-fields'>"
-        f"{_field(prefix, 'name', 'Ad', item.get('name', ''))}"
         f"{_field(prefix, 'target_price', 'Hedef fiyat maks', _price_input_value(item.get('target_price', '')))}"
         f"{_field(prefix, 'minimum_price', 'Hedef fiyat min', _price_input_value(item.get('minimum_price', '')))}"
-        f"{priority_field}{window_field}{_field(prefix, 'exclude_terms', 'Hariç tut', exclude_terms)}</div>"
-        "<div class='watch-flags'>"
-        + _checkbox(prefix, "active", "Aktif", True if is_new else item.get("active", True))
-        + _checkbox(prefix, "notify_once_in_24H", "24 saat sustur", True if is_new else item.get("notify_once_in_24H", True))
-        + _checkbox(prefix, "notify_90_day_low", "90 gün en düşük", False if is_new else item.get("notify_90_day_low", False))
-        + "</div>"
+        f"{_priority_field(prefix, item, is_new)}"
     )
 
 
@@ -230,31 +230,40 @@ def watch_form(item: Dict[str, Any], index: int, known_titles=None) -> str:
     prefix = f"watches_{index}_"
     display_name = watch_display_name(item, index, known_titles or {})
     urls = watch_urls(item) or [""]
+    search = any(watch_name_required_for_url(url) for url in urls if url)
     links = "".join(_field(prefix, field_name, "Link" if number == 1 else f"Link {number}", url, "url")
                     for number, (field_name, url) in enumerate(zip(WATCH_URL_FIELDS, urls), start=1))
-    site_options = _site_options(prefix, item, _watch_site(item))
+    site_fields, site_flags = _site_options(prefix, item, _watch_site(item), search)
+    name = "" if search else (f"<input type='hidden' name='{escape(prefix + 'name', quote=True)}' "
+                              f"value='{escape(str(item.get('name') or ''), quote=True)}'>")
     inner = (
-        _hidden_identity(prefix, item)
+        _hidden_identity(prefix, item) + name
         + f"<div class='watch-links'>{links}</div>"
-        + _common_fields(prefix, item, False)
-        + (f"<div class='watch-site-options'>{site_options}</div>" if site_options else "")
+        + f"<div class='watch-fields'>{_common_fields(prefix, item, False)}{site_fields}</div>"
+        + (f"<div class='watch-site-options'>{site_flags}</div>" if site_flags else "")
         + "<div class='watch-actions'><button class='button danger' type='button' data-delete-watch>Sil</button></div>"
     )
     return (f"<details data-watch-card data-watch-search='{escape(display_name, quote=True)}'><summary>"
             "<input type='checkbox' class='bulk-pick' data-bulk-pick aria-label='Toplu işlem için seç'>"
-            f"{priority_dot(_card_priority(item, False))}{escape(display_name)}</summary><div class='form-grid'>{inner}</div></details>")
+            f"{priority_dot(_card_priority(item, False))}<span class='watch-title'>{escape(display_name)}</span>"
+            f"{_active_switch(prefix, item.get('active', True))}</summary><div class='form-grid'>{inner}</div></details>")
 
 
 def new_watch_form(index: int, check_path: str) -> str:
     """Link first; the site's fields open after a successful check."""
     prefix = f"watches_{index}_"
-    size_options = "<option value=''>Hepsi</option>"
-    site_options = (
-        f"<label data-site-option='size' hidden>Beden<select name='{escape(prefix + 'size', quote=True)}' data-size-select>{size_options}</select></label>"
-        + "".join(f"<span data-site-option='{option}' hidden>{_checkbox(prefix, option, OPTION_LABELS[option], False)}</span>"
-                  for option in ("include_variations", "official_seller_only", "auto_add_to_cart"))
-        + f"<div data-site-option='variant_filter' data-variant-dims hidden></div>"
-          f"<input type='hidden' name='{escape(prefix + 'variant_filter', quote=True)}' data-variant-filter>"
+    hidden = lambda option, html: f"<span class='site-option' data-site-option='{option}' hidden>{html}</span>"  # noqa: E731
+    site_fields = (
+        f"<label data-site-option='name' data-search-only hidden>Ürün adı<input type='text' name='{escape(prefix + 'name', quote=True)}' data-product-name></label>"
+        f"<label data-site-option='size' hidden>Beden<select name='{escape(prefix + 'size', quote=True)}' data-size-select>"
+        "<option value=''>Hepsi</option></select></label>"
+        f"<label data-site-option='exclude_terms' hidden>Hariç tut<input type='text' name='{escape(prefix + 'exclude_terms', quote=True)}'></label>"
+    )
+    site_flags = (
+        hidden("include_variations", _checkbox(prefix, "include_variations", OPTION_LABELS["include_variations"], False))
+        + hidden("official_seller_only", _checkbox(prefix, "official_seller_only", "Platform satıcısı", False)
+                 .replace(">Platform satıcısı</label>", "><span data-seller-label></span></label>"))
+        + hidden("auto_add_to_cart", _checkbox(prefix, "auto_add_to_cart", OPTION_LABELS["auto_add_to_cart"], False))
     )
     return (
         f"<div class='new-watch' data-new-watch data-check-path='{escape(check_path, quote=True)}'>"
@@ -266,8 +275,11 @@ def new_watch_form(index: int, check_path: str) -> str:
         "<div class='new-watch-body' data-new-body hidden>"
         "<div class='new-watch-product'><h3 data-product-title></h3><p class='product-sub' data-product-sub></p>"
         "<div class='variant-table' data-variant-table></div>"
-        f"<div class='watch-site-options'>{site_options}</div></div>"
-        f"<div class='new-watch-fields'>{_common_fields(prefix, {}, True)}</div></div></div>"
+        "<div class='watch-site-options' data-variant-dims data-site-option='variant_filter' hidden></div>"
+        f"<input type='hidden' name='{escape(prefix + 'variant_filter', quote=True)}' data-variant-filter></div>"
+        f"<div class='new-watch-fields'><div class='new-watch-switch'>{_active_switch(prefix, True)}</div>"
+        f"<div class='watch-fields'>{_common_fields(prefix, {}, True)}{site_fields}</div>"
+        f"<div class='watch-site-options'>{site_flags}</div></div></div></div>"
     )
 
 
@@ -478,7 +490,7 @@ def build_watch(form: Dict[str, List[str]], index: int) -> Optional[Dict[str, An
     if priority not in PRIORITIES:
         raise ValueError(f"{_card_context(index, name, [])}: öncelik geçersiz.")
     urls = list(dict.fromkeys(url for field in WATCH_URL_FIELDS if (url := _first(form, prefix + field))))
-    if not any([name, target, size, *urls]):
+    if not any([target, size, *urls]):
         return None
     _require_valid_card(_card_context(index, name, urls), name, target, urls)
     item: Dict[str, Any] = {
@@ -490,9 +502,8 @@ def build_watch(form: Dict[str, List[str]], index: int) -> Optional[Dict[str, An
         "priority": priority,
         "official_seller_only": prefix + "official_seller_only" in form,
         "auto_add_to_cart": prefix + "auto_add_to_cart" in form,
-        "notify_once_in_24H": prefix + "notify_once_in_24H" in form,
-        "notify_90_day_low": prefix + "notify_90_day_low" in form,
-        "notify_window": normalize_notify_window(_first(form, prefix + "notify_window")),
+        # Every card is muted for 24 hours after an alert; there is no setting for it any more.
+        "notify_once_in_24H": True,
         "active": prefix + "active" in form,
     }
     if minimum_price:
@@ -696,7 +707,10 @@ def check_link(url: str, providers) -> Dict[str, Any]:
     except HermesError:
         return {"ok": False, "error": "Bu site desteklenmiyor."}
     provider = providers[site]
-    result: Dict[str, Any] = {"site": site, "options": list(provider.card_options)}
+    result: Dict[str, Any] = {"site": site, "options": list(provider.card_options), "seller_label": SELLER_LABELS.get(site, ""),
+                              "search": watch_name_required_for_url(url)}
+    if result["search"]:
+        return {**result, "ok": True, "title": "", "variants": [], "dimensions": {}, "defaults": {}}
     try:
         with traffic.bind(site), requests.Session() as session:
             preview = provider.inspect(url, ReadContext(timeout=DEFAULT_REQUEST_TIMEOUT_SECONDS, session=session))
@@ -710,4 +724,5 @@ def check_link(url: str, providers) -> Dict[str, Any]:
         "variants": [{"label": _distinct_parts(variant.label), "price": format_tl(variant.price, with_currency=True) if variant.price is not None else "",
                       "in_stock": variant.in_stock, "attributes": variant.attributes} for variant in preview.variants],
         "dimensions": preview.dimensions,
+        "defaults": preview.defaults,
     }

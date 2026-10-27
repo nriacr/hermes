@@ -52,6 +52,12 @@ class IkeaParserTests(unittest.TestCase):
             extract_offer(page(), stocks(kartal="full"), URL)
         self.assertEqual((caught.exception.product_title, caught.exception.product_url), (TITLE, URL))
 
+    def test_chosen_stores_replace_the_defaults(self):
+        offer = extract_offer(page(), stocks(kartal="full"), URL, ["IKEA Kartal"])
+        self.assertEqual(offer.seller, "IKEA Kartal: Stokta Var")
+        with self.assertRaises(OutOfStockHermesError):
+            extract_offer(page(), stocks(online="full", kartal="over"), URL, ["IKEA Kartal"])
+
     def test_thousands_price(self):
         self.assertEqual(extract_offer(page(price="3.299"), stocks(online="full"), URL).price, Decimal("3299"))
 

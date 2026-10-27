@@ -141,3 +141,5 @@ class ProductPreview:
     variants: List[VariantPreview] = field(default_factory=list)
     # Choice boxes: dimension name -> its values in page order.
     dimensions: Dict[str, List[str]] = field(default_factory=dict)
+    # Values ticked before the user chooses (what the card watches when nothing is chosen).
+    defaults: Dict[str, List[str]] = field(default_factory=dict)
