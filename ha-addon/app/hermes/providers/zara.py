@@ -11,7 +11,7 @@ from ..errors import HermesError, OutOfStockHermesError
 from ..logging_utils import log
 from ..models import OfferResult
 from ..utils import normalize_offer_text, parse_decimal, referer_for_url, repair_mojibake
-from .base import Provider, iter_json_objects, soup_from_html
+from .base import Provider, iter_json_objects, size_preview, soup_from_html
 from .http import decode_response_text, read_site_html
 
 OUT_OF_STOCK_MARKERS = ("outofstock", "discontinued", "benzer urunler", "benzer ürünler")
@@ -335,6 +335,19 @@ def fetch_zara_page(session: requests.Session, url: str, timeout: int) -> reques
 
 class ZaraProvider(Provider):
     site = SITE_ZARA
+
+    card_options = ("size",)
+
+    def inspect(self, url, ctx):
+        html = read_site_html(fetch_zara_page(ctx.session, url, ctx.timeout), "Zara", is_interstitial)
+        title, price, sizes = "", None, []
+        for product, variant in _candidate_variants(html):
+            color = _clean_part(variant.get("color") or product.get("color"))
+            size = _variant_size(variant)
+            title = title or _title_with_parts(_base_product_name(product.get("name") or variant.get("name") or "Zara ürünü", color, size), color)
+            price = price or _offer_price(variant.get("offers")) or _offer_price(product.get("offers"))
+            sizes.append((size, _is_available(variant)))
+        return size_preview(self.site, title, price, sizes)
 
     def read(self, watch, ctx, outcome):
         html = read_site_html(fetch_zara_page(ctx.session, watch.url, ctx.timeout), "Zara", is_interstitial)

@@ -201,6 +201,41 @@ def _script_product_variations(soup, source_url: str, limit: int) -> list[Amazon
     return []
 
 
+DIMENSION_LABELS = {"color_name": "Renk", "size_name": "Boyut", "style_name": "Stil", "pattern_name": "Desen",
+                    "configuration": "Yapılandırma", "flavor_name": "Aroma", "item_package_quantity": "Adet"}
+
+
+def _json_value_after(html: str, key: str):
+    """The JSON value written after `"key":` anywhere in the page (Twister state is not valid HTML attributes)."""
+    match = re.search(rf'"{re.escape(key)}"\s*:\s*', html)
+    if not match:
+        return None
+    try:
+        return json.JSONDecoder().raw_decode(html, match.end())[0]
+    except ValueError:
+        return None
+
+
+def product_dimensions(html: str) -> dict[str, list[tuple[str, bool]]]:
+    """Every Twister dimension with its values in page order and whether a new offer is selectable."""
+    dimensions = _json_value_after(html, "sortedDimValuesForAllDims")
+    if not isinstance(dimensions, dict):
+        return {}
+    labels = _json_value_after(html, "variationDisplayLabels")
+    labels = labels if isinstance(labels, dict) else {}
+    order = _json_value_after(html, "dimensions")
+    keys = [key for key in order if key in dimensions] if isinstance(order, list) else []
+    found: dict[str, list[tuple[str, bool]]] = {}
+    for key in keys + [key for key in dimensions if key not in keys]:
+        name = str(labels.get(key) or "").strip() or DIMENSION_LABELS.get(key) or key.removesuffix("_name").replace("_", " ").capitalize()
+        for value in dimensions[key] if isinstance(dimensions[key], list) else []:
+            label = _clean_variation_label(str(value.get("dimensionValueDisplayText") or "")) if isinstance(value, dict) else ""
+            if label and label not in [item for item, _ in found.get(name, [])]:
+                state_name = normalize_offer_text(str(value.get("dimensionValueState") or ""))
+                found.setdefault(name, []).append((label, state_name not in {"unavailable", "disabled"}))
+    return found
+
+
 def parse_product_page(html: str):
     """Parse an Amazon product page once for the provider's page-level readers (indexed selects)."""
     return indexed(soup_from_html(html))

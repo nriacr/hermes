@@ -15,8 +15,8 @@ from ...constants import (
 )
 from ...errors import EmptySearchResultsHermesError, HermesError, OutOfStockHermesError, PriceUnavailableHermesError
 from ...logging_utils import log, ProblemLog
-from ...models import OfferResult, SearchResultItem, WatchRule
-from ...utils import extract_asin_from_url, is_amazon_search_url, log_cell
+from ...models import OfferResult, ProductPreview, SearchResultItem, VariantPreview, WatchRule
+from ...utils import extract_asin_from_url, is_amazon_search_url, log_cell, normalize_offer_text
 from ..base import DEPO_LANE, Provider, ReadContext, WatchRead, excluded_term_in_title
 from ..http import raise_if_age_verification
 from . import parser
@@ -146,8 +146,40 @@ class AmazonProvider(RhythmMixin, PageCacheMixin, Provider):
     def is_protection_error(self, exc: BaseException) -> bool:
         return is_protection_error(exc)
 
+    card_options = ("include_variations", "official_seller_only", "auto_add_to_cart", "variant_filter")
+
+    def inspect(self, url: str, ctx: ReadContext) -> ProductPreview:
+        """The configured page only: its dimensions with stock state and the selected variant's price.
+
+        Other variants' prices need a full sweep, which the first monitoring read does.
+        """
+        if self.is_search_url(url):
+            return super().inspect(url, ctx)
+        html = self.client.fetch(url, ctx.timeout)
+        raise_if_age_verification(html)
+        soup = parser.parse_product_page(html)
+        title = parser.extract_title(soup) or ""
+        selected = {value.strip() for value in parser.selected_variation_label(html, soup=soup).split(" / ")}
+        dimensions = parser.product_dimensions(html)
+        try:
+            new_offers = [offer for offer in parser.extract_offers(html, source_url=url, soup=soup) if not offer.is_warehouse]
+        except HermesError:
+            new_offers = []
+        price = new_offers[0].price if new_offers else None
+        if not dimensions:
+            return ProductPreview(self.site, title, [VariantPreview(title, price, price is not None)])
+        variants = [VariantPreview(value, price if value in selected else None, available, {name: value})
+                    for name, values in dimensions.items() for value, available in values]
+        return ProductPreview(self.site, title, variants,
+                              {name: [value for value, _ in values] for name, values in dimensions.items()})
+
     def keeps_offer(self, watch: WatchRule, offer: OfferResult) -> bool:
-        """With the own-seller option, keep Amazon.com.tr new offers and every verified Depo offer."""
+        """The chosen variant values, then the own-seller option (Amazon.com.tr new offers and verified Depo)."""
+        title = normalize_offer_text(offer.title)
+        for dimension, values in watch.variant_filter.items():
+            if not any(normalize_offer_text(value) in title for value in values):
+                log(f"Varyant seçimi nedeniyle sonuç atlandı ({dimension}): {log_cell(offer.title, 70)}")
+                return False
         if not watch.official_seller_only or offer.is_warehouse or is_platform_seller(offer.seller):
             return True
         log("Platformun kendi satıcısı filtresi nedeniyle sonuç atlandı: "

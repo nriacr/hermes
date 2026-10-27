@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from decimal import Decimal
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from .constants import DEFAULT_PRIORITY
 
@@ -15,8 +15,9 @@ class WatchRule:
     target_price: Decimal
     minimum_price: Optional[Decimal] = None
     excluded_terms: List[str] = field(default_factory=list)
-    group: str = ""
     size: str = ""
+    # Chosen variant values per dimension ({"Renk": ["Siyah"]}); empty keeps every variant.
+    variant_filter: Dict[str, List[str]] = field(default_factory=dict)
     include_variations: bool = False
     priority: str = DEFAULT_PRIORITY
     official_seller_only: bool = False
@@ -118,3 +119,25 @@ class HermesConfig:
     config_errors: List[str] = field(default_factory=list)
     # One summary message a day at 09:00 (reads, errors, best deals).
     daily_summary_enabled: bool = True
+
+
+@dataclass
+class VariantPreview:
+    """One variant read live for the settings page's link check."""
+
+    label: str
+    price: Optional[Decimal] = None
+    in_stock: bool = True
+    # Dimension values of this variant, e.g. {"Renk": "Siyah", "Beden": "M"}.
+    attributes: Dict[str, str] = field(default_factory=dict)
+
+
+@dataclass
+class ProductPreview:
+    """What a link check shows before a card is saved."""
+
+    site: str
+    title: str
+    variants: List[VariantPreview] = field(default_factory=list)
+    # Choice boxes: dimension name -> its values in page order.
+    dimensions: Dict[str, List[str]] = field(default_factory=dict)

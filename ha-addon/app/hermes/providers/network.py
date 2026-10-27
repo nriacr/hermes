@@ -10,6 +10,7 @@ from .base import (
     Provider,
     extract_jsonld_product,
     extract_title,
+    size_preview,
     soup_from_html,
 )
 from .http import fetch_with_retries, read_site_html
@@ -136,6 +137,16 @@ def extract_offers(html: str, source_url: str = "", size: str = "") -> list[Offe
 
 class NetworkProvider(Provider):
     site = SITE_NETWORK
+
+    card_options = ("size",)
+
+    def inspect(self, url, ctx):
+        html = read_site_html(fetch_with_retries(ctx.session, url, ctx.timeout), "Network")
+        offer = extract_offer(html, source_url=url)
+        sizes = _network_product_payload(html).get("Sizes")
+        sizes = [(str(size.get("ValueText") or "").strip(), not size.get("NoStock"))
+                 for size in sizes if isinstance(size, dict)] if isinstance(sizes, list) else []
+        return size_preview(self.site, offer.title, offer.price, sizes)
 
     def read(self, watch, ctx, outcome):
         response = fetch_with_retries(ctx.session, watch.url, ctx.timeout)

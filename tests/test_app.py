@@ -104,14 +104,13 @@ class TelegramQuickAddTests(unittest.TestCase):
         self.assertEqual(telegram._parse_target_price("40000"), Decimal("40000"))
         self.assertIsNone(telegram._parse_target_price("fiyat belli değil"))
 
-    def test_quick_add_uses_the_shared_group_and_the_search_query_as_name(self):
+    def test_quick_add_uses_the_search_query_as_name(self):
         url = "https://www.amazon.com.tr/s?k=edifier+m60"
         with (patch.object(telegram, "read_options", return_value={"gruplar": ["Teknoloji"], "takip_edilenler": []}),
               patch.object(telegram, "save_options_and_restart") as save):
             self.assertEqual(telegram._quick_add_watch(url, Decimal("8700")), telegram.QUICK_ADD_DONE)
         saved = save.call_args.args[0]
-        self.assertIn("Paylaşılanlar", saved["gruplar"])
-        self.assertEqual(saved["takip_edilenler"][0], {"name": "edifier m60", "group": "Paylaşılanlar", "target_price": 8700.0,
+        self.assertEqual(saved["takip_edilenler"][0], {"name": "edifier m60", "target_price": 8700.0,
                                                        "url_1": url, "notify_once_in_24H": True, "active": True,
                                                        "priority": "1m"})
 

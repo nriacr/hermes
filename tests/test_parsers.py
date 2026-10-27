@@ -1,6 +1,6 @@
 import unittest
 from decimal import Decimal
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from support import APP_PATH  # noqa: F401 - puts the add-on on sys.path
 
@@ -2114,7 +2114,6 @@ class WatchCardTests(unittest.TestCase):
                     "url_1": "https://www.amazon.com.tr/dp/B000000001",
                     "url_2": "https://www.hepsiburada.com/ornek-urun-p-HBCV000000000",
                     "url_3": "https://www.trendyol.com/stark-sirt-cantasi",
-                    "group": "Moda",
                     "size": "M",
                     "notify_once_in_24H": True,
                     "active": True,
@@ -2124,7 +2123,6 @@ class WatchCardTests(unittest.TestCase):
         self.assertEqual(len(watches), 3)
         self.assertEqual([item.site for item in watches], ["amazon", "hepsiburada", "trendyol"])
         self.assertTrue(all(item.name == "Ortak ürün" for item in watches))
-        self.assertTrue(all(item.group == "Moda" for item in watches))
         self.assertTrue(all(item.size == "M" for item in watches))
 
     def test_tracking_card_id_is_shared_by_its_links_and_unique_per_card(self):
@@ -2147,28 +2145,24 @@ class WatchCardTests(unittest.TestCase):
         self.assertEqual(watches[0].tracking_id, watches[1].tracking_id)
         self.assertNotEqual(watches[0].tracking_id, watches[2].tracking_id)
 
-    def test_existing_zara_and_hm_watches_default_to_moda_group(self):
-        watches = prepare_watches(
-            [
-                {
-                    "target_price": 1000,
-                    "url_1": "https://www.zara.com/tr/tr/ornek-p03166301.html",
-                    "active": True,
-                },
-                {
-                    "target_price": 1000,
-                    "url_1": "https://www2.hm.com/tr_tr/productpage.1286182003.html",
-                    "active": True,
-                },
-                {
-                    "target_price": 1000,
-                    "url_1": "https://www.amazon.com.tr/dp/B000000001",
-                    "active": True,
-                },
-            ]
-        )
+    def test_amazon_twister_dimensions_keep_page_order_and_stock(self):
+        html = '''<script type="a-state" data-a-state='{"key":"desktop-twister-sort-filter-data"}'>
+        {"sortedDimValuesForAllDims":{
+          "color_name":[{"dimensionValueState":"SELECTED","dimensionValueDisplayText":"Siyah"},
+                        {"dimensionValueState":"UNAVAILABLE","dimensionValueDisplayText":"Gümüş"}],
+          "size_name":[{"dimensionValueState":"AVAILABLE","dimensionValueDisplayText":"256 GB"}]}}
+        </script>'''
+        self.assertEqual(amazon_parser.product_dimensions(html),
+                         {"Renk": [("Siyah", True), ("Gümüş", False)], "Boyut": [("256 GB", True)]})
 
-        self.assertEqual([watch.group for watch in watches], ["Moda", "Moda", ""])
+    def test_amazon_keeps_only_the_chosen_variant_values(self):
+        provider = AmazonProvider(client=Mock())
+        watch = WatchRule(name="", site="amazon", url="https://www.amazon.com.tr/dp/B000000001", target_price=Decimal("1"),
+                          variant_filter={"Renk": ["Siyah", "Mavi"], "Boyut": ["256 GB"]})
+        offer = lambda title: OfferResult(title=title, price=Decimal("1"))  # noqa: E731
+        self.assertTrue(provider.keeps_offer(watch, offer("Telefon / Siyah / 256 GB")))
+        self.assertFalse(provider.keeps_offer(watch, offer("Telefon / Gümüş / 256 GB")))
+        self.assertFalse(provider.keeps_offer(watch, offer("Telefon / Mavi / 512 GB")))
 
     def test_watch_card_detects_site_from_url(self):
         watches = prepare_watches(

@@ -12,7 +12,7 @@ from ..logging_utils import log
 from ..traffic import count_curl
 from ..models import OfferResult
 from ..utils import build_headers, normalize_offer_text, parse_decimal, repair_mojibake
-from .base import Provider, extract_title, iter_json_objects, soup_from_html
+from .base import Provider, extract_title, iter_json_objects, size_preview, soup_from_html
 from .product_page import product_json, explicit_price, visible_price, scoped_soup
 from .http import HtmlResponse, curl_requests, read_site_html
 
@@ -452,6 +452,19 @@ class HMProvider(Provider):
 
     def begin_cycle(self) -> None:
         self.pages = {}
+
+    card_options = ("size",)
+
+    def inspect(self, url, ctx):
+        html = read_site_html(fetch_hm_page(ctx.session, url, ctx.timeout), "H&M", is_access_denied_page,
+                              message="H&M bot koruması nedeniyle ürün verisi okunamadı.")
+        for data in _product_like_objects(html):
+            sizes = _sizes_from_product(data)
+            if sizes:
+                name = _clean(_field(data, ("name", "title", "productName")) or "H&M ürünü")
+                color = _clean(_field(data, ("color", "colorName", "colour", "colourName", "swatchColorName")))
+                return size_preview(self.site, _display_title(name, color, ""), _price_from_product(data), sizes)
+        return super().inspect(url, ctx)
 
     def read(self, watch, ctx, outcome):
         if watch.url not in self.pages:

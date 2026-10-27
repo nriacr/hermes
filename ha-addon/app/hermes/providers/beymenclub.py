@@ -21,6 +21,7 @@ from .base import (
     Provider,
     extract_jsonld_product,
     extract_title,
+    size_preview,
     soup_from_html,
 )
 from .http import curl_requests, decode_response_text, read_site_html
@@ -302,6 +303,20 @@ def fetch_beymenclub_size_summary(session: requests.Session, product_url: str, p
 
 class BeymenClubProvider(Provider):
     site = SITE_BEYMENCLUB
+
+    card_options = ("size",)
+
+    def inspect(self, url, ctx):
+        html = read_site_html(fetch_beymenclub_page(ctx.session, url, ctx.timeout), "Beymen Club")
+        offer = extract_offer(html, source_url=url)
+        product_id = extract_product_id(html)
+        summary = fetch_beymenclub_size_summary(ctx.session, url, product_id, ctx.timeout) if product_id is not None else {}
+        result = summary.get("result") if isinstance(summary, dict) else None
+        sizes = result.get("sizes") if isinstance(result, dict) else None
+        sizes = [(str(size.get("sizeName") or "").strip(),
+                  bool(size.get("inStock")) and (size.get("stockQuantity") is None or size.get("stockQuantity") > 0))
+                 for size in sizes if isinstance(size, dict)] if isinstance(sizes, list) else []
+        return size_preview(self.site, offer.title, offer.price, sizes)
 
     def read(self, watch, ctx, outcome):
         html = read_site_html(fetch_beymenclub_page(ctx.session, watch.url, ctx.timeout), "Beymen Club")

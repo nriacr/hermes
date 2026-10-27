@@ -8,7 +8,10 @@ from typing import Any, Callable, Dict, Iterable, List, Optional
 import requests
 from bs4 import BeautifulSoup
 
-from ..errors import HermesError
+from decimal import Decimal
+
+from ..errors import HermesError, OutOfStockHermesError
+from ..models import ProductPreview, VariantPreview, WatchRule
 from ..utils import normalize_offer_text, parse_decimal, repair_mojibake
 
 PRODUCT_TITLE_SELECTORS = [
@@ -149,6 +152,13 @@ def excluded_term_in_title(watch, title: str) -> str:
     return next((term for term in watch.excluded_terms if normalize_offer_text(term) in normalized_title), "")
 
 
+def size_preview(site: str, title: str, price, sizes) -> ProductPreview:
+    """A clothing page's link check: one row per size, (name, available) in page order."""
+    names = list(dict.fromkeys(name for name, _ in sizes if name))
+    variants = [VariantPreview(name, price, available, {"Beden": name}) for name, available in sizes if name]
+    return ProductPreview(site, title, variants or [VariantPreview(title, price)], {"Beden": names} if names else {})
+
+
 # ---------------------------------------------------------------------------
 # Provider interface
 # ---------------------------------------------------------------------------
@@ -230,6 +240,8 @@ class Provider:
     # The provider spaces every network request itself (Amazon's client);
     # otherwise the monitor spaces the start of each watch read.
     spaces_own_requests = False
+    # Card options shown for this site besides the common ones ("size", "include_variations", ...).
+    card_options: tuple = ()
 
     def set_request_delay(self, minimum: float, maximum: float) -> None:
         """The configured random wait before a request; only providers that space their own requests use it."""
@@ -293,3 +305,14 @@ class Provider:
 
     def display_title(self, title: str) -> str:
         return title
+
+    def inspect(self, url: str, ctx: ReadContext) -> ProductPreview:
+        """A link check before saving: the offers one ordinary read returns, without dimensions."""
+        watch = WatchRule(name="", site=self.site, url=url, target_price=Decimal(0))
+        try:
+            offers = list(self.read(watch, ctx, WatchRead()))
+        except OutOfStockHermesError as exc:
+            title = exc.product_title or ""
+            return ProductPreview(self.site, title, [VariantPreview(title, in_stock=False)] if title else [])
+        title = self.display_title(offers[0].title) if offers else ""
+        return ProductPreview(self.site, title, [VariantPreview(self.display_title(offer.title), offer.price) for offer in offers])

@@ -21,7 +21,7 @@ class FrequencyTests(unittest.TestCase):
     def test_only_the_eight_requested_intervals_are_selectable(self):
         self.assertEqual(PRIORITIES, tuple(step[0] for step in STEPS))
         self.assertEqual(DEFAULT_PRIORITY, "1m")
-        html = settings.watch_form({}, 0, is_new=True)
+        html = settings.new_watch_form(0, "settings/check")
         self.assertNotIn("Her çevrim", html)
         for value, _seconds, label in STEPS:
             self.assertIn(f"value='{value}'", html)

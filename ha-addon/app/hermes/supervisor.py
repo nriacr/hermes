@@ -79,8 +79,9 @@ def save_options_and_restart(options: Dict[str, Any], restart_delay_seconds: flo
 
 
 def migrate_card_ids(options):
+    """Store missing card ids and drop the removed group options once, at start."""
     cards = options.get("takip_edilenler", [])
-    if not any(isinstance(item, dict) and not item.get("id") for item in cards):
+    if "gruplar" not in options and not any(isinstance(item, dict) and (not item.get("id") or "group" in item) for item in cards):
         return
     saved = options_with_defaults(options)
     if os.getenv("SUPERVISOR_TOKEN"):

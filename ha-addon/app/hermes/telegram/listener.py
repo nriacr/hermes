@@ -17,7 +17,6 @@ from ..constants import (
     DEFAULT_PRIORITY,
     TELEGRAM_ERROR_EVENTS_PATH,
     TELEGRAM_LOGIN_STATE_PATH,
-    TELEGRAM_QUICK_ADD_GROUP,
     TELEGRAM_QUICK_ADD_PATH,
     TELEGRAM_SEEN_MESSAGES_PATH,
     TELEGRAM_SESSION_PATH,
@@ -286,14 +285,6 @@ def _quick_add_search_name(url: str) -> str:
     return ""
 
 
-def _ensure_quick_add_group(options: Dict[str, Any]) -> None:
-    groups = options.get("gruplar")
-    groups = [str(group).strip() for group in groups if str(group).strip()] if isinstance(groups, list) else []
-    if TELEGRAM_QUICK_ADD_GROUP.casefold() not in {group.casefold() for group in groups}:
-        groups.append(TELEGRAM_QUICK_ADD_GROUP)
-    options["gruplar"] = groups
-
-
 QUICK_ADD_DONE = "Takip kaydı eklendi"
 
 
@@ -317,14 +308,12 @@ def _quick_add_watch_locked(url: str, target_price, name: str) -> str:
             return "Arama bağlantısındaki ürün adı çözümlenemedi. Bağlantıyı Hermes Ayarlar ekranından ekle."
     options["takip_edilenler"] = watches + [{
         "name": normalized_name,
-        "group": TELEGRAM_QUICK_ADD_GROUP,
         "target_price": float(target_price),
         "url_1": normalized_url,
         "notify_once_in_24H": True,
         "active": True,
         "priority": DEFAULT_PRIORITY,
     }]
-    _ensure_quick_add_group(options)
     save_options_and_restart(options)
     return QUICK_ADD_DONE
 
@@ -350,7 +339,7 @@ async def _handle_saved_message_quick_add(event) -> bool:
         if result == QUICK_ADD_DONE:
             await event.reply(
                 f"Hermes: {result}. Hedef fiyat: {format_tl(target_price, with_currency=True)}. "
-                f"Kayıt `{TELEGRAM_QUICK_ADD_GROUP}` grubuna eklendi; beden ve diğer ayarları Hermes Ayarlar ekranından düzenleyebilirsin."
+                "Beden ve diğer ayarları Hermes Ayarlar ekranından düzenleyebilirsin."
             )
             log(f"Telegram Kayıtlı Mesajlar ile takip eklendi: {pending['url']}")
         else:

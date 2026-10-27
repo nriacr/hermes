@@ -22,6 +22,7 @@ from ..config import read_options
 from ..constants import APP_VERSION
 from ..logging_utils import log, redact
 from ..notifier import Pushover
+from ..providers.registry import ProviderSet
 from ..utils import parse_bool
 from . import assets
 from .access import Session, WebAccess
@@ -30,7 +31,7 @@ from .icons import HERMES_ICON_PNG, HERMES_ICON_SVG, render_web_manifest
 from .pages import link
 from .pin import csrf_field, render_configure_page, render_pin_page, render_session_bar
 from .statistics import clear_statistics_cache, render_statistics_page, statistics_live_html
-from .settings import handle_restart, handle_settings_save, render_restart_page, render_settings_page
+from .settings import check_link, handle_restart, handle_settings_save, render_restart_page, render_settings_page
 
 PUBLIC_TOKEN_MIN_LENGTH = 24
 # Text responses above this size are gzip-compressed when the browser accepts it.
@@ -173,6 +174,7 @@ class Router:
     def __init__(self, runtime: Runtime, access: Optional[WebAccess] = None) -> None:
         self.runtime = runtime
         self.access = access or WebAccess()
+        self._spare_providers = None
 
     def _cookie(self, request: Request, token: str) -> str:
         return self.access.cookie(token, request.scope, request.secure)
@@ -317,7 +319,18 @@ class Router:
             return NOT_FOUND
         return Response(200, pages[path](), HTML)
 
+    def _providers(self):
+        service = getattr(self.runtime, "service", None)
+        if service is not None:
+            return service.monitor.providers
+        if self._spare_providers is None:  # the monitor is not running (configuration error)
+            self._spare_providers = ProviderSet()
+        return self._spare_providers
+
     def _post(self, request: Request, path: str) -> Response:
+        if path == "/settings/check":
+            result = check_link(self._form(request).get("url", [""])[0], self._providers())
+            return Response(200, json.dumps(result, ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8")
         clear_dashboard_cache()
         if path == "/settings/save":
             ok, message = handle_settings_save(request.body)

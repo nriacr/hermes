@@ -7,19 +7,28 @@ import urllib.parse
 from html import escape
 from typing import Any, Dict, List, Optional
 
-from ..config import DEFAULT_TELEGRAM_CHANNELS, WATCH_URL_FIELDS, options_with_defaults, read_options, watch_group, watch_urls
+import requests
+
+from .. import traffic
+from ..config import (
+    DEFAULT_TELEGRAM_CHANNELS, WATCH_URL_FIELDS, format_variant_filter, options_with_defaults, parse_variant_filter, read_options, watch_urls,
+)
 from ..constants import (
-    APP_VERSION, DEFAULT_PRIORITY, PRIORITIES, PRIORITY_DESCRIPTIONS, PRIORITY_LABELS, STATE_PATH, NOTIFY_WINDOWS, normalize_notify_window, SUMMARY_PATH, SITE_LABELS, normalize_priority,
+    APP_VERSION, DEFAULT_PRIORITY, DEFAULT_REQUEST_TIMEOUT_SECONDS, PRIORITIES, PRIORITY_DESCRIPTIONS, PRIORITY_LABELS, STATE_PATH, NOTIFY_WINDOWS, normalize_notify_window, SUMMARY_PATH, SITE_LABELS, normalize_priority,
 )
 from ..errors import HermesError
 from ..logging_utils import log
+from ..providers.base import ReadContext
+from ..providers.registry import PROVIDER_TYPES
 from ..storage import load_json
 from ..supervisor import OPTIONS_LOCK, save_options_and_restart, schedule_restart
 from ..utils import detect_site_from_url, format_tl, parse_bool, parse_decimal, site_label, utc_now, watch_name_required_for_url
 from .dashboard import priority_dot
 from .pages import link, render_notice, render_page, render_tool_actions, confirm_script_tag
 
-OTHER_GROUP = "Diğer"
+OTHER_SITE = "Diğer"
+# Card options each site shows besides the common ones.
+SITE_OPTIONS = {provider.site: provider.card_options for provider in PROVIDER_TYPES}
 MAX_WATCH_CARDS = 500
 STALE_PAGE_MESSAGE = "Ayar sayfası eskimiş: takip listesi bu sayfa açıldıktan sonra değişti. Sayfayı yenile ve değişikliği tekrar yap."
 
@@ -151,24 +160,40 @@ def _card_priority(item: Dict[str, Any], is_new: bool) -> str:
     return DEFAULT_PRIORITY if is_new else normalize_priority(item.get("priority"))
 
 
-def watch_form(item: Dict[str, Any], index: int, is_new: bool = False, groups=None, known_titles=None, show_remove=False) -> str:
-    prefix = f"watches_{index}_"
-    group = watch_group(item) or OTHER_GROUP
-    display_name = watch_display_name(item, index, known_titles or {})
-    title = "Yeni takip ekle" if is_new else f"[{group}] {display_name}"
-    group_choices = list(groups or [])
-    if not is_new and group != OTHER_GROUP and group not in group_choices:
-        group_choices.append(group)
-    urls = watch_urls(item)
-    selected_group = "" if is_new else (str(item.get("group") or "").strip() or (group if group != OTHER_GROUP else ""))
-    exclude_terms = item.get("exclude_terms", "") if isinstance(item, dict) else ""
+def _watch_site(item) -> str:
+    for url in watch_urls(item):
+        try:
+            return detect_site_from_url(url)
+        except HermesError:
+            continue
+    return ""
+
+
+OPTION_LABELS = {
+    "include_variations": "Varyasyonları ekle",
+    "official_seller_only": "Yalnızca Amazon satıcısı",
+    "auto_add_to_cart": "Otomatik sepete ekle",
+}
+
+
+def _site_options(prefix, item, site) -> str:
+    """The site's own fields of a saved card."""
+    parts = []
+    for option in SITE_OPTIONS.get(site, ()):
+        if option == "size":
+            parts.append(_field(prefix, "size", "Beden", item.get("size", "")))
+        elif option == "variant_filter":
+            parts.append(_field(prefix, "variant_filter", "Varyant seçimi", item.get("variant_filter", "")))
+        else:
+            parts.append(_checkbox(prefix, option, OPTION_LABELS[option], item.get(option, False)))
+    return "".join(parts)
+
+
+def _common_fields(prefix, item, is_new) -> str:
+    exclude_terms = item.get("exclude_terms", "")
     if isinstance(exclude_terms, list):
         exclude_terms = ", ".join(str(term).strip() for term in exclude_terms if str(term).strip())
     priority = _card_priority(item, is_new)
-    link_fields = "".join(
-        _field(prefix, field_name, f"Link {number}", urls[number - 1] if len(urls) >= number else "", "url")
-        for number, field_name in enumerate(WATCH_URL_FIELDS, start=1)
-    )
     priority_field = (
         f"<label class='watch-priority'>Öncelik<select name='{escape(prefix + 'priority', quote=True)}' data-watch-priority>"
         + "".join(f"<option value='{value}' title='{escape(PRIORITY_DESCRIPTIONS[value], quote=True)}'"
@@ -181,47 +206,80 @@ def watch_form(item: Dict[str, Any], index: int, is_new: bool = False, groups=No
                   f"{escape(label)}</option>" for value, label in NOTIFY_WINDOWS.items())
         + "</select></label>"
     )
-    exclude_field = _field(prefix, "exclude_terms", "Hariç Tut", exclude_terms).replace("<label>", "<label class='watch-exclude'>", 1)
-    flags = "".join([
-        _checkbox(prefix, "include_variations", "Varyasyonları ekle", False if is_new else item.get("include_variations", False)),
-        _checkbox(prefix, "official_seller_only", "Yalnızca platformun kendi satıcısı", False if is_new else item.get("official_seller_only", False)),
-        _checkbox(prefix, "auto_add_to_cart", "Otomatik sepete ekle (Amazon)", False if is_new else item.get("auto_add_to_cart", False)),
-        _checkbox(prefix, "notify_once_in_24H", "24 saat sustur", True if is_new else item.get("notify_once_in_24H", True)),
-        _checkbox(prefix, "notify_90_day_low", "90 günün en düşüğünde de bildir", False if is_new else item.get("notify_90_day_low", False)),
-        _checkbox(prefix, "active", "Aktif", True if is_new else item.get("active", True)),
-    ])
-    if is_new:
-        actions = ("<div class='watch-actions'><button class='button secondary' type='button' data-remove-new-watch>Bu kartı kaldır</button></div>"
-                   if show_remove else "")
-    else:
-        actions = "<div class='watch-actions'><button class='button danger' type='button' data-delete-watch>Sil</button></div>"
-    inner = (
-        f"<input type='hidden' name='{escape(prefix + 'id', quote=True)}' value='{escape(str(item.get('id') or ''), quote=True)}'>"
-        f"<input type='hidden' name='{escape(prefix + 'delete', quote=True)}' value='0' data-delete-flag>"
-        "<div class='watch-layout'><div class='watch-top'>"
-        f"{_select(prefix, 'group', 'Grup', selected_group, group_choices)}"
+    return (
+        "<div class='watch-fields'>"
         f"{_field(prefix, 'name', 'Ad', item.get('name', ''))}"
-        f"{_field(prefix, 'target_price', 'Hedef Fiyat Maks', _price_input_value(item.get('target_price', '')))}"
-        f"{_field(prefix, 'minimum_price', 'Hedef Fiyat Min', _price_input_value(item.get('minimum_price', '')))}"
-        f"{_field(prefix, 'size', 'Beden', item.get('size', ''))}"
-        f"</div><div class='watch-links'>{link_fields}</div>"
-        f"<div class='watch-bottom'>{priority_field}{window_field}{exclude_field}{flags}{actions}</div></div>"
+        f"{_field(prefix, 'target_price', 'Hedef fiyat maks', _price_input_value(item.get('target_price', '')))}"
+        f"{_field(prefix, 'minimum_price', 'Hedef fiyat min', _price_input_value(item.get('minimum_price', '')))}"
+        f"{priority_field}{window_field}{_field(prefix, 'exclude_terms', 'Hariç tut', exclude_terms)}</div>"
+        "<div class='watch-flags'>"
+        + _checkbox(prefix, "active", "Aktif", True if is_new else item.get("active", True))
+        + _checkbox(prefix, "notify_once_in_24H", "24 saat sustur", True if is_new else item.get("notify_once_in_24H", True))
+        + _checkbox(prefix, "notify_90_day_low", "90 gün en düşük", False if is_new else item.get("notify_90_day_low", False))
+        + "</div>"
     )
-    attributes = " data-new-watch='true'" if is_new else (
-        f" data-watch-group='{escape(group, quote=True)}' data-watch-search='{escape(display_name, quote=True)}'"
-    )
-    dot = "" if is_new else priority_dot(priority)
-    pick = "" if is_new else "<input type='checkbox' class='bulk-pick' data-bulk-pick aria-label='Toplu işlem için seç'>"
-    return f"<details data-watch-card{attributes}><summary>{pick}{dot}{escape(title)}</summary><div class='form-grid'>{inner}</div></details>"
 
 
-def group_choices(configured_groups, items) -> List[str]:
-    groups: List[str] = []
-    for value in [str(group or "").strip() for group in configured_groups or []] + [
-            watch_group(item) or OTHER_GROUP for item in _as_list(items)]:
-        if value and value.casefold() not in {existing.casefold() for existing in groups}:
-            groups.append(value)
-    return groups
+def _hidden_identity(prefix, item) -> str:
+    return (f"<input type='hidden' name='{escape(prefix + 'id', quote=True)}' value='{escape(str(item.get('id') or ''), quote=True)}'>"
+            f"<input type='hidden' name='{escape(prefix + 'delete', quote=True)}' value='0' data-delete-flag>")
+
+
+def watch_form(item: Dict[str, Any], index: int, known_titles=None) -> str:
+    """A saved card: its links, the common fields and only its site's own fields."""
+    prefix = f"watches_{index}_"
+    display_name = watch_display_name(item, index, known_titles or {})
+    urls = watch_urls(item) or [""]
+    links = "".join(_field(prefix, field_name, "Link" if number == 1 else f"Link {number}", url, "url")
+                    for number, (field_name, url) in enumerate(zip(WATCH_URL_FIELDS, urls), start=1))
+    site_options = _site_options(prefix, item, _watch_site(item))
+    inner = (
+        _hidden_identity(prefix, item)
+        + f"<div class='watch-links'>{links}</div>"
+        + _common_fields(prefix, item, False)
+        + (f"<div class='watch-site-options'>{site_options}</div>" if site_options else "")
+        + "<div class='watch-actions'><button class='button danger' type='button' data-delete-watch>Sil</button></div>"
+    )
+    return (f"<details data-watch-card data-watch-search='{escape(display_name, quote=True)}'><summary>"
+            "<input type='checkbox' class='bulk-pick' data-bulk-pick aria-label='Toplu işlem için seç'>"
+            f"{priority_dot(_card_priority(item, False))}{escape(display_name)}</summary><div class='form-grid'>{inner}</div></details>")
+
+
+def new_watch_form(index: int, check_path: str) -> str:
+    """Link first; the site's fields open after a successful check."""
+    prefix = f"watches_{index}_"
+    size_options = "<option value=''>Hepsi</option>"
+    site_options = (
+        f"<label data-site-option='size' hidden>Beden<select name='{escape(prefix + 'size', quote=True)}' data-size-select>{size_options}</select></label>"
+        + "".join(f"<span data-site-option='{option}' hidden>{_checkbox(prefix, option, OPTION_LABELS[option], False)}</span>"
+                  for option in ("include_variations", "official_seller_only", "auto_add_to_cart"))
+        + f"<div data-site-option='variant_filter' data-variant-dims hidden></div>"
+          f"<input type='hidden' name='{escape(prefix + 'variant_filter', quote=True)}' data-variant-filter>"
+    )
+    return (
+        f"<div class='new-watch' data-new-watch data-check-path='{escape(check_path, quote=True)}'>"
+        + _hidden_identity(prefix, {})
+        + "<div class='link-row'>"
+          f"<input type='url' name='{escape(prefix + 'url_1', quote=True)}' aria-label='Link' autocomplete='off' data-check-url>"
+          "<button class='button primary' type='button' data-check-link>Kontrol et</button></div>"
+        "<p class='check-error' data-check-error hidden></p>"
+        "<div class='new-watch-body' data-new-body hidden>"
+        "<div class='new-watch-product'><h3 data-product-title></h3><p class='product-sub' data-product-sub></p>"
+        "<div class='variant-table' data-variant-table></div>"
+        f"<div class='watch-site-options'>{site_options}</div></div>"
+        f"<div class='new-watch-fields'>{_common_fields(prefix, {}, True)}</div></div></div>"
+    )
+
+
+def sites_in_order(watches) -> List[tuple]:
+    """(site label, [(index, card)]) in the supported-site order; unknown links last."""
+    grouped: Dict[str, List[tuple]] = {}
+    for index, item in enumerate(watches):
+        item = item if isinstance(item, dict) else {}
+        site = _watch_site(item)
+        grouped.setdefault(SITE_LABELS.get(site, OTHER_SITE), []).append((index, item))
+    order = list(SITE_LABELS.values()) + [OTHER_SITE]
+    return [(label, grouped[label]) for label in order if label in grouped]
 
 
 def _list_from_text(raw_value: str) -> List[str]:
@@ -304,10 +362,9 @@ def supported_sites_text() -> str:
     return ", ".join(SITE_LABELS.values())
 
 
-def bulk_toolbar(groups: List[str]) -> str:
+def bulk_toolbar() -> str:
     """Selection controls that only fill the existing card fields; saving stays the single apply step."""
     priorities = "".join(f"<option value='{value}'>{escape(label)}</option>" for value, label in PRIORITY_LABELS.items())
-    group_options = "".join(f"<option value='{escape(group, quote=True)}'>{escape(group)}</option>" for group in groups)
     return (
         "<section class='settings-section bulk-tools' data-bulk-tools><h2>Toplu işlem</h2>"
         "<div class='bulk-row'><button class='button secondary' type='button' data-bulk-all>Görünenleri seç</button>"
@@ -316,27 +373,24 @@ def bulk_toolbar(groups: List[str]) -> str:
         "<div class='bulk-row'><button class='button secondary' type='button' data-bulk-active='1'>Aktif yap</button>"
         "<button class='button secondary' type='button' data-bulk-active='0'>Pasif yap</button>"
         f"<select data-bulk-priority aria-label='Öncelik'>{priorities}</select>"
-        "<button class='button secondary' type='button' data-bulk-set-priority>Önceliği uygula</button>"
-        f"<select data-bulk-group aria-label='Grup'><option value=''>Grup yok</option>{group_options}</select>"
-        "<button class='button secondary' type='button' data-bulk-set-group>Grubu uygula</button></div>"
+        "<button class='button secondary' type='button' data-bulk-set-priority>Önceliği uygula</button></div>"
         "</section>"
+    )
+
+
+def _site_groups(watches, known_titles) -> str:
+    return "".join(
+        f"<details class='site-group' data-site-group><summary>{escape(label)}<span class='site-count'>{len(cards)}</span></summary>"
+        f"<div class='site-cards'>{''.join(watch_form(item, index, known_titles) for index, item in cards)}</div></details>"
+        for label, cards in sites_in_order(watches)
     )
 
 
 def render_settings_page(base: str, params: Dict[str, List[str]], *, access_bar: str = "", open_http: bool = False) -> bytes:
     options = read_options()
-    configured_groups = _list_from_text("\n".join(str(group) for group in _as_list(options.get("gruplar"))))
     known_titles = stored_watch_titles()
     watches = _as_list(options.get("takip_edilenler"))
-    groups = group_choices(configured_groups, watches)
     new_index = len(watches)
-    template = watch_form({}, 0, is_new=True, groups=groups, show_remove=True).replace("watches_0_", "watches___INDEX___")
-    filters = "".join(
-        f"<button class='watch-group-filter' type='button' data-watch-group-filter='{escape(group, quote=True)}' aria-pressed='true'>{escape(group)}</button>"
-        for group in group_choices(configured_groups, watches)
-    )
-    if filters:
-        filters = f"<div class='watch-group-filters' aria-label='Takip edilen grup filtreleri'>{filters}</div>"
     notice = render_notice(params.get("saved", [""])[0], params.get("msg", [""])[0])
     http_notice = render_notice("warn", HTTP_WARNING) if open_http else ""
     body = (
@@ -344,19 +398,12 @@ def render_settings_page(base: str, params: Dict[str, List[str]], *, access_bar:
         f"<form id='settings-form' method='post' action='{escape(link(base, 'settings/save'), quote=True)}' data-settings-save>"
         "<input type='hidden' name='operation' value='update_existing'>"
         f"<input type='hidden' name='watches_count' id='watches-count' value='{new_index + 1}'>"
-        "<section class='settings-section'><h2>Yeni takip ekle</h2>"
-        f"<div id='new-watch-list'>{watch_form({}, new_index, is_new=True, groups=groups, known_titles=known_titles)}</div>"
-        "<div class='actions'><button class='button secondary' type='button' id='add-watch-card'>Başka takip ekle</button></div>"
-        f"<template id='new-watch-template'>{template}</template></section>"
-        "<section class='settings-section watch-tools'><label class='watch-search'>Takip edilenlerde ara"
-        "<input id='watch-search' type='search' placeholder='Ürün adında ara' autocomplete='off'></label>"
-        f"{filters}"
-        "</section>"
-        + bulk_toolbar(groups) +
+        "<section class='settings-section'><h2>Yeni takip</h2>"
+        f"{new_watch_form(new_index, link(base, 'settings/check'))}</section>"
         "<section class='settings-section'><h2>Takip edilenler</h2>"
-        + "".join(watch_form(item if isinstance(item, dict) else {}, index, groups=groups, known_titles=known_titles)
-                  for index, item in enumerate(watches))
-        + "</section>"
+        "<input id='watch-search' type='search' placeholder='Ara' aria-label='Takip edilenlerde ara' autocomplete='off'>"
+        f"{_site_groups(watches, known_titles)}</section>"
+        + bulk_toolbar()
         + _telegram_section(options)
         + _timing_section(options)
         + _daily_summary_section(options)
@@ -420,10 +467,10 @@ def _require_valid_card(context: str, name: str, target: str, urls: List[str]) -
 def build_watch(form: Dict[str, List[str]], index: int) -> Optional[Dict[str, Any]]:
     prefix = f"watches_{index}_"
     name = _first(form, prefix + "name")
-    group = _first(form, prefix + "group")
     target = _first(form, prefix + "target_price")
     minimum_price = _first(form, prefix + "minimum_price")
     size = _first(form, prefix + "size")
+    variant_filter = format_variant_filter(parse_variant_filter(_first(form, prefix + "variant_filter")))
     exclude_terms = _first(form, prefix + "exclude_terms")
     priority = _first(form, prefix + "priority", DEFAULT_PRIORITY).casefold()
     if priority == "cycle":  # an already-open pre-update form can still save safely
@@ -437,9 +484,9 @@ def build_watch(form: Dict[str, List[str]], index: int) -> Optional[Dict[str, An
     item: Dict[str, Any] = {
         "id": _first(form, prefix + "id") or uuid.uuid4().hex,
         "name": name,
-        "group": group or watch_group({f"url_{number}": url for number, url in enumerate(urls, start=1)}),
         "target_price": _price_from_form(target),
-        "include_variations": prefix + "include_variations" in form,
+        # Choosing variant values reads the variant family.
+        "include_variations": prefix + "include_variations" in form or bool(variant_filter),
         "priority": priority,
         "official_seller_only": prefix + "official_seller_only" in form,
         "auto_add_to_cart": prefix + "auto_add_to_cart" in form,
@@ -454,6 +501,8 @@ def build_watch(form: Dict[str, List[str]], index: int) -> Optional[Dict[str, An
         item["exclude_terms"] = exclude_terms
     if size:
         item["size"] = size
+    if variant_filter:
+        item["variant_filter"] = variant_filter
     for number, url in enumerate(urls, start=1):
         item[f"url_{number}"] = url
     return item
@@ -632,3 +681,33 @@ def handle_restart():
         return True, "Hermes yeniden başlatılıyor; ayarlar değişmedi."
     except Exception as exc:  # noqa: BLE001
         return False, f"Hermes yeniden başlatılamadı: {exc}"
+
+
+def _distinct_parts(text: str) -> str:
+    """"Ürün / Ürün / Siyah" -> "Ürün / Siyah": some sites repeat the name in their variant titles."""
+    return " / ".join(dict.fromkeys(part.strip() for part in str(text or "").split(" / ") if part.strip()))
+
+
+def check_link(url: str, providers) -> Dict[str, Any]:
+    """The new-card link check: the site and its live product, variants and choice boxes."""
+    url = str(url or "").strip()
+    try:
+        site = detect_site_from_url(url)
+    except HermesError:
+        return {"ok": False, "error": "Bu site desteklenmiyor."}
+    provider = providers[site]
+    result: Dict[str, Any] = {"site": site, "options": list(provider.card_options)}
+    try:
+        with traffic.bind(site), requests.Session() as session:
+            preview = provider.inspect(url, ReadContext(timeout=DEFAULT_REQUEST_TIMEOUT_SECONDS, session=session))
+    except Exception as exc:  # noqa: BLE001
+        log(f"Link kontrolü okunamadı: {site_label(site)} | {exc}")
+        return {**result, "ok": False, "error": f"Sayfa okunamadı: {exc}"}
+    return {
+        **result,
+        "ok": True,
+        "title": _distinct_parts(preview.title),
+        "variants": [{"label": _distinct_parts(variant.label), "price": format_tl(variant.price, with_currency=True) if variant.price is not None else "",
+                      "in_stock": variant.in_stock, "attributes": variant.attributes} for variant in preview.variants],
+        "dimensions": preview.dimensions,
+    }

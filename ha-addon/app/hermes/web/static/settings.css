@@ -3,13 +3,13 @@ body.ov .page-heading { margin:6px 0 14px; font:800 clamp(28px,4vw,40px)/1.05 va
 .settings-page .settings-section { margin-top:16px; padding:18px; border-radius:22px; border:1px solid var(--edge); background:var(--glass); backdrop-filter:blur(10px); }
 .settings-page .settings-section h2 { margin:0 0 12px; font:700 13px var(--display); letter-spacing:.14em; text-transform:uppercase; color:var(--mute); }
 .settings-page details { margin:10px 0; border-radius:18px; border:1px solid var(--edge); background:rgba(255,255,255,.045); transition:border-color .25s,background .25s; }
-.settings-page details:hover { border-color:rgba(255,255,255,.2); } .settings-page details[open] { border-color:rgba(182,255,59,.45); background:rgba(255,255,255,.07); }
+.settings-page details:hover { border-color:rgba(255,255,255,.2); } .settings-page details[open] { border-color:rgba(201,229,154,.32); background:rgba(255,255,255,.07); }
 .settings-page summary { display:flex; align-items:center; padding:14px 16px; font:600 14px var(--display); letter-spacing:-.01em; color:var(--text); }
 .settings-page summary::before { content:'▸'; flex:none; margin-right:10px; color:var(--mute); transition:transform .2s; }
 .settings-page summary .priority-dot { width:10px; height:10px; margin:0 9px 0 0; box-shadow:0 0 10px currentColor; }
 .settings-page .form-grid { padding:2px 16px 16px; }
 .settings-page label { font:500 12px var(--body); color:var(--mute); }
-.settings-page input[type='text'], .settings-page input[type='number'], .settings-page input[type='url'], .settings-page input[type='search'], .settings-page select, .settings-page textarea, .watch-search input, .watch-priority select { min-height:42px; border-radius:13px; border:1px solid var(--edge); background:rgba(0,0,0,.28); color:var(--text); font:14px var(--body); transition:border-color .2s,box-shadow .2s; }
+.settings-page input[type='text'], .settings-page input[type='number'], .settings-page input[type='url'], .settings-page input[type='search'], .settings-page select, .settings-page textarea, .watch-priority select { min-height:42px; border-radius:13px; border:1px solid var(--edge); background:rgba(0,0,0,.28); color:var(--text); font:14px var(--body); transition:border-color .2s,box-shadow .2s; }
 .settings-page input:focus, .settings-page select:focus, .settings-page textarea:focus { outline:0; border-color:var(--cyan); box-shadow:0 0 0 3px rgba(39,225,255,.18); }
 .settings-page input::placeholder { color:var(--faint); }
 .settings-page input[type='checkbox'] { width:18px; height:18px; accent-color:var(--lime); }
@@ -20,10 +20,7 @@ body.ov .button.primary, .period-switch .button[aria-current='page'] { border-co
 body.ov .button.danger { border-color:transparent; background:linear-gradient(95deg,#ff3d9a,#ff6b6b); color:#fff; }
 body.ov .notice { margin:0 0 12px; border-radius:16px; }
 body.ov .notice-warn { color:var(--warn); background:rgba(255,200,87,.1); border-color:rgba(255,200,87,.3); } body.ov .notice-ok { color:var(--lime); background:rgba(182,255,59,.08); border-color:rgba(182,255,59,.25); } body.ov .notice-fail { color:#ffb3d3; background:rgba(255,61,154,.1); border-color:rgba(255,61,154,.3); }
-.settings-page .watch-search { color:var(--mute); font-weight:500; } .settings-page .watch-search input { background:rgba(0,0,0,.28); }
-.settings-page .watch-group-filter { min-height:36px; padding:0 14px; border-radius:99px; border:1px solid var(--edge); background:var(--glass); color:var(--text); font:600 13px var(--display); transition:transform .2s,background .2s; } .settings-page .watch-group-filter:hover { transform:translateY(-2px); border-color:rgba(255,255,255,.28); }
-.settings-page .watch-group-filter[aria-pressed='true'] { background:rgba(182,255,59,.14); border-color:rgba(182,255,59,.45); } .settings-page .watch-group-filter[aria-pressed='false'] { background:transparent; color:var(--faint); opacity:.8; }
-.settings-page .watch-hint, .settings-page .apply-bar p { color:var(--mute); }
+.settings-page .apply-bar p { color:var(--mute); }
 .settings-page .apply-bar .button.primary { min-height:36px; padding:0 14px; border-radius:99px; border:1px solid rgba(182,255,59,.45); background:rgba(182,255,59,.14); color:var(--text); font:600 13px var(--display); transition:transform .2s,background .2s; } .settings-page .apply-bar .button.primary:hover { transform:translateY(-2px); border-color:rgba(255,255,255,.28); }
 .settings-page .apply-bar { bottom:10px; margin-top:20px; padding:12px 14px; border:1px solid var(--edge); border-radius:20px; background:rgba(14,11,28,.82); backdrop-filter:blur(14px); box-shadow:0 12px 40px rgba(0,0,0,.45); }
 .settings-page .tool-actions { margin-top:22px; }
@@ -32,3 +29,21 @@ body.ov .footer-note { border-left:0; border-radius:16px; background:var(--glass
 .settings-page details.is-deleted summary { color:#ff7ab8; }.settings-page .bulk-row { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-bottom:10px; } .settings-page .bulk-tools select { padding:0 10px; }
 .settings-page .bulk-count { color:var(--mute); font:600 13px var(--display); } .settings-page summary .bulk-pick { flex:none; margin:0 10px 0 0; }
 .settings-page .bulk-tools select { width:auto; min-width:110px; }
+body.ov.settings-page .button.primary { border:1px solid rgba(201,229,154,.35); background:rgba(201,229,154,.12); color:#d4ebad; } body.ov.settings-page .button.danger { border:1px solid rgba(240,163,191,.35); background:rgba(240,163,191,.1); color:#f3b3ca; }
+.settings-page .watch-links, .settings-page .watch-fields, .settings-page .watch-flags, .settings-page .watch-site-options, .settings-page .watch-actions { grid-column:1 / -1; }
+.settings-page .watch-fields { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; }
+.settings-page .watch-flags, .settings-page .watch-site-options { display:flex; flex-wrap:wrap; align-items:end; gap:4px 20px; } .settings-page .watch-site-options > label:not(.checkbox-row) { flex:0 1 220px; }
+.settings-page #watch-search { width:100%; padding:0 12px; margin-bottom:4px; }
+.settings-page .site-count { margin-left:auto; color:var(--mute); font:600 12px var(--display); } .settings-page .site-cards { padding:0 10px 10px; } .settings-page .site-cards details { background:rgba(0,0,0,.18); }
+.settings-page .link-row { display:flex; gap:8px; } .settings-page .link-row input { flex:1; min-width:0; padding:0 12px; } .settings-page .link-row .button { white-space:nowrap; }
+.settings-page .check-error { margin:10px 0 0; color:#f3b3ca; font-size:13px; }
+.settings-page .new-watch-body { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:18px; margin-top:16px; } .settings-page .new-watch-product, .settings-page .new-watch-fields { display:grid; gap:14px; align-content:start; min-width:0; }
+.settings-page .new-watch-product h3 { margin:0; font:600 15px var(--display); } .settings-page .product-sub { margin:-10px 0 0; color:var(--mute); font-size:13px; }
+.settings-page .new-watch-fields .watch-fields { grid-template-columns:repeat(2,minmax(0,1fr)); }
+.settings-page .variant-table { overflow-x:auto; } .settings-page .variant-table table { width:100%; min-width:0; border-collapse:collapse; font-size:13.5px; font-variant-numeric:tabular-nums; }
+.settings-page .variant-table th { padding:6px 8px; border-bottom:1px solid var(--edge); color:var(--mute); font:600 12px var(--body); text-align:left; } .settings-page .variant-table td { padding:8px; border-bottom:1px solid rgba(255,255,255,.05); } .settings-page .variant-table .num { text-align:right; }
+.settings-page .in-stock { color:#9fd8b5; } .settings-page .no-stock { color:#f3b3ca; }
+.settings-page .variant-dim { display:grid; gap:6px; flex:1 1 100%; } .settings-page .variant-dim > span { color:var(--mute); font:500 12px var(--body); } .settings-page .variant-chips { display:flex; flex-wrap:wrap; gap:6px; }
+.settings-page .variant-chip { display:inline-flex; align-items:center; gap:6px; min-height:32px; padding:0 10px; border-radius:99px; border:1px solid var(--edge); color:var(--text); font:500 13px var(--body); cursor:pointer; } .settings-page .variant-chip:has(input:checked) { border-color:rgba(201,229,154,.45); background:rgba(201,229,154,.1); } .settings-page .variant-chip input { width:15px; height:15px; }
+@media (max-width:700px) { .settings-page .new-watch-body { grid-template-columns:1fr; } }
+.settings-page [hidden] { display:none !important; }

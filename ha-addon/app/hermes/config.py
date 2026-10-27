@@ -9,8 +9,6 @@ from .constants import (
     DEFAULT_REQUEST_DELAY_MAX_SECONDS,
     DEFAULT_REQUEST_DELAY_MIN_SECONDS,
     DEFAULT_REQUEST_TIMEOUT_SECONDS,
-    FASHION_GROUP,
-    FASHION_SITES,
     OPTIONS_PATH,
     SEARCH_RESULT_LIMIT,
     normalize_notify_window,
@@ -59,7 +57,6 @@ OPTION_DEFAULTS: Dict[str, Any] = {
     "channels": list(DEFAULT_TELEGRAM_CHANNELS),
     "keywords": [],
     "exclude_keywords": [],
-    "gruplar": [],
     "takip_edilenler": [],
 }
 
@@ -72,9 +69,13 @@ def read_options() -> Dict[str, Any]:
 def options_with_defaults(options: Any) -> Dict[str, Any]:
     """Preserve every existing add-on option while supplying schema defaults."""
     saved = deepcopy(options) if isinstance(options, dict) else {}
+    # Groups were removed in 4.26.0; the settings list groups cards by site instead.
+    saved.pop("gruplar", None)
     for key, value in OPTION_DEFAULTS.items():
         saved.setdefault(key, deepcopy(value))
     for item in saved.get("takip_edilenler", []):
+        if isinstance(item, dict):
+            item.pop("group", None)
         if isinstance(item, dict) and not item.get("id"):
             try:
                 target = parse_decimal(str(item.get("target_price") or "0"))
@@ -103,18 +104,19 @@ def watch_urls(item: Dict[str, object]) -> List[str]:
     return urls
 
 
-def watch_group(item: Dict[str, object]) -> str:
-    """The card's group, or the implicit fashion group for Zara/H&M links."""
-    group = str(item.get("group") or "").strip() if isinstance(item, dict) else ""
-    if group:
-        return group
-    for url in watch_urls(item):
-        try:
-            if detect_site_from_url(url) in FASHION_SITES:
-                return FASHION_GROUP
-        except HermesError:
-            continue
-    return ""
+def parse_variant_filter(value: object) -> Dict[str, List[str]]:
+    """"Renk=Siyah, Mavi; Beden=M" -> {"Renk": ["Siyah", "Mavi"], "Beden": ["M"]}."""
+    chosen: Dict[str, List[str]] = {}
+    for part in str(value or "").split(";"):
+        dimension, separator, values = part.partition("=")
+        names = [item.strip() for item in values.split(",") if item.strip()]
+        if separator and dimension.strip() and names:
+            chosen[dimension.strip()] = names
+    return chosen
+
+
+def format_variant_filter(chosen: Dict[str, List[str]]) -> str:
+    return "; ".join(f"{dimension}={', '.join(values)}" for dimension, values in chosen.items() if values)
 
 
 def string_list(value: object) -> List[str]:
@@ -209,8 +211,8 @@ def _prepare_watch(item):
                 target_price=target_price,
                 minimum_price=minimum_price,
                 excluded_terms=string_list(item.get("exclude_terms")),
-                group=watch_group(item),
                 size=size,
+                variant_filter=parse_variant_filter(item.get("variant_filter")),
                 include_variations=parse_bool(item.get("include_variations"), default=False),
                 priority=priority,
                 official_seller_only=parse_bool(item.get("official_seller_only"), default=False),

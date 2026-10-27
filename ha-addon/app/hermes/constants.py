@@ -62,8 +62,6 @@ SITE_HOST_MARKERS = (
     ("amazon", SITE_AMAZON),
 )
 # Zara and H&M cards without a group are shown under this group.
-FASHION_SITES = {SITE_ZARA, SITE_HM}
-FASHION_GROUP = "Moda"
 
 AMAZON_BASE_URL = "https://www.amazon.com.tr"
 NOTIFY_REPEAT_SECONDS = 24 * 60 * 60
@@ -76,7 +74,6 @@ DEFAULT_INTERVAL_SECONDS = 60
 SEARCH_RESULT_LIMIT = 60
 SEARCH_ERROR_NOTIFICATION_HOUR = 11
 TELEGRAM_STATUS_HEARTBEAT_SECONDS = 60 * 60
-TELEGRAM_QUICK_ADD_GROUP = "Paylaşılanlar"
 # All card surfaces and providers use this one interval scale. Compatibility
 # keeps pre-3.12 unknown/missing choices at their previous six-hour interval.
 PRIORITY_INTERVAL_SECONDS = {"1m": 60, "5m": 300, "15m": 900, "30m": 1800,

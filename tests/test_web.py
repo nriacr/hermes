@@ -11,7 +11,11 @@ from unittest.mock import patch
 
 from support import TempData
 
+from types import SimpleNamespace
+
 from hermes.config import prepare_watches
+from hermes.errors import HermesError
+from hermes.models import ProductPreview, VariantPreview
 from hermes import history as history_module
 from hermes.history import History
 from hermes.diagnostics import Diagnostics
@@ -800,13 +804,13 @@ class SettingsTests(DataFilesMixin, unittest.TestCase):
         self.assertEqual(watches[0]["priority"], "3h")
         self.assertTrue(watches[0]["official_seller_only"])
         html = settings.watch_form(watches[0], 0)
-        for text in ("Yalnızca platformun kendi satıcısı", ">1 dk</option>", ">5 dk</option>", ">15 dk</option>", ">30 dk</option>", ">60 dk</option>",
+        for text in ("Yalnızca Amazon satıcısı", ">1 dk</option>", ">5 dk</option>", ">15 dk</option>", ">30 dk</option>", ">60 dk</option>",
                      "selected>3 saat</option>", ">6 saat</option>", ">12 saat</option>", "<i class=\"priority-dot priority-3h\""):
             self.assertIn(text, html)
         for old in ("Yüksek", "Orta", "Düşük"):
             self.assertNotIn(old, html)
         # A new card starts at one minute; pre-3.12 choices still show six hours.
-        self.assertIn("value='1m' title='1 dk arayla taranır' selected>", settings.watch_form({}, 0, is_new=True))
+        self.assertIn("value='1m' title='1 dk arayla taranır' selected>", settings.new_watch_form(0, "settings/check"))
         self.assertIn("selected>6 saat</option>", settings.watch_form({"name": "Eski", "priority": "high"}, 0))
 
     def test_updating_a_card_keeps_its_variation_setting(self):
@@ -821,11 +825,12 @@ class SettingsTests(DataFilesMixin, unittest.TestCase):
     def test_page_renders_new_card_first_with_one_save_form_and_overlay(self):
         self.write_options({"takip_edilenler": [{"name": "Mevcut", "target_price": 100, "url_1": "https://www.amazon.com.tr/dp/B000000001"}]})
         page = settings.render_settings_page(".", {}).decode()
-        self.assertLess(page.index("Yeni takip ekle"), page.index("Takip edilenler"))
+        self.assertLess(page.index("Yeni takip"), page.index("Takip edilenler"))
         self.assertEqual(page.count("data-settings-save"), 1)
         for text in ("id='saving-overlay'", "Değişiklikleri uygula", "Ayarlar kaydediliyor", "id='watch-search'",
                      "data-watch-search='Mevcut'", "class='button danger'", "data-delete-watch", "value='100'",
-                     "src='./settings.js?v="):
+                     "src='./settings.js?v=", "data-check-path='./settings/check'", "data-site-group",
+                     "Amazon<span class='site-count'>1</span>"):
             self.assertIn(text, page)
         for text in ("name='delete_watch_index'", "name='update_watch_index'", "name='watch_index'"):
             self.assertNotIn(text, page)
@@ -854,25 +859,48 @@ class SettingsTests(DataFilesMixin, unittest.TestCase):
             with self.subTest(bad=bad), self.assertRaisesRegex(ValueError, message):
                 settings.apply_settings_operation(source, {"operation": ["update_existing"], **bad})
 
-    def test_configured_groups_are_offered_and_filterable(self):
-        self.write_options({"gruplar": ["Moda", "Teknoloji", "Market"], "takip_edilenler": []})
+    def test_saved_cards_are_grouped_by_site_and_show_only_their_site_options(self):
+        self.write_options({"gruplar": ["Moda"], "takip_edilenler": [
+            {"name": "Polo", "group": "Moda", "target_price": 900, "url_1": "https://www.zara.com/tr/tr/polo-p01234567.html"},
+            {"name": "Kulaklık", "target_price": 1500, "url_1": "https://www.amazon.com.tr/dp/B000000001"},
+            {"name": "Fırın", "target_price": 5000, "url_1": "https://www.hepsiburada.com/firin-p-HBC1"}]})
         page = settings.render_settings_page(".", {}).decode()
-        for group in ("Moda", "Teknoloji", "Market"):
-            self.assertIn(f"data-watch-group-filter='{group}'", page)
-        html = settings.watch_form({"name": "Polo", "group": "Moda"}, 0, groups=["Moda", "Teknoloji"])
-        self.assertIn("<select", html)
-        self.assertIn("Teknoloji", html)
+        self.assertNotIn("Grup", page)
+        self.assertLess(page.index("Amazon<span"), page.index("Hepsiburada<span"))
+        self.assertLess(page.index("Hepsiburada<span"), page.index("Zara<span"))
+        zara = settings.watch_form({"name": "Polo", "url_1": "https://www.zara.com/tr/tr/polo-p01234567.html"}, 0)
+        self.assertIn(">Beden<", zara)
+        self.assertNotIn("Varyasyonları ekle", zara)
+        amazon = settings.watch_form({"name": "Kulaklık", "variant_filter": "Renk=Siyah", "url_1": "https://www.amazon.com.tr/dp/B000000001"}, 1)
+        for text in ("Varyasyonları ekle", "Yalnızca Amazon satıcısı", "Otomatik sepete ekle", "value='Renk=Siyah'"):
+            self.assertIn(text, amazon)
+        self.assertNotIn(">Beden<", amazon)
+        hepsiburada = settings.watch_form({"name": "Fırın", "url_1": "https://www.hepsiburada.com/firin-p-HBC1"}, 2)
+        self.assertNotIn("watch-site-options", hepsiburada)
 
-    def test_cards_use_the_compact_three_row_layout(self):
-        for html in (settings.watch_form({}, 0, is_new=True, groups=["Moda"]),
-                     settings.watch_form({"name": "Mevcut", "group": "Teknoloji", "target_price": 1500,
-                                          "url_1": "https://www.amazon.com.tr/dp/B000000001"}, 1, groups=["Moda", "Teknoloji"])):
-            for css in ("watch-layout", "watch-top", "watch-links", "watch-bottom"):
-                self.assertIn(css, html)
-            self.assertLess(html.index(">Grup<"), html.index(">Ad<"))
-            self.assertLess(html.index(">Hedef Fiyat Maks<"), html.index(">Beden<"))
-            for number in range(1, 6):
-                self.assertIn(f">Link {number}<", html)
+    def test_choosing_variant_values_reads_the_variant_family(self):
+        watches = settings.build_watches({"watches_count": ["1"], "watches_0_name": ["Kulaklık"], "watches_0_target_price": ["1000"],
+                                          "watches_0_url_1": ["https://www.amazon.com.tr/dp/B000000001"],
+                                          "watches_0_variant_filter": ["Renk=Siyah, Gümüş; Boyut="], "watches_0_active": ["1"]})
+        self.assertEqual(watches[0]["variant_filter"], "Renk=Siyah, Gümüş")
+        self.assertTrue(watches[0]["include_variations"])
+        self.assertEqual(prepare_watches(watches)[0].variant_filter, {"Renk": ["Siyah", "Gümüş"]})
+
+    def test_link_check_reports_the_site_its_options_and_the_live_variants(self):
+        preview = ProductPreview("zara", "Polo / Siyah", [VariantPreview("M", Decimal("899.90"), True, {"Beden": "M"}),
+                                                          VariantPreview("L", Decimal("899.90"), False, {"Beden": "L"})],
+                                 {"Beden": ["M", "L"]})
+        provider = SimpleNamespace(card_options=("size",), inspect=lambda url, ctx: preview)
+        result = settings.check_link("https://www.zara.com/tr/tr/polo-p01234567.html", {"zara": provider})
+        self.assertEqual((result["ok"], result["options"], result["dimensions"]), (True, ["size"], {"Beden": ["M", "L"]}))
+        self.assertEqual(result["variants"][1], {"label": "L", "price": "899 TL", "in_stock": False, "attributes": {"Beden": "L"}})
+        self.assertEqual(settings.check_link("https://example.com/urun", {}), {"ok": False, "error": "Bu site desteklenmiyor."})
+
+        def broken(url, ctx):
+            raise HermesError("HTTP 503")
+        result = settings.check_link("https://www.zara.com/tr/tr/polo-p01234567.html",
+                                     {"zara": SimpleNamespace(card_options=("size",), inspect=broken)})
+        self.assertEqual((result["ok"], result["error"]), (False, "Sayfa okunamadı: HTTP 503"))
 
     def test_search_card_without_a_name_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "arama sayfası"):
@@ -880,13 +908,13 @@ class SettingsTests(DataFilesMixin, unittest.TestCase):
                                     "watches_0_url_1": ["https://www.amazon.com.tr/s?k=juo+q3"]})
 
     def test_empty_new_card_is_ignored_and_missing_fields_are_named(self):
-        self.assertEqual(settings.build_watches({"watches_count": ["1"], "watches_0_group": ["Moda"], "watches_0_active": ["1"]}), [])
+        self.assertEqual(settings.build_watches({"watches_count": ["1"], "watches_0_active": ["1"]}), [])
         with self.assertRaisesRegex(ValueError, r"Takip 1 \(Eksik ürün\): en az bir link"):
             settings.build_watches({"watches_count": ["1"], "watches_0_name": ["Eksik ürün"], "watches_0_target_price": ["1000"]})
 
     def test_delete_update_and_batch_operations(self):
         two = {"takip_edilenler": [{"name": "Silinecek", "target_price": 100, "url_1": "https://www.amazon.com.tr/dp/B000000001"},
-                                   {"name": "Kalacak", "group": "Diğer", "target_price": 200, "url_1": "https://www.amazon.com.tr/dp/B000000002"}]}
+                                   {"name": "Kalacak", "target_price": 200, "url_1": "https://www.amazon.com.tr/dp/B000000002"}]}
         for form in ({"operation": ["update_existing"], "delete_watch_index": ["0"]}, {"operation": ["delete_watch"], "watch_index": ["0"]}):
             options, message = settings.apply_settings_operation(two, form)
             self.assertEqual(message, "Silinecek takip kaydı silindi.")
@@ -895,31 +923,31 @@ class SettingsTests(DataFilesMixin, unittest.TestCase):
             "operation": ["update_existing"], "watches_count": ["3"],
             "watches_0_delete": ["1"], "watches_0_name": ["Silinecek"], "watches_0_target_price": ["100"],
             "watches_0_url_1": ["https://www.amazon.com.tr/dp/B000000001"],
-            "watches_1_name": ["Kalacak"], "watches_1_group": ["Teknoloji"], "watches_1_target_price": ["250"],
+            "watches_1_name": ["Kalacak"], "watches_1_target_price": ["250"],
             "watches_1_url_1": ["https://www.amazon.com.tr/dp/B000000002"], "watches_1_active": ["1"],
             "watches_2_name": ["Yeni kayıt"], "watches_2_target_price": ["1.500"],
             "watches_2_url_1": ["https://www.hepsiburada.com/ara?q=yeni"], "watches_2_active": ["1"],
             "telegram_enabled": ["1"], "channels": ["@firsatz"]})
         self.assertEqual(message, "Ayarlar kaydedildi.")
         self.assertEqual([item["name"] for item in options["takip_edilenler"]], ["Kalacak", "Yeni kayıt"])
-        self.assertEqual((options["takip_edilenler"][0]["group"], options["takip_edilenler"][0]["target_price"]), ("Teknoloji", 250))
+        self.assertEqual(options["takip_edilenler"][0]["target_price"], 250)
         self.assertEqual(options["takip_edilenler"][1]["target_price"], 1500)
         self.assertTrue(options["telegram_enabled"])
         self.assertFalse(options["telegram_saved_messages_enabled"])  # the unchecked box was absent
 
     def test_single_card_update_changes_only_that_card(self):
         source = {"takip_edilenler": [
-            {"name": "İlk", "group": "Diğer", "target_price": 100, "url_1": "https://www.amazon.com.tr/dp/B000000001"},
-            {"name": "İkinci", "group": "Moda", "target_price": 200, "url_1": "https://www.zara.com/tr/tr/ornek-p03166301.html"}]}
+            {"name": "İlk", "target_price": 100, "url_1": "https://www.amazon.com.tr/dp/B000000001"},
+            {"name": "İkinci", "target_price": 200, "url_1": "https://www.zara.com/tr/tr/ornek-p03166301.html"}]}
         for index_field in ("update_watch_index", "watch_index"):
             options, message = settings.apply_settings_operation(source, {
-                "operation": ["update_watch"], index_field: ["1"], "watches_1_name": ["İkinci"], "watches_1_group": ["Teknoloji"],
+                "operation": ["update_watch"], index_field: ["1"], "watches_1_name": ["İkinci"],
                 "watches_1_target_price": ["1.500"], "watches_1_url_1": ["https://www.zara.com/tr/tr/ornek-p03166301.html"],
                 "watches_1_active": ["1"]})
             self.assertIn("güncellendi", message)
             self.assertEqual({k:v for k,v in options["takip_edilenler"][0].items() if k != "id"}, source["takip_edilenler"][0])
             self.assertTrue(options["takip_edilenler"][0]["id"])
-            self.assertEqual((options["takip_edilenler"][1]["group"], options["takip_edilenler"][1]["target_price"]), ("Teknoloji", 1500))
+            self.assertEqual(options["takip_edilenler"][1]["target_price"], 1500)
 
     def test_a_stale_page_cannot_delete_or_edit_another_watch(self):
         # The list changed after the page was opened: position 0 now holds a different watch.
@@ -977,25 +1005,21 @@ class SettingsTests(DataFilesMixin, unittest.TestCase):
         self.assertTrue(options["telegram_enabled"])
         self.assertEqual(options["takip_edilenler"], [])
         self.assertEqual(options["request_delay_max_seconds"], 8)  # schema default supplied
-
-    def test_fashion_cards_default_to_the_moda_group(self):
-        watches = settings.build_watches({"watches_count": ["1"], "watches_0_name": ["Gömlek"], "watches_0_target_price": ["1000"],
-                                          "watches_0_url_1": ["https://www.zara.com/tr/tr/gomlek-p01234567.html"]})
-        self.assertEqual(watches[0]["group"], "Moda")
+        self.assertNotIn("gruplar", options)  # removed with the site grouping
 
     def test_cards_without_a_name_use_learned_titles(self):
-        html = settings.watch_form({"url_1": "https://www.zara.com/tr/tr/dokulu-p03166301.html?v1=567"}, 8, groups=["Moda"],
+        html = settings.watch_form({"url_1": "https://www.zara.com/tr/tr/dokulu-p03166301.html?v1=567"}, 8,
                                    known_titles={"https://www.zara.com/tr/tr/dokulu-p03166301.html": "Dokulu Polo"})
-        self.assertIn("[Moda] Dokulu Polo", html)
+        self.assertIn(">Dokulu Polo</summary>", html)
         self.data.write_summary({"stock_rows": [{"product_url": "https://www2.hm.com/tr_tr/productpage.1286182003.html?color=009",
                                                  "product_title": "Keten Gömlek / Kahverengi / XL"}]})
-        html = settings.watch_form({"url_1": "https://www2.hm.com/tr_tr/productpage.1286182003.html"}, 3, groups=["Moda"],
+        html = settings.watch_form({"url_1": "https://www2.hm.com/tr_tr/productpage.1286182003.html"}, 3,
                                    known_titles=settings.stored_watch_titles())
         self.assertIn("Keten Gömlek", html)
 
     def test_shared_scripts_handle_search_filters_and_restart(self):
         self.assertIn("watchSearch?.addEventListener('input', refreshWatchList)", assets.SETTINGS_SCRIPT)
-        for text in ("data-watch-group-filter", "data-delete-watch", "add-watch-card"):
+        for text in ("data-site-group", "data-delete-watch", "data-check-link", "data-variant-filter"):
             self.assertIn(text, assets.SETTINGS_SCRIPT)
         self.assertIn("waitForHermes", assets.RESTART_SCRIPT)
 
