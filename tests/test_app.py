@@ -276,7 +276,6 @@ class EndToEndTests(unittest.TestCase):
         data = TempData()
         rule = watch("Çanta", "https://www.trendyol.com/canta", target="5000")
         cfg = config([rule], interval_seconds=3600)
-        cfg.daily_summary_enabled = False  # the 09:00-22:00 daily summary would add a second message during the day
         runtime = hermes_app.HermesRuntime(cfg, files=data.files)
         runtime.service.monitor.delivery.transport = Mock(configured=True)
         reads = []

@@ -214,7 +214,7 @@ def _priority_field(prefix, item, is_new) -> str:
 
 def _common_fields(prefix, item, is_new) -> str:
     return (
-        f"{_field(prefix, 'target_price', 'Hedef fiyat maks', _price_input_value(item.get('target_price', '')))}"
+        f"{_field(prefix, 'target_price', 'Hedef fiyat', _price_input_value(item.get('target_price', ''))).replace('<label>', "<label class='target-price'>", 1)}"
         f"{_field(prefix, 'minimum_price', 'Hedef fiyat min', _price_input_value(item.get('minimum_price', '')))}"
         f"{_priority_field(prefix, item, is_new)}"
     )
@@ -340,12 +340,6 @@ def _timing_section(options: Dict[str, Any]) -> str:
     return f"<section class='settings-section timing-settings'><h2>Zamanlama</h2><div class='form-grid'>{fields}</div></section>"
 
 
-def _daily_summary_section(options: Dict[str, Any]) -> str:
-    box = _checkbox("", "daily_summary_enabled", "Günlük özet bildirimi (her sabah 09:00)", options.get("daily_summary_enabled", True))
-    return ("<section class='settings-section'><h2>Günlük özet</h2>"
-            f"{box}</section>")
-
-
 def _update_timing_options(options: Dict[str, Any], form) -> None:
     """Same limits as the add-on schema; a page without these fields keeps the saved values."""
     values = {}
@@ -379,9 +373,7 @@ def bulk_toolbar() -> str:
     priorities = "".join(f"<option value='{value}'>{escape(label)}</option>" for value, label in PRIORITY_LABELS.items())
     return (
         "<section class='settings-section bulk-tools' data-bulk-tools><h2>Toplu işlem</h2>"
-        "<div class='bulk-row'><button class='button secondary' type='button' data-bulk-all>Görünenleri seç</button>"
-        "<button class='button secondary' type='button' data-bulk-none>Seçimi kaldır</button>"
-        "<span class='bulk-count' data-bulk-count>0 seçili</span></div>"
+        "<div class='bulk-row'><span class='bulk-count' data-bulk-count>0 seçili</span></div>"
         "<div class='bulk-row'><button class='button secondary' type='button' data-bulk-active='1'>Aktif yap</button>"
         "<button class='button secondary' type='button' data-bulk-active='0'>Pasif yap</button>"
         f"<select data-bulk-priority aria-label='Öncelik'>{priorities}</select>"
@@ -418,7 +410,6 @@ def render_settings_page(base: str, params: Dict[str, List[str]], *, access_bar:
         + bulk_toolbar()
         + _telegram_section(options)
         + _timing_section(options)
-        + _daily_summary_section(options)
         + "<div class='apply-bar'><p>Uygulayınca Hermes yeniden başlar.</p><button class='button primary' type='submit'>Değişiklikleri uygula</button></div></form>"
         + render_tool_actions(base)
     )
@@ -658,7 +649,6 @@ def _update_all_watches(options, form, existing_watches):
     options["takip_edilenler"] = built
     _update_telegram_options(options, form)
     _update_timing_options(options, form)
-    options["daily_summary_enabled"] = "daily_summary_enabled" in form
     return options, "Ayarlar kaydedildi."
 
 

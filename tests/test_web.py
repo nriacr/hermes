@@ -1007,7 +1007,7 @@ class SettingsTests(DataFilesMixin, unittest.TestCase):
 
     def test_saving_preserves_every_other_option(self):
         source = {"interval_seconds": 10, "pushover_user_key": "user", "pushover_api_token": "token", "telegram_enabled": True,
-                  "api_id": "123", "channels": ["@example"], "keywords": ["fırsat"], "gruplar": ["Moda"],
+                  "api_id": "123", "channels": ["@example"], "keywords": ["fırsat"], "gruplar": ["Moda"], "daily_summary_enabled": True,
                   "public_dashboard_token": TOKEN,
                   "takip_edilenler": [{"name": "Silinecek", "target_price": 100, "url_1": "https://www.amazon.com.tr/dp/B000000001"}]}
         options, _ = settings.apply_settings_operation(source, {"operation": ["update_existing"], "delete_watch_index": ["0"]})
@@ -1016,6 +1016,7 @@ class SettingsTests(DataFilesMixin, unittest.TestCase):
         self.assertEqual(options["takip_edilenler"], [])
         self.assertEqual(options["request_delay_max_seconds"], 8)  # schema default supplied
         self.assertNotIn("gruplar", options)  # removed with the site grouping
+        self.assertNotIn("daily_summary_enabled", options)
 
     def test_cards_without_a_name_use_learned_titles(self):
         html = settings.watch_form({"url_1": "https://www.zara.com/tr/tr/dokulu-p03166301.html?v1=567"}, 8,

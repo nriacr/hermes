@@ -167,15 +167,6 @@
     if (label) label.textContent = `${picks().length} seçili`;
   };
   const touch = (field) => { field.dispatchEvent(new Event('input', { bubbles: true })); field.dispatchEvent(new Event('change', { bubbles: true })); };
-  const setPicked = (value) => {
-    document.querySelectorAll('[data-watch-card]').forEach((card) => {
-      const box = card.querySelector('[data-bulk-pick]');
-      if (box) box.checked = value && !card.hidden;
-    });
-    countPicks();
-  };
-  document.querySelector('[data-bulk-all]')?.addEventListener('click', () => setPicked(true));
-  document.querySelector('[data-bulk-none]')?.addEventListener('click', () => setPicked(false));
   document.addEventListener('change', (event) => { if (event.target.matches('[data-bulk-pick]')) countPicks(); });
   const bulk = (selector, value) => {
     const cards = picks();

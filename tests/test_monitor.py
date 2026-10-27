@@ -1356,7 +1356,6 @@ class PanelCommandTests(CycleTestCase):
     def test_commands_are_applied_between_cycles_and_can_start_one_now(self):
         rule = watch("Ürün", "https://www.trendyol.com/x", target="100")
         cfg = config([rule], interval_seconds=3600)
-        cfg.daily_summary_enabled = False  # the 09:00-22:00 daily summary would add a third outbox row during the day
         service = runner.MonitorService(cfg, self.data.files, notifier=self.notify)
         cycles = []
 

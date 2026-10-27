@@ -45,7 +45,6 @@ OPTION_DEFAULTS: Dict[str, Any] = {
     "pushover_user_key": "",
     "pushover_api_token": "",
     "public_dashboard_enabled": False,
-    "daily_summary_enabled": True,
     "public_dashboard_token": "",
     "telegram_enabled": False,
     "telegram_saved_messages_enabled": True,
@@ -66,11 +65,15 @@ def read_options() -> Dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
+REMOVED_OPTIONS = ("gruplar", "daily_summary_enabled")
+
+
 def options_with_defaults(options: Any) -> Dict[str, Any]:
     """Preserve every existing add-on option while supplying schema defaults."""
     saved = deepcopy(options) if isinstance(options, dict) else {}
-    # Groups were removed in 4.26.0; the settings list groups cards by site instead.
-    saved.pop("gruplar", None)
+    # Removed in 4.26.0: groups (the settings list groups cards by site) and the daily summary.
+    for removed in REMOVED_OPTIONS:
+        saved.pop(removed, None)
     for key, value in OPTION_DEFAULTS.items():
         saved.setdefault(key, deepcopy(value))
     for item in saved.get("takip_edilenler", []):
@@ -300,5 +303,4 @@ def load_config(payload: Optional[Dict[str, Any]] = None, *, tolerant=False) -> 
         watches=watches,
         telegram=telegram,
         config_errors=config_errors,
-        daily_summary_enabled=parse_bool(payload.get("daily_summary_enabled"), default=True),
     )
