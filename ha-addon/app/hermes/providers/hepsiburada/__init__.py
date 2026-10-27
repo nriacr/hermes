@@ -249,6 +249,21 @@ class HepsiburadaProvider(Provider):
     alert_shows_seller = True
     card_options = ("name", "minimum_price", "official_seller_only", "exclude_terms")
 
+    def inspect(self, url, ctx):
+        """Variant titles repeat the product name; the link check lists what differs between them.
+
+        "Apple iPhone 17 Pro Max 256 GB Abis / Abis / 256 GB" -> "256 GB Abis".
+        """
+        preview = super().inspect(url, ctx)
+        names = [variant.label.split(" / ")[0] for variant in preview.variants]
+        words = [name.split() for name in names]
+        shared = 0
+        while len(words) > 1 and all(len(item) > shared + 1 and item[shared] == words[0][shared] for item in words):
+            shared += 1
+        for variant, item, name in zip(preview.variants, words, names):
+            variant.label = " ".join(item[shared:]) or name
+        return preview
+
     def keeps_offer(self, watch, offer) -> bool:
         """With the own-seller option, only offers sold by Hepsiburada itself."""
         if not watch.official_seller_only or normalize_offer_text(offer.seller or "") == "hepsiburada":

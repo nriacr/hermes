@@ -236,6 +236,23 @@ def product_dimensions(html: str) -> dict[str, list[tuple[str, bool]]]:
     return found
 
 
+def dimension_combinations(html: str) -> list[tuple[str, dict[str, str]]]:
+    """Every concrete variant ASIN with its value in each dimension, e.g. ("B0…", {"Renk": "Abis", "Ölçü": "256 GB"})."""
+    combos = _json_value_after(html, "dimensionValuesDisplayData")
+    order = _json_value_after(html, "dimensions")
+    if not isinstance(combos, dict) or not isinstance(order, list):
+        return []
+    labels = _json_value_after(html, "variationDisplayLabels")
+    labels = labels if isinstance(labels, dict) else {}
+    names = [str(labels.get(key) or "").strip() or DIMENSION_LABELS.get(key) or key.removesuffix("_name").replace("_", " ").capitalize()
+             for key in order]
+    found = []
+    for asin, values in combos.items():
+        if re.fullmatch(r"[A-Z0-9]{10}", str(asin)) and isinstance(values, list) and len(values) == len(names):
+            found.append((asin, {name: _clean_variation_label(str(value)) for name, value in zip(names, values)}))
+    return found
+
+
 def parse_product_page(html: str):
     """Parse an Amazon product page once for the provider's page-level readers (indexed selects)."""
     return indexed(soup_from_html(html))

@@ -2165,6 +2165,14 @@ class WatchCardTests(unittest.TestCase):
         watch.official_seller_only = False
         self.assertTrue(provider.keeps_offer(watch, OfferResult(title="x", price=Decimal("1"), seller="Ceptemax")))
 
+    def test_amazon_dimension_combinations_name_every_variant_asin(self):
+        html = '''"dimensionValuesDisplayData" : {"B0FQFTYPTQ":["Gümüş Rengi","256 GB"],"B0FQFJ2HLL":["Kozmik Turuncu","512 GB"]},
+                "dimensions" : ["color_name","size_name"],
+                "variationDisplayLabels" : {"size_name":"Ölçü","color_name":"Renk"},'''
+        self.assertEqual(amazon_parser.dimension_combinations(html), [
+            ("B0FQFTYPTQ", {"Renk": "Gümüş Rengi", "Ölçü": "256 GB"}),
+            ("B0FQFJ2HLL", {"Renk": "Kozmik Turuncu", "Ölçü": "512 GB"})])
+
     def test_amazon_keeps_only_the_chosen_variant_values(self):
         provider = AmazonProvider(client=Mock())
         watch = WatchRule(name="", site="amazon", url="https://www.amazon.com.tr/dp/B000000001", target_price=Decimal("1"),

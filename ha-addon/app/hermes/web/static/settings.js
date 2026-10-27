@@ -19,6 +19,18 @@
   };
   watchSearch?.addEventListener('input', refreshWatchList);
 
+  // Prices show thousands separators while typing: 100000 -> 100.000.
+  document.addEventListener('input', (event) => {
+    const field = event.target;
+    if (!field.matches?.("input[name$='_target_price'], input[name$='_minimum_price']")) return;
+    const digitsAfterCaret = field.value.slice(field.selectionStart).replace(/\D/g, '').length;
+    const digits = field.value.replace(/\D/g, '').replace(/^0+(?=\d)/, '');
+    field.value = digits.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+    let caret = field.value.length;
+    for (let seen = 0; caret > 0 && seen < digitsAfterCaret; caret -= 1) if (/\d/.test(field.value[caret - 1])) seen += 1;
+    field.setSelectionRange(caret, caret);
+  });
+
   const newWatch = document.querySelector('[data-new-watch]');
   const element = (tag, className, text) => {
     const node = document.createElement(tag);
@@ -64,7 +76,9 @@
     const sizeSelect = newWatch.querySelector('[data-size-select]');
     sizeSelect.replaceChildren(new Option('Hepsi', ''));
     // Out-of-stock values stay choosable: the card waits for them to come back.
-    const outOfStock = new Set(variants.filter((item) => !item.in_stock).flatMap((item) => Object.values(item.attributes || {})));
+    // A value is out of stock only when no variant with it is in stock.
+    const inStock = new Set(variants.filter((item) => item.in_stock).flatMap((item) => Object.values(item.attributes || {})));
+    const outOfStock = new Set(variants.flatMap((item) => Object.values(item.attributes || {})).filter((value) => !inStock.has(value)));
     (dimensions.Beden || []).forEach((size) => sizeSelect.appendChild(new Option(outOfStock.has(size) ? `${size} (tükendi)` : size, size)));
     const dims = newWatch.querySelector('[data-variant-dims]');
     dims.replaceChildren();

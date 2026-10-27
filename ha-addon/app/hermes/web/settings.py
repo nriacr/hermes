@@ -46,7 +46,8 @@ def _first(form: Dict[str, List[str]], key: str, default: str = "") -> str:
 
 
 def _field(prefix, name, label, value="", field_type="text", required=False) -> str:
-    return (f"<label>{escape(label)}<input type='{field_type}' name='{escape(prefix + name, quote=True)}' "
+    numeric = " inputmode='numeric'" if name in {"target_price", "minimum_price"} else ""
+    return (f"<label>{escape(label)}<input type='{field_type}'{numeric} name='{escape(prefix + name, quote=True)}' "
             f"value='{escape(str(value or ''), quote=True)}'{' required' if required else ''}></label>")
 
 
@@ -262,7 +263,7 @@ def new_watch_form(index: int, check_path: str) -> str:
     hidden = lambda option, html: f"<span class='site-option' data-site-option='{option}' hidden>{html}</span>"  # noqa: E731
     site_fields = (
         f"<label data-site-option='name' data-search-only hidden>Ürün adı<input type='text' name='{escape(prefix + 'name', quote=True)}' data-product-name></label>"
-        f"<label data-site-option='minimum_price' data-search-only hidden>Hedef fiyat min<input type='text' name='{escape(prefix + 'minimum_price', quote=True)}'></label>"
+        f"<label data-site-option='minimum_price' data-search-only hidden>Hedef fiyat min<input type='text' inputmode='numeric' name='{escape(prefix + 'minimum_price', quote=True)}'></label>"
         f"<label data-site-option='size' hidden>Beden<select name='{escape(prefix + 'size', quote=True)}' data-size-select>"
         "<option value=''>Hepsi</option></select></label>"
         f"<label data-site-option='exclude_terms' hidden>Hariç tut<input type='text' name='{escape(prefix + 'exclude_terms', quote=True)}'></label>"
@@ -696,19 +697,6 @@ def _distinct_parts(text: str) -> str:
     return " / ".join(dict.fromkeys(part.strip() for part in str(text or "").split(" / ") if part.strip()))
 
 
-def _variant_labels(labels: List[str]) -> List[str]:
-    """What differs between variants: each one's own name without the words every variant shares.
-
-    "Apple iPhone 17 Pro Max 256 GB Abis / Abis / 256 GB" -> "256 GB Abis".
-    """
-    names = [_distinct_parts(label).split(" / ")[0] for label in labels]
-    words = [name.split() for name in names]
-    shared = 0
-    while len(words) > 1 and all(len(item) > shared + 1 and item[shared] == words[0][shared] for item in words):
-        shared += 1
-    return [" ".join(item[shared:]) or name for item, name in zip(words, names)]
-
-
 def check_link(url: str, providers) -> Dict[str, Any]:
     """The new-card link check: the site and its live product, variants and choice boxes."""
     url = str(url or "").strip()
@@ -731,9 +719,8 @@ def check_link(url: str, providers) -> Dict[str, Any]:
         **result,
         "ok": True,
         "title": _distinct_parts(preview.title),
-        "variants": [{"label": label, "price": format_tl(variant.price, with_currency=True) if variant.price is not None else "",
-                      "in_stock": variant.in_stock, "attributes": variant.attributes}
-                     for variant, label in zip(preview.variants, _variant_labels([variant.label for variant in preview.variants]))],
+        "variants": [{"label": _distinct_parts(variant.label), "price": format_tl(variant.price, with_currency=True) if variant.price is not None else "",
+                      "in_stock": variant.in_stock, "attributes": variant.attributes} for variant in preview.variants],
         "dimensions": preview.dimensions,
         "defaults": preview.defaults,
     }
