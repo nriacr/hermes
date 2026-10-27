@@ -20,6 +20,8 @@ from .product_page import explicit_price, product_json
 STORE_STOCKS_URL = "https://www.ikea.com.tr/_ws/general.aspx/CheckStoreStocks"
 # Watched stores (normalized title fragment, label shown in alerts).
 WATCHED_STORES = (("internet magazasi", "İnternet Mağazası"), ("bayrampasa", "Bayrampaşa"))
+# The stores a card can choose from (normalized title fragments).
+OFFERED_STORES = ("internet magazasi", "bayrampasa", "kartal", "umraniye")
 IN_STOCK_CLASSES = {"full", "critical"}
 PRODUCT_CODE = re.compile(r"-(\d{8})/?$")
 PRODUCT_DATA = re.compile(r'"@type"\s*:\s*"Product"')
@@ -104,8 +106,11 @@ class IkeaProvider(Provider):
         product = product_json(soup_from_html(html), "", url) or {}
         title = str(product.get("name") or "").strip()
         price = explicit_price(product) if product else None
-        # The online store first, then the physical stores in IKEA's order.
-        stores = sorted(all_stores(stocks), key=lambda store: "internet" not in normalize_offer_text(store["label"]))
+        # Only the offered stores, the online store first.
+        stores = sorted((store for store in all_stores(stocks)
+                         if any(fragment in normalize_offer_text(store["label"]) for fragment in OFFERED_STORES)),
+                        key=lambda store: next(index for index, fragment in enumerate(OFFERED_STORES)
+                                               if fragment in normalize_offer_text(store["label"])))
         variants = [VariantPreview(store["label"], price, store["class"] in IN_STOCK_CLASSES, {STORE_DIMENSION: store["label"]})
                     for store in stores]
         defaults = [store["label"] for store in stores

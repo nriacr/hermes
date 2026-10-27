@@ -50,6 +50,6 @@ body.ov.settings-page .button.primary { border:1px solid rgba(201,229,154,.35); 
 .settings-page .active-switch { position:relative; display:inline-block; flex:none; width:40px; height:22px; margin-left:12px; cursor:pointer; } .settings-page .active-switch input { position:absolute; opacity:0; width:100%; height:100%; margin:0; cursor:pointer; }
 .settings-page .active-switch span { position:absolute; inset:0; border-radius:99px; border:1px solid var(--edge); background:rgba(255,255,255,.08); transition:background .2s,border-color .2s; } .settings-page .active-switch span::after { content:''; position:absolute; top:2px; left:2px; width:16px; height:16px; border-radius:50%; background:var(--mute); transition:transform .2s,background .2s; }
 .settings-page .active-switch input:checked + span { background:rgba(201,229,154,.22); border-color:rgba(201,229,154,.45); } .settings-page .active-switch input:checked + span::after { transform:translateX(18px); background:#d4ebad; } .settings-page .active-switch input:focus-visible + span { outline:2px solid rgba(201,229,154,.6); outline-offset:2px; }
-.settings-page .new-watch-switch { display:flex; justify-content:flex-end; }
 .settings-page .target-price { grid-column:1 / -1; color:var(--text); font:600 13px var(--display); } .settings-page .target-price input { min-height:52px; font:700 22px var(--display); letter-spacing:-.01em; }
+.settings-page .variant-chip.is-out { color:var(--mute); border-style:dashed; }
 .settings-page [hidden] { display:none !important; }

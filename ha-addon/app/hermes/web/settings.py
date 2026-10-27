@@ -169,7 +169,9 @@ def _watch_site(item) -> str:
     return ""
 
 
-OPTION_LABELS = {"include_variations": "Varyant", "auto_add_to_cart": "Otomatik sepete ekle"}
+OPTION_LABELS = {"auto_add_to_cart": "Otomatik sepete ekle"}
+# Fields only a search link shows; a product link takes them from the page.
+SEARCH_ONLY = ("name", "minimum_price")
 SELLER_LABELS = {"amazon": "Amazon.com.tr satıcısı", "hepsiburada": "Hepsiburada satıcısı"}
 CHOICE_LABELS = {"ikea": "Mağazalar"}
 
@@ -184,9 +186,12 @@ def _site_options(prefix, item, site, search) -> tuple:
     """The site's own (text fields, checkboxes) of a saved card; the product name only on search pages."""
     parts, flags = [], []
     for option in SITE_OPTIONS.get(site, ()):
+        if option in SEARCH_ONLY and not search:
+            continue
         if option == "name":
-            if search:
-                parts.append(_field(prefix, "name", "Ürün adı", item.get("name", "")))
+            parts.append(_field(prefix, "name", "Ürün adı", item.get("name", "")))
+        elif option == "minimum_price":
+            parts.append(_field(prefix, "minimum_price", "Hedef fiyat min", _price_input_value(item.get("minimum_price", ""))))
         elif option == "size":
             parts.append(_field(prefix, "size", "Beden", item.get("size", "")))
         elif option == "exclude_terms":
@@ -215,7 +220,6 @@ def _priority_field(prefix, item, is_new) -> str:
 def _common_fields(prefix, item, is_new) -> str:
     return (
         f"{_field(prefix, 'target_price', 'Hedef fiyat', _price_input_value(item.get('target_price', ''))).replace('<label>', "<label class='target-price'>", 1)}"
-        f"{_field(prefix, 'minimum_price', 'Hedef fiyat min', _price_input_value(item.get('minimum_price', '')))}"
         f"{_priority_field(prefix, item, is_new)}"
     )
 
@@ -236,6 +240,9 @@ def watch_form(item: Dict[str, Any], index: int, known_titles=None) -> str:
     site_fields, site_flags = _site_options(prefix, item, _watch_site(item), search)
     name = "" if search else (f"<input type='hidden' name='{escape(prefix + 'name', quote=True)}' "
                               f"value='{escape(str(item.get('name') or ''), quote=True)}'>")
+    if item.get("include_variations") and not item.get("variant_filter"):
+        # Cards saved before variant choices read the whole family; saving keeps that.
+        name += f"<input type='hidden' name='{escape(prefix + 'include_variations', quote=True)}' value='1'>"
     inner = (
         _hidden_identity(prefix, item) + name
         + f"<div class='watch-links'>{links}</div>"
@@ -255,13 +262,13 @@ def new_watch_form(index: int, check_path: str) -> str:
     hidden = lambda option, html: f"<span class='site-option' data-site-option='{option}' hidden>{html}</span>"  # noqa: E731
     site_fields = (
         f"<label data-site-option='name' data-search-only hidden>Ürün adı<input type='text' name='{escape(prefix + 'name', quote=True)}' data-product-name></label>"
+        f"<label data-site-option='minimum_price' data-search-only hidden>Hedef fiyat min<input type='text' name='{escape(prefix + 'minimum_price', quote=True)}'></label>"
         f"<label data-site-option='size' hidden>Beden<select name='{escape(prefix + 'size', quote=True)}' data-size-select>"
         "<option value=''>Hepsi</option></select></label>"
         f"<label data-site-option='exclude_terms' hidden>Hariç tut<input type='text' name='{escape(prefix + 'exclude_terms', quote=True)}'></label>"
     )
     site_flags = (
-        hidden("include_variations", _checkbox(prefix, "include_variations", OPTION_LABELS["include_variations"], False))
-        + hidden("official_seller_only", _checkbox(prefix, "official_seller_only", "Platform satıcısı", False)
+        hidden("official_seller_only", _checkbox(prefix, "official_seller_only", "Platform satıcısı", False)
                  .replace(">Platform satıcısı</label>", "><span data-seller-label></span></label>"))
         + hidden("auto_add_to_cart", _checkbox(prefix, "auto_add_to_cart", OPTION_LABELS["auto_add_to_cart"], False))
     )
@@ -277,7 +284,7 @@ def new_watch_form(index: int, check_path: str) -> str:
         "<div class='variant-table' data-variant-table></div>"
         "<div class='watch-site-options' data-variant-dims data-site-option='variant_filter' hidden></div>"
         f"<input type='hidden' name='{escape(prefix + 'variant_filter', quote=True)}' data-variant-filter></div>"
-        f"<div class='new-watch-fields'><div class='new-watch-switch'>{_active_switch(prefix, True)}</div>"
+        f"<div class='new-watch-fields'><input type='hidden' name='{escape(prefix + 'active', quote=True)}' value='1'>"
         f"<div class='watch-fields'>{_common_fields(prefix, {}, True)}{site_fields}</div>"
         f"<div class='watch-site-options'>{site_flags}</div></div></div></div>"
     )
@@ -689,6 +696,19 @@ def _distinct_parts(text: str) -> str:
     return " / ".join(dict.fromkeys(part.strip() for part in str(text or "").split(" / ") if part.strip()))
 
 
+def _variant_labels(labels: List[str]) -> List[str]:
+    """What differs between variants: each one's own name without the words every variant shares.
+
+    "Apple iPhone 17 Pro Max 256 GB Abis / Abis / 256 GB" -> "256 GB Abis".
+    """
+    names = [_distinct_parts(label).split(" / ")[0] for label in labels]
+    words = [name.split() for name in names]
+    shared = 0
+    while len(words) > 1 and all(len(item) > shared + 1 and item[shared] == words[0][shared] for item in words):
+        shared += 1
+    return [" ".join(item[shared:]) or name for item, name in zip(words, names)]
+
+
 def check_link(url: str, providers) -> Dict[str, Any]:
     """The new-card link check: the site and its live product, variants and choice boxes."""
     url = str(url or "").strip()
@@ -711,8 +731,9 @@ def check_link(url: str, providers) -> Dict[str, Any]:
         **result,
         "ok": True,
         "title": _distinct_parts(preview.title),
-        "variants": [{"label": _distinct_parts(variant.label), "price": format_tl(variant.price, with_currency=True) if variant.price is not None else "",
-                      "in_stock": variant.in_stock, "attributes": variant.attributes} for variant in preview.variants],
+        "variants": [{"label": label, "price": format_tl(variant.price, with_currency=True) if variant.price is not None else "",
+                      "in_stock": variant.in_stock, "attributes": variant.attributes}
+                     for variant, label in zip(preview.variants, _variant_labels([variant.label for variant in preview.variants]))],
         "dimensions": preview.dimensions,
         "defaults": preview.defaults,
     }

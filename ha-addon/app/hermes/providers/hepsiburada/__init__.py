@@ -247,7 +247,7 @@ def fetch_hepsiburada_page(session: requests.Session, url: str, timeout: int):
 class HepsiburadaProvider(Provider):
     site = SITE_HEPSIBURADA
     alert_shows_seller = True
-    card_options = ("name", "official_seller_only", "exclude_terms")
+    card_options = ("name", "minimum_price", "official_seller_only", "exclude_terms")
 
     def keeps_offer(self, watch, offer) -> bool:
         """With the own-seller option, only offers sold by Hepsiburada itself."""

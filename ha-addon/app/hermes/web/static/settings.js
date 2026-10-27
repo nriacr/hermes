@@ -63,7 +63,9 @@
     newWatch.querySelector('[data-seller-label]').textContent = data.seller_label || '';
     const sizeSelect = newWatch.querySelector('[data-size-select]');
     sizeSelect.replaceChildren(new Option('Hepsi', ''));
-    (dimensions.Beden || []).forEach((size) => sizeSelect.appendChild(new Option(size, size)));
+    // Out-of-stock values stay choosable: the card waits for them to come back.
+    const outOfStock = new Set(variants.filter((item) => !item.in_stock).flatMap((item) => Object.values(item.attributes || {})));
+    (dimensions.Beden || []).forEach((size) => sizeSelect.appendChild(new Option(outOfStock.has(size) ? `${size} (tükendi)` : size, size)));
     const dims = newWatch.querySelector('[data-variant-dims]');
     dims.replaceChildren();
     if (options.has('variant_filter')) {
@@ -73,7 +75,7 @@
         group.appendChild(element('span', '', name));
         const chips = element('div', 'variant-chips');
         values.forEach((value) => {
-          const chip = element('label', 'variant-chip');
+          const chip = element('label', outOfStock.has(value) ? 'variant-chip is-out' : 'variant-chip');
           const box = element('input');
           box.type = 'checkbox';
           box.value = value;

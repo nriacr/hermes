@@ -875,14 +875,16 @@ class SettingsTests(DataFilesMixin, unittest.TestCase):
             self.assertNotIn(removed, zara)
         self.assertIn("data-active-switch", zara)
         amazon = settings.watch_form({"name": "Kulaklık", "variant_filter": "Renk=Siyah", "url_1": "https://www.amazon.com.tr/dp/B000000001"}, 1)
-        for text in (">Varyant<", "Amazon.com.tr satıcısı", "Otomatik sepete ekle", "Hariç tut", "value='Renk=Siyah'"):
+        for text in ("Amazon.com.tr satıcısı", "Otomatik sepete ekle", "Hariç tut", "value='Renk=Siyah'"):
             self.assertIn(text, amazon)
+        self.assertNotIn("Hedef fiyat min", amazon)  # a product link has no minimum
         self.assertNotIn(">Beden<", amazon)
         hepsiburada = settings.watch_form({"name": "Fırın", "url_1": "https://www.hepsiburada.com/firin-p-HBC1"}, 2)
         self.assertIn("Hepsiburada satıcısı", hepsiburada)
         self.assertNotIn(">Ürün adı<", hepsiburada)  # a product page takes its name from the page
         search = settings.watch_form({"name": "fırın", "url_1": "https://www.hepsiburada.com/ara?q=firin"}, 3)
         self.assertIn(">Ürün adı<", search)
+        self.assertIn("Hedef fiyat min", search)
         trendyol = settings.watch_form({"name": "Çanta", "url_1": "https://www.trendyol.com/stark"}, 4)
         self.assertNotIn("watch-site-options", trendyol)
         self.assertNotIn(">Beden<", trendyol)
