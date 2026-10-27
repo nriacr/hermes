@@ -826,6 +826,7 @@ class SettingsTests(DataFilesMixin, unittest.TestCase):
         self.write_options({"takip_edilenler": [{"name": "Mevcut", "target_price": 100, "url_1": "https://www.amazon.com.tr/dp/B000000001"}]})
         page = settings.render_settings_page(".", {}).decode()
         self.assertLess(page.index("Yeni takip"), page.index("Takip edilenler"))
+        self.assertLess(page.index("data-queue-watch"), page.index("data-queued-list"))
         self.assertEqual(page.count("data-settings-save"), 1)
         for text in ("id='saving-overlay'", "Değişiklikleri uygula", "Ayarlar kaydediliyor", "id='watch-search'",
                      "data-watch-search='Mevcut'", "class='button danger'", "data-delete-watch", "value='100'",
@@ -1032,7 +1033,7 @@ class SettingsTests(DataFilesMixin, unittest.TestCase):
 
     def test_shared_scripts_handle_search_filters_and_restart(self):
         self.assertIn("watchSearch?.addEventListener('input', refreshWatchList)", assets.SETTINGS_SCRIPT)
-        for text in ("data-site-group", "data-delete-watch", "data-check-link", "data-variant-filter"):
+        for text in ("data-site-group", "data-delete-watch", "data-check-link", "data-variant-filter", "data-queue-watch"):
             self.assertIn(text, assets.SETTINGS_SCRIPT)
         self.assertIn("waitForHermes", assets.RESTART_SCRIPT)
 

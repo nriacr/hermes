@@ -52,4 +52,9 @@ body.ov.settings-page .button.primary { border:1px solid rgba(201,229,154,.35); 
 .settings-page .active-switch input:checked + span { background:rgba(201,229,154,.22); border-color:rgba(201,229,154,.45); } .settings-page .active-switch input:checked + span::after { transform:translateX(18px); background:#d4ebad; } .settings-page .active-switch input:focus-visible + span { outline:2px solid rgba(201,229,154,.6); outline-offset:2px; }
 .settings-page .target-price { grid-column:1 / -1; color:var(--text); font:600 13px var(--display); } .settings-page .target-price input { min-height:52px; font:700 22px var(--display); letter-spacing:-.01em; }
 .settings-page .variant-chip.is-out { color:var(--mute); border-style:dashed; }
+.settings-page .new-watch-actions { display:flex; justify-content:flex-end; margin-top:auto; } body.ov.settings-page .button.add { min-width:120px; border:1px solid rgba(134,214,160,.45); background:rgba(134,214,160,.16); color:#a8e6bc; }
+.settings-page .queued-watches { display:grid; grid-template-columns:minmax(0,1fr); gap:6px; margin-top:14px; } .settings-page .queued-watches:empty { display:none; }
+.settings-page .queued-watch { display:flex; align-items:center; gap:12px; min-height:44px; padding:0 8px 0 14px; border-radius:14px; border:1px solid rgba(134,214,160,.3); background:rgba(134,214,160,.06); }
+.settings-page .queued-name { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text); font:600 13.5px var(--display); } .settings-page .queued-price { color:var(--mute); font-variant-numeric:tabular-nums; white-space:nowrap; }
+.settings-page .queued-remove { min-height:32px; padding:0 12px; border-radius:10px; border:1px solid var(--edge); background:transparent; color:var(--mute); font:600 12px var(--display); cursor:pointer; }
 .settings-page [hidden] { display:none !important; }

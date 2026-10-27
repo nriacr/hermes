@@ -31,7 +31,12 @@
     field.setSelectionRange(caret, caret);
   });
 
-  const newWatch = document.querySelector('[data-new-watch]');
+  let newWatch = document.querySelector('[data-new-watch]');
+  // The empty form, reused for the next link after "Ekle".
+  const pristineWatch = newWatch?.outerHTML || '';
+  const watchesCount = document.getElementById('watches-count');
+  const pristineIndex = Number(watchesCount?.value || 1) - 1;
+  const queuedList = document.querySelector('[data-queued-list]');
   const element = (tag, className, text) => {
     const node = document.createElement(tag);
     if (className) node.className = className;
@@ -109,8 +114,7 @@
     if (nameField && (!nameField.value || !data.search)) nameField.value = data.search ? nameField.value : (data.title || '');
     body.hidden = false;
   };
-  newWatch?.querySelector('[data-check-link]')?.addEventListener('click', async (event) => {
-    const button = event.currentTarget;
+  const checkLink = async (button) => {
     const url = newWatch.querySelector('[data-check-url]').value.trim();
     const error = newWatch.querySelector('[data-check-error]');
     const body = newWatch.querySelector('[data-new-body]');
@@ -132,11 +136,54 @@
       button.disabled = false;
       button.textContent = 'Kontrol et';
     }
+  };
+  document.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-check-link]');
+    if (button) checkLink(button);
   });
-  newWatch?.querySelector('[data-check-url]')?.addEventListener('keydown', (event) => {
-    if (event.key !== 'Enter') return;
+  document.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' || !event.target.matches('[data-check-url]')) return;
     event.preventDefault();
     newWatch.querySelector('[data-check-link]').click();
+  });
+
+  // "Ekle" keeps the checked card as hidden fields and opens an empty form; one apply saves them all.
+  document.addEventListener('click', (event) => {
+    if (!event.target.closest('[data-queue-watch]')) return;
+    const error = newWatch.querySelector('[data-check-error]');
+    const target = newWatch.querySelector("input[name$='_target_price']");
+    const name = newWatch.querySelector('[data-product-name]');
+    const missing = !target.value.trim() ? target : (!name.closest('[hidden]') && !name.value.trim() ? name : null);
+    if (missing) {
+      error.textContent = missing === target ? 'Hedef fiyatı yaz.' : 'Ürün adını yaz.';
+      error.hidden = false;
+      missing.focus();
+      return;
+    }
+    const row = element('div', 'queued-watch');
+    newWatch.querySelectorAll('input[name], select[name]').forEach((field) => {
+      if (field.type === 'checkbox' && !field.checked) return;
+      const copy = element('input');
+      copy.type = 'hidden';
+      copy.name = field.name;
+      copy.value = field.value;
+      row.appendChild(copy);
+    });
+    const title = newWatch.querySelector('[data-product-title]').textContent || name.value || newWatch.querySelector('[data-check-url]').value;
+    const remove = element('button', 'queued-remove', 'Kaldır');
+    remove.type = 'button';
+    remove.addEventListener('click', () => { row.remove(); dirty = true; });
+    row.append(element('span', 'queued-name', title), element('span', 'queued-price', `${target.value} TL`), remove);
+    queuedList.appendChild(row);
+    const index = Number(watchesCount.value);
+    watchesCount.value = String(index + 1);
+    const holder = document.createElement('div');
+    holder.innerHTML = pristineWatch.replaceAll(`watches_${pristineIndex}_`, `watches_${index}_`);
+    const fresh = holder.firstElementChild;
+    newWatch.replaceWith(fresh);
+    newWatch = fresh;
+    newWatch.querySelector('[data-check-url]').focus();
+    dirty = true;
   });
 
   document.addEventListener('click', (event) => {

@@ -287,7 +287,8 @@ def new_watch_form(index: int, check_path: str) -> str:
         f"<input type='hidden' name='{escape(prefix + 'variant_filter', quote=True)}' data-variant-filter></div>"
         f"<div class='new-watch-fields'><input type='hidden' name='{escape(prefix + 'active', quote=True)}' value='1'>"
         f"<div class='watch-fields'>{_common_fields(prefix, {}, True)}{site_fields}</div>"
-        f"<div class='watch-site-options'>{site_flags}</div></div></div></div>"
+        f"<div class='watch-site-options'>{site_flags}</div>"
+        "<div class='new-watch-actions'><button class='button add' type='button' data-queue-watch>Ekle</button></div></div></div></div>"
     )
 
 
@@ -411,7 +412,7 @@ def render_settings_page(base: str, params: Dict[str, List[str]], *, access_bar:
         "<input type='hidden' name='operation' value='update_existing'>"
         f"<input type='hidden' name='watches_count' id='watches-count' value='{new_index + 1}'>"
         "<section class='settings-section'><h2>Yeni takip</h2>"
-        f"{new_watch_form(new_index, link(base, 'settings/check'))}</section>"
+        f"{new_watch_form(new_index, link(base, 'settings/check'))}<div class='queued-watches' data-queued-list></div></section>"
         "<section class='settings-section'><h2>Takip edilenler</h2>"
         "<input id='watch-search' type='search' placeholder='Ara' aria-label='Takip edilenlerde ara' autocomplete='off'>"
         f"{_site_groups(watches, known_titles)}</section>"
