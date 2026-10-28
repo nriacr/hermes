@@ -1,5 +1,11 @@
 # Değişiklik günlüğü
 
+## 4.27.0
+
+- Amazon Depo fırsatları kart ayarı olmadan otomatik sepete eklenir (sepetteki diğer ürünler "Sonra al"a taşınır, silinmez; günde en çok 5). Yeni teklifler yalnız bildirilir. "Otomatik sepete ekle" kutusu ve kayıtlı değeri kaldırıldı.
+- Ayarlar: sıradaki yeni takibin adına tıklanınca form yeniden açılır, düzeltilip yerine geri eklenir.
+- Kart sürükleme fareyi yalnız dikeyde takip eder, diğer kartlar kayarak yol açar, bırakınca yerine oturur.
+- "Değişiklikleri uygula" değişiklik yokken pasif; solunda kaydetmeden geri dönen "Vazgeç".
 ## 4.26.3
 
 - Ayarlar: Kontrol sonrası yeşil "Ekle" ile birden çok yeni takip biriktirilir, hepsi tek "Değişiklikleri uygula" ve tek yeniden başlatmayla kaydedilir.
