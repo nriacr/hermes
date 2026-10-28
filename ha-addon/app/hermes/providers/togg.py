@@ -4,7 +4,7 @@ from typing import Any, Dict, List
 
 from ..constants import SITE_TOGG
 from ..errors import HermesError, HttpStatusHermesError, OutOfStockHermesError
-from ..models import OfferResult
+from ..models import OfferResult, ProductPreview, VariantPreview
 from ..utils import normalize_offer_text
 from .base import Provider
 
@@ -73,9 +73,14 @@ def extract_offers(payload: str, model: str, source_url: str = "") -> List[Offer
             for product in matches]
 
 
+MODEL_DIMENSION = "Model"
+
+
 class ToggProvider(Provider):
     site = SITE_TOGG
     notifies_stock_return = True
+    # The card names the watched model; the link check lists the models to choose from.
+    card_options = ("model",)
 
     def __init__(self) -> None:
         self.payload: str | None = None
@@ -91,6 +96,16 @@ class ToggProvider(Provider):
                 raise HttpStatusHermesError(response.status_code, TOGG_PRODUCTS_URL)
             self.payload = response.text
         return self.payload
+
+    def inspect(self, url, ctx):
+        response = ctx.session.get(TOGG_PRODUCTS_URL, headers=togg_headers(), timeout=ctx.timeout)
+        if response.status_code >= 400:
+            raise HttpStatusHermesError(response.status_code, TOGG_PRODUCTS_URL)
+        products = parse_products(response.text)
+        names = [str(product["name"]).strip() for product in products]
+        variants = [VariantPreview(name, product_price(product) or None, True, {MODEL_DIMENSION: name})
+                    for name, product in zip(names, products)]
+        return ProductPreview(self.site, "Togg", variants, {MODEL_DIMENSION: names})
 
     def read(self, watch, ctx, outcome):
         return extract_offers(self._products_payload(ctx), watch.name, source_url=watch.url)

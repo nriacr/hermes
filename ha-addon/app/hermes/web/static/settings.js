@@ -93,7 +93,7 @@
     // A single product shows its live price large; a family shows its variant count above the table.
     newWatch.querySelector('[data-product-sub]').classList.toggle('is-price', variants.length <= 1);
     newWatch.querySelector('[data-product-sub]').textContent = variants.length > 1
-      ? `${variants.length} ${'Mağaza' in (data.dimensions || {}) ? 'mağaza' : 'varyant'}` : (priced[0]?.price || '');
+      ? `${variants.length} ${'Mağaza' in (data.dimensions || {}) ? 'mağaza' : 'Model' in (data.dimensions || {}) ? 'model' : 'varyant'}` : (priced[0]?.price || '');
     const table = newWatch.querySelector('[data-variant-table]');
     table.replaceChildren();
     if (variants.length > 1) {
@@ -115,10 +115,19 @@
       node.hidden = !options.has(node.dataset.siteOption) || ('searchOnly' in node.dataset && !data.search);
     });
     newWatch.querySelector('[data-seller-label]').textContent = data.seller_label || '';
+    // A model site whose list is empty right now asks for the model name to wait for.
+    const typedModel = options.has('model') && !(data.dimensions?.Model || []).length;
+    newWatch.querySelector('[data-site-option="model"]').hidden = !options.has('model') || typedModel;
+    if (typedModel) newWatch.querySelector('[data-site-option="name"]').hidden = false;
+    newWatch.querySelector('[data-name-label]').textContent = options.has('model') ? 'Model' : 'Ürün adı';
     // Out-of-stock values stay choosable: the card waits for them to come back.
     // A value is out of stock only when no variant with it is in stock.
     const inStock = new Set(variants.filter((item) => item.in_stock).flatMap((item) => Object.values(item.attributes || {})));
     const outOfStock = new Set(variants.flatMap((item) => Object.values(item.attributes || {})).filter((value) => !inStock.has(value)));
+    // A model site (Togg) names the card after the chosen model.
+    const modelSelect = newWatch.querySelector('[data-model-select]');
+    modelSelect.replaceChildren(new Option('Seç', ''), ...(dimensions.Model || []).map((model) => new Option(model, model)));
+    modelSelect.onchange = () => { newWatch.querySelector('[data-product-name]').value = modelSelect.value; };
     sizeChoices = (dimensions.Beden || []).map((size) => [size, outOfStock.has(size) ? `${size} (tükendi)` : size]);
     renderSizes([]);
     const dims = newWatch.querySelector('[data-variant-dims]');
@@ -148,7 +157,7 @@
     table.hidden = !variants.length;
     writeVariantFilter();
     const nameField = newWatch.querySelector('[data-product-name]');
-    if (nameField && (!nameField.value || !data.search)) nameField.value = data.search ? nameField.value : (data.title || '');
+    if (nameField && (!nameField.value || !data.search)) nameField.value = data.search ? nameField.value : (options.has('model') ? '' : data.title || '');
     body.hidden = false;
   };
   const checkLink = async (button) => {
@@ -190,9 +199,11 @@
     const error = newWatch.querySelector('[data-check-error]');
     const target = newWatch.querySelector("input[name$='_target_price']");
     const name = newWatch.querySelector('[data-product-name]');
-    const missing = !target.value.trim() ? target : (!name.closest('[hidden]') && !name.value.trim() ? name : null);
+    const model = newWatch.querySelector('[data-model-select]');
+    const missing = !target.value.trim() ? target
+      : (!model.closest('[hidden]') && !model.value ? model : (!name.closest('[hidden]') && !name.value.trim() ? name : null));
     if (missing) {
-      error.textContent = missing === target ? 'Hedef fiyatı yaz.' : 'Ürün adını yaz.';
+      error.textContent = missing === target ? 'Hedef fiyatı yaz.' : missing === model ? 'Modeli seç.' : `${newWatch.querySelector('[data-name-label]').textContent === 'Model' ? 'Modeli' : 'Ürün adını'} yaz.`;
       error.hidden = false;
       missing.focus();
       return;
@@ -208,7 +219,9 @@
       copy.value = field.value;
       row.appendChild(copy);
     });
-    const title = newWatch.querySelector('[data-product-title]').textContent || name.value || newWatch.querySelector('[data-check-url]').value;
+    const modelCard = newWatch.querySelector('[data-name-label]').textContent === 'Model';
+    const title = (modelCard && name.value) || newWatch.querySelector('[data-product-title]').textContent || name.value
+      || newWatch.querySelector('[data-check-url]').value;
     const remove = element('button', 'queued-remove', 'Kaldır');
     remove.type = 'button';
     remove.addEventListener('click', () => { row.remove(); setDirty(true); });
@@ -260,6 +273,7 @@
       group.querySelectorAll('input').forEach((box) => { box.checked = (chosen[group.dataset.variantDim] || []).includes(box.value); });
     });
     writeVariantFilter();
+    newWatch.querySelector('[data-model-select]').value = values[`watches_${row.dataset.index}_name`] || '';
     renderSizes((values[`watches_${row.dataset.index}_size`] || '').split(';').map((size) => size.trim()).filter(Boolean));
     const marker = element('div', 'queued-watch is-open');
     marker.dataset.reopened = row.dataset.index;

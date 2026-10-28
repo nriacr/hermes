@@ -32,6 +32,14 @@ class ToggParserTests(unittest.TestCase):
     def test_site_detection(self):
         self.assertEqual(detect_site_from_url(URL), "togg")
 
+    def test_link_check_lists_every_model_to_choose_from(self):
+        session = Mock()
+        session.get.return_value = SimpleNamespace(status_code=200, text=payload(V1, V2))
+        preview = ToggProvider().inspect(URL, ReadContext(timeout=5, session=session))
+        self.assertEqual(preview.dimensions, {"Model": [V1, V2]})
+        self.assertEqual([(variant.label, variant.price) for variant in preview.variants],
+                         [(V1, Decimal("2193999.99")), (V2, Decimal("2193999.99"))])
+
     def test_listed_model_is_an_offer_with_the_lowest_tax_inclusive_price(self):
         offers = extract_offers(payload(V1, "T10X V2 4More Obsidiyen", V2), V2, URL)
         self.assertEqual([offer.title for offer in offers], [V2])

@@ -190,6 +190,8 @@ def _site_options(prefix, item, site, search) -> tuple:
             continue
         if option == "name":
             parts.append(_field(prefix, "name", "Ürün adı", item.get("name", "")))
+        elif option == "model":
+            parts.append(_field(prefix, "name", "Model", item.get("name", "")))
         elif option == "minimum_price":
             parts.append(_field(prefix, "minimum_price", "Hedef fiyat min", _price_input_value(item.get("minimum_price", ""))))
         elif option == "size":
@@ -236,7 +238,9 @@ def watch_form(item: Dict[str, Any], index: int, known_titles=None) -> str:
     links = "".join(_field(prefix, field_name, "Link" if number == 1 else f"Link {number}", url, "url")
                     for number, (field_name, url) in enumerate(zip(WATCH_URL_FIELDS, urls), start=1))
     site_fields, site_flags = _site_options(prefix, item, _watch_site(item), search)
-    name = "" if search else (f"<input type='hidden' name='{escape(prefix + 'name', quote=True)}' "
+    # The card's name is its own field on search pages and for a site that watches a named model.
+    named = search or "model" in SITE_OPTIONS.get(_watch_site(item), ())
+    name = "" if named else (f"<input type='hidden' name='{escape(prefix + 'name', quote=True)}' "
                               f"value='{escape(str(item.get('name') or ''), quote=True)}'>")
     if item.get("include_variations") and not item.get("variant_filter"):
         # Cards saved before variant choices read the whole family; saving keeps that.
@@ -260,8 +264,9 @@ def new_watch_form(index: int, check_path: str) -> str:
     prefix = f"watches_{index}_"
     hidden = lambda option, html: f"<span class='site-option' data-site-option='{option}' hidden>{html}</span>"  # noqa: E731
     site_fields = (
-        f"<label data-site-option='name' data-search-only hidden>Ürün adı<input type='text' name='{escape(prefix + 'name', quote=True)}' data-product-name></label>"
+        f"<label data-site-option='name' data-search-only hidden><span data-name-label>Ürün adı</span><input type='text' name='{escape(prefix + 'name', quote=True)}' data-product-name></label>"
         f"<label data-site-option='minimum_price' data-search-only hidden>Hedef fiyat min<input type='text' inputmode='numeric' name='{escape(prefix + 'minimum_price', quote=True)}'></label>"
+        "<label data-site-option='model' hidden>Model<select data-model-select></select></label>"
         f"<div class='size-boxes' data-site-option='size' data-size-boxes hidden></div>"
         f"<input type='hidden' name='{escape(prefix + 'size', quote=True)}' data-sizes>"
         f"<label data-site-option='exclude_terms' hidden>Hariç tut<input type='text' name='{escape(prefix + 'exclude_terms', quote=True)}'></label>"
