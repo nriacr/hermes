@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.29.0
+
+- Ayarlar Kontrol et arka planda çalışır, sayfa sonucu birkaç saniyede bir sorar; uzun okumalarda (Hepsiburada varyant ailesi) Home Assistant zaman aşımı hatası olmaz, düğmede geçen süre görünür.
+- H&M: Kontrol et sayfadaki tüm renkleri bedenleriyle okur; Renk seçimi yapılabilir, yalnız seçilen renkler izlenir.
 ## 4.28.0
 
 - Beden seçilen sitelerde birden çok beden: bir beden seçince sonraki beden kutusu açılır; her beden ayrı izlenir ("M; L" olarak kaydedilir).
