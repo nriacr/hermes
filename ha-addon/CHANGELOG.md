@@ -1,5 +1,10 @@
 # Değişiklik günlüğü
 
+## 4.31.1
+
+- Amazon: varyant satırındaki ok düğmesi (javascript:void) varyant sayılmaz; Hue Flare taramalarındaki 404 tekrarları biter.
+- Hepsiburada önce çalışan curl_cffi ile okur; engellenen python-requests ve ana sayfa denemeleri yalnız curl başarısızsa yapılır (24 saatte 456 adet 403 ölçülmüştü).
+- Pushover her bildirimi yeni bağlantıyla gönderir (ilk denemedeki "bağlantı koptu" hataları biter).
 ## 4.31.0
 
 - Kaldırılan kart bildirim ayarlarının (Bildirim zamanı, 90 günün en düşüğü, 24 saat sustur) izleme kodu ve kayıtlı değerleri silindi; her kart hedef altında bildirir, aynı fiyat için 24 saat susar.
