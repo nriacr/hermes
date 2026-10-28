@@ -1,5 +1,10 @@
 # Değişiklik günlüğü
 
+## 4.31.0
+
+- Kaldırılan kart bildirim ayarlarının (Bildirim zamanı, 90 günün en düşüğü, 24 saat sustur) izleme kodu ve kayıtlı değerleri silindi; her kart hedef altında bildirir, aynı fiyat için 24 saat susar.
+- Amazon Kontrol et: sayfadaki Depo teklifi varyant satırında fiyatıyla gösterilir.
+- Temizlik: Ayarlar'da kullanılmayan yardımcı ve stiller, Togg'da tekrar eden ürün listesi okuması.
 ## 4.30.0
 
 - Hepsiburada: Kontrol et sayfadaki varyant listesini tek istekle okur (12 varyant ~3 sn); Kapasite/Renk seçimi yapılabilir, seçim varyantın SKU'su ile eşleşir (yanlış adlı varyantlar karışmaz).
