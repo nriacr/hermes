@@ -60,6 +60,29 @@
     }).filter(Boolean);
     newWatch.querySelector('[data-variant-filter]').value = chosen.join('; ');
   };
+  // One size box per chosen size; choosing one opens the next. Saved as "M; L".
+  let sizeChoices = [];
+  const renderSizes = (chosen) => {
+    const boxes = newWatch.querySelector('[data-size-boxes]');
+    boxes.replaceChildren();
+    [...chosen, ''].forEach((value, position) => {
+      const remaining = sizeChoices.filter(([size]) => size === value || !chosen.includes(size));
+      if (position > 0 && !remaining.length) return;
+      const label = element('label', '', position ? `Beden ${position + 1}` : 'Beden');
+      const select = element('select');
+      select.appendChild(new Option(position ? 'Seç' : 'Hepsi', ''));
+      remaining.forEach(([size, text]) => select.appendChild(new Option(text, size)));
+      select.value = value;
+      select.addEventListener('change', () => {
+        const next = [...boxes.querySelectorAll('select')].map((box) => box.value).filter(Boolean);
+        renderSizes([...new Set(next)]);
+      });
+      label.appendChild(select);
+      boxes.appendChild(label);
+    });
+    newWatch.querySelector('[data-sizes]').value = chosen.join('; ');
+  };
+
   let lastCheck = null;
   const showProduct = (data) => {
     lastCheck = data;
@@ -90,13 +113,12 @@
       node.hidden = !options.has(node.dataset.siteOption) || ('searchOnly' in node.dataset && !data.search);
     });
     newWatch.querySelector('[data-seller-label]').textContent = data.seller_label || '';
-    const sizeSelect = newWatch.querySelector('[data-size-select]');
-    sizeSelect.replaceChildren(new Option('Hepsi', ''));
     // Out-of-stock values stay choosable: the card waits for them to come back.
     // A value is out of stock only when no variant with it is in stock.
     const inStock = new Set(variants.filter((item) => item.in_stock).flatMap((item) => Object.values(item.attributes || {})));
     const outOfStock = new Set(variants.flatMap((item) => Object.values(item.attributes || {})).filter((value) => !inStock.has(value)));
-    (dimensions.Beden || []).forEach((size) => sizeSelect.appendChild(new Option(outOfStock.has(size) ? `${size} (tükendi)` : size, size)));
+    sizeChoices = (dimensions.Beden || []).map((size) => [size, outOfStock.has(size) ? `${size} (tükendi)` : size]);
+    renderSizes([]);
     const dims = newWatch.querySelector('[data-variant-dims]');
     dims.replaceChildren();
     if (options.has('variant_filter')) {
@@ -235,6 +257,7 @@
       group.querySelectorAll('input').forEach((box) => { box.checked = (chosen[group.dataset.variantDim] || []).includes(box.value); });
     });
     writeVariantFilter();
+    renderSizes((values[`watches_${row.dataset.index}_size`] || '').split(';').map((size) => size.trim()).filter(Boolean));
     const marker = element('div', 'queued-watch is-open');
     marker.dataset.reopened = row.dataset.index;
     marker.append(element('span', 'queued-name', `${row.querySelector('.queued-name').textContent} (düzeltiliyor)`));

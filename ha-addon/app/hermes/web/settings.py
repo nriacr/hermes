@@ -262,8 +262,8 @@ def new_watch_form(index: int, check_path: str) -> str:
     site_fields = (
         f"<label data-site-option='name' data-search-only hidden>Ürün adı<input type='text' name='{escape(prefix + 'name', quote=True)}' data-product-name></label>"
         f"<label data-site-option='minimum_price' data-search-only hidden>Hedef fiyat min<input type='text' inputmode='numeric' name='{escape(prefix + 'minimum_price', quote=True)}'></label>"
-        f"<label data-site-option='size' hidden>Beden<select name='{escape(prefix + 'size', quote=True)}' data-size-select>"
-        "<option value=''>Hepsi</option></select></label>"
+        f"<div class='size-boxes' data-site-option='size' data-size-boxes hidden></div>"
+        f"<input type='hidden' name='{escape(prefix + 'size', quote=True)}' data-sizes>"
         f"<label data-site-option='exclude_terms' hidden>Hariç tut<input type='text' name='{escape(prefix + 'exclude_terms', quote=True)}'></label>"
     )
     site_flags = (

@@ -2126,6 +2126,14 @@ class WatchCardTests(unittest.TestCase):
         self.assertTrue(all(item.name == "Ortak ürün" for item in watches))
         self.assertTrue(all(item.size == "M" for item in watches))
 
+    def test_each_chosen_size_is_watched_on_its_own(self):
+        watches = prepare_watches([{"name": "Ceket", "target_price": 4000, "size": "48/6N; 50/6N; 48/6N",
+                                    "url_1": "https://www.network.com.tr/bej-ceket-p-216361", "active": True}])
+        self.assertEqual([watch.size for watch in watches], ["48/6N", "50/6N"])
+        self.assertEqual(len({watch.tracking_id for watch in watches}), 1)
+        shoes = prepare_watches([{"target_price": 1, "size": "42,5", "url_1": "https://www.zara.com/tr/tr/x-p01234567.html"}])
+        self.assertEqual([watch.size for watch in shoes], ["42,5"])
+
     def test_tracking_card_id_is_shared_by_its_links_and_unique_per_card(self):
         watches = prepare_watches(
             [

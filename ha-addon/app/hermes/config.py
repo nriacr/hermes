@@ -1,6 +1,7 @@
 """Supervisor options: reading, validation and the defaults used when saving."""
 
 from copy import deepcopy
+from itertools import product
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
@@ -110,6 +111,12 @@ def watch_urls(item: Dict[str, object]) -> List[str]:
     return urls
 
 
+def card_sizes(value: object) -> List[str]:
+    """"M; L" -> ["M", "L"]: a card watches each chosen size on its own (";" since shoe sizes can hold a comma)."""
+    sizes = list(dict.fromkeys(part.strip() for part in str(value or "").split(";") if part.strip()))
+    return sizes or [""]
+
+
 def parse_variant_filter(value: object) -> Dict[str, List[str]]:
     """"Renk=Siyah, Mavi; Beden=M" -> {"Renk": ["Siyah", "Mavi"], "Beden": ["M"]}."""
     chosen: Dict[str, List[str]] = {}
@@ -208,7 +215,8 @@ def _prepare_watch(item):
     # A card may contain several links, but all of them belong to the same
     # tracking rule. This keeps their results separate from another card.
     tracking_id = str(item.get("id") or tracking_card_id(name, target_price, size, [url for url, _ in supported_urls]))
-    for url, site in supported_urls:
+    # Each link, and each chosen size of it, is read on its own.
+    for (url, site), one_size in product(supported_urls, card_sizes(size)):
         watches.append(
             WatchRule(
                 name=name,
@@ -217,7 +225,7 @@ def _prepare_watch(item):
                 target_price=target_price,
                 minimum_price=minimum_price,
                 excluded_terms=string_list(item.get("exclude_terms")),
-                size=size,
+                size=one_size,
                 variant_filter=parse_variant_filter(item.get("variant_filter")),
                 include_variations=parse_bool(item.get("include_variations"), default=False),
                 priority=priority,
