@@ -135,6 +135,7 @@
     if (options.has('variant_filter')) {
       Object.entries(dimensions).forEach(([name, values]) => {
         if (values.length < 2) return;  // nothing to choose
+        if (name === 'Beden' && options.has('size')) return;  // sizes have their own boxes
         const group = element('div', 'variant-dim');
         group.dataset.variantDim = name;
         group.appendChild(element('span', '', name));

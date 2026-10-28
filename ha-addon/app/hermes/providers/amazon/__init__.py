@@ -16,8 +16,8 @@ from ...constants import (
 from ...errors import EmptySearchResultsHermesError, HermesError, OutOfStockHermesError, PriceUnavailableHermesError
 from ...logging_utils import log, ProblemLog
 from ...models import OfferResult, ProductPreview, SearchResultItem, VariantPreview, WatchRule
-from ...utils import extract_asin_from_url, is_amazon_search_url, log_cell, normalize_offer_text
-from ..base import DEPO_LANE, Provider, ReadContext, WatchRead, excluded_term_in_title
+from ...utils import extract_asin_from_url, is_amazon_search_url, log_cell
+from ..base import DEPO_LANE, Provider, ReadContext, WatchRead, excluded_term_in_title, outside_variant_filter
 from ..http import raise_if_age_verification
 from . import parser
 from .access import MAIN_LANE, AmazonAccess
@@ -202,11 +202,10 @@ class AmazonProvider(RhythmMixin, PageCacheMixin, Provider):
 
     def keeps_offer(self, watch: WatchRule, offer: OfferResult) -> bool:
         """The chosen variant values, then the own-seller option (Amazon.com.tr new offers and verified Depo)."""
-        title = normalize_offer_text(offer.title)
-        for dimension, values in watch.variant_filter.items():
-            if not any(normalize_offer_text(value) in title for value in values):
-                log(f"Varyant seçimi nedeniyle sonuç atlandı ({dimension}): {log_cell(offer.title, 70)}")
-                return False
+        dimension = outside_variant_filter(watch, offer.title)
+        if dimension:
+            log(f"Varyant seçimi nedeniyle sonuç atlandı ({dimension}): {log_cell(offer.title, 70)}")
+            return False
         if not watch.official_seller_only or offer.is_warehouse or is_platform_seller(offer.seller):
             return True
         log("Platformun kendi satıcısı filtresi nedeniyle sonuç atlandı: "

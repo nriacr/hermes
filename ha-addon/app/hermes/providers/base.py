@@ -152,6 +152,20 @@ def excluded_term_in_title(watch, title: str) -> str:
     return next((term for term in watch.excluded_terms if normalize_offer_text(term) in normalized_title), "")
 
 
+def outside_variant_filter(watch, title: str, whole_parts: bool = False) -> str:
+    """The first chosen dimension the title has none of the values of ("" when it matches every choice).
+
+    With `whole_parts` a value must be one " / " part of the title, so "Mavi" does not match "Açık mavi".
+    """
+    if whole_parts:
+        parts = {normalize_offer_text(part) for part in str(title or "").split(" / ")}
+        found = lambda value: normalize_offer_text(value) in parts  # noqa: E731
+    else:
+        normalized = normalize_offer_text(title)
+        found = lambda value: normalize_offer_text(value) in normalized  # noqa: E731
+    return next((dimension for dimension, values in watch.variant_filter.items() if not any(map(found, values))), "")
+
+
 def size_preview(site: str, title: str, price, sizes) -> ProductPreview:
     """A clothing page's link check: one row per size, (name, available) in page order."""
     names = list(dict.fromkeys(name for name, _ in sizes if name))

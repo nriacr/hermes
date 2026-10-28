@@ -40,7 +40,7 @@ from hermes.providers.hepsiburada.parser import (
     extract_variant_urls,
     title_with_variant_label,
 )
-from hermes.providers.hm import extract_offers as extract_hm_offers
+from hermes.providers.hm import HMProvider, extract_offers as extract_hm_offers
 from hermes.providers.network import (
     _network_requested_size_state,
     extract_offer as extract_network_offer,
@@ -2163,6 +2163,14 @@ class WatchCardTests(unittest.TestCase):
         </script>'''
         self.assertEqual(amazon_parser.product_dimensions(html),
                          {"Renk": [("Siyah", True), ("Gümüş", False)], "Boyut": [("256 GB", True)]})
+
+    def test_hm_keeps_only_the_chosen_colours_as_whole_title_parts(self):
+        provider = HMProvider()
+        watch = WatchRule(name="", site="hm", url="https://www2.hm.com/tr_tr/productpage.1342316001.html", target_price=Decimal("1"),
+                          variant_filter={"Renk": ["Beyaz", "Mavi"]})
+        offer = lambda title: OfferResult(title=title, price=Decimal("1"))  # noqa: E731
+        self.assertTrue(provider.keeps_offer(watch, offer("5'li Kolsuz Üst / Beyaz / 98/104")))
+        self.assertFalse(provider.keeps_offer(watch, offer("5'li Kolsuz Üst / Açık mavi/Koyu mavi / 98/104")))
 
     def test_hepsiburada_own_seller_option_keeps_only_hepsiburada_offers(self):
         provider = HepsiburadaProvider()
