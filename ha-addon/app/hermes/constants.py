@@ -79,16 +79,6 @@ TELEGRAM_STATUS_HEARTBEAT_SECONDS = 60 * 60
 PRIORITY_INTERVAL_SECONDS = {"1m": 60, "5m": 300, "15m": 900, "30m": 1800,
                              "60m": 3600, "3h": 10800, "6h": 21600, "12h": 43200}
 PRIORITIES = tuple(PRIORITY_INTERVAL_SECONDS)
-# Per-card notification windows (local time). Outside its window a card's alert is not
-# sent and not marked as sent, so it goes out on the first read once the window opens.
-NOTIFY_WINDOWS = {
-    "always": "Her zaman",
-    "daytime": "Yalnız gündüz (08:00–22:00)",
-    "evening": "Yalnız akşam (18:00–23:00)",
-    "weekend": "Yalnız hafta sonu",
-}
-DEFAULT_NOTIFY_WINDOW = "always"
-
 DEFAULT_PRIORITY = "1m"
 COMPATIBILITY_PRIORITY = "6h"
 PRIORITY_LABELS = {"1m": "1 dk", "5m": "5 dk", "15m": "15 dk", "30m": "30 dk",
@@ -108,10 +98,6 @@ def normalize_priority(value) -> str:
     if text == "cycle":
         return DEFAULT_PRIORITY
     return text if text in PRIORITIES else COMPATIBILITY_PRIORITY
-
-def normalize_notify_window(value) -> str:
-    text = str(value or "").strip().casefold()
-    return text if text in NOTIFY_WINDOWS else DEFAULT_NOTIFY_WINDOW
 
 # -- Amazon access control (3.3.0) ---------------------------------------------
 # Measured 2026-10-03 (Pi logs, 1,147 requests): three unbroken runs at ~10.8

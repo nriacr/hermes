@@ -112,7 +112,6 @@ def updated_offer_entry(state_entry: Dict[str, Any], current_price: Decimal, tar
         updated["min_price_at"] = updated["last_checked_at"]
     if previous_max_price != max_price or not updated.get("max_price_at"):
         updated["max_price_at"] = updated["last_checked_at"]
-    updated["was_below_target"] = current_price <= target_price
     if alert_sent:
         updated["last_alerted_price"] = str(current_price)
         updated["last_alerted_at"] = utc_now()
@@ -142,8 +141,8 @@ def clear_price_history(state: Dict[str, Any]) -> int:
 # -- notification suppression ---------------------------------------------------
 
 
-def should_alert(state_entry: Dict[str, Any], current_price: Decimal, target_price: Decimal, repeat_after_24h: bool,
-                 warehouse: bool = False) -> bool:
+def should_alert(state_entry: Dict[str, Any], current_price: Decimal, target_price: Decimal, warehouse: bool = False) -> bool:
+    """Under target: a new or lower price alerts; the same price alerts again after 24 hours."""
     # A warehouse (Depo) price change usually means another unit, so any change under target alerts again.
     if current_price > target_price:
         return False
@@ -159,13 +158,11 @@ def should_alert(state_entry: Dict[str, Any], current_price: Decimal, target_pri
             return True
     except InvalidOperation:
         return True
-    if repeat_after_24h:
-        last_alerted_at = parse_iso_datetime(state_entry.get("last_alerted_at"))
-        if not last_alerted_at:
-            return False
-        elapsed = (local_now().astimezone(timezone.utc) - last_alerted_at).total_seconds()
-        return elapsed >= NOTIFY_REPEAT_SECONDS
-    return not state_entry.get("was_below_target", False)
+    last_alerted_at = parse_iso_datetime(state_entry.get("last_alerted_at"))
+    if not last_alerted_at:
+        return False
+    elapsed = (local_now().astimezone(timezone.utc) - last_alerted_at).total_seconds()
+    return elapsed >= NOTIFY_REPEAT_SECONDS
 
 
 def reset_alert_after_missing(state_entry: Dict[str, Any], seller: str, product_name: str) -> Dict[str, Any]:

@@ -76,6 +76,13 @@ def extract_offers(payload: str, model: str, source_url: str = "") -> List[Offer
 MODEL_DIMENSION = "Model"
 
 
+def fetch_products(session, timeout: int) -> str:
+    response = session.get(TOGG_PRODUCTS_URL, headers=togg_headers(), timeout=timeout)
+    if response.status_code >= 400:
+        raise HttpStatusHermesError(response.status_code, TOGG_PRODUCTS_URL)
+    return response.text
+
+
 class ToggProvider(Provider):
     site = SITE_TOGG
     notifies_stock_return = True
@@ -91,17 +98,11 @@ class ToggProvider(Provider):
     def _products_payload(self, ctx: Any) -> str:
         """One request per cycle serves every Togg card."""
         if self.payload is None:
-            response = ctx.session.get(TOGG_PRODUCTS_URL, headers=togg_headers(), timeout=ctx.timeout)
-            if response.status_code >= 400:
-                raise HttpStatusHermesError(response.status_code, TOGG_PRODUCTS_URL)
-            self.payload = response.text
+            self.payload = fetch_products(ctx.session, ctx.timeout)
         return self.payload
 
     def inspect(self, url, ctx):
-        response = ctx.session.get(TOGG_PRODUCTS_URL, headers=togg_headers(), timeout=ctx.timeout)
-        if response.status_code >= 400:
-            raise HttpStatusHermesError(response.status_code, TOGG_PRODUCTS_URL)
-        products = parse_products(response.text)
+        products = parse_products(fetch_products(ctx.session, ctx.timeout))
         names = [str(product["name"]).strip() for product in products]
         variants = [VariantPreview(name, product_price(product) or None, True, {MODEL_DIMENSION: name})
                     for name, product in zip(names, products)]

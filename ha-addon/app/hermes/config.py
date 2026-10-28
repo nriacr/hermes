@@ -12,7 +12,6 @@ from .constants import (
     DEFAULT_REQUEST_TIMEOUT_SECONDS,
     OPTIONS_PATH,
     SEARCH_RESULT_LIMIT,
-    normalize_notify_window,
     normalize_priority,
 )
 from .errors import HermesError
@@ -67,7 +66,7 @@ def read_options() -> Dict[str, Any]:
 
 
 REMOVED_OPTIONS = ("gruplar", "daily_summary_enabled")
-REMOVED_CARD_KEYS = ("group", "auto_add_to_cart")
+REMOVED_CARD_KEYS = ("group", "auto_add_to_cart", "notify_once_in_24H", "notify_90_day_low", "notify_window")
 
 
 def options_with_defaults(options: Any) -> Dict[str, Any]:
@@ -80,7 +79,8 @@ def options_with_defaults(options: Any) -> Dict[str, Any]:
         saved.setdefault(key, deepcopy(value))
     for item in saved.get("takip_edilenler", []):
         if isinstance(item, dict):
-            # Removed card keys: groups (4.26.0) and the cart box (Depo deals always go to the cart).
+            # Removed card keys: groups, the cart box (Depo deals always go to the cart) and the
+            # notification settings (every card is muted 24 hours after an alert, at any hour).
             for key in REMOVED_CARD_KEYS:
                 item.pop(key, None)
         if isinstance(item, dict) and not item.get("id"):
@@ -232,9 +232,6 @@ def _prepare_watch(item):
                 official_seller_only=parse_bool(item.get("official_seller_only"), default=False),
                 check_now_token=str(item.get("check_now_token") or "").strip(),
                 max_items_to_scan=SEARCH_RESULT_LIMIT,
-                notify_once_in_24h=parse_bool(item.get("notify_once_in_24H"), default=True),
-                notify_on_90_day_low=parse_bool(item.get("notify_90_day_low"), default=False),
-                notify_window=normalize_notify_window(item.get("notify_window")),
                 active=True,
                 tracking_id=tracking_id,
             )

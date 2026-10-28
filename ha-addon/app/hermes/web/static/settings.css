@@ -27,9 +27,9 @@ body.ov .footer-note { border-left:0; border-radius:16px; background:var(--glass
 .settings-page .bulk-count { color:var(--mute); font:600 13px var(--display); } .settings-page summary .bulk-pick { flex:none; margin:0 10px 0 0; }
 .settings-page .bulk-tools select { width:auto; min-width:110px; }
 body.ov.settings-page .button.primary { border:1px solid rgba(201,229,154,.35); background:rgba(201,229,154,.12); color:#d4ebad; } body.ov.settings-page .button.danger { border:1px solid rgba(240,163,191,.35); background:rgba(240,163,191,.1); color:#f3b3ca; }
-.settings-page .watch-links, .settings-page .watch-fields, .settings-page .watch-flags, .settings-page .watch-site-options, .settings-page .watch-actions { grid-column:1 / -1; }
+.settings-page .watch-links, .settings-page .watch-fields, .settings-page .watch-site-options, .settings-page .watch-actions { grid-column:1 / -1; }
 .settings-page .watch-fields { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; }
-.settings-page .watch-flags, .settings-page .watch-site-options { display:flex; flex-wrap:wrap; align-items:end; gap:4px 20px; } .settings-page .watch-site-options > label:not(.checkbox-row) { flex:0 1 220px; }
+.settings-page .watch-site-options { display:flex; flex-wrap:wrap; align-items:end; gap:4px 20px; } .settings-page .watch-site-options > label:not(.checkbox-row) { flex:0 1 220px; }
 .settings-page #watch-search { width:100%; padding:0 12px; margin-bottom:4px; }
 .settings-page .site-count { margin-left:auto; color:var(--mute); font:600 12px var(--display); } .settings-page .site-cards { padding:0 10px 10px; } .settings-page .site-cards details { background:rgba(0,0,0,.18); }
 .settings-page .link-row { display:flex; gap:8px; } .settings-page .link-row input { flex:1; min-width:0; padding:0 12px; } .settings-page .link-row .button { white-space:nowrap; }

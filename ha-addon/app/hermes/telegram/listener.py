@@ -310,7 +310,6 @@ def _quick_add_watch_locked(url: str, target_price, name: str) -> str:
         "name": normalized_name,
         "target_price": float(target_price),
         "url_1": normalized_url,
-        "notify_once_in_24H": True,
         "active": True,
         "priority": DEFAULT_PRIORITY,
     }]

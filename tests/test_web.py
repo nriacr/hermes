@@ -823,7 +823,7 @@ class SettingsTests(DataFilesMixin, unittest.TestCase):
             {"takip_edilenler": [{"name": "Tablet", "target_price": 20000, "url_1": "https://www.amazon.com.tr/dp/B000000001?th=1"}]},
             {"operation": ["update_watch"], "watch_index": ["0"], "update_watch_index": ["0"], "watches_0_name": ["Tablet"],
              "watches_0_target_price": ["20000"], "watches_0_url_1": ["https://www.amazon.com.tr/dp/B000000001?th=1"],
-             "watches_0_include_variations": ["on"], "watches_0_notify_once_in_24H": ["on"], "watches_0_active": ["on"]})
+             "watches_0_include_variations": ["on"], "watches_0_active": ["on"]})
         self.assertTrue(prepare_watches(options["takip_edilenler"])[0].include_variations)
         self.assertTrue(options["takip_edilenler"][0]["check_now_token"])
 
@@ -920,7 +920,6 @@ class SettingsTests(DataFilesMixin, unittest.TestCase):
                                           "watches_0_variant_filter": ["Renk=Siyah, Gümüş; Boyut="], "watches_0_active": ["1"]})
         self.assertEqual(watches[0]["variant_filter"], "Renk=Siyah, Gümüş")
         self.assertTrue(watches[0]["include_variations"])
-        self.assertTrue(watches[0]["notify_once_in_24H"])  # always muted for 24 hours
         self.assertEqual(prepare_watches(watches)[0].variant_filter, {"Renk": ["Siyah", "Gümüş"]})
 
     def test_a_long_link_check_runs_in_the_background_until_asked_for(self):

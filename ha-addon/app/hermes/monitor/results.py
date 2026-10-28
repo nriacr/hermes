@@ -13,8 +13,6 @@ from typing import Any, Dict, List, Optional
 from dataclasses import dataclass, field, asdict
 
 from ..cart import CartQueue
-from ..history import read_prices
-from ..pricestats import is_new_low
 from ..errors import HermesError, EmptySearchResultsHermesError, OutOfStockHermesError, error_status
 from ..logging_utils import log
 from ..models import OfferResult, PriceSummaryRow, WatchRule
@@ -176,13 +174,8 @@ class ResultRecorder:
                     is_warehouse=offer.is_warehouse, tracking_id=watch.tracking_id, priority=watch.priority,
                     price_checked_at=price_checked_at,
                 )])
-                window_open = alerts.window_open(watch.notify_window, local_now())
-                wants_alert = window_open and not replayed and not stock_return_sent and state_ops.should_alert(
-                    offer_entry, offer.price, watch.target_price, watch.notify_once_in_24h,
-                    offer.is_warehouse)
-                # Read before this price is stored, so "new low" compares with what was seen earlier.
-                low_alert = (watch.notify_on_90_day_low and window_open and not replayed and not stock_return_sent and not wants_alert
-                             and self._is_90_day_low(item_key, offer.price, offer_entry))
+                wants_alert = not replayed and not stock_return_sent and state_ops.should_alert(
+                    offer_entry, offer.price, watch.target_price, offer.is_warehouse)
             if replayed:
                 with self._lock:
                     state[item_key] = {**offer_entry, "last_price_checked_at": price_checked_at, "last_error": None,
@@ -202,9 +195,6 @@ class ResultRecorder:
                        f"Güncel fiyat: {format_tl(offer.price, with_currency=True)}{seller_note}\n"
                        f"Hedef fiyat: {format_tl(watch.target_price, with_currency=True)}")
             title = f"{seller} Depo fırsatı" if offer.is_warehouse else f"{seller} fiyat alarmı"
-            if low_alert:
-                title = f"{seller} 90 günün en düşüğü"
-                message += "\n90 günün en düşük fiyatı (hedefin üstünde olabilir)."
             with self._lock:
                 updated = state_ops.updated_offer_entry(state.get(item_key, offer_entry), offer.price, watch.target_price,
                                                         False, context)
@@ -219,9 +209,6 @@ class ResultRecorder:
                 })
                 if alert_queued:
                     updated["pending_alert_price"] = str(offer.price)
-                if low_alert:
-                    updated["last_low_alert_price"] = str(offer.price)
-                    updated["last_low_alert_at"] = utc_now()
                 state[item_key] = updated
                 # The cart job commits with its notification, so it exists only when an alert is queued;
                 # its own worker starts at once, in parallel with the Pushover delivery.
@@ -247,12 +234,6 @@ class ResultRecorder:
                             status = self.notifier.db.connect().execute("SELECT state FROM outbox WHERE id=?", (identity,)).fetchone()[0]
                         if status != "pending":
                             updated.pop("pending_alert_price", None)
-                    elif low_alert:
-                        # No offer_key: this heads-up never touches the target-price suppression or the
-                        # opportunity event; it expires after 24 hours like any other keyless message.
-                        identity = hashlib.sha256(json.dumps(["low90", item_key, str(offer.price)]).encode()).hexdigest()
-                        self.notifier.enqueue({"title": title, "message": message, "url": matched_url, "price": str(offer.price),
-                                               "target": str(watch.target_price), "kind": "low90"}, identity, state, price_statements)
                     else:
                         # A read that only moved its timestamps does not rewrite the whole (large) state each time;
                         # any real change, and every cycle end, still commits it. The price row always commits.
@@ -274,14 +255,6 @@ class ResultRecorder:
 
         return recorded
 
-
-    def _is_90_day_low(self, item_key: str, price, entry: Dict[str, Any]) -> bool:
-        """A price below everything stored for this offer in the last 90 days (at least a week of history)."""
-        last = state_ops.state_decimal(entry.get("last_low_alert_price"))
-        if last is not None and price >= last:
-            return False
-        points = [(moment, float(value)) for moment, value in read_prices(self.files.database, item_key)]
-        return is_new_low(points, float(price), datetime.now(timezone.utc))
 
     @staticmethod
     def _offer_key(state: Dict[str, Any], watch: WatchRule, entry: Dict[str, Any], url: str, is_warehouse: bool) -> str:

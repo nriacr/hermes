@@ -2211,6 +2211,11 @@ class WatchCardTests(unittest.TestCase):
             ("B0FQFTYPTQ", {"Renk": "Gümüş Rengi", "Ölçü": "256 GB"}),
             ("B0FQFJ2HLL", {"Renk": "Kozmik Turuncu", "Ölçü": "512 GB"})])
 
+    def test_amazon_link_check_names_a_depo_offer_with_its_price(self):
+        self.assertEqual(AmazonProvider._variant_label("Kozmik Turuncu / 512 GB", Decimal("104499")),
+                         "Kozmik Turuncu / 512 GB · Depo 104.499 TL")
+        self.assertEqual(AmazonProvider._variant_label("Abis / 256 GB", None), "Abis / 256 GB")
+
     def test_amazon_keeps_only_the_chosen_variant_values(self):
         provider = AmazonProvider(client=Mock())
         watch = WatchRule(name="", site="amazon", url="https://www.amazon.com.tr/dp/B000000001", target_price=Decimal("1"),

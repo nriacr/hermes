@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 
 from support import APP_PATH  # noqa: F401
 
-from hermes.pricestats import is_new_low, window_stats
+from hermes.pricestats import window_stats
 
 NOW = datetime(2026, 10, 15, 12, tzinfo=timezone.utc)
 
@@ -30,22 +30,8 @@ class WindowStatsTests(unittest.TestCase):
         self.assertAlmostEqual(stats.days, 90)
         self.assertAlmostEqual(stats.average, (500 * 50 + 300 * 40) / 90)
 
-    def test_new_low_needs_history_and_a_strictly_lower_price(self):
-        history = [(at(30), 100.0), (at(10), 80.0)]
-        self.assertTrue(is_new_low(history, 79.0, NOW))
-        self.assertFalse(is_new_low(history, 80.0, NOW))
-        self.assertFalse(is_new_low([(at(3), 100.0)], 50.0, NOW))
-        self.assertFalse(is_new_low([], 50.0, NOW))
-
 
 class CardIntegrationTests(unittest.TestCase):
-    def test_option_is_read_from_the_card(self):
-        from hermes.config import prepare_watches
-
-        base = {"name": "x", "target_price": 100, "url_1": "https://www.amazon.com.tr/dp/B000000001"}
-        self.assertFalse(prepare_watches([base])[0].notify_on_90_day_low)
-        self.assertTrue(prepare_watches([{**base, "notify_90_day_low": True}])[0].notify_on_90_day_low)
-
     def test_average_chip_shows_only_with_a_week_of_history(self):
         from decimal import Decimal
 

@@ -47,20 +47,10 @@ def _first(form: Dict[str, List[str]], key: str, default: str = "") -> str:
 # -- form controls --------------------------------------------------------------------
 
 
-def _field(prefix, name, label, value="", field_type="text", required=False) -> str:
+def _field(prefix, name, label, value="", field_type="text") -> str:
     numeric = " inputmode='numeric'" if name in {"target_price", "minimum_price"} else ""
     return (f"<label>{escape(label)}<input type='{field_type}'{numeric} name='{escape(prefix + name, quote=True)}' "
-            f"value='{escape(str(value or ''), quote=True)}'{' required' if required else ''}></label>")
-
-
-def _select(prefix, name, label, value, choices, placeholder="Seçilmedi") -> str:
-    selected_value = str(value or "").strip()
-    options = [f"<option value=''>{escape(placeholder)}</option>"]
-    for choice in choices:
-        text = str(choice or "").strip()
-        if text:
-            options.append(f"<option value='{escape(text, quote=True)}'{' selected' if text == selected_value else ''}>{escape(text)}</option>")
-    return f"<label>{escape(label)}<select name='{escape(prefix + name, quote=True)}'>{''.join(options)}</select></label>"
+            f"value='{escape(str(value or ''), quote=True)}'></label>")
 
 
 def _textarea(prefix, name, label, values=None, rows=5) -> str:
@@ -68,8 +58,8 @@ def _textarea(prefix, name, label, values=None, rows=5) -> str:
     return f"<label>{escape(label)}<textarea name='{escape(prefix + name, quote=True)}' rows='{int(rows)}'>{escape(value)}</textarea></label>"
 
 
-def _checkbox(prefix, name, label, checked=True, danger=False) -> str:
-    return (f"<label class='checkbox-row{' danger' if danger else ''}'><input type='checkbox' name='{escape(prefix + name, quote=True)}' "
+def _checkbox(prefix, name, label, checked=True) -> str:
+    return (f"<label class='checkbox-row'><input type='checkbox' name='{escape(prefix + name, quote=True)}' "
             f"value='1'{' checked' if parse_bool(checked, default=True) else ''}>{escape(label)}</label>")
 
 
@@ -510,8 +500,6 @@ def build_watch(form: Dict[str, List[str]], index: int) -> Optional[Dict[str, An
         "include_variations": prefix + "include_variations" in form or bool(variant_filter),
         "priority": priority,
         "official_seller_only": prefix + "official_seller_only" in form,
-        # Every card is muted for 24 hours after an alert; there is no setting for it any more.
-        "notify_once_in_24H": True,
         "active": prefix + "active" in form,
     }
     if minimum_price:

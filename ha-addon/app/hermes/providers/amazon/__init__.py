@@ -16,7 +16,7 @@ from ...constants import (
 from ...errors import EmptySearchResultsHermesError, HermesError, OutOfStockHermesError, PriceUnavailableHermesError
 from ...logging_utils import log, ProblemLog
 from ...models import OfferResult, ProductPreview, SearchResultItem, VariantPreview, WatchRule
-from ...utils import extract_asin_from_url, is_amazon_search_url, log_cell
+from ...utils import extract_asin_from_url, format_tl, is_amazon_search_url, log_cell
 from ..base import DEPO_LANE, Provider, ReadContext, WatchRead, excluded_term_in_title, outside_variant_filter
 from ..http import raise_if_age_verification
 from . import parser
@@ -153,13 +153,21 @@ class AmazonProvider(RhythmMixin, PageCacheMixin, Provider):
     adds_deals_to_cart = True
     card_options = ("name", "minimum_price", "official_seller_only", "exclude_terms", "variant_filter")
 
-    def _inspect_offer(self, html: str, url: str):
-        """(lowest new price or None, in stock) of one product page."""
+    @staticmethod
+    def _inspect_offer(html: str, url: str, soup=None):
+        """(lowest new price, in stock, lowest Depo price shown on the page) of one product page; None when absent."""
         try:
-            offers = [offer for offer in parser.extract_offers(html, source_url=url) if not offer.is_warehouse]
+            offers = parser.extract_offers(html, source_url=url, soup=soup)
         except HermesError:
-            return None, False
-        return (min(offer.price for offer in offers), True) if offers else (None, False)
+            return None, False, None
+        new = [offer.price for offer in offers if not offer.is_warehouse]
+        depo = [offer.price for offer in offers if offer.is_warehouse]
+        return (min(new) if new else None), bool(new or depo), (min(depo) if depo else None)
+
+    @staticmethod
+    def _variant_label(values: str, depo) -> str:
+        """The variant's values; a Depo offer on its page is named with its price."""
+        return f"{values} · Depo {format_tl(depo, with_currency=True)}" if depo is not None else values
 
     def inspect(self, url: str, ctx: ReadContext) -> ProductPreview:
         """Every variant of the family with its own price and stock, one page per variant.
@@ -170,12 +178,13 @@ class AmazonProvider(RhythmMixin, PageCacheMixin, Provider):
             return super().inspect(url, ctx)
         html = self.client.fetch(url, ctx.timeout)
         raise_if_age_verification(html)
-        title = parser.extract_title(parser.parse_product_page(html)) or ""
+        soup = parser.parse_product_page(html)
+        title = parser.extract_title(soup) or ""
         dimensions = parser.product_dimensions(html)
-        price, in_stock = self._inspect_offer(html, url)
+        price, in_stock, depo = self._inspect_offer(html, url, soup)
         combinations = parser.dimension_combinations(html)[:INSPECT_VARIANT_LIMIT]
         if not dimensions or not combinations:
-            return ProductPreview(self.site, title, [VariantPreview(title, price, in_stock)],
+            return ProductPreview(self.site, title, [VariantPreview(self._variant_label(title, depo), price or depo, in_stock)],
                                   {name: [value for value, _ in values] for name, values in dimensions.items()})
         # Page order: by the first dimension's values, then the next.
         order = {name: [value for value, _ in values] for name, values in dimensions.items()}
@@ -186,17 +195,17 @@ class AmazonProvider(RhythmMixin, PageCacheMixin, Provider):
         for asin, values in combinations:
             label = " / ".join(values.values())
             if asin == current:
-                variants.append(VariantPreview(label, price, in_stock, values))
+                variants.append(VariantPreview(self._variant_label(label, depo), price, in_stock, values))
                 continue
-            variant_price, variant_stock = None, False
+            variant_price, variant_stock, variant_depo = None, False, None
             if not blocked:
                 variant_url = f"https://www.amazon.com.tr/dp/{asin}?th=1&psc=1"
                 try:
-                    variant_price, variant_stock = self._inspect_offer(self.client.fetch(variant_url, ctx.timeout), variant_url)
+                    variant_price, variant_stock, variant_depo = self._inspect_offer(self.client.fetch(variant_url, ctx.timeout), variant_url)
                 except Exception as exc:  # noqa: BLE001 - the remaining variants stay listed without a price
                     blocked = is_protection_error(exc)
                     log(f"Link kontrolü Amazon varyantı okunamadı: {asin} | {exc}")
-            variants.append(VariantPreview(label, variant_price, variant_stock, values))
+            variants.append(VariantPreview(self._variant_label(label, variant_depo), variant_price, variant_stock, values))
         return ProductPreview(self.site, title, variants,
                               {name: [value for value, _ in values] for name, values in dimensions.items()})
 

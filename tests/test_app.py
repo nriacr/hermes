@@ -111,7 +111,7 @@ class TelegramQuickAddTests(unittest.TestCase):
             self.assertEqual(telegram._quick_add_watch(url, Decimal("8700")), telegram.QUICK_ADD_DONE)
         saved = save.call_args.args[0]
         self.assertEqual(saved["takip_edilenler"][0], {"name": "edifier m60", "target_price": 8700.0,
-                                                       "url_1": url, "notify_once_in_24H": True, "active": True,
+                                                       "url_1": url, "active": True,
                                                        "priority": "1m"})
 
     def test_an_already_watched_link_is_not_added_twice(self):

@@ -73,17 +73,6 @@ def has_silent_access_failure(state: Dict[str, Any], config: HermesConfig) -> bo
     return False
 
 
-def window_open(window: str, now) -> bool:
-    """Whether a card with this notification window may alert at `now` (local time)."""
-    if window == "daytime":
-        return QUIET_END_HOUR <= now.hour < QUIET_START_HOUR
-    if window == "evening":
-        return 18 <= now.hour < 23
-    if window == "weekend":
-        return now.weekday() >= 5
-    return True
-
-
 def quiet_hours(now) -> bool:
     return now.hour >= QUIET_START_HOUR or now.hour < QUIET_END_HOUR
 

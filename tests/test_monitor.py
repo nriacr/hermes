@@ -196,78 +196,21 @@ class NotificationTests(CycleTestCase):
         self.assertEqual(read.call_count, 2)
         self.notify.send.assert_called_once()
         entry = state[state[key(rule)]["offer_keys"][0]]
-        self.assertFalse(state_ops.should_alert(entry, Decimal("900"), Decimal("1000"), True))
-        self.assertTrue(state_ops.should_alert(entry, Decimal("850"), Decimal("1000"), True))
+        self.assertFalse(state_ops.should_alert(entry, Decimal("900"), Decimal("1000")))
+        self.assertTrue(state_ops.should_alert(entry, Decimal("850"), Decimal("1000")))
         entry["last_alerted_at"] = (datetime.now(timezone.utc) - timedelta(hours=25)).isoformat()
-        self.assertTrue(state_ops.should_alert(entry, Decimal("900"), Decimal("1000"), True))
+        self.assertTrue(state_ops.should_alert(entry, Decimal("900"), Decimal("1000")))
 
     def test_warehouse_price_change_under_target_alerts_again(self):
-        entry = {"last_alerted_price": "2245.02", "last_alerted_at": datetime.now(timezone.utc).isoformat(),
-                 "was_below_target": True}
+        entry = {"last_alerted_price": "2245.02", "last_alerted_at": datetime.now(timezone.utc).isoformat()}
         # A higher Depo price is usually another unit; a normal offer stays quiet for 24 hours.
-        self.assertTrue(state_ops.should_alert(entry, Decimal("2369.75"), Decimal("3000"), True, True))
-        self.assertFalse(state_ops.should_alert(entry, Decimal("2369.75"), Decimal("3000"), True))
-        self.assertFalse(state_ops.should_alert(entry, Decimal("2245.02"), Decimal("3000"), True, True))
-        self.assertFalse(state_ops.should_alert(entry, Decimal("3100"), Decimal("3000"), True, True))
+        self.assertTrue(state_ops.should_alert(entry, Decimal("2369.75"), Decimal("3000"), True))
+        self.assertFalse(state_ops.should_alert(entry, Decimal("2369.75"), Decimal("3000")))
+        self.assertFalse(state_ops.should_alert(entry, Decimal("2245.02"), Decimal("3000"), True))
+        self.assertFalse(state_ops.should_alert(entry, Decimal("3100"), Decimal("3000"), True))
         entry["pending_alert_price"] = "2369.75"
-        self.assertFalse(state_ops.should_alert(entry, Decimal("2369.75"), Decimal("3000"), True, True))
-        self.assertTrue(state_ops.should_alert(entry, Decimal("2400"), Decimal("3000"), True, True))
-
-    def _age_price_history(self, days):
-        from hermes.database import Database
-        old = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
-        Database.at(self.data.files.database).transaction([("UPDATE prices SET checked_at=?", (old,))])
-
-    def test_90_day_low_notifies_above_target_only_when_enabled_and_only_for_new_lows(self):
-        for enabled in (True, False):
-            with self.subTest(enabled=enabled):
-                self.data.cleanup()
-                self.data = TempData()
-                self.notify = notifier()
-                rule = watch(url=AMAZON, target="1000", notify_on_90_day_low=enabled)
-                first = [OfferResult("iPhone", Decimal("1500"), url=AMAZON)]
-                with patch.object(AmazonProvider, "read", side_effect=reader(first)):
-                    self.run_cycle(config([rule]))
-                self.assertEqual(self.titles_sent(), [])
-                self._age_price_history(30)
-                lower = [OfferResult("iPhone", Decimal("1400"), url=AMAZON)]
-                with patch.object(AmazonProvider, "read", side_effect=reader(lower)):
-                    state = self.run_later(config([rule]))
-                self.assertEqual(self.titles_sent(), ["Amazon 90 günün en düşüğü"] if enabled else [])
-                entry = state[state[key(rule)]["offer_keys"][0]]
-                self.assertEqual(entry.get("last_low_alert_price"), "1400" if enabled else None)
-                self.assertNotIn("last_alerted_price", entry)
-                # The same price again is not a new low.
-                with patch.object(AmazonProvider, "read", side_effect=reader(lower)):
-                    self.run_later(config([rule]))
-                self.assertEqual(len(self.titles_sent()), 1 if enabled else 0)
-
-    def test_card_notification_window_defers_the_alert_until_it_opens(self):
-        from hermes.monitor import results as results_module
-        rule = watch(url=AMAZON, target="1000", notify_window="weekend")
-        offers = [OfferResult("iPhone", Decimal("900"), url=AMAZON)]
-        wednesday = datetime(2026, 10, 14, 12, 0).astimezone()
-        saturday = datetime(2026, 10, 17, 12, 0).astimezone()
-        with patch.object(AmazonProvider, "read", side_effect=reader(offers)):
-            with patch.object(results_module, "local_now", return_value=wednesday):
-                state = self.run_cycle(config([rule]))
-            self.assertEqual(self.titles_sent(), [])
-            entry = state[state[key(rule)]["offer_keys"][0]]
-            self.assertNotIn("last_alerted_price", entry)
-            with patch.object(results_module, "local_now", return_value=saturday):
-                self.run_later(config([rule]))
-        self.assertEqual(self.titles_sent(), ["Amazon fiyat alarmı"])
-
-    def test_window_open_rules(self):
-        from hermes.monitor.alerts import window_open
-        at = lambda day, hour: datetime(2026, 10, day, hour, 0)  # noqa: E731  (14 Oct 2026 is a Wednesday)
-        self.assertTrue(window_open("always", at(14, 3)))
-        self.assertTrue(window_open("daytime", at(14, 8)))
-        self.assertFalse(window_open("daytime", at(14, 22)))
-        self.assertFalse(window_open("evening", at(14, 17)))
-        self.assertTrue(window_open("evening", at(14, 22)))
-        self.assertFalse(window_open("weekend", at(16, 12)))
-        self.assertTrue(window_open("weekend", at(17, 12)))
+        self.assertFalse(state_ops.should_alert(entry, Decimal("2369.75"), Decimal("3000"), True))
+        self.assertTrue(state_ops.should_alert(entry, Decimal("2400"), Decimal("3000"), True))
 
     def test_variant_url_change_preserves_alert_suppression_and_history(self):
         rule = watch(url=AMAZON, target="100000", include_variations=True)

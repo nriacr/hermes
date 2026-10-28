@@ -43,10 +43,3 @@ def window_stats(points: Sequence[Point], now: datetime, days: int = WINDOW_DAYS
     if low == float("inf") or seconds <= 0:
         return None
     return WindowStats(low=low, average=weighted / seconds, days=seconds / 86400)
-
-
-def is_new_low(previous: Sequence[Point], price: float, now: datetime, days: int = WINDOW_DAYS,
-               min_days: int = MIN_HISTORY_DAYS) -> bool:
-    """The price is below everything seen in the window, with enough history to mean something."""
-    stats = window_stats(previous, now, days)
-    return bool(stats and stats.days >= min_days and price < stats.low)
