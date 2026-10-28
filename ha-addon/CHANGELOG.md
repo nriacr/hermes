@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.30.0
+
+- Hepsiburada: Kontrol et sayfadaki varyant listesini tek istekle okur (12 varyant ~3 sn); Kapasite/Renk seçimi yapılabilir, seçim varyantın SKU'su ile eşleşir (yanlış adlı varyantlar karışmaz).
+- "Okunuyor" düğmesi yalnız dönen halka gösterir.
 ## 4.29.0
 
 - Ayarlar Kontrol et arka planda çalışır, sayfa sonucu birkaç saniyede bir sorar; uzun okumalarda (Hepsiburada varyant ailesi) Home Assistant zaman aşımı hatası olmaz, düğmede geçen süre görünür.
