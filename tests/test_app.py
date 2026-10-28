@@ -240,15 +240,17 @@ class RuntimeTests(unittest.TestCase):
         self.assertTrue(ok)
         self.assertIn("tarama sürüyor", message)
 
-    def test_statistics_reset_uses_the_command_barrier_and_reports_queued_state(self):
+    def test_statistics_reset_clears_at_once_during_a_round_and_restarts(self):
         runtime = hermes_app.HermesRuntime(config([watch("x", "https://www.trendyol.com/x")]), files=self.data.files)
-        command = runner.Command("reset_statistics", runner.reset_statistics)
-        with patch.object(runtime.service, "submit", return_value=command) as submit, patch.object(hermes_app, "ACTION_WAIT_SECONDS", 0):
+        with (patch.object(runtime.service, "submit") as submit, patch.object(hermes_app, "schedule_restart") as restart,
+              patch.object(hermes_app, "reset_statistics", return_value=4) as reset):
             ok, message = runtime.reset_statistics()
-        submit.assert_called_once_with("reset_statistics")
+        submit.assert_not_called()  # no waiting for the round to end
+        reset.assert_called_once_with(self.data.files)
+        restart.assert_called_once_with()
         self.assertTrue(ok)
-        self.assertIn("tarama biter bitmez", message)
-        self.assertFalse(command.done.is_set())
+        self.assertIn("4 okuma", message)
+        self.assertIn("yeniden başlatılıyor", message)
 
     def test_runtime_exposes_startup_coverage_without_watch_identity(self):
         rule = watch("Kart", "https://www.trendyol.com/x", priority="6h")

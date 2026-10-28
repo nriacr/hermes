@@ -617,7 +617,7 @@ def render_statistics_page(base: str, params: Optional[Dict[str, List[str]]] = N
 def render_reset_statistics(base: str) -> str:
     """Confirmed reset of all statistical history, independent of price history."""
     return (f"<div class='actions tool-actions statistics-reset'><form class='inline-form' method='post' "
-            f"action='{escape(link(base, 'reset-statistics'), quote=True)}' data-confirm='Tüm okuma, süre ve sorun kayıtları silinecek. Fiyat geçmişi ve takipler korunur. Devam?'>"
+            f"action='{escape(link(base, 'reset-statistics'), quote=True)}' data-confirm='Tüm okuma, süre ve sorun kayıtları hemen silinecek ve Hermes yeniden başlayacak. Fiyat geçmişi ve takipler korunur. Devam?'>"
             "<button class='button secondary' type='submit'>İstatistik geçmişini sil</button></form></div>")
 
 

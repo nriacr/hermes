@@ -6,7 +6,7 @@ import threading
 from typing import Optional, Tuple
 
 from .config import load_config, read_options
-from .supervisor import migrate_card_ids
+from .supervisor import migrate_card_ids, schedule_restart
 from .constants import APP_VERSION, DATA_DIR, DIAGNOSTIC_LOG_PATH, INGRESS_PORT, PUBLIC_PORT
 from .logging_utils import enable_file_log, log
 from .models import HermesConfig
@@ -87,11 +87,14 @@ class HermesRuntime:
         )
 
     def reset_statistics(self) -> Tuple[bool, str]:
-        return self._action(
-            "reset_statistics", reset_statistics,
-            "İstatistik geçmişi silindi ({count} okuma). Fiyat geçmişi korundu.",
-            "Şu an bir tarama sürüyor. İstatistik geçmişi tarama biter bitmez silinecek. Fiyat geçmişi korunacak.",
-        )
+        """Clear at once, without waiting for the round, then restart so no half-counted round is kept."""
+        try:
+            count = reset_statistics(self.files)
+        except Exception as exc:  # noqa: BLE001
+            log(f"Panel işlemi başarısız: reset_statistics | {exc}")
+            return False, f"İşlem tamamlanamadı: {exc}"
+        schedule_restart()
+        return True, f"İstatistik geçmişi silindi ({count} okuma). Fiyat geçmişi korundu. Hermes yeniden başlatılıyor."
 
     def stop(self) -> None:
         self.stop_event.set()

@@ -347,7 +347,9 @@ class Router:
         if path in {"/reset-statistics", "/reset-errors"}:
             ok, message = self.runtime.reset_statistics()
             clear_statistics_cache()
-            return redirect(request, "statistics", saved="ok" if ok else "fail", msg=message)
+            if not ok:
+                return redirect(request, "statistics", saved="fail", msg=message)
+            return redirect(request, "restarting", msg=message, return_to_main="1")
         actions = {
             "/test-pushover": ("test", send_test_notification),
             "/reset-notifications": ("reset", self.runtime.reset_notifications),

@@ -753,15 +753,15 @@ class StatisticsPageTests(DataFilesMixin, unittest.TestCase):
                       "boş bellek 400 MB</small>", rows[2])
         self.assertNotIn(url, spells)
 
-    def test_reset_button_asks_first_and_returns_to_statistics_with_the_result(self):
+    def test_reset_button_asks_first_and_restarts_hermes(self):
         html = self.page("7d")
         form = html.split("statistics-reset")[1].split("</form>")[0]
         self.assertIn("action='./reset-statistics'", form)
-        self.assertIn("data-confirm='Tüm okuma, süre ve sorun kayıtları silinecek", form)
+        self.assertIn("data-confirm='Tüm okuma, süre ve sorun kayıtları hemen silinecek ve Hermes yeniden başlayacak", form)
         self.assertIn("confirm.js", html)  # the confirm script is on the page
         response = self.request_post("/reset-statistics")
         self.assertEqual(response.status, 303)
-        self.assertTrue(response.headers["Location"].startswith("./statistics?saved=ok&msg="))
+        self.assertTrue(response.headers["Location"].startswith("./restarting?msg="))
         self.assertEqual(self.runtime.resets, ["statistics"])
         notice = self.request("/statistics?saved=ok&msg=Hata+kay%C4%B1tlar%C4%B1+silindi+%283+kay%C4%B1t%29.").payload.decode()
         self.assertIn("<p class='notice notice-ok'>Hata kayıtları silindi (3 kayıt).</p>", notice)
