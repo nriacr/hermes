@@ -183,7 +183,6 @@
       do {
         await new Promise((resolve) => { setTimeout(resolve, 1500); });
         data = await ask({ job });
-        if (data.pending) button.replaceChildren(element('span', 'spinner'), `Okunuyor ${data.seconds} sn`);
       } while (data.pending);
       if (!data.ok) throw new Error(data.error || 'Sayfa okunamadı.');
       showProduct(data);
