@@ -290,36 +290,69 @@
   document.querySelectorAll('[data-bulk-active]').forEach((button) => button.addEventListener('click', () => bulk("input[type='checkbox'][name$='_active']", button.dataset.bulkActive === '1')));
   document.querySelector('[data-bulk-set-priority]')?.addEventListener('click', () => bulk('[data-watch-priority]', document.querySelector('[data-bulk-priority]').value));
 
-  // Cards are dragged by their handle inside their own site; the shown order is saved with the page.
-  let dragged = null;
+  // A card is dragged by its handle, up and down only, inside its own site; the others slide out of
+  // its way and it settles into its place on release. The shown order is saved with the page.
   const orderField = document.querySelector('[data-watch-order]');
   const writeOrder = () => {
     orderField.value = [...document.querySelectorAll('[data-watch-card]')]
       .map((card) => card.querySelector("input[name$='_id']")?.value || '').join(',');
     dirty = true;
   };
+  const slide = (cards, move) => {
+    // Move the DOM, then animate each sibling from where it was to where it now is.
+    const before = new Map(cards.map((card) => [card, card.getBoundingClientRect().top]));
+    move();
+    cards.forEach((card) => {
+      const shift = before.get(card) - card.getBoundingClientRect().top;
+      if (!shift) return;
+      card.style.transition = 'none';
+      card.style.transform = `translateY(${shift}px)`;
+      requestAnimationFrame(() => {
+        card.style.transition = 'transform .18s ease';
+        card.style.transform = '';
+      });
+    });
+  };
+  let drag = null;
   document.addEventListener('click', (event) => { if (event.target.closest('[data-drag-handle]')) event.preventDefault(); });
-  document.addEventListener('dragstart', (event) => {
-    const handle = event.target.closest?.('[data-drag-handle]');
-    if (!handle) return;
-    dragged = handle.closest('[data-watch-card]');
-    event.dataTransfer.effectAllowed = 'move';
-    event.dataTransfer.setDragImage(dragged, 20, 20);
-    dragged.classList.add('is-dragging');
-  });
-  document.addEventListener('dragover', (event) => {
-    const card = event.target.closest?.('[data-watch-card]');
-    if (!dragged || !card || card === dragged || card.parentElement !== dragged.parentElement) return;
+  document.addEventListener('pointerdown', (event) => {
+    const handle = event.target.closest('[data-drag-handle]');
+    if (!handle || event.button !== 0) return;
     event.preventDefault();
-    const box = card.getBoundingClientRect();
-    card.parentElement.insertBefore(dragged, event.clientY < box.top + box.height / 2 ? card : card.nextSibling);
+    const card = handle.closest('[data-watch-card]');
+    drag = { card, list: card.parentElement, startY: event.clientY, top: card.getBoundingClientRect().top, moved: false };
+    try { handle.setPointerCapture(event.pointerId); } catch { /* the document listeners still follow the pointer */ }
+    card.classList.add('is-dragging');
   });
-  document.addEventListener('dragend', () => {
-    if (!dragged) return;
-    dragged.classList.remove('is-dragging');
-    dragged = null;
-    writeOrder();
+  document.addEventListener('pointermove', (event) => {
+    if (!drag) return;
+    const { card, list } = drag;
+    const others = [...list.children].filter((item) => item !== card);
+    const bounds = list.getBoundingClientRect();
+    const height = card.getBoundingClientRect().height;
+    // Only vertical, and never outside the site's own list.
+    const wanted = Math.min(Math.max(drag.top + event.clientY - drag.startY, bounds.top), bounds.bottom - height);
+    const middle = wanted + height / 2;
+    const next = others.find((item) => middle < item.getBoundingClientRect().top + item.getBoundingClientRect().height / 2) || null;
+    if (next !== card.nextElementSibling) {
+      slide(others, () => list.insertBefore(card, next));
+      drag.moved = true;
+    }
+    card.style.transition = 'none';
+    card.style.transform = `translateY(${wanted - (card.getBoundingClientRect().top - (parseFloat(card.style.transform.slice(11)) || 0))}px)`;
   });
+  const drop = () => {
+    if (!drag) return;
+    const { card, moved } = drag;
+    drag = null;
+    card.style.transition = 'transform .18s ease';
+    card.style.transform = '';
+    card.addEventListener('transitionend', () => { card.classList.remove('is-dragging'); card.style.transition = ''; }, { once: true });
+    setTimeout(() => card.classList.remove('is-dragging'), 250);
+    if (moved) writeOrder();
+  };
+  document.addEventListener('pointerup', drop);
+  document.addEventListener('pointercancel', drop);
 
   const savingOverlay = document.getElementById('saving-overlay');
   const savingTitle = document.getElementById('saving-title');

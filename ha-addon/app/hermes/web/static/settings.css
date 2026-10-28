@@ -57,5 +57,5 @@ body.ov.settings-page .button.primary { border:1px solid rgba(201,229,154,.35); 
 .topbar .lock-form { margin:0 0 0 auto; } .topbar .lock-form + .gear-button { margin-left:0; } body.ov .lock-button:hover { transform:none; color:var(--text); } .topbar .lock-button { cursor:pointer; font:inherit; }
 .settings-page .tool-actions { flex-wrap:wrap; } .settings-page .tool-actions .apply-button { margin-left:auto; }
 .settings-page .drag-handle { flex:none; width:14px; height:18px; margin:0 8px 0 -4px; cursor:grab; opacity:.55; background:radial-gradient(circle,var(--mute) 1.4px,transparent 1.6px) 0 0/7px 6px; } .settings-page .drag-handle:hover { opacity:1; }
-.settings-page details.is-dragging { opacity:.45; }
+.settings-page details.is-dragging { position:relative; z-index:5; border-color:rgba(201,229,154,.45); background:#1d1932; box-shadow:0 14px 34px rgba(0,0,0,.5); cursor:grabbing; } .settings-page .drag-handle { touch-action:none; }
 .settings-page [hidden] { display:none !important; }

@@ -249,7 +249,7 @@ def watch_form(item: Dict[str, Any], index: int, known_titles=None) -> str:
         + "<div class='watch-actions'><button class='button danger' type='button' data-delete-watch>Sil</button></div>"
     )
     return (f"<details data-watch-card data-watch-search='{escape(display_name, quote=True)}'><summary>"
-            "<span class='drag-handle' draggable='true' data-drag-handle title='Sürükleyerek sırala' aria-hidden='true'></span>"
+            "<span class='drag-handle' data-drag-handle title='Sürükleyerek sırala' aria-hidden='true'></span>"
             "<input type='checkbox' class='bulk-pick' data-bulk-pick aria-label='Toplu işlem için seç'>"
             f"{priority_dot(_card_priority(item, False))}<span class='watch-title'>{escape(display_name)}</span>"
             f"{_active_switch(prefix, item.get('active', True))}</summary><div class='form-grid'>{inner}</div></details>")
