@@ -90,6 +90,8 @@
     newWatch.querySelector('[data-product-title]').textContent = data.title || '';
     const variants = data.variants || [];
     const priced = variants.filter((item) => item.price);
+    // A single product shows its live price large; a family shows its variant count above the table.
+    newWatch.querySelector('[data-product-sub]').classList.toggle('is-price', variants.length <= 1);
     newWatch.querySelector('[data-product-sub]').textContent = variants.length > 1
       ? `${variants.length} ${'Mağaza' in (data.dimensions || {}) ? 'mağaza' : 'varyant'}` : (priced[0]?.price || '');
     const table = newWatch.querySelector('[data-variant-table]');
@@ -123,6 +125,7 @@
     dims.replaceChildren();
     if (options.has('variant_filter')) {
       Object.entries(dimensions).forEach(([name, values]) => {
+        if (values.length < 2) return;  // nothing to choose
         const group = element('div', 'variant-dim');
         group.dataset.variantDim = name;
         group.appendChild(element('span', '', name));
@@ -140,7 +143,7 @@
         group.appendChild(chips);
         dims.appendChild(group);
       });
-      dims.hidden = !Object.keys(dimensions).length;
+      dims.hidden = !dims.children.length;
     }
     table.hidden = !variants.length;
     writeVariantFilter();
