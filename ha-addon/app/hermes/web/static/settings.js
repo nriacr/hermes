@@ -289,7 +289,6 @@
       card.classList.remove('is-deleted');
       deleteButton.textContent = 'Sil';
     } else {
-      if (!window.confirm('Bu takip silinecek. Devam?')) return;
       flag.value = '1';
       card.classList.add('is-deleted');
       deleteButton.textContent = 'Vazgeç';
