@@ -419,7 +419,9 @@ def render_settings_page(base: str, params: Dict[str, List[str]], *, lock_button
         + _telegram_section(options)
         + _timing_section(options)
         + "</form>"
-        + render_tool_actions(base, pin_change + "<button class='button primary apply-button' type='submit' form='settings-form'>Değişiklikleri uygula</button>")
+        + render_tool_actions(base, pin_change
+                                 + "<span class='apply-group'><button class='button discard-button' type='button' data-discard>Vazgeç</button>"
+                                 "<button class='button primary apply-button' type='submit' form='settings-form' data-apply>Değişiklikleri uygula</button></span>")
     )
     overlay = ("<div id='saving-overlay' class='saving-overlay' hidden><div class='saving-dialog'><div class='saving-spinner'></div>"
                "<h2 id='saving-title'>Ayarlar kaydediliyor</h2><p id='saving-message'>Kaydediliyor, Hermes yeniden başlıyor…</p></div></div>")

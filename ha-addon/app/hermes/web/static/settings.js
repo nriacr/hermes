@@ -3,7 +3,17 @@
   const watchSearch = document.getElementById('watch-search');
   const settingsForm = document.getElementById('settings-form');
   let dirty = false;
-  document.addEventListener('hermes-session-locked', () => { dirty = false; });
+  // Apply and Vazgeç wait until something changed.
+  const setDirty = (value) => {
+    dirty = value;
+    document.querySelectorAll('[data-apply], [data-discard]').forEach((button) => { button.disabled = !value; });
+  };
+  setDirty(false);
+  document.addEventListener('hermes-session-locked', () => setDirty(false));
+  document.querySelector('[data-discard]')?.addEventListener('click', () => {
+    setDirty(false);
+    window.location.reload();
+  });
 
   const refreshWatchList = () => {
     const searchText = normalize(watchSearch?.value.trim());
@@ -176,7 +186,7 @@
     const title = newWatch.querySelector('[data-product-title]').textContent || name.value || newWatch.querySelector('[data-check-url]').value;
     const remove = element('button', 'queued-remove', 'Kaldır');
     remove.type = 'button';
-    remove.addEventListener('click', () => { row.remove(); dirty = true; });
+    remove.addEventListener('click', () => { row.remove(); setDirty(true); });
     const edit = element('button', 'queued-name', title);
     edit.type = 'button';
     edit.title = 'Düzelt';
@@ -188,7 +198,7 @@
     watchesCount.value = String(index + 1);
     openForm(index);
     newWatch.querySelector('[data-check-url]').focus();
-    dirty = true;
+    setDirty(true);
   });
 
   const openForm = (index) => {
@@ -258,11 +268,13 @@
       card.classList.add('is-deleted');
       deleteButton.textContent = 'Vazgeç';
     }
-    dirty = true;
+    setDirty(true);
   });
 
-  settingsForm?.addEventListener('input', () => { dirty = true; });
-  settingsForm?.addEventListener('change', () => { dirty = true; });
+  // Searching the list or ticking cards for bulk actions changes nothing by itself.
+  const changes = (event) => !event.target.matches('#watch-search, [data-bulk-pick], [data-check-url]');
+  settingsForm?.addEventListener('input', (event) => { if (changes(event)) setDirty(true); });
+  settingsForm?.addEventListener('change', (event) => { if (changes(event)) setDirty(true); });
   window.addEventListener('beforeunload', (event) => {
     if (!dirty) return;
     event.preventDefault();
@@ -296,7 +308,7 @@
   const writeOrder = () => {
     orderField.value = [...document.querySelectorAll('[data-watch-card]')]
       .map((card) => card.querySelector("input[name$='_id']")?.value || '').join(',');
-    dirty = true;
+    setDirty(true);
   };
   const slide = (cards, move) => {
     // Move the DOM, then animate each sibling from where it was to where it now is.
@@ -364,7 +376,7 @@
       button.setAttribute('aria-disabled', 'true');
       button.textContent = 'Kaydediliyor...';
     }
-    dirty = false;
+    setDirty(false);
     savingTitle.textContent = 'Ayarlar kaydediliyor';
     savingMessage.textContent = 'Kaydediliyor, Hermes yeniden başlıyor…';
     savingOverlay.hidden = false;

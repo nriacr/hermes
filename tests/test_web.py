@@ -157,7 +157,8 @@ class RouterTests(DataFilesMixin, unittest.TestCase):
         for label in ("Pushover testi", "Bildirim Sıfırla", "Min/Maks Sıfırla"):
             self.assertIn(label, row)
             self.assertNotIn(label, self.request("/").payload.decode())
-        self.assertGreater(row.index("form='settings-form'>Değişiklikleri uygula"), row.index("Hermes'i yeniden başlat"))
+        self.assertGreater(row.index("data-discard>Vazgeç"), row.index("Hermes'i yeniden başlat"))
+        self.assertGreater(row.index("form='settings-form' data-apply>Değişiklikleri uygula"), row.index("data-discard>Vazgeç"))
         self.assertNotIn("Ayarlar açık", settings_page)
         topbar = settings_page[settings_page.index("class='topbar'"):settings_page.index("page-heading")]
         self.assertLess(topbar.index("aria-label='Kilitle'"), topbar.index("aria-label='Ayarlar'"))
