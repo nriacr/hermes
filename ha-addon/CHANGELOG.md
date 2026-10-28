@@ -1,5 +1,11 @@
 # Değişiklik günlüğü
 
+## 4.28.0
+
+- Beden seçilen sitelerde birden çok beden: bir beden seçince sonraki beden kutusu açılır; her beden ayrı izlenir ("M; L" olarak kaydedilir).
+- Togg: Kontrol et satıştaki modelleri fiyatlarıyla listeler, model seçilir; liste boşsa Model kutusu yazılır.
+- Kontrol et okurken dönen simge; varyantsız üründe canlı fiyat büyük gösterilir; tek değerli varyant kutusu gizlenir.
+- Sil onay sormadan kartı silme sırasına alır (Uygula ile silinir, Vazgeç ile geri alınır).
 ## 4.27.0
 
 - Amazon Depo fırsatları kart ayarı olmadan otomatik sepete eklenir (sepetteki diğer ürünler "Sonra al"a taşınır, silinmez; günde en çok 5). Yeni teklifler yalnız bildirilir. "Otomatik sepete ekle" kutusu ve kayıtlı değeri kaldırıldı.
