@@ -1,5 +1,8 @@
 # Değişiklik günlüğü
 
+## 4.31.2
+
+- İstatistik geçmişini sil: taramanın bitmesini beklemeden kayıtları hemen siler ve Hermes'i yeniden başlatır (fiyat geçmişi ve takipler korunur).
 ## 4.31.1
 
 - Amazon: varyant satırındaki ok düğmesi (javascript:void) varyant sayılmaz; Hue Flare taramalarındaki 404 tekrarları biter.
