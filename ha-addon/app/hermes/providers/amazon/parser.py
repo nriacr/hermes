@@ -125,7 +125,9 @@ def _variation_url_from_element(element) -> str:
         asin = str(node.get("data-asin") or node.get("data-defaultasin") or "").strip()
         if asin:
             break
-    return _normalized_variation_url(raw_url, asin or extract_asin_from_url(raw_url) or "")
+    asin = asin or extract_asin_from_url(raw_url) or ""
+    # A carousel arrow ("←", href "javascript:void(0);") sits in the same rows; only a product is a variation.
+    return _normalized_variation_url(raw_url, asin) if asin else ""
 
 
 def _clean_variation_label(value: str) -> str:

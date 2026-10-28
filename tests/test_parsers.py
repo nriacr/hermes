@@ -2203,6 +2203,13 @@ class WatchCardTests(unittest.TestCase):
         watch.official_seller_only = False
         self.assertTrue(provider.keeps_offer(watch, OfferResult(title="x", price=Decimal("1"), seller="Ceptemax")))
 
+    def test_amazon_carousel_arrow_is_not_a_variation(self):
+        html = ('<ul id="variation_color_name"><li><a href="javascript:void(0);">←</a></li>'
+                '<li data-asin="B000000002"><a href="/dp/B000000002?th=1">Beyaz</a></li></ul>')
+        variations = extract_product_variations(html, "https://www.amazon.com.tr/dp/B000000001", 60)
+        self.assertNotIn("https://www.amazon.com.tr/javascript:void(0);", [item.url for item in variations])
+        self.assertIn("https://www.amazon.com.tr/dp/B000000002?th=1", [item.url for item in variations])
+
     def test_amazon_dimension_combinations_name_every_variant_asin(self):
         html = '''"dimensionValuesDisplayData" : {"B0FQFTYPTQ":["Gümüş Rengi","256 GB"],"B0FQFJ2HLL":["Kozmik Turuncu","512 GB"]},
                 "dimensions" : ["color_name","size_name"],
