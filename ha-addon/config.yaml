@@ -89,7 +89,6 @@ schema:
       include_variations: "bool?"
       priority: "str?"
       official_seller_only: "bool?"
-      auto_add_to_cart: "bool?"
       check_now_token: "str?"
       url_1: "str?"
       url_2: "str?"

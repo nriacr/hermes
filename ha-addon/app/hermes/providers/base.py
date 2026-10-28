@@ -240,6 +240,8 @@ class Provider:
     # The provider spaces every network request itself (Amazon's client);
     # otherwise the monitor spaces the start of each watch read.
     spaces_own_requests = False
+    # Every alerted deal the provider can buy (Amazon Depo) goes to the cart; no card setting.
+    adds_deals_to_cart = False
     # Card options shown for this site besides the common ones ("size", "include_variations", ...).
     card_options: tuple = ()
 

@@ -66,6 +66,7 @@ def read_options() -> Dict[str, Any]:
 
 
 REMOVED_OPTIONS = ("gruplar", "daily_summary_enabled")
+REMOVED_CARD_KEYS = ("group", "auto_add_to_cart")
 
 
 def options_with_defaults(options: Any) -> Dict[str, Any]:
@@ -78,7 +79,9 @@ def options_with_defaults(options: Any) -> Dict[str, Any]:
         saved.setdefault(key, deepcopy(value))
     for item in saved.get("takip_edilenler", []):
         if isinstance(item, dict):
-            item.pop("group", None)
+            # Removed card keys: groups (4.26.0) and the cart box (Depo deals always go to the cart).
+            for key in REMOVED_CARD_KEYS:
+                item.pop(key, None)
         if isinstance(item, dict) and not item.get("id"):
             try:
                 target = parse_decimal(str(item.get("target_price") or "0"))
@@ -219,7 +222,6 @@ def _prepare_watch(item):
                 include_variations=parse_bool(item.get("include_variations"), default=False),
                 priority=priority,
                 official_seller_only=parse_bool(item.get("official_seller_only"), default=False),
-                auto_add_to_cart=parse_bool(item.get("auto_add_to_cart"), default=False),
                 check_now_token=str(item.get("check_now_token") or "").strip(),
                 max_items_to_scan=SEARCH_RESULT_LIMIT,
                 notify_once_in_24h=parse_bool(item.get("notify_once_in_24H"), default=True),

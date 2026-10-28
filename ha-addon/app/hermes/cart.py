@@ -20,7 +20,8 @@ class CartQueue:
         self.db = database
         self.providers = providers
         self.delivery = delivery
-        self.enabled = {(w.site, w.tracking_id) for w in watches if w.auto_add_to_cart and w.active}
+        # The watches of sites that add deals to the cart.
+        self.enabled = {(w.site, w.tracking_id) for w in watches if w.active}
         self.stop = threading.Event()
         self.thread = None
         self.next_session_check = time.monotonic() + FIRST_SESSION_CHECK_SECONDS

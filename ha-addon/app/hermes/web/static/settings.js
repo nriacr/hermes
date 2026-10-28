@@ -50,7 +50,9 @@
     }).filter(Boolean);
     newWatch.querySelector('[data-variant-filter]').value = chosen.join('; ');
   };
+  let lastCheck = null;
   const showProduct = (data) => {
+    lastCheck = data;
     const body = newWatch.querySelector('[data-new-body]');
     newWatch.querySelector('[data-product-title]').textContent = data.title || '';
     const variants = data.variants || [];
@@ -161,6 +163,8 @@
       return;
     }
     const row = element('div', 'queued-watch');
+    row.dataset.index = newWatch.querySelector("input[name$='_url_1']").name.match(/^watches_(\d+)_/)[1];
+    row.checkData = lastCheck;
     newWatch.querySelectorAll('input[name], select[name]').forEach((field) => {
       if (field.type === 'checkbox' && !field.checked) return;
       const copy = element('input');
@@ -173,18 +177,60 @@
     const remove = element('button', 'queued-remove', 'Kaldır');
     remove.type = 'button';
     remove.addEventListener('click', () => { row.remove(); dirty = true; });
-    row.append(element('span', 'queued-name', title), element('span', 'queued-price', `${target.value} TL`), remove);
-    queuedList.appendChild(row);
+    const edit = element('button', 'queued-name', title);
+    edit.type = 'button';
+    edit.title = 'Düzelt';
+    edit.addEventListener('click', () => reopenQueued(row));
+    row.append(edit, element('span', 'queued-price', `${target.value} TL`), remove);
+    const placeholder = queuedList.querySelector(`[data-reopened='${row.dataset.index}']`);
+    if (placeholder) placeholder.replaceWith(row); else queuedList.appendChild(row);
     const index = Number(watchesCount.value);
     watchesCount.value = String(index + 1);
+    openForm(index);
+    newWatch.querySelector('[data-check-url]').focus();
+    dirty = true;
+  });
+
+  const openForm = (index) => {
     const holder = document.createElement('div');
     holder.innerHTML = pristineWatch.replaceAll(`watches_${pristineIndex}_`, `watches_${index}_`);
     const fresh = holder.firstElementChild;
     newWatch.replaceWith(fresh);
     newWatch = fresh;
-    newWatch.querySelector('[data-check-url]').focus();
-    dirty = true;
-  });
+    lastCheck = null;
+  };
+  // A queued card opens again in the form with its own values; "Ekle" puts it back in its place.
+  const reopenQueued = (row) => {
+    const urlField = newWatch.querySelector('[data-check-url]');
+    const error = newWatch.querySelector('[data-check-error]');
+    if (urlField.value.trim()) {
+      error.textContent = 'Önce bu linki ekle ya da linki sil.';
+      error.hidden = false;
+      return;
+    }
+    openForm(row.dataset.index);
+    const values = {};
+    row.querySelectorAll('input[type=hidden]').forEach((copy) => { values[copy.name] = copy.value; });
+    if (row.checkData) showProduct(row.checkData);
+    newWatch.querySelectorAll('input[name], select[name]').forEach((field) => {
+      if (field.type === 'checkbox') field.checked = field.name in values;
+      else if (field.name in values) field.value = values[field.name];
+    });
+    const chosen = {};
+    (values[`watches_${row.dataset.index}_variant_filter`] || '').split(';').forEach((part) => {
+      const [dimension, list] = part.split('=');
+      if (dimension && list) chosen[dimension.trim()] = list.split(',').map((value) => value.trim());
+    });
+    newWatch.querySelectorAll('[data-variant-dim]').forEach((group) => {
+      group.querySelectorAll('input').forEach((box) => { box.checked = (chosen[group.dataset.variantDim] || []).includes(box.value); });
+    });
+    writeVariantFilter();
+    const marker = element('div', 'queued-watch is-open');
+    marker.dataset.reopened = row.dataset.index;
+    marker.append(element('span', 'queued-name', `${row.querySelector('.queued-name').textContent} (düzeltiliyor)`));
+    row.replaceWith(marker);
+    newWatch.querySelector("input[name$='_target_price']").focus();
+  };
 
   document.addEventListener('click', (event) => {
     const activeSwitch = event.target.closest('[data-active-switch]');

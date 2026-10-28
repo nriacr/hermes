@@ -36,7 +36,8 @@ class CartError(Exception):
 
 def payload(watch, offer, url):
     asin = extract_asin_from_url(url)
-    if not asin or offer.price > watch.target_price:
+    # Only Depo deals go to the cart; a new offer is notified as before.
+    if not asin or not offer.is_warehouse or offer.price > watch.target_price:
         return None
     return {'asin': asin, 'price': str(offer.price), 'target': str(watch.target_price),
             'warehouse': bool(offer.is_warehouse), 'seller': offer.seller or '',

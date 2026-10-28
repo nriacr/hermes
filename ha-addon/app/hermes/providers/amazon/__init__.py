@@ -150,7 +150,8 @@ class AmazonProvider(RhythmMixin, PageCacheMixin, Provider):
     def is_protection_error(self, exc: BaseException) -> bool:
         return is_protection_error(exc)
 
-    card_options = ("name", "minimum_price", "official_seller_only", "auto_add_to_cart", "exclude_terms", "variant_filter")
+    adds_deals_to_cart = True
+    card_options = ("name", "minimum_price", "official_seller_only", "exclude_terms", "variant_filter")
 
     def _inspect_offer(self, html: str, url: str):
         """(lowest new price or None, in stock) of one product page."""

@@ -170,7 +170,6 @@ def _watch_site(item) -> str:
     return ""
 
 
-OPTION_LABELS = {"auto_add_to_cart": "Otomatik sepete ekle"}
 # Fields only a search link shows; a product link takes them from the page.
 SEARCH_ONLY = ("name", "minimum_price")
 SELLER_LABELS = {"amazon": "Amazon.com.tr satıcısı", "hepsiburada": "Hepsiburada satıcısı"}
@@ -203,8 +202,6 @@ def _site_options(prefix, item, site, search) -> tuple:
             parts.append(_field(prefix, "variant_filter", CHOICE_LABELS.get(site, "Varyant seçimi"), item.get("variant_filter", "")))
         elif option == "official_seller_only":
             flags.append(_checkbox(prefix, option, SELLER_LABELS.get(site, "Platform satıcısı"), item.get(option, False)))
-        else:
-            flags.append(_checkbox(prefix, option, OPTION_LABELS[option], item.get(option, False)))
     return "".join(parts), "".join(flags)
 
 
@@ -272,7 +269,6 @@ def new_watch_form(index: int, check_path: str) -> str:
     site_flags = (
         hidden("official_seller_only", _checkbox(prefix, "official_seller_only", "Platform satıcısı", False)
                  .replace(">Platform satıcısı</label>", "><span data-seller-label></span></label>"))
-        + hidden("auto_add_to_cart", _checkbox(prefix, "auto_add_to_cart", OPTION_LABELS["auto_add_to_cart"], False))
     )
     return (
         f"<div class='new-watch' data-new-watch data-check-path='{escape(check_path, quote=True)}'>"
@@ -505,7 +501,6 @@ def build_watch(form: Dict[str, List[str]], index: int) -> Optional[Dict[str, An
         "include_variations": prefix + "include_variations" in form or bool(variant_filter),
         "priority": priority,
         "official_seller_only": prefix + "official_seller_only" in form,
-        "auto_add_to_cart": prefix + "auto_add_to_cart" in form,
         # Every card is muted for 24 hours after an alert; there is no setting for it any more.
         "notify_once_in_24H": True,
         "active": prefix + "active" in form,

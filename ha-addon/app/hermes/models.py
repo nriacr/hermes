@@ -21,7 +21,6 @@ class WatchRule:
     include_variations: bool = False
     priority: str = DEFAULT_PRIORITY
     official_seller_only: bool = False
-    auto_add_to_cart: bool = False
     check_now_token: str = ""
     max_items_to_scan: int = 60
     notify_once_in_24h: bool = True

@@ -26,11 +26,13 @@ class CartCase(unittest.TestCase):
         self.db.connect()
         self.addCleanup(self.db.close)
         self.watch = WatchRule('test', 'amazon', 'https://www.amazon.com.tr/dp/B012345678', Decimal('100'),
-                               tracking_id='card', auto_add_to_cart=True)
+                               tracking_id='card')
 
-    def test_cart_disabled_by_default_and_other_provider_has_no_intent(self):
-        self.assertFalse(WatchRule('x', 'other', 'url', Decimal(1)).auto_add_to_cart)
+    def test_only_depo_deals_of_a_cart_site_create_an_intent(self):
+        self.assertFalse(Provider.adds_deals_to_cart)
+        self.assertTrue(AmazonProvider.adds_deals_to_cart)
         self.assertIsNone(Provider.cart_payload(None, self.watch, None, None))
+        self.assertIsNone(payload(self.watch, OfferResult('x', Decimal('90')), self.watch.url))  # a new offer
 
     def test_same_intent_is_deduplicated(self):
         job = payload(self.watch, OfferResult('x', Decimal('90'), is_warehouse=True), self.watch.url)
@@ -53,7 +55,7 @@ class CartCase(unittest.TestCase):
     def test_expired_and_disabled_jobs_do_not_touch_cart(self):
         provider = Mock()
         queue = CartQueue(self.db, {'amazon': provider}, [])
-        job = payload(self.watch, OfferResult('x', Decimal('90')), self.watch.url)
+        job = payload(self.watch, OfferResult('x', Decimal('90'), is_warehouse=True), self.watch.url)
         self.db.transaction([queue.statement('amazon', 'card', job)])
         queue.run_one()
         provider.add_to_cart.assert_not_called()
@@ -61,7 +63,7 @@ class CartCase(unittest.TestCase):
 
     def test_interrupted_post_is_not_automatically_repeated(self):
         queue = CartQueue(self.db, {}, [self.watch])
-        job = payload(self.watch, OfferResult('x', Decimal('90')), self.watch.url)
+        job = payload(self.watch, OfferResult('x', Decimal('90'), is_warehouse=True), self.watch.url)
         self.db.transaction([queue.statement('amazon', 'card', job),
                              ("UPDATE cart_jobs SET state='processing'", ())])
         queue.start()
@@ -69,7 +71,7 @@ class CartCase(unittest.TestCase):
         self.assertEqual(self.db.connect().execute('SELECT state FROM cart_jobs').fetchone()[0], 'uncertain')
 
     def test_above_target_does_not_create_cart_intent(self):
-        self.assertIsNone(payload(self.watch, OfferResult('x', Decimal('101')), self.watch.url))
+        self.assertIsNone(payload(self.watch, OfferResult('x', Decimal('101'), is_warehouse=True), self.watch.url))
 
 
     def test_success_sends_nothing_and_limit_reports(self):
@@ -289,15 +291,16 @@ class CartIntentWiringTests(unittest.TestCase):
                            is_warehouse=True, offer_id='search-offer-id-0123456789')
 
     def test_alerted_deal_queues_one_cart_job_with_its_offer_id(self):
-        rule = WatchRule('Depo', 'amazon', 'https://www.amazon.com.tr/s?k=x', Decimal('100'), auto_add_to_cart=True)
+        rule = WatchRule('Depo', 'amazon', 'https://www.amazon.com.tr/s?k=x', Decimal('100'))
         jobs = self.jobs(rule, self.offer(), cycles=2)
         self.assertEqual(len(jobs), 1)
         self.assertIn('search-offer-id-0123456789', jobs[0])
 
-    def test_card_without_the_box_queues_nothing(self):
-        rule = WatchRule('Depo', 'amazon', 'https://www.amazon.com.tr/s?k=x', Decimal('100'))
-        self.assertEqual(self.jobs(rule, self.offer()), [])
+    def test_new_offer_deal_queues_nothing(self):
+        rule = WatchRule('Yeni', 'amazon', 'https://www.amazon.com.tr/s?k=x', Decimal('100'))
+        offer = OfferResult('Yeni ürün', Decimal('90'), seller='Amazon.com.tr', url='https://www.amazon.com.tr/dp/' + ASIN)
+        self.assertEqual(self.jobs(rule, offer), [])
 
     def test_price_above_target_queues_nothing(self):
-        rule = WatchRule('Depo', 'amazon', 'https://www.amazon.com.tr/s?k=x', Decimal('100'), auto_add_to_cart=True)
+        rule = WatchRule('Depo', 'amazon', 'https://www.amazon.com.tr/s?k=x', Decimal('100'))
         self.assertEqual(self.jobs(rule, self.offer('150')), [])

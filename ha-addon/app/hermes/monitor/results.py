@@ -225,7 +225,7 @@ class ResultRecorder:
                 state[item_key] = updated
                 # The cart job commits with its notification, so it exists only when an alert is queued;
                 # its own worker starts at once, in parallel with the Pushover delivery.
-                if alert_queued and watch.auto_add_to_cart:
+                if alert_queued and provider.adds_deals_to_cart:
                     cart_payload = provider.cart_payload(watch, offer, matched_url)
                     if cart_payload:
                         cart_payload['appearance'] = offer_entry.get('last_missing_at', '')
