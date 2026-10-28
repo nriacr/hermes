@@ -192,15 +192,50 @@ def _warm_up(session: requests.Session, timeout: int) -> None:
             setattr(session, WARMED_ATTRIBUTE, True)
 
 
+def _curl_page(url: str, variants: List[str], timeout: int, attempts: List[str]):
+    """The first address curl_cffi reads (remembered for the next read), or (None, last error)."""
+    last_error: Optional[Exception] = None
+    try:
+        curl_session = curl_requests.Session()
+        for candidate in variants:
+            try:
+                page = _checked(
+                    count_curl(curl_session.get(
+                        candidate, headers=hepsiburada_headers(candidate), timeout=timeout,
+                        allow_redirects=True, impersonate="chrome124",
+                    )),
+                    candidate,
+                )
+                note_attempt("curl", "ok")
+                _curl_winner[url] = candidate
+                return page, None
+            except Exception as exc:  # noqa: BLE001
+                last_error = exc
+                note_attempt("curl", _outcome(exc))
+                attempts.append(_attempt("curl", candidate, exc))
+    except Exception as exc:  # noqa: BLE001
+        last_error = exc
+        attempts.append(_attempt("curl_setup", url, exc))
+    return None, last_error
+
+
 def fetch_hepsiburada_page(session: requests.Session, url: str, timeout: int):
+    """curl_cffi (a browser TLS fingerprint) first; plain requests only when curl is missing or fails.
+
+    Measured 2026-10-28: Hepsiburada answered every plain-requests read and home-page warm-up with 403
+    (456 in 24 hours) while curl_cffi read every page; trying requests first only added blocked requests.
+    """
     remembered = _curl_first(url, timeout)
     if remembered is not None:
         return remembered
-    _warm_up(session, timeout)
-
-    last_error: Optional[Exception] = None
     attempts: List[str] = []
     variants = url_variants(url)
+    last_error: Optional[Exception] = None
+    if curl_requests is not None:
+        page, last_error = _curl_page(url, variants, timeout, attempts)
+        if page is not None:
+            return page
+    _warm_up(session, timeout)
     for method, client in (("requests", session), ("requests_fresh", CountedSession())):
         for candidate in variants:
             try:
@@ -216,28 +251,6 @@ def fetch_hepsiburada_page(session: requests.Session, url: str, timeout: int):
                 attempts.append(_attempt(method, candidate, exc))
                 if client is session:
                     setattr(session, WARMED_ATTRIBUTE, False)  # the next read starts with a fresh warm-up
-    if curl_requests is not None:
-        try:
-            curl_session = curl_requests.Session()
-            for candidate in variants:
-                try:
-                    page = _checked(
-                        count_curl(curl_session.get(
-                            candidate, headers=hepsiburada_headers(candidate), timeout=timeout,
-                            allow_redirects=True, impersonate="chrome124",
-                        )),
-                        candidate,
-                    )
-                    note_attempt("curl", "ok")
-                    _curl_winner[url] = candidate
-                    return page
-                except Exception as exc:  # noqa: BLE001
-                    last_error = exc
-                    note_attempt("curl", _outcome(exc))
-                    attempts.append(_attempt("curl", candidate, exc))
-        except Exception as exc:  # noqa: BLE001
-            last_error = exc
-            attempts.append(_attempt("curl_setup", url, exc))
     if attempts:
         log(f"Hepsiburada teşhis: deneme={len(attempts)} | akis={' > '.join(attempts[-6:])} | url={url}")
     if last_error:

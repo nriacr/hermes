@@ -15,6 +15,12 @@ class PushoverQuietTest(unittest.TestCase):
         self.assertEqual(self.sent_priority(), "0")
         self.assertEqual(self.sent_priority(quiet=True), "-1")
 
+    def test_every_message_opens_its_own_connection(self):
+        session = Mock()
+        session.post.return_value.json.return_value = {"status": 1}
+        Pushover("u", "t", session=session).send("b", "m")
+        self.assertEqual(session.post.call_args.kwargs["headers"], {"Connection": "close"})
+
 
 if __name__ == "__main__":
     unittest.main()

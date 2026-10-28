@@ -35,6 +35,9 @@ class Pushover:
                     "priority": "-1" if quiet else "0",
                     "sound": "pushover",
                 },
+                # Pushover drops idle keep-alive connections; reusing one failed the first try of most
+                # messages (25 of 36 in three days, 2026-10-28). A fresh connection per message avoids it.
+                headers={"Connection": "close"},
                 timeout=self.timeout,
             )
         response.raise_for_status()

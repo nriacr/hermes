@@ -112,13 +112,12 @@ class CurlFirstTests(unittest.TestCase):
         return (patch.object(hepsiburada, "curl_requests", self.fake_curl),
                 patch.object(hepsiburada, "CountedSession", lambda: FakeSession(page_status=403)))
 
-    def test_first_read_runs_the_full_order_and_remembers_curl(self):
+    def test_first_read_goes_to_curl_without_blocked_requests_and_remembers_it(self):
         session = FakeSession(page_status=403, home_status=403)
         first, second = self.blocked_requests_world()
         with first, second:
             fetch_hepsiburada_page(session, PRODUCT, 5)
-        self.assertEqual(session.calls[0], HOME_URL)          # warm-up and python-requests attempts ran first
-        self.assertGreaterEqual(len(session.calls), 3)
+        self.assertEqual(session.calls, [])                   # no warm-up or python-requests read that 403s
         self.assertEqual(len(self.curl_calls), 1)
         self.assertIn(PRODUCT, hepsiburada._curl_winner)
 
@@ -139,7 +138,7 @@ class CurlFirstTests(unittest.TestCase):
         with patch.object(hepsiburada, "curl_requests", self.fake_curl):
             page = fetch_hepsiburada_page(session, PRODUCT, 5)
         self.assertEqual(page.status_code, 200)               # the read is not lost
-        self.assertEqual(session.calls[0], HOME_URL)          # original path (warm-up, then requests) ran
+        self.assertEqual(session.calls[0], HOME_URL)          # after curl, the requests path (warm-up first) ran
         self.assertNotIn(PRODUCT, hepsiburada._curl_winner)
 
     def test_without_curl_nothing_is_remembered(self):
