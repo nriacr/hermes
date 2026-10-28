@@ -31,7 +31,7 @@ from .icons import HERMES_ICON_PNG, HERMES_ICON_SVG, render_web_manifest
 from .pages import link
 from .pin import csrf_field, render_configure_page, render_lock_button, render_pin_change_link, render_pin_page
 from .statistics import clear_statistics_cache, render_statistics_page, statistics_live_html
-from .settings import check_link, handle_restart, handle_settings_save, render_restart_page, render_settings_page
+from .settings import handle_restart, link_check_result, start_link_check, handle_settings_save, render_restart_page, render_settings_page
 
 PUBLIC_TOKEN_MIN_LENGTH = 24
 # Text responses above this size are gzip-compressed when the browser accepts it.
@@ -330,7 +330,9 @@ class Router:
 
     def _post(self, request: Request, path: str) -> Response:
         if path == "/settings/check":
-            result = check_link(self._form(request).get("url", [""])[0], self._providers())
+            form = self._form(request)
+            job = form.get("job", [""])[0]
+            result = link_check_result(job) if job else {"job": start_link_check(form.get("url", [""])[0], self._providers())}
             return Response(200, json.dumps(result, ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8")
         clear_dashboard_cache()
         if path == "/settings/save":

@@ -2,6 +2,8 @@
 
 import re
 import sqlite3
+import threading
+import time
 import uuid
 import urllib.parse
 from html import escape
@@ -736,3 +738,38 @@ def check_link(url: str, providers) -> Dict[str, Any]:
         "dimensions": preview.dimensions,
         "defaults": preview.defaults,
     }
+
+
+# A link check can take minutes (a Hepsiburada family reads every variant page), longer than Home
+# Assistant's ingress waits for one answer. It runs in the background; the page asks for the result.
+_CHECKS: Dict[str, Dict[str, Any]] = {}
+_CHECKS_LOCK = threading.Lock()
+CHECK_KEEP_SECONDS = 600
+
+
+def start_link_check(url: str, providers) -> str:
+    job = uuid.uuid4().hex
+    now = time.monotonic()
+    with _CHECKS_LOCK:
+        for old in [key for key, entry in _CHECKS.items() if now - entry["started"] > CHECK_KEEP_SECONDS]:
+            _CHECKS.pop(old)
+        _CHECKS[job] = {"started": now, "result": None}
+
+    def run():
+        result = check_link(url, providers)
+        with _CHECKS_LOCK:
+            if job in _CHECKS:
+                _CHECKS[job]["result"] = result
+
+    threading.Thread(target=run, name="hermes-link-check", daemon=True).start()
+    return job
+
+
+def link_check_result(job: str) -> Dict[str, Any]:
+    with _CHECKS_LOCK:
+        entry = _CHECKS.get(job)
+        if entry is None:
+            return {"ok": False, "error": "Kontrol bulunamadı; tekrar dene."}
+        if entry["result"] is None:
+            return {"pending": True, "seconds": int(time.monotonic() - entry["started"])}
+        return _CHECKS.pop(job)["result"]

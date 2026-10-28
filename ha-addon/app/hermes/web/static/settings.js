@@ -169,9 +169,21 @@
     button.disabled = true;
     button.replaceChildren(element('span', 'spinner'), 'Okunuyor');
     try {
-      const form = new URLSearchParams({ url, csrf_token: settingsForm.querySelector("[name='csrf_token']")?.value || '' });
-      const response = await fetch(newWatch.dataset.checkPath, { method: 'POST', body: form, credentials: 'same-origin' });
-      const data = await response.json();
+      // The check runs on Hermes in the background; ask for its result until it is ready.
+      const csrf = settingsForm.querySelector("[name='csrf_token']")?.value || '';
+      const ask = async (fields) => {
+        const response = await fetch(newWatch.dataset.checkPath, { method: 'POST', body: new URLSearchParams({ ...fields, csrf_token: csrf }),
+                                                                   credentials: 'same-origin' });
+        try { return await response.json(); } catch { throw new Error('Hermes yanıt vermedi; tekrar dene.'); }
+      };
+      const { job, error: startError } = await ask({ url });
+      if (!job) throw new Error(startError || 'Sayfa okunamadı.');
+      let data;
+      do {
+        await new Promise((resolve) => { setTimeout(resolve, 1500); });
+        data = await ask({ job });
+        if (data.pending) button.replaceChildren(element('span', 'spinner'), `Okunuyor ${data.seconds} sn`);
+      } while (data.pending);
       if (!data.ok) throw new Error(data.error || 'Sayfa okunamadı.');
       showProduct(data);
     } catch (problem) {

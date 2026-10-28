@@ -1,6 +1,8 @@
 """Panel pages, settings forms and the shared ingress/public router."""
 
 import gzip
+import threading
+import time
 import json
 import unittest
 
@@ -920,6 +922,24 @@ class SettingsTests(DataFilesMixin, unittest.TestCase):
         self.assertTrue(watches[0]["include_variations"])
         self.assertTrue(watches[0]["notify_once_in_24H"])  # always muted for 24 hours
         self.assertEqual(prepare_watches(watches)[0].variant_filter, {"Renk": ["Siyah", "Gümüş"]})
+
+    def test_a_long_link_check_runs_in_the_background_until_asked_for(self):
+        release = threading.Event()
+
+        def slow(url, ctx):
+            release.wait(5)
+            return ProductPreview("zara", "Polo", [VariantPreview("M", Decimal("10"), True, {"Beden": "M"})], {"Beden": ["M"]})
+        job = settings.start_link_check("https://www.zara.com/tr/tr/polo-p01234567.html",
+                                        {"zara": SimpleNamespace(card_options=("size",), inspect=slow)})
+        self.assertTrue(settings.link_check_result(job)["pending"])
+        release.set()
+        for _ in range(50):
+            result = settings.link_check_result(job)
+            if not result.get("pending"):
+                break
+            time.sleep(0.05)
+        self.assertEqual((result["ok"], result["title"]), (True, "Polo"))
+        self.assertEqual(settings.link_check_result(job)["ok"], False)  # a result is handed out once
 
     def test_link_check_reports_the_site_its_options_and_the_live_variants(self):
         preview = ProductPreview("zara", "Polo / Siyah", [VariantPreview("M", Decimal("899.90"), True, {"Beden": "M"}),
