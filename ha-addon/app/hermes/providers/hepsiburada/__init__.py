@@ -4,7 +4,8 @@ import contextlib
 import threading
 import time
 from collections import Counter
-from typing import List, Optional
+from decimal import Decimal
+from typing import Dict, List, Optional
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import requests
@@ -13,9 +14,9 @@ from ...constants import CHROME_CLIENT_HINTS, SITE_HEPSIBURADA
 from ...errors import HermesError, HttpStatusHermesError
 from ...logging_utils import log
 from ...traffic import CountedSession, count_curl
-from ...models import OfferResult
+from ...models import OfferResult, ProductPreview, VariantPreview
 from ...utils import build_headers, format_tl, is_hepsiburada_search_url, normalize_offer_text
-from ..base import Provider, excluded_term_in_title
+from ..base import Provider, excluded_term_in_title, outside_variant_filter
 from ..http import curl_requests, decode_response_text, has_generic_challenge, read_site_html
 from . import parser
 from .parser import clean_display_title, is_product_url
@@ -247,25 +248,52 @@ def fetch_hepsiburada_page(session: requests.Session, url: str, timeout: int):
 class HepsiburadaProvider(Provider):
     site = SITE_HEPSIBURADA
     alert_shows_seller = True
-    card_options = ("name", "minimum_price", "official_seller_only", "exclude_terms")
+    card_options = ("name", "minimum_price", "official_seller_only", "exclude_terms", "variant_filter")
+
+    def __init__(self) -> None:
+        # SKU -> variant values ({"Renk": "Abis", "Kapasite": "256 GB"}) of the families read so far.
+        self.families: Dict[str, Dict[str, str]] = {}
 
     def inspect(self, url, ctx):
-        """Variant titles repeat the product name; the link check lists what differs between them.
+        """The page's own variant list (one request): every SKU with its values, price and stock."""
+        if self.is_search_url(url):
+            return super().inspect(url, ctx)
+        html = self._page(ctx, url)
+        self._remember_family(html)
+        family = parser.variant_family(html)
+        if not family:
+            return super().inspect(url, ctx)
+        dimensions: Dict[str, List[str]] = {}
+        variants = []
+        for entry in family:
+            for name, value in entry["values"].items():
+                if value not in dimensions.setdefault(name, []):
+                    dimensions[name].append(value)
+            price = Decimal(str(entry["price"])) if entry["price"] not in (None, "") else None
+            variants.append(VariantPreview(" / ".join(entry["values"].values()), price, entry["in_stock"], entry["values"]))
+        try:
+            title = clean_display_title(parser.extract_offer(html, source_url=url).title)
+        except HermesError:
+            title = ""
+        return ProductPreview(self.site, title, variants, dimensions)
 
-        "Apple iPhone 17 Pro Max 256 GB Abis / Abis / 256 GB" -> "256 GB Abis".
-        """
-        preview = super().inspect(url, ctx)
-        names = [variant.label.split(" / ")[0] for variant in preview.variants]
-        words = [name.split() for name in names]
-        shared = 0
-        while len(words) > 1 and all(len(item) > shared + 1 and item[shared] == words[0][shared] for item in words):
-            shared += 1
-        for variant, item, name in zip(preview.variants, words, names):
-            variant.label = " ".join(item[shared:]) or name
-        return preview
+    def _remember_family(self, html: str) -> None:
+        """SKU -> its variant values, so a chosen colour/capacity is matched by the offer's own SKU."""
+        for entry in parser.variant_family(html):
+            self.families[entry["sku"]] = entry["values"]
 
     def keeps_offer(self, watch, offer) -> bool:
-        """With the own-seller option, only offers sold by Hepsiburada itself."""
+        """The chosen variant values (by SKU when known), then the own-seller option (Hepsiburada itself)."""
+        if watch.variant_filter:
+            values = self.families.get(parser.product_id_from_url(offer.url or ""))
+            if values is not None:
+                missing = next((name for name, chosen in watch.variant_filter.items()
+                                if name in values and values[name] not in chosen), "")
+            else:
+                missing = outside_variant_filter(watch, offer.title)
+            if missing:
+                log(f"Hepsiburada varyant seçimi nedeniyle sonuç atlandı ({missing}): {offer.title}")
+                return False
         if not watch.official_seller_only or normalize_offer_text(offer.seller or "") == "hepsiburada":
             return True
         log(f"Hepsiburada satıcısı filtresi nedeniyle sonuç atlandı: {offer.seller or 'satıcı bilgisi yok'} | {offer.title}")
@@ -282,6 +310,8 @@ class HepsiburadaProvider(Provider):
 
     def read(self, watch, ctx, outcome):
         html = self._page(ctx, watch.url)
+        if watch.variant_filter:
+            self._remember_family(html)
         if not is_product_url(watch.url):
             offers = parser.extract_search_offers(html, source_url=watch.url, limit=self._scan_limit(watch))
             offers = self._with_variant_titles(ctx, offers)

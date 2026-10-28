@@ -22,6 +22,7 @@ from hermes.providers.amazon.parser import (
 from hermes.providers.amazon.search import dedupe_results, extract_result_candidates
 from hermes.providers.base import soup_from_html
 from hermes.providers.hepsiburada import HepsiburadaProvider
+from hermes.providers.hepsiburada import parser as hepsiburada_parser
 from hermes.providers.beymenclub import (
     extract_offer as extract_beymenclub_offer,
     extract_offers as extract_beymenclub_offers,
@@ -2171,6 +2172,27 @@ class WatchCardTests(unittest.TestCase):
         offer = lambda title: OfferResult(title=title, price=Decimal("1"))  # noqa: E731
         self.assertTrue(provider.keeps_offer(watch, offer("5'li Kolsuz Üst / Beyaz / 98/104")))
         self.assertFalse(provider.keeps_offer(watch, offer("5'li Kolsuz Üst / Açık mavi/Koyu mavi / 98/104")))
+
+    def test_hepsiburada_family_lists_every_sku_and_filters_by_its_values(self):
+        html = ('<script>{"variants":[{"name":"iPhone 256 GB Abis","sku":"HBCV0001","properties":['
+                '{"name":"Kapasite","displayName":"Kapasite","valueObject":{"actualValue":"256 GB"}},'
+                '{"name":"Renk","displayName":"Renk","valueObject":{"actualValue":"Abis"}}],"price":112499.02,"isInStock":true},'
+                '{"name":"iPhone 512 GB Gümüş","sku":"HBCV0002","properties":['
+                '{"name":"Kapasite","displayName":"Kapasite","valueObject":{"actualValue":"512 GB"}},'
+                '{"name":"Renk","displayName":"Renk","valueObject":{"actualValue":"Gümüş"}}],"price":137999,"isInStock":false}]}</script>')
+        family = hepsiburada_parser.variant_family(html)
+        self.assertEqual([(entry["sku"], entry["values"], entry["in_stock"]) for entry in family],
+                         [("HBCV0001", {"Kapasite": "256 GB", "Renk": "Abis"}, True),
+                          ("HBCV0002", {"Kapasite": "512 GB", "Renk": "Gümüş"}, False)])
+        provider = HepsiburadaProvider()
+        provider._remember_family(html)
+        watch = WatchRule(name="", site="hepsiburada", url="https://www.hepsiburada.com/x-p-HBCV0001", target_price=Decimal("1"),
+                          variant_filter={"Renk": ["Abis"]})
+        # A mislabelled title still follows its SKU.
+        self.assertTrue(provider.keeps_offer(watch, OfferResult("iPhone 256 GB Gümüş / Abis", Decimal("1"),
+                                                                url="https://www.hepsiburada.com/x-p-HBCV0001")))
+        self.assertFalse(provider.keeps_offer(watch, OfferResult("iPhone 512 GB Abis", Decimal("1"),
+                                                                 url="https://www.hepsiburada.com/x-p-HBCV0002")))
 
     def test_hepsiburada_own_seller_option_keeps_only_hepsiburada_offers(self):
         provider = HepsiburadaProvider()

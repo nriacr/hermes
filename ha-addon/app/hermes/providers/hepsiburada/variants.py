@@ -1,5 +1,6 @@
 """Hepsiburada variant handling: selected color/capacity labels, display titles and variant links."""
 
+import json
 import re
 from typing import Any, Iterable, Optional
 from urllib.parse import unquote
@@ -391,3 +392,32 @@ def extract_variant_urls(html: str, source_url: str, limit: int = 8) -> list[str
         if len(urls) >= limit:
             break
     return urls[:limit]
+
+
+def variant_family(html: str) -> list[dict]:
+    """The page's own variant list: one entry per SKU with its properties, list price and stock.
+
+    [{"sku": "HBCV…", "values": {"Kapasite": "256 GB", "Renk": "Abis"}, "price": 112499.02, "in_stock": True, "url": …}]
+    """
+    match = re.search(r'"variants"\s*:\s*\[\{', html)
+    if not match:
+        return []
+    try:
+        entries = json.JSONDecoder().raw_decode(html, match.end() - 2)[0]
+    except ValueError:
+        return []
+    family = []
+    for entry in entries if isinstance(entries, list) else []:
+        if not isinstance(entry, dict) or not str(entry.get("sku") or "").strip():
+            continue
+        values = {}
+        for prop in entry.get("properties") or []:
+            if isinstance(prop, dict) and isinstance(prop.get("valueObject"), dict):
+                name = _clean_text(str(prop.get("displayName") or prop.get("name") or ""))
+                value = _clean_text(str(prop["valueObject"].get("actualValue") or ""))
+                if name and value:
+                    values[name] = value
+        if values:
+            family.append({"sku": str(entry["sku"]).strip().upper(), "values": values, "price": entry.get("price"),
+                           "in_stock": bool(entry.get("isInStock")), "url": str(entry.get("url") or "")})
+    return family

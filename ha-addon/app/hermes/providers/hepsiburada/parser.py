@@ -14,6 +14,7 @@ from .variants import (
     extract_selected_variant_labels,
     extract_variant_urls,
     title_with_variant_label,
+    variant_family,
 )
 
 __all__ = [
@@ -29,4 +30,5 @@ __all__ = [
     "is_product_url",
     "product_id_from_url",
     "title_with_variant_label",
+    "variant_family",
 ]
