@@ -155,7 +155,7 @@
     error.hidden = true;
     if (!url) return;
     button.disabled = true;
-    button.textContent = 'Okunuyor';
+    button.replaceChildren(element('span', 'spinner'), 'Okunuyor');
     try {
       const form = new URLSearchParams({ url, csrf_token: settingsForm.querySelector("[name='csrf_token']")?.value || '' });
       const response = await fetch(newWatch.dataset.checkPath, { method: 'POST', body: form, credentials: 'same-origin' });
