@@ -151,7 +151,7 @@ class MonitorService:
             if bridge and bridge.enabled and site in began:
                 bridge.persistent_problem(f"stall:{site}", message)
             if site not in stall.notified and not quiet_hours(local_now()):
-                self.monitor.delivery.send("Hermes takip uyarısı", message, event_id=f"stall:{site}:{round(time.time() - (now - since))}")
+                self.monitor.delivery.send("Hermes takip uyarısı", message, event_id=f"stall:{site}:{round(time.time() - (now - since))}", quiet=True)
                 stall.notified.add(site)
 
     # -- the loop -------------------------------------------------------------
@@ -243,7 +243,7 @@ class MonitorService:
                                 message = f"{name} {variant}: en az 10 dakikadır tekrar tekrar okunamadı. Ayrıntı Hermes panelinde."
                             if item["kind"] == "round":
                                 self.monitor.delivery.send("Hermes takip uyarısı", message,
-                                    event_id=f"incident:{identity}:{item['opened']}")
+                                    event_id=f"incident:{identity}:{item['opened']}", quiet=True)
                             if bridge.persistent_problem(identity, message):
                                 communicated[identity] = item["opened"]
                         for identity in set(communicated) - set(critical):

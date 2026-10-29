@@ -67,7 +67,7 @@ class CartQueue:
                 log(f'Sepet oturum kontrolü: {problem}')
                 if problem != self.session_problem and self.delivery is not None:
                     self.delivery.send('Amazon oturumu sorunlu', problem + "\nOtomatik sepete ekleme bu sırada çalışmaz.",
-                                       CART_URL, 'Sepeti aç')
+                                       CART_URL, 'Sepeti aç', quiet=True)
                 self.session_problem = problem
             else:
                 if self.session_problem:
@@ -119,7 +119,7 @@ class CartQueue:
             return
         try:
             self.delivery.send('Sepete eklendi, ama dikkat' if added else 'Sepete eklenemedi',
-                               f"{job.get('title') or job['asin']}\n{detail}", CART_URL, 'Sepeti aç')
+                               f"{job.get('title') or job['asin']}\n{detail}", CART_URL, 'Sepeti aç', quiet=True)
         except Exception as exc:  # noqa: BLE001 - the cart result is already stored
             log(f'Sepet sonucu bildirilemedi: {type(exc).__name__}')
 

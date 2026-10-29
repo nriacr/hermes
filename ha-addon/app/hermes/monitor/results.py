@@ -71,7 +71,7 @@ class ResultRecorder:
     def _notify(self, title: str, message: str, url: str) -> bool:
         """Persist a warning; its delivery is independent of the price read."""
         try:
-            self.notifier.send(title, message, url)
+            self.notifier.send(title, message, url, quiet=True)
             return True
         except Exception as exc:  # noqa: BLE001
             log(f"Bildirim gönderilemedi, sonraki çevrimde yeniden denenecek: {title} | {exc}")

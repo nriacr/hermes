@@ -146,7 +146,7 @@ def maybe_alert_summary_drop(state: Dict[str, Any], rows: List[PriceSummaryRow],
                 "Amazon arama linkleri geçici olarak boş veya eksik dönmüş olabilir."
             )
             try:
-                notifier.send("Hermes özet uyarısı", message)
+                notifier.send("Hermes özet uyarısı", message, quiet=True)
                 values["last_summary_drop_alert_at"] = utc_now()
                 log(f"Özet ürün sayısı uyarısı gönderildi, düşüş 5 tur sürdü: {counts}")
             except Exception as exc:  # noqa: BLE001
@@ -192,7 +192,7 @@ def maybe_alert_search_failures(state: Dict[str, Any], events: List[Dict[str, An
         + "\n".join(lines)
     )
     try:
-        notifier.send("Hermes arama erişim uyarısı", message[:900])
+        notifier.send("Hermes arama erişim uyarısı", message[:900], quiet=True)
         values["last_search_failure_alert_at"] = utc_now()
         log(f"Arama erişim uyarısı gönderildi: {counts}")
     except Exception as exc:  # noqa: BLE001

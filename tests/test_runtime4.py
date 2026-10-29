@@ -49,6 +49,18 @@ class DurableDeliveryTests(unittest.TestCase):
     def enqueue(self):
         return self.queue.enqueue(self.payload, "event", self.state)
 
+    def test_warning_stays_quiet_after_reopening_queue(self):
+        self.queue.send("Amazon oturumu sorunlu", "Bağlantı kurulamadı", quiet=True)
+        self.queue.db.close()
+        self.queue = DeliveryQueue(self.data.files.database, self.transport)
+        self.assertTrue(self.queue.deliver_one())
+        self.assertTrue(self.transport.send.call_args.kwargs["quiet"])
+
+    def test_opportunity_keeps_normal_priority(self):
+        self.enqueue()
+        self.assertTrue(self.queue.deliver_one())
+        self.assertFalse(self.transport.send.call_args.kwargs.get("quiet", False))
+
     def test_pending_survives_close_and_reopen(self):
         self.enqueue()
         self.queue.db.close()

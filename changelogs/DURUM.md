@@ -5,6 +5,8 @@ sonuç, gerçek kontrol ve yayın/kurulum bilgisi yeterlidir. Ayrıntı Git geç
 
 ## Yapılanlar
 
+- 2026-10-29 · Agent: Codex · Hermes 4.32.3: tüm Pushover hata/uyarıları (Amazon oturumu/sepet, arama, özet, takip) sessiz öncelikle kuyruğa alınır; Telegram sessizliği ve fiyat fırsatlarının normal sesi korunur. Kuyruk yeniden açılma ve fırsat önceliği regresyonları eklendi. Kurulum/canlı doğrulama sonucu aşağıdaki iş kaydında tamamlanacak.
+
 - 2026-10-26 · Agent: Codex · Hermes 4.24.4: ürün/satıcıya bağlı sabit Premium kupon etiketi okunup bir kez düşülür; güncel ana teklif eski varyant listesinden önce kullanılır. Alfred’in oturumsuz yanıtında 111.699 − 500 = 111.199 TL; açık Premium fiyatı, başka satıcı/varyant ve üst sınırlı kampanya korumaları dahil 698 test + check.sh geçti. GitHub main yayımlandı, Alfred’e kuruldu (kaynak cde8112); installer sağlık/veri denetimi ve yeni sürümün canlı Hepsiburada günlüğünde 111.199 TL doğrulandı. Chrome/Mac Hepsiburada oturumu kullanılmadı. Günlük tam yedek a627473e (26 Ekim 05:00 TSİ, yaklaşık 6,5 saat), geri dönüş: prepare_code_rollback.sh 42b5649 (veri geri yükleme yok).
 
 - 2026-10-24 · Agent: Claude · 4.23.2 + Hermes Tarayıcı 0.2.5 (Nuri: 1): teklif numarası olmayan yeni ürün fırsatlarında ürün sayfası tarayıcıda özetlenir (view=offer). Canlı ölçüm Pi'den: ürün özeti 1,76 sn / 772 B, sepet özeti 0,90 sn / 198 B; iPhone sayfasında yeni ve Depo teklifleri doğru ayrıldı. Bu yolda sepete giriş tahmini ~3,9 sn (gerçek fırsatla ölçülmedi). Kontrol: check.sh; install_rpi.sh.

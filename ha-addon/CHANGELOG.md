@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.32.3
+
+- Tüm hata ve uyarı bildirimleri Telegram bildirimleri gibi sessiz iletilir; fiyat fırsatlarının sesi değişmez.
+
 ## 4.32.2
 
 - İstatistik: iki farklı sitenin aynı anda zaman aşımı/bağlantı hatası aldığı internet kesintisi pencereleri hata sayılmaz; sayfada kısa not gösterilir.

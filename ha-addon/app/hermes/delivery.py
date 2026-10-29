@@ -46,9 +46,9 @@ class DeliveryQueue:
         self._wake.set()
         return identity
 
-    def send(self, title, message, url="", url_title="Ürünü aç", *, event_id=None, metadata=None):
+    def send(self, title, message, url="", url_title="Ürünü aç", *, event_id=None, metadata=None, quiet=False):
         self.enqueue({"title": title, "message": message, "url": url, "url_title": url_title,
-                      **(metadata or {})}, event_id)
+                      **(metadata or {}), **({"quiet": True} if quiet else {})}, event_id)
 
     def start(self):
         if self.thread is None:

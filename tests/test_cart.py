@@ -87,6 +87,7 @@ class CartCase(unittest.TestCase):
         self.assertEqual(provider.add_to_cart.call_count, 5)
         delivery.send.assert_called_once()
         self.assertEqual(delivery.send.call_args.args[0], 'Sepete eklenemedi')
+        self.assertTrue(delivery.send.call_args.kwargs['quiet'])
 
     def test_session_problem_is_announced_once_until_it_clears(self):
         provider = Mock()
@@ -99,6 +100,7 @@ class CartCase(unittest.TestCase):
             self.assertTrue(queue.check_session(now=queue.next_session_check))
         self.assertEqual(provider.check_cart_session.call_count, 4)
         self.assertEqual([c.args[0] for c in delivery.send.call_args_list], ['Amazon oturumu sorunlu'] * 2)
+        self.assertTrue(all(c.kwargs['quiet'] for c in delivery.send.call_args_list))
 
     def test_no_session_check_without_an_enabled_card(self):
         queue = CartQueue(self.db, {'amazon': Mock()}, [])
