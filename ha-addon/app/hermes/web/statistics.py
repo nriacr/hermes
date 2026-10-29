@@ -103,6 +103,42 @@ def is_failure(outcome: str) -> bool:
     return outcome not in SUCCESS_OUTCOMES
 
 
+# Pi'nin interneti kesilince farklı siteler aynı anda zaman aşımı/bağlantı hatası alır;
+# bu okumalar sitelerin hatası değildir ve istatistiklere sayılmaz.
+NETWORK_OUTCOMES = frozenset({"timeout", "connection", "unreadable", "partial"})
+OUTAGE_DETAIL_WORDS = ("timed out", "timeout", "connection", "resolve", "ssl", "certificate", "0 bytes")
+OUTAGE_LINK_GAP = timedelta(minutes=3)
+OUTAGE_PADDING = timedelta(minutes=1)
+
+
+def network_outage_windows(reads: List[Read]) -> List[Tuple[datetime, datetime]]:
+    """Time windows in which at least two different sites failed with network-type errors."""
+    suspects = [item for item in reads
+                if item.outcome in NETWORK_OUTCOMES
+                and (item.outcome != "unreadable" or any(word in item.detail.lower() for word in OUTAGE_DETAIL_WORDS))]
+    windows: List[Tuple[datetime, datetime]] = []
+    group: List[Read] = []
+    for item in sorted(suspects, key=lambda item: item.at):
+        if group and item.at - group[-1].at > OUTAGE_LINK_GAP:
+            if len({read.site for read in group}) >= 2:
+                windows.append((group[0].at - OUTAGE_PADDING, group[-1].at + OUTAGE_PADDING))
+            group = []
+        group.append(item)
+    if len({read.site for read in group}) >= 2:
+        windows.append((group[0].at - OUTAGE_PADDING, group[-1].at + OUTAGE_PADDING))
+    return windows
+
+
+def without_network_outages(reads: List[Read]) -> Tuple[List[Read], int]:
+    """Reads minus the network-type failures inside an outage window, and how many were dropped."""
+    windows = network_outage_windows(reads)
+    if not windows:
+        return reads, 0
+    kept = [item for item in reads
+            if not (item.outcome in NETWORK_OUTCOMES and any(start <= item.at <= end for start, end in windows))]
+    return kept, len(reads) - len(kept)
+
+
 # -- figures ----------------------------------------------------------------------------
 
 
@@ -572,6 +608,12 @@ def render_traffic(rows, today: datetime) -> str:
     return f"{tile_html}<div class='site-health-list'>{''.join(cards)}</div>{note}{table}"
 
 
+def outage_note(count: int) -> str:
+    if not count:
+        return ""
+    return f"<p class='site-note'>İnternet kesintisi sırasındaki {count} okuma hata sayılmadı.</p>"
+
+
 def _statistics_html(base: str, params: Optional[Dict[str, List[str]]] = None) -> str:
     period = period_key(params or {})
     label, span = PERIODS[period]
@@ -580,6 +622,7 @@ def _statistics_html(base: str, params: Optional[Dict[str, List[str]]] = None) -
     since = now - span
     week = guarded("okumalar", lambda: read_reads(DATABASE_PATH, now - timedelta(days=7) - MAX_CHECK_GAP), [])
     week = [item for item in week if item.outcome != "interrupted"]
+    week, outage_reads = without_network_outages(week)
     reads = [item for item in week if item.at >= since]
     gaps = check_gaps(week, since)
     requests_by_site = {
@@ -596,7 +639,7 @@ def _statistics_html(base: str, params: Optional[Dict[str, List[str]]] = None) -
         f"<section class='summary-panel'><div class='summary-head'><h2>İnternet kullanımı</h2><span>Son {TRAFFIC_DAYS} gün</span></div>"
         f"{guarded('internet kullanımı', lambda: render_traffic(read_traffic(DATABASE_PATH, (now - timedelta(days=TRAFFIC_DAYS - 1)).strftime('%Y-%m-%d')), now), '')}</section>"
         f"<section class='summary-panel'><div class='summary-head'><h2>Engel ve hata türleri</h2><span>{escape(label)}</span></div>"
-        f"{render_error_types(reads)}{render_spells(reads)}</section>"
+        f"{render_error_types(reads)}{render_spells(reads)}{outage_note(outage_reads)}</section>"
         f"{render_daily_history(week, now)}"
         f"{guarded('sorun geçmişi', lambda: render_problem_history(span), SORUN_YOK)}"
     )

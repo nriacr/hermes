@@ -52,3 +52,25 @@ class CacheTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NetworkOutageTests(unittest.TestCase):
+    def reads(self, rows):
+        from datetime import datetime, timedelta
+        from hermes.history import Read
+        start = datetime(2026, 10, 28, 23, 23).astimezone()
+        return [Read(start + timedelta(minutes=m), site, outcome, 0, "k", "p", detail) for m, site, outcome, detail in rows]
+
+    def test_two_sites_failing_together_are_not_counted(self):
+        rows = self.reads([(0, "togg", "connection", "SSLError"), (1, "amazon", "unreadable", "Operation timed out"),
+                           (2, "amazon", "partial", ""), (3, "amazon", "ok", "")])
+        kept, dropped = page.without_network_outages(rows)
+        self.assertEqual((dropped, [item.outcome for item in kept]), (3, ["ok"]))
+
+    def test_single_site_failure_stays(self):
+        rows = self.reads([(0, "amazon", "timeout", ""), (90, "amazon", "unreadable", "Operation timed out")])
+        self.assertEqual(page.without_network_outages(rows)[1], 0)
+
+    def test_unreadable_without_network_words_stays(self):
+        rows = self.reads([(0, "togg", "unreadable", "fiyat yok"), (1, "amazon", "unreadable", "fiyat yok")])
+        self.assertEqual(page.without_network_outages(rows)[1], 0)
