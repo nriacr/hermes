@@ -1,5 +1,8 @@
 # Değişiklik günlüğü
 
+## 4.32.2
+
+- İstatistik: iki farklı sitenin aynı anda zaman aşımı/bağlantı hatası aldığı internet kesintisi pencereleri hata sayılmaz; sayfada kısa not gösterilir.
 ## 4.32.1
 
 - Gece modu saatleri tarayıcı saat kutusu yerine Hermes tasarımında saat/dakika seçiciyle seçilir.
