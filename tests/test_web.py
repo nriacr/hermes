@@ -914,6 +914,21 @@ class SettingsTests(DataFilesMixin, unittest.TestCase):
         # Shown a, c, b (newest first) is stored b, c, a; the new card D is newest.
         self.assertEqual([item["name"] for item in options["takip_edilenler"]], ["B", "C", "A", "D"])
 
+    def test_togg_cards_offer_night_mode_and_save_its_times(self):
+        togg = settings.watch_form({"name": "T10X V2", "url_1": "https://configurator.togg.com.tr/", "night_mode": True,
+                                    "night_start": "22:30", "night_end": "06:15"}, 0)
+        for text in ("Gece modu", "name='watches_0_night_start' value='22:30'", "name='watches_0_night_end' value='06:15'"):
+            self.assertIn(text, togg)
+        self.assertNotIn("data-night-times hidden", togg)
+        self.assertNotIn("Gece modu", settings.watch_form({"name": "x", "url_1": "https://www.zara.com/tr/tr/x-p01234567.html"}, 1))
+        watches = settings.build_watches({"watches_count": ["1"], "watches_0_name": ["T10X V2"], "watches_0_target_price": ["3000000"],
+                                          "watches_0_url_1": ["https://configurator.togg.com.tr/"], "watches_0_active": ["1"],
+                                          "watches_0_night_mode": ["1"], "watches_0_night_start": ["22:30"], "watches_0_night_end": ["06:15"]})
+        self.assertEqual((watches[0]["night_mode"], watches[0]["night_start"], watches[0]["night_end"]), (True, "22:30", "06:15"))
+        off = settings.build_watches({"watches_count": ["1"], "watches_0_name": ["T10X V2"], "watches_0_target_price": ["3000000"],
+                                      "watches_0_url_1": ["https://configurator.togg.com.tr/"], "watches_0_night_start": ["22:30"]})
+        self.assertNotIn("night_mode", off[0])
+
     def test_choosing_variant_values_reads_the_variant_family(self):
         watches = settings.build_watches({"watches_count": ["1"], "watches_0_name": ["Kulaklık"], "watches_0_target_price": ["1000"],
                                           "watches_0_url_1": ["https://www.amazon.com.tr/dp/B000000001"],

@@ -12,7 +12,7 @@ from decimal import Decimal
 
 from ..errors import HermesError, OutOfStockHermesError
 from ..models import ProductPreview, VariantPreview, WatchRule
-from ..utils import normalize_offer_text, parse_decimal, repair_mojibake
+from ..utils import local_now, normalize_offer_text, parse_decimal, repair_mojibake
 
 PRODUCT_TITLE_SELECTORS = [
     "#productTitle",
@@ -150,6 +150,17 @@ def excluded_term_in_title(watch, title: str) -> str:
     """The first configured exclusion found in a title (comma-separated OR filter)."""
     normalized_title = normalize_offer_text(title)
     return next((term for term in watch.excluded_terms if normalize_offer_text(term) in normalized_title), "")
+
+
+def in_night_window(watch, now=None) -> bool:
+    """True while the card's night mode (local time, may cross midnight) pauses its reads."""
+    if not watch.night_start or not watch.night_end:
+        return False
+    now = now or local_now()
+    clock = f"{now.hour:02d}:{now.minute:02d}"
+    if watch.night_start < watch.night_end:
+        return watch.night_start <= clock < watch.night_end
+    return clock >= watch.night_start or clock < watch.night_end
 
 
 def outside_variant_filter(watch, title: str, whole_parts: bool = False) -> str:

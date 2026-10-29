@@ -196,7 +196,22 @@ def _site_options(prefix, item, site, search) -> tuple:
             parts.append(_field(prefix, "variant_filter", CHOICE_LABELS.get(site, "Varyant seçimi"), item.get("variant_filter", "")))
         elif option == "official_seller_only":
             flags.append(_checkbox(prefix, option, SELLER_LABELS.get(site, "Platform satıcısı"), item.get(option, False)))
+        elif option == "night_mode":
+            flags.append(_night_mode(prefix, item))
     return "".join(parts), "".join(flags)
+
+
+def _night_mode(prefix, item) -> str:
+    """"Gece modu" box; ticking it opens its two times, between which the card's reads pause."""
+    on = parse_bool(item.get("night_mode"), default=False)
+    return (
+        "<div class='night-mode' data-night-mode>"
+        + _checkbox(prefix, "night_mode", "Gece modu", on).replace("<input ", "<input data-night-toggle ", 1)
+        + f"<div class='night-times' data-night-times{'' if on else ' hidden'}>"
+        + _field(prefix, "night_start", "Başlangıç", item.get("night_start") or "23:00", "time")
+        + _field(prefix, "night_end", "Bitiş", item.get("night_end") or "07:00", "time")
+        + "</div></div>"
+    )
 
 
 def _priority_field(prefix, item, is_new) -> str:
@@ -264,7 +279,8 @@ def new_watch_form(index: int, check_path: str) -> str:
         f"<label data-site-option='exclude_terms' hidden>Hariç tut<input type='text' name='{escape(prefix + 'exclude_terms', quote=True)}'></label>"
     )
     site_flags = (
-        hidden("official_seller_only", _checkbox(prefix, "official_seller_only", "Platform satıcısı", False)
+        hidden("night_mode", _night_mode(prefix, {}))
+        + hidden("official_seller_only", _checkbox(prefix, "official_seller_only", "Platform satıcısı", False)
                  .replace(">Platform satıcısı</label>", "><span data-seller-label></span></label>"))
     )
     return (
@@ -506,6 +522,9 @@ def build_watch(form: Dict[str, List[str]], index: int) -> Optional[Dict[str, An
         item["minimum_price"] = _price_from_form(minimum_price)
     if exclude_terms:
         item["exclude_terms"] = exclude_terms
+    if prefix + "night_mode" in form:
+        item.update(night_mode=True, night_start=_first(form, prefix + "night_start") or "23:00",
+                    night_end=_first(form, prefix + "night_end") or "07:00")
     if size:
         item["size"] = size
     if variant_filter:

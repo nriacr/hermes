@@ -62,4 +62,5 @@ body.ov.settings-page .button.primary { border:1px solid rgba(201,229,154,.35); 
 body.ov.settings-page .button[data-check-link]:disabled { opacity:1; } .settings-page [data-check-link] { display:inline-flex; align-items:center; justify-content:center; gap:8px; } .settings-page [data-check-link] .spinner { width:14px; height:14px; border:2px solid currentColor; border-right-color:transparent; border-radius:50%; animation:hermes-spin .7s linear infinite; }
 @media (prefers-reduced-motion:reduce) { .settings-page [data-check-link] .spinner { animation-duration:2s; } }
 .settings-page .product-sub.is-price { margin:0; color:var(--text); font:700 26px var(--display); letter-spacing:-.01em; font-variant-numeric:tabular-nums; }
+.settings-page .night-mode { display:flex; flex-wrap:wrap; align-items:end; gap:8px 16px; } .settings-page .night-times { display:flex; gap:12px; } .settings-page .night-times input { min-width:110px; }
 .settings-page [hidden] { display:none !important; }

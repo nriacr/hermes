@@ -18,6 +18,9 @@ class WatchRule:
     size: str = ""
     # Chosen variant values per dimension ({"Renk": ["Siyah"]}); empty keeps every variant.
     variant_filter: Dict[str, List[str]] = field(default_factory=dict)
+    # Night mode: no reads between these local times ("23:00", "07:00"); empty means always read.
+    night_start: str = ""
+    night_end: str = ""
     include_variations: bool = False
     priority: str = DEFAULT_PRIORITY
     official_seller_only: bool = False

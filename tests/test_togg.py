@@ -32,6 +32,25 @@ class ToggParserTests(unittest.TestCase):
     def test_site_detection(self):
         self.assertEqual(detect_site_from_url(URL), "togg")
 
+    def test_night_mode_pauses_reads_between_its_times_even_across_midnight(self):
+        from datetime import datetime
+        from hermes.config import prepare_watches
+        card = {"name": V2, "target_price": 3000000, "url_1": URL, "night_mode": True, "night_start": "23:00", "night_end": "07:00"}
+        rule = prepare_watches([card])[0]
+        provider = ToggProvider()
+        at = lambda hour, minute=0: datetime(2026, 10, 29, hour, minute).astimezone()  # noqa: E731
+        with patch("hermes.providers.base.local_now") as now:
+            for hour, minute, due in ((22, 59, True), (23, 0, False), (3, 30, False), (6, 59, False), (7, 0, True), (12, 0, True)):
+                now.return_value = at(hour, minute)
+                self.assertEqual(provider.read_due(rule), due, (hour, minute))
+        off = prepare_watches([{**card, "night_mode": False}])[0]
+        self.assertTrue(provider.read_due(off))
+        daytime = prepare_watches([{**card, "night_start": "09:00", "night_end": "17:00"}])[0]
+        with patch("hermes.providers.base.local_now", return_value=at(12)):
+            self.assertFalse(provider.read_due(daytime))
+        for bad in ({"night_start": "25:00"}, {"night_start": "08:00", "night_end": "08:00"}):
+            self.assertEqual(prepare_watches([{**card, **bad}])[0].night_start, "")
+
     def test_link_check_lists_every_model_to_choose_from(self):
         session = Mock()
         session.get.return_value = SimpleNamespace(status_code=200, text=payload(V1, V2))

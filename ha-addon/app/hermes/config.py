@@ -111,6 +111,20 @@ def watch_urls(item: Dict[str, object]) -> List[str]:
     return urls
 
 
+def night_window(item: Dict[str, object]) -> tuple:
+    """("23:00", "07:00") when the card has night mode on with two valid times, else ("", "")."""
+    if not parse_bool(item.get("night_mode"), default=False):
+        return "", ""
+    times = []
+    for key, default in (("night_start", "23:00"), ("night_end", "07:00")):
+        text = str(item.get(key) or default).strip()
+        hours, _, minutes = text.partition(":")
+        if not (hours.isdigit() and minutes.isdigit() and 0 <= int(hours) < 24 and 0 <= int(minutes) < 60):
+            return "", ""
+        times.append(f"{int(hours):02d}:{int(minutes):02d}")
+    return (times[0], times[1]) if times[0] != times[1] else ("", "")
+
+
 def card_sizes(value: object) -> List[str]:
     """"M; L" -> ["M", "L"]: a card watches each chosen size on its own (";" since shoe sizes can hold a comma)."""
     sizes = list(dict.fromkeys(part.strip() for part in str(value or "").split(";") if part.strip()))
@@ -227,6 +241,8 @@ def _prepare_watch(item):
                 excluded_terms=string_list(item.get("exclude_terms")),
                 size=one_size,
                 variant_filter=parse_variant_filter(item.get("variant_filter")),
+                night_start=night_window(item)[0],
+                night_end=night_window(item)[1],
                 include_variations=parse_bool(item.get("include_variations"), default=False),
                 priority=priority,
                 official_seller_only=parse_bool(item.get("official_seller_only"), default=False),

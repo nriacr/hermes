@@ -6,7 +6,7 @@ from ..constants import SITE_TOGG
 from ..errors import HermesError, HttpStatusHermesError, OutOfStockHermesError
 from ..models import OfferResult, ProductPreview, VariantPreview
 from ..utils import normalize_offer_text
-from .base import Provider
+from .base import Provider, in_night_window
 
 # The configurator page loads its model list from this public endpoint. A model that can be
 # configured appears in the list; a model that is not on sale yet is simply absent.
@@ -87,7 +87,11 @@ class ToggProvider(Provider):
     site = SITE_TOGG
     notifies_stock_return = True
     # The card names the watched model; the link check lists the models to choose from.
-    card_options = ("model",)
+    card_options = ("model", "night_mode")
+
+    def read_due(self, watch) -> bool:
+        """Night mode pauses the card's reads between its two times."""
+        return not in_night_window(watch)
 
     def __init__(self) -> None:
         self.payload: str | None = None

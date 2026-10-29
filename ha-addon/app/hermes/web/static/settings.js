@@ -294,6 +294,12 @@
     newWatch.querySelector("input[name$='_target_price']").focus();
   };
 
+  // "Gece modu" opens its two times.
+  document.addEventListener('change', (event) => {
+    if (!event.target.matches('[data-night-toggle]')) return;
+    event.target.closest('[data-night-mode]').querySelector('[data-night-times]').hidden = !event.target.checked;
+  });
+
   document.addEventListener('click', (event) => {
     const activeSwitch = event.target.closest('[data-active-switch]');
     if (activeSwitch) {
