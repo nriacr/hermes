@@ -6,6 +6,7 @@
   if (!modal || !sheet || !region) return;
   const apply = () => {
     region.querySelectorAll('[data-tab]').forEach((tab) => tab.setAttribute('aria-selected', String(tab.dataset.tab === state.tab)));
+    region.querySelectorAll('.ov-tabs').forEach((bar) => bar.style.setProperty('--i', String([...bar.querySelectorAll('[data-tab]')].findIndex((tab) => tab.dataset.tab === state.tab))));
     region.querySelectorAll('[data-pane]').forEach((pane) => { pane.hidden = pane.dataset.pane !== state.tab; });
     region.querySelectorAll('[data-filter]').forEach((chip) => chip.setAttribute('aria-pressed', String(chip.dataset.filter === state.filter)));
     region.querySelectorAll('.ov-tile').forEach((tile) => { tile.hidden = state.filter !== 'all' && tile.dataset.site !== state.filter; });

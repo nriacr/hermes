@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.32.4
+
+- Ana sayfa sekmelerinde seçili sekmenin beyaz oblongu sekmeler arasında kayarak geçer.
+
 ## 4.32.3
 
 - Tüm hata ve uyarı bildirimleri Telegram bildirimleri gibi sessiz iletilir; fiyat fırsatlarının sesi değişmez.
