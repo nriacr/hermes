@@ -1,5 +1,8 @@
 # Değişiklik günlüğü
 
+## 4.32.1
+
+- Gece modu saatleri tarayıcı saat kutusu yerine Hermes tasarımında saat/dakika seçiciyle seçilir.
 ## 4.32.0
 
 - Togg kartına "Gece modu": işaretlenince Başlangıç/Bitiş saatleri açılır; o saatler arasında kart okunmaz (gece yarısını geçen aralıklar dahil).
