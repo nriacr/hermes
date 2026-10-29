@@ -201,6 +201,19 @@ def _site_options(prefix, item, site, search) -> tuple:
     return "".join(parts), "".join(flags)
 
 
+def _time_field(prefix, name, label, value) -> str:
+    """A 24-hour time as two selects (hour, minute in 5-minute steps) in one pill; a hidden field holds "HH:MM"."""
+    hour, _, minute = str(value or "00:00").partition(":")
+    hour, minute = hour.zfill(2), minute.zfill(2)
+    minutes = sorted({f"{step:02d}" for step in range(0, 60, 5)} | {minute})
+    options = lambda values, chosen: "".join(  # noqa: E731
+        f"<option value='{item}'{' selected' if item == chosen else ''}>{item}</option>" for item in values)
+    return (f"<label class='time-pick' data-time-pick>{escape(label)}<span class='time-pill'>"
+            f"<select data-time-hour aria-label='{escape(label)} saat'>{options([f'{h:02d}' for h in range(24)], hour)}</select>"
+            f"<b>:</b><select data-time-minute aria-label='{escape(label)} dakika'>{options(minutes, minute)}</select></span>"
+            f"<input type='hidden' name='{escape(prefix + name, quote=True)}' value='{hour}:{minute}'></label>")
+
+
 def _night_mode(prefix, item) -> str:
     """"Gece modu" box; ticking it opens its two times, between which the card's reads pause."""
     on = parse_bool(item.get("night_mode"), default=False)
@@ -208,8 +221,8 @@ def _night_mode(prefix, item) -> str:
         "<div class='night-mode' data-night-mode>"
         + _checkbox(prefix, "night_mode", "Gece modu", on).replace("<input ", "<input data-night-toggle ", 1)
         + f"<div class='night-times' data-night-times{'' if on else ' hidden'}>"
-        + _field(prefix, "night_start", "Başlangıç", item.get("night_start") or "23:00", "time")
-        + _field(prefix, "night_end", "Bitiş", item.get("night_end") or "07:00", "time")
+        + _time_field(prefix, "night_start", "Başlangıç", item.get("night_start") or "23:00")
+        + _time_field(prefix, "night_end", "Bitiş", item.get("night_end") or "07:00")
         + "</div></div>"
     )
 

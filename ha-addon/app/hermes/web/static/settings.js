@@ -286,6 +286,7 @@
     });
     writeVariantFilter();
     newWatch.querySelector('[data-model-select]').value = values[`watches_${row.dataset.index}_name`] || '';
+    newWatch.querySelectorAll('[data-time-pick]').forEach(loadTimePick);
     renderSizes((values[`watches_${row.dataset.index}_size`] || '').split(';').map((size) => size.trim()).filter(Boolean));
     const marker = element('div', 'queued-watch is-open');
     marker.dataset.reopened = row.dataset.index;
@@ -293,6 +294,22 @@
     row.replaceWith(marker);
     newWatch.querySelector("input[name$='_target_price']").focus();
   };
+
+  // A time pick (hour + minute selects) writes "HH:MM" into its hidden field.
+  const syncTimePick = (pick) => {
+    pick.querySelector('input[type=hidden]').value = `${pick.querySelector('[data-time-hour]').value}:${pick.querySelector('[data-time-minute]').value}`;
+  };
+  const loadTimePick = (pick) => {
+    const [hour = '00', minute = '00'] = pick.querySelector('input[type=hidden]').value.split(':');
+    const minuteSelect = pick.querySelector('[data-time-minute]');
+    if (![...minuteSelect.options].some((option) => option.value === minute)) minuteSelect.add(new Option(minute, minute));
+    pick.querySelector('[data-time-hour]').value = hour;
+    minuteSelect.value = minute;
+  };
+  document.addEventListener('change', (event) => {
+    const pick = event.target.closest?.('[data-time-pick]');
+    if (pick) syncTimePick(pick);
+  });
 
   // "Gece modu" opens its two times.
   document.addEventListener('change', (event) => {

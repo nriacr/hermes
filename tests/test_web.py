@@ -917,7 +917,8 @@ class SettingsTests(DataFilesMixin, unittest.TestCase):
     def test_togg_cards_offer_night_mode_and_save_its_times(self):
         togg = settings.watch_form({"name": "T10X V2", "url_1": "https://configurator.togg.com.tr/", "night_mode": True,
                                     "night_start": "22:30", "night_end": "06:15"}, 0)
-        for text in ("Gece modu", "name='watches_0_night_start' value='22:30'", "name='watches_0_night_end' value='06:15'"):
+        for text in ("Gece modu", "name='watches_0_night_start' value='22:30'", "name='watches_0_night_end' value='06:15'",
+                     "<option value='22' selected>22</option>", "<option value='15' selected>15</option>"):
             self.assertIn(text, togg)
         self.assertNotIn("data-night-times hidden", togg)
         self.assertNotIn("Gece modu", settings.watch_form({"name": "x", "url_1": "https://www.zara.com/tr/tr/x-p01234567.html"}, 1))

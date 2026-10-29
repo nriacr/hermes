@@ -63,4 +63,8 @@ body.ov.settings-page .button[data-check-link]:disabled { opacity:1; } .settings
 @media (prefers-reduced-motion:reduce) { .settings-page [data-check-link] .spinner { animation-duration:2s; } }
 .settings-page .product-sub.is-price { margin:0; color:var(--text); font:700 26px var(--display); letter-spacing:-.01em; font-variant-numeric:tabular-nums; }
 .settings-page .night-mode { display:flex; flex-wrap:wrap; align-items:end; gap:8px 16px; } .settings-page .night-times { display:flex; gap:12px; } .settings-page .night-times input { min-width:110px; }
+.settings-page .time-pick { gap:6px; } .settings-page .time-pill { display:inline-flex; align-items:center; gap:2px; height:42px; padding:0 6px; border-radius:13px; border:1px solid var(--edge); background:rgba(0,0,0,.28); }
+.settings-page .time-pill:focus-within { border-color:rgba(201,229,154,.45); } .settings-page .time-pill b { color:var(--mute); font:600 15px var(--display); }
+.settings-page .time-pill select { width:auto; min-height:36px; padding:0 6px; border:0; background:transparent; font:700 15px var(--display); font-variant-numeric:tabular-nums; text-align:center; text-align-last:center; -webkit-appearance:none; appearance:none; cursor:pointer; }
+.settings-page .time-pill select:focus { outline:0; box-shadow:none; } .settings-page .time-pill select option { background:#1d1932; color:var(--text); }
 .settings-page [hidden] { display:none !important; }
