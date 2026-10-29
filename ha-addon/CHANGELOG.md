@@ -1,5 +1,8 @@
 # Değişiklik günlüğü
 
+## 4.32.0
+
+- Togg kartına "Gece modu": işaretlenince Başlangıç/Bitiş saatleri açılır; o saatler arasında kart okunmaz (gece yarısını geçen aralıklar dahil).
 ## 4.31.2
 
 - İstatistik geçmişini sil: taramanın bitmesini beklemeden kayıtları hemen siler ve Hermes'i yeniden başlatır (fiyat geçmişi ve takipler korunur).
