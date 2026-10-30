@@ -1,6 +1,8 @@
 """Hepsiburada product detail pages: the lowest seller offer from the page and embedded listings."""
 
 import re
+from dataclasses import replace
+from decimal import Decimal
 from typing import Iterable, Optional
 
 from ...errors import HermesError
@@ -196,16 +198,20 @@ def _detail_candidate(soup, *, warn_missing_premium: bool = True) -> Optional[He
     )
 
 
+def _product_candidates(soup, source_url: str, selected_product_id: str) -> list[HepsiburadaCandidate]:
+    candidates = _embedded_detail_candidates(soup, source_url=source_url)
+    detail = _detail_candidate(soup, warn_missing_premium=not any(item.has_preferred_price for item in candidates))
+    if detail and (detail.has_preferred_price or not candidates):
+        detail.identity = f"{selected_product_id}:{normalize_offer_text(detail.seller)}"
+        candidates.append(detail)
+    return _dedupe_candidates(candidates)
+
+
 def extract_offer(html: str, source_url: str = "") -> OfferResult:
     soup = soup_from_html(html)
     selected_product_id = _product_id_from_url(source_url)
     if selected_product_id:
-        candidates = _embedded_detail_candidates(soup, source_url=source_url)
-        detail = _detail_candidate(soup, warn_missing_premium=not any(item.has_preferred_price for item in candidates))
-        if detail and (detail.has_preferred_price or not candidates):
-            detail.identity = f"{selected_product_id}:{normalize_offer_text(detail.seller)}"
-            candidates.append(detail)
-        candidates = _dedupe_candidates(candidates)
+        candidates = _product_candidates(soup, source_url, selected_product_id)
     else:
         candidates = _search_candidates_from_dom(soup)
         if not candidates:
@@ -225,4 +231,56 @@ def extract_offer(html: str, source_url: str = "") -> OfferResult:
         price=best.price,
         seller=best.seller,
         url=best.url or None,
+    )
+
+
+def shown_seller(html: str, source_url: str) -> str:
+    """The seller the product page itself sells from; the only one its HTML proves is buyable."""
+    soup = soup_from_html(html)
+    current = _current_product_listing_mapping(_embedded_text(soup), _product_id_from_url(source_url))
+    if current:
+        return _clean_text(current.get("merchantName") or "")
+    return _detail_seller(_visible_lines_until_details(soup))
+
+
+def live_seller_prices(payload) -> dict[str, Decimal]:
+    """Salable sellers and their prices from the listings API, by normalized seller name."""
+    data = payload.get("data") if isinstance(payload, dict) else None
+    listings = data.get("listings") if isinstance(data, dict) else None
+    prices: dict[str, Decimal] = {}
+    for listing in listings if isinstance(listings, list) else []:
+        if not isinstance(listing, dict) or listing.get("isSalable") is False:
+            continue
+        seller = normalize_offer_text(_clean_text(listing.get("merchantName") or ""))
+        price = _listing_mapping_price(listing)
+        if seller and price is not None:
+            prices[seller] = price
+    return prices
+
+
+def extract_verified_offer(html: str, source_url: str, shown: str, live_prices: dict[str, Decimal]) -> OfferResult:
+    """The lowest offer among sellers that can really be bought.
+
+    The page's compact seller list can keep sellers that are gone or carry old
+    prices. Sellers other than the shown one count only with their live price.
+    """
+    soup = soup_from_html(html)
+    shown_key = normalize_offer_text(shown)
+    candidates = []
+    for candidate in _product_candidates(soup, source_url, _product_id_from_url(source_url)):
+        seller = normalize_offer_text(candidate.seller)
+        if seller == shown_key:
+            candidates.append(candidate)
+        elif seller in live_prices:
+            candidates.append(replace(candidate, price=live_prices[seller]))
+    if not candidates:
+        raise HermesError("Hepsiburada sayfasından satın alınabilir fiyat bulunamadı.")
+    candidates = _dedupe_candidates(candidates)
+    _log_candidates(candidates)
+    best = candidates[0]
+    return OfferResult(
+        title=repair_mojibake(best.title),
+        price=best.price,
+        seller=best.seller,
+        url=source_url,
     )

@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.32.5
+
+- Hepsiburada: sayfanın eski satıcı listesinde kalan satıcılar sayılmaz. Gösterilen satıcı dışındaki biri canlı satıcı listesinde satılıyorsa ve fiyatı oradan alınarak değerlendirilir; liste okunamazsa yalnız gösterilen satıcı sayılır.
+
 ## 4.32.4
 
 - Ana sayfa sekmelerinde seçili sekmenin beyaz oblongu sekmeler arasında kayarak geçer.

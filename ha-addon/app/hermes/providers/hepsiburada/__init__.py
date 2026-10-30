@@ -404,6 +404,37 @@ class HepsiburadaProvider(Provider):
 
     def _variant_offer(self, ctx, watch, html: str, variant_url: str):
         """Return the variant's payable offer and, when fetched, its own page."""
+        offer, variant_html = self._page_offer(ctx, watch, html, variant_url)
+        if not variant_html:
+            return offer, variant_html
+        shown = parser.shown_seller(variant_html, variant_url)
+        if normalize_offer_text(offer.seller or "") == normalize_offer_text(shown):
+            return offer, variant_html
+        live_prices = self._live_seller_prices(ctx, variant_url)
+        verified = parser.extract_verified_offer(variant_html, variant_url, shown, live_prices)
+        if normalize_offer_text(verified.seller or "") != normalize_offer_text(offer.seller or ""):
+            log(f"Hepsiburada satıcısı canlı listede doğrulanmadı, sayılmadı: {offer.seller} | {format_tl(offer.price, with_currency=True)}")
+        return verified, variant_html
+
+    def _live_seller_prices(self, ctx, url: str) -> Dict[str, Decimal]:
+        """The site's live seller list; empty when it cannot be read, so only the shown seller counts."""
+        api_url = f"{HOME_URL}api/v1/product/listings/{parser.product_id_from_url(url)}"
+        headers = hepsiburada_headers(url)
+        headers.pop("Upgrade-Insecure-Requests", None)
+        headers.pop("Sec-Fetch-User", None)
+        headers.update({"Accept": "application/json", "Referer": url, "Sec-Fetch-Dest": "empty", "Sec-Fetch-Mode": "cors"})
+        try:
+            response = count_curl(curl_requests.Session().get(api_url, headers=headers, timeout=ctx.timeout, impersonate="chrome124"))
+            response.raise_for_status()
+            prices = parser.live_seller_prices(response.json())
+        except Exception as exc:  # noqa: BLE001
+            log(f"Hepsiburada canlı satıcı listesi okunamadı: {api_url} | {exc}")
+            return {}
+        if not prices:
+            log(f"Hepsiburada canlı satıcı listesi boş: {api_url}")
+        return prices
+
+    def _page_offer(self, ctx, watch, html: str, variant_url: str):
         embedded_offer = parser.extract_embedded_variant_offer(html, variant_url)
         if variant_url == watch.url:
             return _lower_offer(embedded_offer, parser.extract_offer(html, source_url=variant_url)), html
