@@ -232,6 +232,17 @@ class StatisticsResetTests(HistoryCase):
         self.assertEqual(before, {table: db.execute(f"SELECT * FROM {table}").fetchall() for table in protected})
         self.assertEqual(files, {p: p.read_bytes() for p in files})
 
+    def test_reset_hides_open_incidents_from_main_page_until_they_recur(self):
+        from hermes.diagnostics import Diagnostics
+        diagnostics = Diagnostics(self.data.files.database)
+        diagnostics.incident("watch", "read", "Hata", "Sonra denenecek")
+        self.assertEqual(len(diagnostics.active_since_reset()), 1)
+        self.history.clear_statistics()
+        self.assertEqual(diagnostics.active_since_reset(), [])
+        self.assertEqual(len(diagnostics.active()), 1)
+        diagnostics.incident("watch", "read", "Hata", "Sonra denenecek")
+        self.assertEqual(len(diagnostics.active_since_reset()), 1)
+
     def test_new_statistics_accumulate_and_reset_stays_empty_after_restart(self):
         self.data.files.cycle_history.write_text(json.dumps(realistic_cycles(datetime.now(timezone.utc))))
         self.history.migrate_json(self.data.files.state, self.data.files.cycle_history)

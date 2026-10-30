@@ -114,12 +114,20 @@ class Diagnostics:
     def active(self):
         return self._records("resolved IS NULL")
 
-    def recent(self, hours=24):
+    def reset_at(self):
         with self.db.lock:
             connection = self.db.connect()
             has_meta = connection.execute("SELECT 1 FROM sqlite_master WHERE name='meta' AND type='table'").fetchone()
             reset = connection.execute("SELECT value FROM meta WHERE key='statistics_reset'").fetchone() if has_meta else None
-        reset_at = json.loads(reset[0])["at"] if reset else 0
+        return json.loads(reset[0])["at"] if reset else 0
+
+    def active_since_reset(self):
+        """Open incidents the user has not cleared; a recurrence updates the incident and shows it again."""
+        reset_at = self.reset_at()
+        return [item for item in self.active() if item["updated"] > reset_at]
+
+    def recent(self, hours=24):
+        reset_at = self.reset_at()
         cutoff = max(time.time()-hours*3600, reset_at)
         return self._records("updated>=? OR resolved>=?", (cutoff, cutoff))
 

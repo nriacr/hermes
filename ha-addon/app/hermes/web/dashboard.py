@@ -634,7 +634,7 @@ def _build_dashboard_live_html(base: str) -> str:
     telegram_status = load_json(TELEGRAM_STATUS_PATH, {})
     state = state if isinstance(state, dict) else {}
     with _stage("tanı"):
-        active = Diagnostics(DATABASE_PATH).active()
+        active = Diagnostics(DATABASE_PATH).active_since_reset()
     # One failing watch may exist both in state and in durable diagnostics.
     diagnosed = {item["component"] for item in active if item["kind"] in {"read", "partial"}}
     with _stage("hatalar"):
