@@ -8,6 +8,7 @@ from typing import Optional
 from ..constants import APP_VERSION
 from ..utils import repair_mojibake
 from .icons import render_web_app_head
+from .wordmark import WORDMARK_PATH, WORDMARK_VIEWBOX
 
 SITE_THEME_CLASSES = (
     ("amazon", "site-amazon"),
@@ -32,6 +33,9 @@ PAGE_TEMPLATE = Template((Path(__file__).with_name("templates") / "page.html").r
 
 # The top bar carries only the logo (home) and the settings gear; İstatistik is
 # reached from the button row at the bottom of the settings page.
+
+_LOGO_SVG = f"<svg class='ov-logo' viewBox='{WORDMARK_VIEWBOX}' aria-hidden='true'><path d='{WORDMARK_PATH}'/></svg>"
+TOPBAR_LOGO = f"{_LOGO_SVG}<span class='ov-logo-shine'>{_LOGO_SVG}</span>"
 
 TOPBAR_LOCK_ICON = (
     "<svg viewBox='0 0 24 24' width='22' height='22' fill='none' stroke='currentColor' stroke-width='2' "
@@ -65,10 +69,10 @@ def link(base: str, target: str = "") -> str:
 
 
 def render_topbar(base: str, current: str, extra: str = "") -> str:
-    """Hermes badge, then (right) the page's own topbar buttons and the gear."""
+    """Hermes signature, then (right) the page's own topbar buttons and the gear."""
     gear_current = " aria-current='page'" if current == "settings" else ""
     return (
-        f"<div class='topbar'><a class='badge' href='{escape(link(base), quote=True)}' aria-label='Özet Tablo'>Hermes</a>{extra}"
+        f"<div class='topbar'><a class='badge' href='{escape(link(base), quote=True)}' aria-label='Özet Tablo'>{TOPBAR_LOGO}</a>{extra}"
         f"<a class='gear-button' href='{escape(link(base, 'settings'), quote=True)}' aria-label='Ayarlar' "
         f"title='Ayarlar'{gear_current}>{GEAR_ICON}</a></div>"
     )

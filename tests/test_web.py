@@ -603,11 +603,21 @@ class DashboardTests(DataFilesMixin, unittest.TestCase):
         self.data.write_summary({"rows": [price_row(price="14.000 TL")]})
         self.assertIn("▲ %40,0", self.live())
 
-    def test_settings_share_the_home_screen_skin_and_the_logo_is_a_neutral_tile(self):
+    def test_deal_heading_shows_only_with_deals_and_the_top_row_stays_one_block(self):
+        self.data.write_summary({"rows": [price_row(price="14.000 TL")]})
+        page = self.live()
+        self.assertIn("<div class='ov-bar'>", page)
+        self.assertNotIn(">Fırsatlar</h2>", page)
+        self.assertNotIn("<p class='ov-empty'>Yok.</p><div class='ov-tabs'", page)
+        self.data.write_summary({"rows": [price_row()]})
+        self.assertIn(">Fırsatlar</h2><div class='ov-spot'>", self.live())
+
+    def test_settings_share_the_home_screen_skin_and_the_signature_logo(self):
         page = self.router_get("/settings")
         self.assertIn("<body class='public ov settings-page'>", page)
         css = self.router_get("/app.css")
-        for text in ("body.ov .topbar .badge::before", "linear-gradient(135deg,#5d6a8e,#e8ebf5)", ".settings-page .settings-section",
+        self.assertIn("class='ov-logo-shine'", page)
+        for text in (".ov-logo-shine", "@keyframes ov-shine", ".settings-page .settings-section",
                      "body.ov .button.primary"):
             self.assertIn(text, css)
 

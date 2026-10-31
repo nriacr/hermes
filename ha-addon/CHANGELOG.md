@@ -1,5 +1,10 @@
 # Değişiklik günlüğü
 
+## 4.33.0
+
+- Ana sayfa üst alanı yenilendi: Özet Tablo başlığı ve eski logo yerine ışık geçişli Hermes imzası geldi; Çevrim ve rakam kutuları aynı satırda, sabit genişlikte. Hermes ve Ayarlar her sayfada aynı yerde kalır.
+- Fırsatlar başlığı yalnız fırsat varken görünür, "Yok" kutusu kaldırıldı. Aktif fırsat kartlarının çerçevesinde satıcı renginde, eşzamanlı dönen ışık var.
+
 ## 4.32.8
 
 - SSD yazması azaltıldı: yalnız eski sürüme dönüş için tutulan JSON kopyaları 5 dk yerine 60 dk'da bir yazılır; asıl veri `hermes.db` içinde gecikmesiz kalır.

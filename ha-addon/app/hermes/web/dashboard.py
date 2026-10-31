@@ -433,19 +433,19 @@ def render_summary(payload: Dict[str, Any], state: Dict[str, Any], telegram_stat
     stock_rows = [row for row in payload.get("stock_rows", []) if isinstance(row, dict)] if isinstance(payload.get("stock_rows"), list) else []
     if not rows and not stock_rows:
         recent = render_telegram_pane(telegram_status) if telegram_status.get("recent_notifications") else ""
-        return ("<section class='ov-hero'><div><h1>Özet Tablo</h1><p>İlk kontrol döngüsü tamamlandığında son fiyat tablosu burada görünecek.</p></div></section>"
+        return ("<section class='ov-hero'><p>İlk kontrol döngüsü tamamlandığında son fiyat tablosu burada görünecek.</p></section>"
                 + (f"<h2 class='ov-sec'>Telegram</h2>{recent}" if recent else "") + render_errors(errors))
     offers = build_offers(rows, state)
     deals = sorted((offer for offer in offers if offer.hit), key=lambda offer: offer.gap_share)
     watching = [offer for offer in offers if not offer.hit]
     cycle = escape(duration_text(payload.get("cycle_duration_seconds"), payload.get("cycle_duration_minutes") or "-"))
-    status = (f"<div class='ov-status'><span class='ov-pulse'></span>Çevrim <b>{cycle}</b> · Son güncelleme "
-              f"<b>{escape(relative_time_text(payload.get('checked_at')))}</b></div>")
-    numbers = (f"<div class='ov-nums'><div class='ov-num'><b>{len(offers)}</b><span>takipte ürün</span></div>"
+    status = (f"<div class='ov-status'><span class='ov-pulse'></span><p>Çevrim <b>{cycle}</b><br>Son güncelleme "
+              f"<b>{escape(relative_time_text(payload.get('checked_at')))}</b></p></div>")
+    numbers = (f"<div class='ov-nums'><div class='ov-num'><b>{len(offers)}</b><span>takipte</span></div>"
                f"<div class='ov-num'><b>{len(stock_rows)}</b><span>stokta yok</span></div>"
                f"<div class='ov-num deal'><b>{len(deals)}</b><span>fırsat</span></div></div>")
-    spot = (f"<div class='ov-spot'>{''.join(render_deal(offer) for offer in deals)}</div>" if deals
-            else "<p class='ov-empty'>Yok.</p>")
+    spot = (f"<h2 class='ov-sec'>Fırsatlar</h2><div class='ov-spot'>{''.join(render_deal(offer) for offer in deals)}</div>"
+            if deals else "")
     telegram_count = min(5, len(telegram_status.get("recent_notifications") or [])) if isinstance(telegram_status.get("recent_notifications"), list) else 0
     tabs = (
         "<div class='ov-tabs' role='tablist'>"
@@ -458,8 +458,7 @@ def render_summary(payload: Dict[str, Any], state: Dict[str, Any], telegram_stat
              f"<div class='ov-pane' data-pane='stock' hidden>{render_stock_pane(stock_rows)}</div>"
              f"<div class='ov-pane' data-pane='tg' hidden>{render_telegram_pane(telegram_status)}</div>"
              f"<div class='ov-pane' data-pane='history' hidden>{history[1]}</div>")
-    return (f"{status}<section class='ov-hero'><div><h1>Özet Tablo</h1></div>"
-            f"{numbers}</section><h2 class='ov-sec'>Fırsatlar</h2>{spot}{tabs}<div class='ov-panes'>{panes}</div>{render_errors(errors)}")
+    return (f"<div class='ov-bar'>{status}{numbers}</div>{spot}{tabs}<div class='ov-panes'>{panes}</div>{render_errors(errors)}")
 
 # -- errors -------------------------------------------------------------------------
 
