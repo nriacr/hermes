@@ -87,7 +87,7 @@ def adopt_json_files(data_dir: Path) -> list:
 # The JSON copies only serve a rollback to an older Hermes, so each file is rewritten at most once
 # per EXPORT_EVERY_SECONDS (the newest content waits in memory and is flushed by a timer, on stop
 # and at exit). The authoritative copy in `hermes.db` is written separately and is not delayed.
-EXPORT_EVERY_SECONDS = 300
+EXPORT_EVERY_SECONDS = 3600
 _PENDING: dict[Path, str] = {}
 _LAST_EXPORT: dict[Path, float] = {}
 _LAST_TEXT: dict[Path, str] = {}  # content last written per file; an identical rewrite is skipped

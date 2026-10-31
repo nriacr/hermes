@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.32.8
+
+- SSD yazması azaltıldı: yalnız eski sürüme dönüş için tutulan JSON kopyaları 5 dk yerine 60 dk'da bir yazılır; asıl veri `hermes.db` içinde gecikmesiz kalır.
+
 ## 4.32.7
 
 - Amazon sepete ekleme: hızlı yolda Amazon HTTP hata koduyla reddederse ürün sayfasından taze teklif ve jetonla bir kez daha denenir; ret mesajına HTTP kodu eklenir (31 Ekim Hue Go Depo ekleme hatası).
