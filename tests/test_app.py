@@ -127,6 +127,39 @@ class TelegramQuickAddTests(unittest.TestCase):
         self.assertTrue(telegram._has_exclude_keyword("AirPods kılıfı", ["kılıf"]))
 
 
+class TelegramFlameTests(unittest.TestCase):
+    def event(self, text="", emoji="", id=10):
+        return SimpleNamespace(raw_text=text, id=id, chat_id=5, chat=SimpleNamespace(title="OnuAl", username="onual"),
+                               message=SimpleNamespace(file=SimpleNamespace(emoji=emoji) if emoji else None))
+
+    def test_only_a_lone_flame_counts(self):
+        self.assertTrue(telegram._is_flame_message(self.event("🔥")))
+        self.assertTrue(telegram._is_flame_message(self.event(" 🔥🔥 ")))
+        self.assertTrue(telegram._is_flame_message(self.event("", "🔥")))
+        self.assertFalse(telegram._is_flame_message(self.event("🔥 Fırsat")))
+        self.assertFalse(telegram._is_flame_message(self.event("", "😀")))
+        self.assertFalse(telegram._is_flame_message(self.event("")))
+
+    def test_previous_post_is_sent_quietly(self):
+        event = self.event("🔥")
+        previous = SimpleNamespace(raw_text="Magly 72 Parça 1.447 TL", id=9, chat=event.chat)
+        event.client = SimpleNamespace(get_messages=AsyncMock(return_value=[previous]))
+        notifier = Mock()
+        asyncio.run(telegram._send_flame_notification(notifier, event, "OnuAl"))
+        event.client.get_messages.assert_awaited_once_with(5, limit=1, max_id=10)
+        args, kwargs = notifier.send.call_args
+        self.assertEqual(args[1], "Magly 72 Parça 1.447 TL")
+        self.assertEqual(args[2], "https://t.me/onual/9")
+        self.assertTrue(kwargs["metadata"]["quiet"])
+
+    def test_no_previous_post_sends_nothing(self):
+        event = self.event("🔥")
+        event.client = SimpleNamespace(get_messages=AsyncMock(return_value=[]))
+        notifier = Mock()
+        asyncio.run(telegram._send_flame_notification(notifier, event, "OnuAl"))
+        notifier.send.assert_not_called()
+
+
 class TelegramConnectionTests(unittest.TestCase):
     def test_disabled_listener_only_records_its_state(self):
         data = TempData()

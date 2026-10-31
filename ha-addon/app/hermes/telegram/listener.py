@@ -50,6 +50,7 @@ except Exception:  # pragma: no cover - handled at runtime inside the add-on
 MAX_SEEN_MESSAGES = 5000
 QUICK_ADD_EXPIRY_HOURS = 24
 RECONNECT_DELAY_SECONDS = 60
+FLAME = "\U0001F525"
 URL_PATTERN = re.compile(r"https?://[^\s<>]+", re.IGNORECASE)
 
 
@@ -400,6 +401,26 @@ def _send_keyword_notification(notifier: Pushover, event, channel_name: str, key
     log(f"Telegram bildirimi kuyruğa alındı: kanal={channel_name} | keyword={keyword}")
 
 
+def _is_flame_message(event) -> bool:
+    """A message that is only a flame: plain emoji text or a sticker whose emoji is the flame."""
+    text = re.sub(r"[\s\ufe0f]", "", event.raw_text or "")
+    if text:
+        return set(text) == {FLAME}
+    return getattr(getattr(event.message, "file", None), "emoji", "") == FLAME
+
+
+async def _send_flame_notification(notifier: Pushover, event, channel_name: str) -> None:
+    previous = (await event.client.get_messages(event.chat_id, limit=1, max_id=event.id) or [None])[0]
+    if previous is None:
+        return
+    text = _message_preview(previous.raw_text) or "(Metinsiz paylaşım, Telegram'da aç)"
+    message_url = _telegram_message_link(previous)
+    notifier.send(f"{FLAME} {channel_name}", text, message_url, url_title="Telegram'da aç",
+                  event_id="telegram:flame:" + _message_key(event),
+                  metadata={"telegram": [channel_name, FLAME, message_url, text[:180]], "quiet": True})
+    log(f"Telegram alev bildirimi kuyruğa alındı: kanal={channel_name}")
+
+
 # -- connection ---------------------------------------------------------------------
 
 
@@ -483,6 +504,13 @@ async def _listen(config: HermesConfig, notifier: Pushover) -> None:
                         _first_time_seen(_message_key(event))
                     except Exception as exc:  # noqa: BLE001
                         record_telegram_error(f"Kayıtlı Mesajlar ile takip eklenemedi: {exc}", "Telegram hızlı ekleme")
+                return
+            if _is_flame_message(event):
+                try:
+                    await _send_flame_notification(notifier, event, _channel_label(event))
+                    _first_time_seen(_message_key(event))
+                except Exception as exc:  # noqa: BLE001
+                    record_telegram_error(f"Alev bildirimi gönderilemedi: {exc}", "Telegram bildirim")
                 return
             keyword = _matching_keyword(text, telegram_config.keywords)
             if not keyword:

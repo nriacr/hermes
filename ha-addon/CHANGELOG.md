@@ -1,5 +1,8 @@
 # Değişiklik günlüğü
 
+## 4.34.0
+
+- Telegram: takip edilen kanal tek başına 🔥 (yazı ya da çıkartma) paylaşınca, o kanalın bir önceki paylaşımı sessiz Pushover bildirimi olarak gelir (başlık "🔥 kanal adı", Telegram bağlantısıyla). Keyword gerekmez.
 ## 4.33.0
 
 - Ana sayfa üst alanı yenilendi: Özet Tablo başlığı ve eski logo yerine ışık geçişli Hermes imzası geldi; Çevrim ve rakam kutuları aynı satırda, sabit genişlikte. Hermes ve Ayarlar her sayfada aynı yerde kalır.
