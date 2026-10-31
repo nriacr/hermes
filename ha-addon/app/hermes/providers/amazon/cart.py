@@ -34,6 +34,10 @@ class CartError(Exception):
         super().__init__(message)
 
 
+class CartRejected(CartError):
+    """Amazon answered a cart request with an HTTP error status."""
+
+
 def payload(watch, offer, url):
     asin = extract_asin_from_url(url)
     # Only Depo deals go to the cart; a new offer is notified as before.
@@ -78,14 +82,14 @@ class BrowserTransport:
         if view:
             # The browser already reduced the page to a summary (None: not that kind of page).
             if status not in (0, 200, 302, 303):
-                raise CartError('Amazon sepet isteğini kabul etmedi')
+                raise CartRejected(f'Amazon sepet isteğini kabul etmedi (HTTP {status})')
             return result.get(view)
         html = result.get('html', '')
         # A POST is not followed (status 0 = redirect); the caller re-reads the cart.
         if method == 'GET' and (status != 200 or not html):
             raise CartError('Amazon sayfası okunamadı')
         if method == 'POST' and status not in (0, 200, 302, 303):
-            raise CartError('Amazon sepet isteğini kabul etmedi')
+            raise CartRejected(f'Amazon sepet isteğini kabul etmedi (HTTP {status})')
         if html and protection_reason(html):
             raise CartError("Amazon doğrulama istiyor; Hermes Tarayıcı'da kontrol et")
         return html
@@ -219,8 +223,13 @@ def _add_to_cart(job, transport):
     offer_id, token = job.get('offer_id'), cart.tokens['add'] or _last_add_token
     if not offer_id or not token:
         offer_id, token = offer_from_page(transport, job)
-    cart = add_offer(transport, token, job, offer_id)
-    if cart.row(job['asin']) is None and job.get('offer_id'):
+    try:
+        cart = add_offer(transport, token, job, offer_id)
+    except CartRejected:
+        if not job.get('offer_id'):
+            raise
+        cart = None
+    if (cart is None or cart.row(job['asin']) is None) and job.get('offer_id'):
         # A stale token or an id read without the session may be refused; retry once from the logged-in page.
         offer_id, token = offer_from_page(transport, job)
         cart = add_offer(transport, token, job, offer_id)

@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.32.7
+
+- Amazon sepete ekleme: hızlı yolda Amazon HTTP hata koduyla reddederse ürün sayfasından taze teklif ve jetonla bir kez daha denenir; ret mesajına HTTP kodu eklenir (31 Ekim Hue Go Depo ekleme hatası).
+
 ## 4.32.6
 
 - İstatistik sayfasında Hata Sıfırla artık ana sayfadaki hata listesini de temizler; açık kayıt yeniden oluşursa listede tekrar görünür.

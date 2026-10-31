@@ -306,3 +306,21 @@ class CartIntentWiringTests(unittest.TestCase):
     def test_price_above_target_queues_nothing(self):
         rule = WatchRule('Depo', 'amazon', 'https://www.amazon.com.tr/s?k=x', Decimal('100'))
         self.assertEqual(self.jobs(rule, self.offer('150')), [])
+
+
+class RejectedFastAddTests(unittest.TestCase):
+    def test_rejected_fast_add_retries_with_fresh_offer(self):
+        job = {'asin': 'B0X', 'price': '10', 'target': '20', 'warehouse': True, 'offer_id': 'old', 'url': 'u'}
+        calls = []
+
+        def fake_add(transport, token, j, offer_id):
+            calls.append(offer_id)
+            if offer_id == 'old':
+                raise amazon_cart.CartRejected('Amazon sepet isteğini kabul etmedi (HTTP 400)')
+            return Cart({'nav': 'merhaba', 'rows': [{'asin': 'B0X', 'itemid': 'i', 'quantity': '1', 'price': '10'}]})
+
+        with patch.object(amazon_cart, 'add_offer', fake_add), \
+                patch.object(amazon_cart, 'offer_from_page', lambda t, j: ('fresh', 'tok')), \
+                patch.object(amazon_cart, 'read_cart', lambda t: Cart({'nav': 'merhaba', 'rows': [], 'add_token': 'tok'})):
+            self.assertTrue(amazon_cart._add_to_cart(job, None).startswith('Sepette yalnız'))
+        self.assertEqual(calls, ['old', 'fresh'])
