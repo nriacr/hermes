@@ -8,7 +8,7 @@ from support import APP_PATH  # noqa: F401
 
 from hermes.providers import hepsiburada
 from hermes.providers.hepsiburada import HepsiburadaProvider
-from hermes.providers.hepsiburada.parser import extract_embedded_variant_offer, extract_offer
+from hermes.providers.hepsiburada.parser import extract_embedded_variant_offer, extract_offer, live_seller_prices
 
 
 SKU = "HBCV00009Z3Z8C"
@@ -187,3 +187,37 @@ class HepsiburadaLiveSellerTests(unittest.TestCase):
             offer, _page_html = provider._variant_offer(SimpleNamespace(timeout=5), SimpleNamespace(url=URL), page(product()), URL)
         live.assert_not_called()
         self.assertEqual(offer.price, Decimal("111199"))
+
+
+class HepsiburadaCouponLimitTests(unittest.TestCase):
+    TIERS = ",".join(
+        f"cep-telefonu-aksesuarlarinda-{limit}-tl-ve-uzeri-alisverise-premium-a-ozel-{amount}-tl-kupon"
+        for limit, amount in ((1000, 100), (2000, 200), (3000, 300))
+    ) + ",cep-telefonu-aksesuarlarinda-premium-a-ozel-300-tl-ye-varan-kupon-firsati"
+
+    def payable(self, price, tags=TIERS):
+        return extract_offer(page(product(price=price, tags=tags)), URL).price
+
+    def test_highest_reached_limit_applies(self):
+        for price, expected in ((6699, 6399), (3000, 2700), (2999, 2799), (2000, 1800), (1500, 1400)):
+            with self.subTest(price=price):
+                self.assertEqual(self.payable(price), Decimal(expected))
+
+    def test_price_under_every_limit_gets_no_coupon(self):
+        self.assertEqual(self.payable(999), Decimal("999"))
+
+    def test_limit_is_checked_against_the_price_before_the_coupon(self):
+        self.assertEqual(self.payable(3100), Decimal("2800"))
+
+    def test_thousands_in_tags_and_ne_uzerine_form(self):
+        tags = "secili-urunlerde-20-000-tl-ve-uzerine-premiuma-ozel-1-000-tl-indirim"
+        self.assertEqual(self.payable(25000, tags), Decimal("24000"))
+        self.assertEqual(self.payable(19000, tags), Decimal("19000"))
+
+    def test_non_premium_coupon_and_up_to_tags_are_ignored(self):
+        tags = "cep-telefonu-aksesuarlarinda-750-tl-ve-uzerine-150-tl-kupon-indirimi,cep-telefonu-aksesuarlarinda-premium-a-ozel-300-tl-ye-varan-kupon-firsati"
+        self.assertEqual(self.payable(6699, tags), Decimal("6699"))
+
+    def test_live_seller_list_uses_the_same_rule(self):
+        listing = live_listing("Hepsiburada", 6699, paymentTag=self.TIERS)
+        self.assertEqual(live_seller_prices(live_payload(listing))["hepsiburada"], Decimal("6399"))

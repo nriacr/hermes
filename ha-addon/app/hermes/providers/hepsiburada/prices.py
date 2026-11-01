@@ -139,11 +139,17 @@ def _premium_prices(text: str) -> list[Decimal]:
     return _prices_after_markers(text, PREMIUM_PRICE_MARKERS, skip_campaign_amounts=True)
 
 
-def _premium_tag_discount(mapping: dict) -> Decimal:
+def _tag_amount(raw: str) -> Decimal:
+    return Decimal(raw.replace("-", ""))
+
+
+def _premium_tag_discount(mapping: dict, price: Optional[Decimal] = None) -> Decimal:
     """Fixed automatic Premium coupons, scoped to this product/seller listing.
 
     Repeated paymentTag/tagList entries describe one discount. Generic coupons,
     card campaigns and 'up to' amounts do not state an exact Premium reduction.
+    Coupons with a lower limit are tiers of one offer: the highest limit the
+    price reaches applies. Without a price, any coupon counts as present.
     """
     tags = str(mapping.get("paymentTag") or "").split(",")
     tags.extend(
@@ -152,13 +158,24 @@ def _premium_tag_discount(mapping: dict) -> Decimal:
         if isinstance(item, dict)
     )
     amounts = []
+    tiers = []
     for tag in tags:
+        tag = tag.strip().lower()
         match = re.search(
             r"(?:^|-)premium-?a-ozel-(\d+(?:-\d{3})*)-tl-(?:kupon|indirim)-firsati$",
-            tag.strip().lower(),
+            tag,
         )
         if match:
-            amounts.append(Decimal(match.group(1).replace("-", "")))
+            amounts.append(_tag_amount(match.group(1)))
+        match = re.search(
+            r"(?:^|-)(\d+(?:-\d{3})*)-tl-ve-uzeri(?:ne)?(?:-[a-z0-9-]*?)?-premium-?a-ozel-(\d+(?:-\d{3})*)-tl-(?:kupon|indirim)$",
+            tag,
+        )
+        if match:
+            tiers.append((_tag_amount(match.group(1)), _tag_amount(match.group(2))))
+    reachable = [tier for tier in tiers if price is None or price >= tier[0]]
+    if reachable:
+        amounts.append(max(reachable)[1])
     return max(amounts, default=Decimal("0"))
 
 
@@ -319,7 +336,7 @@ def _listing_mapping_price(mapping: dict) -> Optional[Decimal]:
         ]
     if entries:
         price = min(price for price, _context in entries)
-        discount = _premium_tag_discount(mapping)
+        discount = _premium_tag_discount(mapping, price)
         # Explicit Premium prices returned above already include the benefit.
         return price - discount if discount > 0 and _valid_price(price - discount) else price
 
