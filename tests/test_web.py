@@ -612,6 +612,9 @@ class DashboardTests(DataFilesMixin, unittest.TestCase):
         self.data.write_summary({"rows": [price_row()]})
         self.assertIn(">Fırsatlar</h2><div class='ov-spot'>", self.live())
 
+    def test_deal_glow_is_not_cut_at_the_page_column_edge(self):
+        self.assertNotIn("main { overflow-x:clip; }", self.router_get("/app.css"))
+
     def test_warehouse_deal_glow_uses_the_card_yellow(self):
         self.assertIn(".ov .ov-deal-depo::before, .ov .ov-deal-depo::after { --c:#ffd35c; --hi:#ffe9a8; }", self.router_get("/app.css"))
 

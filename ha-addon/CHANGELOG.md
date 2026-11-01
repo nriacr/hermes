@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.34.4
+
+- Fırsat kartı ışığı sol ve sağ sütun kenarında kesilmez, sayfanın kenarına kadar yayılır.
+
 ## 4.34.3
 
 - Depo fırsat kartının çerçeve ışığı artık satıcı rengi yerine kartın kendi sarısında döner.
