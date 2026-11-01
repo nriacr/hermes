@@ -37,6 +37,7 @@ body.ov a { color:inherit; }
 .ov-deal-foot { display:flex; align-items:flex-end; justify-content:space-between; gap:10px; margin-top:10px; } .ov-deal .ov-price { font:800 30px/1 var(--display); letter-spacing:-.05em; } .ov-price small { margin-left:3px; font-size:.5em; font-weight:600; color:var(--mute); letter-spacing:0; }
 .ov-deal-side { text-align:right; } .ov-deal-side .ov-spark { width:72px; height:26px; color:var(--c); display:block; margin-left:auto; } .ov-off { font:800 14px var(--display); color:var(--ink); } .ov-off small { display:block; font:500 11px var(--body); color:var(--mute); }
 .ov-deal-depo { --c:#ffd35c; --hi:#ffe9a8; --lo:#4a3a08; background:linear-gradient(160deg,#ffdd6b,#ffc533); border-color:#ffd35c; box-shadow:0 0 26px rgba(255,211,92,.3); color:#15121f; }
+.ov .ov-deal-depo::before, .ov .ov-deal-depo::after { --c:#ffd35c; --hi:#ffe9a8; }
 .ov-deal-depo .ov-site { color:#15121f; } .ov-deal-depo .ov-site::before { background:#15121f; box-shadow:none; } .ov-deal-depo .ov-ago { color:#4a3a08; } .ov-deal-depo h3 { color:#15121f; }
 .ov-deal-depo .ov-price { color:#15121f; } .ov-deal-depo .ov-price small, .ov-deal-depo .ov-off small { color:#5a4a10; }
 .ov-deal-depo .ov-deal-side .ov-spark { color:#15121f; } .ov-deal-depo .ov-off { color:#15121f; }

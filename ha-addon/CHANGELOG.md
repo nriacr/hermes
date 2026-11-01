@@ -1,12 +1,12 @@
 # Değişiklik günlüğü
 
+## 4.34.3
+
+- Depo fırsat kartının çerçeve ışığı artık satıcı rengi yerine kartın kendi sarısında döner.
+
 ## 4.34.2
 
 - Hepsiburada: alt limitli Premium kuponları fiyata yansır. Fiyatın geçtiği en yüksek alt limitli kupon düşülür, kuponlar toplanmaz; fiyat alt limitin altındaysa kupon sayılmaz.
-
-## 4.34.1
-
-- Depo fırsat kartının çerçeve ışığı artık satıcı rengi yerine kartın kendi sarısında döner.
 
 ## 4.34.0
 
