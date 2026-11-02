@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.39.10
+
+- İsteğe bağlı, yalnız mevcut Telegram hesabına açık Hermes bot sohbeti: renk/beden çoklu seçim düğmeleri, tekli tarama aralığı ve hedef fiyat, manuel fiyat. Seçili ürün fiyatının %5/10/15/25/40 altı üst 50 TL katına yuvarlanır; anahtar gizli ayar alanından girilir.
+
 ## 4.39.9
 
 - Trendyol kupon kaynağı araştırması tarayıcısız sürer: ürün kontrolünde sayfanın servis yapısı ve birinci taraf statik istemci dosyaları metin olarak incelenir; JavaScript çalıştırılmaz. Kaynak/okuma sınırı uygulanır, yönlendirme takip edilmez ve istek değerleri kayda alınmaz. Tanı hatası ürün fiyatını bozmaz; eski 403 kupon çağrısı tekrarlanmaz.
