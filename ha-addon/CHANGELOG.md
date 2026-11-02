@@ -1,5 +1,11 @@
 # Değişiklik günlüğü
 
+## 4.36.0
+
+- Trendyol yeniden okunuyor: fiyat sayfanın kendi ürün verisinden alınır (indirimli fiyat; liste fiyatı ve "TL / Adet" birim fiyatı kullanılmaz). Plus üyesi olduğun için Plus'a özel fiyat varsa o esas alınır.
+- Trendyol kuponları sitenin kupon listesinden okunur; alt limiti tutan ve en çok indirim yapan tek kupon (yüzde ya da TL, en fazla indirim tavanıyla) düşülür. Kupon okunamazsa kuponsuz fiyat kullanılır ve günlüğe yazılır.
+- Trendyol kartlarında Beden seçeneği: seçilen beden stokta değilse fiyat yerine stok durumu gösterilir. Kontrol et tüm bedenleri stok bilgisiyle listeler. Her okuma günlüğe fiyat hesabını yazar.
+
 ## 4.35.0
 
 - Hepsiburada: kupon ve sepet indirimi etiketlerden değil, sitenin "şu an geçerli kampanya ve kuponlar" cevabından hesaplanır. Biten kuponlar düşülmez; geçerli Premium kuponlarında fiyatın geçtiği en yüksek alt limitli kupon düşülür.

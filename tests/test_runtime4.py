@@ -171,24 +171,28 @@ class DurableDeliveryTests(unittest.TestCase):
         self.assertEqual(self.row(), ("pending", 0))
 
 
+def trendyol_offer(html):
+    return trendyol.extract_offers(html, "")[0]
+
+
 class ScopedProductTests(unittest.TestCase):
     def test_recommendation_script_price_is_never_the_product_price(self):
         html = '<h1>Takip edilen ürün</h1><script>recommendations={"price":79.90}</script>'
-        for extract in (trendyol.extract_offer, network.extract_offer, beymenclub.extract_offer):
-            with self.subTest(provider=extract.__module__), self.assertRaises(HermesError):
+        for extract in (trendyol_offer, network.extract_offer, beymenclub.extract_offer):
+            with self.subTest(provider=extract.__name__), self.assertRaises(HermesError):
                 extract(html)
 
     def test_recommendation_jsonld_and_visible_price_are_rejected(self):
         html = '''<h1>Ürün</h1><div class="recommendations"><div class="product-detail_price">79,90 TL</div>
         <script type="application/ld+json">{"@type":"Product","name":"Ürün","offers":{"price":79.90}}</script></div>'''
         with self.assertRaises(HermesError):
-            trendyol.extract_offer(html)
+            trendyol_offer(html)
 
     def test_unrelated_jsonld_product_does_not_supply_price(self):
         html = '''<h1>Telefon</h1><script type="application/ld+json">{"@type":"Product","name":"Kılıf",
         "offers":{"price":79.90}}</script>'''
         with self.assertRaises(HermesError):
-            trendyol.extract_offer(html)
+            trendyol_offer(html)
 
     def test_campaign_in_recommendation_is_ignored(self):
         html = '<h1>Elbise</h1><div class="product-price">999 TL</div><aside class="related"><b>Sepette 79 TL</b></aside>'
@@ -202,7 +206,7 @@ class ScopedProductTests(unittest.TestCase):
         html = '''<h1>Telefon</h1><script type="application/ld+json">{"@type":"Product","name":"Telefon",
         "offers":{"price":90,"priceCurrency":"EUR"}}</script>'''
         with self.assertRaises(HermesError):
-            trendyol.extract_offer(html)
+            trendyol_offer(html)
 
     def test_visible_foreign_currency_is_not_assumed_try(self):
         with self.assertRaises(HermesError):

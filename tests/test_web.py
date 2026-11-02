@@ -913,7 +913,7 @@ class SettingsTests(DataFilesMixin, unittest.TestCase):
         self.assertEqual(togg.count("name='watches_5_name'"), 1)
         trendyol = settings.watch_form({"name": "Çanta", "url_1": "https://www.trendyol.com/stark"}, 4)
         self.assertNotIn("watch-site-options", trendyol)
-        self.assertNotIn(">Beden<", trendyol)
+        self.assertIn(">Beden<", trendyol)
 
     def test_newest_card_is_listed_first_and_a_dragged_order_is_saved(self):
         stored = {"takip_edilenler": [
