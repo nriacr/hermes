@@ -289,6 +289,25 @@ class TelegramConnectionTests(unittest.TestCase):
         finally:
             data.cleanup()
 
+    def test_an_open_poll_is_read_directly_when_no_vote_update_arrives(self):
+        data = TempData()
+        try:
+            current = {"key": "size", "title": "Beden", "part": "", "values": ["S", "M"], "out": [], "message_id": 20, "poll_id": 500}
+            pending = {"chat_id": "7", "stage": "poll", "current": current, "steps": [], "choices": {},
+                       "created_at": telegram.local_now().isoformat()}
+            (data.root / "quick.json").write_text(json.dumps({"pending": [pending]}))
+            voted = SimpleNamespace(media=SimpleNamespace(results=SimpleNamespace(results=[SimpleNamespace(option=b"1", chosen=True)])))
+            client = SimpleNamespace(get_messages=AsyncMock(return_value=voted), send_message=AsyncMock())
+            with patch.object(telegram, "TELEGRAM_QUICK_ADD_PATH", data.root / "quick.json"):
+                self.assertTrue(asyncio.run(telegram._check_open_polls(client)))
+                self.assertFalse(asyncio.run(telegram._check_open_polls(client)))  # already answered
+            self.assertIn("Beden: M seçildi", client.send_message.call_args_list[0].args[1])
+            self.assertIn("Hedef fiyat nedir?", client.send_message.call_args_list[1].args[1])
+            saved = json.loads((data.root / "quick.json").read_text())["pending"][0]
+            self.assertEqual((saved["stage"], saved["choices"]), ("target_price", {"size": ["M"]}))
+        finally:
+            data.cleanup()
+
     def test_an_unreadable_link_adds_nothing(self):
         data = TempData()
         try:

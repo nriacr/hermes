@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.39.3
+
+- Telegram ile ekleme: telefonda verilen anket oyu Hermes'e bildirim olarak gelmezse açık anket 3 saniyede bir okunur; oy verilince sıradaki soruya geçilir.
+
 ## 4.39.2
 
 - Trendyol ürün kontrolünde renk/beden kaynak yapısı Pi üzerinde tanılanır; fiyat ve takip davranışı korunur.
