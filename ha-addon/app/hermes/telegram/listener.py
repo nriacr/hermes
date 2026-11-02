@@ -57,6 +57,8 @@ URL_PATTERN = re.compile(r"https?://[^\s<>]+", re.IGNORECASE)
 # A bare price answers the latest question without a Telegram reply.
 PRICE_ONLY_PATTERN = re.compile(r"^[\d\s.,]+(?:tl|₺)?$", re.IGNORECASE)
 BOT_PREFIX = "Hermes:"
+PREVIEW_ATTEMPTS = 4
+PREVIEW_WAIT_SECONDS = 2
 
 
 class WaitingForUser(Exception):
@@ -232,6 +234,35 @@ def _extract_supported_url(text: str) -> str:
             resolved_url = _resolve_shared_url(candidate)
             if resolved_url:
                 return resolved_url
+    return ""
+
+
+async def _preview_url(event) -> str:
+    """A short link the site will not open for Hermes (Hepsiburada app.hb.biz answers 403) may
+    still be named in Telegram's own link preview; it can arrive a few seconds after the message."""
+    message = getattr(event, "message", None)
+    for attempt in range(PREVIEW_ATTEMPTS):
+        webpage = getattr(getattr(message, "media", None), "webpage", None)
+        for candidate in (getattr(webpage, "url", ""), getattr(webpage, "display_url", "")):
+            candidate = str(candidate or "")
+            if candidate and not candidate.startswith("http"):
+                candidate = "https://" + candidate
+            if candidate:
+                try:
+                    detect_site_from_url(candidate)
+                    log(f"Telegram önizlemesinden ürün adresi alındı: {candidate}")
+                    return candidate
+                except Exception:  # noqa: BLE001
+                    pass
+        ready = webpage is not None and type(webpage).__name__ != "WebPagePending"
+        if ready or attempt == PREVIEW_ATTEMPTS - 1:
+            break
+        await asyncio.sleep(PREVIEW_WAIT_SECONDS)
+        client = getattr(event, "client", None)
+        if client is None:
+            break
+        message = await client.get_messages(event.chat_id, ids=event.id)
+    log(f"Telegram önizlemesinde desteklenen adres yok: {type(webpage).__name__} {getattr(webpage, 'url', '')}")
     return ""
 
 
@@ -419,6 +450,13 @@ async def _handle_saved_message_quick_add(event, providers=None) -> bool:
         return True
 
     url = _extract_supported_url(text)
+    if not url and URL_PATTERN.search(text):
+        url = await _preview_url(event)
+        if not url:
+            payload["pending"] = pending_items
+            save_json(TELEGRAM_QUICK_ADD_PATH, payload)
+            await event.reply("Hermes: bu bağlantıdan desteklenen bir ürün sayfasına ulaşılamadı; takip eklenmedi.")
+            return True
     if not url:
         payload["pending"] = pending_items
         save_json(TELEGRAM_QUICK_ADD_PATH, payload)

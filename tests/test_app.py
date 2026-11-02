@@ -266,6 +266,32 @@ class TelegramConnectionTests(unittest.TestCase):
             data.cleanup()
 
 
+    def test_a_blocked_short_link_is_read_from_the_telegram_preview(self):
+        product = "https://www.hepsiburada.com/urun-p-HBC0000001"
+        WebPagePending = type("WebPagePending", (), {"url": "https://app.hb.biz/x"})
+        later = SimpleNamespace(media=SimpleNamespace(webpage=SimpleNamespace(url=product)))
+        event = SimpleNamespace(message=SimpleNamespace(media=SimpleNamespace(webpage=WebPagePending())), chat_id=7, id=10,
+                                client=SimpleNamespace(get_messages=AsyncMock(return_value=later)))
+        with patch.object(telegram, "PREVIEW_WAIT_SECONDS", 0):
+            self.assertEqual(asyncio.run(telegram._preview_url(event)), product)
+        empty = SimpleNamespace(message=SimpleNamespace(media=SimpleNamespace(webpage=SimpleNamespace(url="https://app.hb.biz/x"))))
+        self.assertEqual(asyncio.run(telegram._preview_url(empty)), "")
+
+    def test_an_unopenable_link_gets_an_answer(self):
+        data = TempData()
+        try:
+            with (patch.object(telegram, "TELEGRAM_QUICK_ADD_PATH", data.root / "quick.json"),
+                  patch.object(telegram, "_extract_supported_url", return_value=""),
+                  patch.object(telegram, "_preview_url", AsyncMock(return_value=""))):
+                event = SimpleNamespace(raw_text="https://app.hb.biz/x", chat_id=7, id=10, message=None, reply=AsyncMock())
+                self.assertTrue(asyncio.run(telegram._handle_saved_message_quick_add(event)))
+                self.assertIn("takip eklenmedi", event.reply.call_args.args[0])
+                note = SimpleNamespace(raw_text="süt al", chat_id=7, id=11, message=None, reply=AsyncMock())
+                self.assertFalse(asyncio.run(telegram._handle_saved_message_quick_add(note)))
+                note.reply.assert_not_called()
+        finally:
+            data.cleanup()
+
 class SupervisorRestartTests(unittest.TestCase):
     def test_a_timeout_while_the_supervisor_stops_hermes_is_not_reported_as_a_failure(self):
         for error in (TimeoutError("timed out"), RuntimeError("Supervisor API bağlantısı kurulamadı: timed out")):
