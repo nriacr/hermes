@@ -10,7 +10,7 @@ import json
 import re
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, Optional
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urljoin, urlsplit, urlunsplit
 
 from ..constants import CHROME_USER_AGENT, SITE_TRENDYOL
 from ..errors import HermesError, OutOfStockHermesError, PriceUnavailableHermesError
@@ -18,7 +18,7 @@ from ..logging_utils import log
 from ..models import OfferResult, ProductPreview, VariantPreview
 from ..traffic import count_curl
 from ..utils import build_headers, format_tl as whole_tl, parse_decimal
-from .base import Provider, outside_variant_filter
+from .base import Provider, outside_variant_filter, soup_from_html
 from .http import curl_requests, fetch_with_retries, read_site_html
 from .size_availability import size_matches
 
@@ -86,6 +86,60 @@ def public_coupon_fields(value, depth=0):
     if isinstance(value, list):
         return [public_coupon_fields(child, depth + 1) for child in value[:60]]
     return value[:1000] if isinstance(value, str) else value
+
+
+def source_contract(value, depth=0):
+    """Request structure and endpoint paths, never request/session values."""
+    if depth > 6:
+        return "…"
+    if isinstance(value, dict):
+        return {(urlunsplit((*urlsplit(key)[:3], "", "")) if key.startswith(("https://", "/")) else key):
+                source_contract(child, depth + 1) for key, child in value.items()
+                if not any(term in key.lower() for term in ("token", "cookie", "session", "user", "header", "secret", "auth"))}
+    if isinstance(value, list):
+        return [source_contract(child, depth + 1) for child in value[:40]]
+    if isinstance(value, str) and value.startswith(("https://", "/")):
+        parsed = urlsplit(value)
+        if parsed.username or parsed.password:
+            return "<url>"
+        return {"path": urlunsplit((parsed.scheme, parsed.netloc, parsed.path, "", "")),
+                "query_keys": [key for key, _ in parse_qsl(parsed.query)]}
+    return type(value).__name__
+
+
+def allowed_source_asset(url):
+    try:
+        parsed = urlsplit(url)
+        host = (parsed.hostname or "").lower()
+        return (parsed.scheme == "https" and not parsed.username and not parsed.password
+                and parsed.port in (None, 443) and parsed.path.endswith(".js")
+                and (host == "trendyol.com" or host.endswith(".trendyol.com")
+                     or host == "dsmcdn.com" or host.endswith(".dsmcdn.com")))
+    except ValueError:
+        return False
+
+
+def coupon_client_contracts(code):
+    """Inspect static client code as text. No JavaScript is executed."""
+    paths, assets = [], []
+    for match in re.finditer(r'''["'`]([^"'`\r\n]{0,250}(?:coupon|collectable)[^"'`\r\n]{0,250})["'`]''', code.replace('\\/', '/'), re.I):
+        value = match[1]
+        if "/" not in value or re.search(r"\s", value) or any(term in value.lower() for term in ("token", "secret", "authorization")):
+            continue
+        if value.split("?", 1)[0].endswith(".js"):
+            assets.append(value)
+        elif "coupon" in value.lower() or "collectable" in value.lower():
+            try:
+                parsed = urlsplit(value)
+            except ValueError:
+                continue
+            if not parsed.username and not parsed.password:
+                paths.append(urlunsplit((parsed.scheme, parsed.netloc, parsed.path, "", "")))
+    parameters = [name for name in ("contentId", "merchantId", "storefrontId", "culture", "channelId", "listingId", "variantId")
+                  if name in code]
+    headers = re.findall(r'''["'](x-[A-Za-z0-9-]+|Authorization|Accept-Language)["']\s*:''', code)
+    return {"paths": list(dict.fromkeys(paths))[:30], "candidate_parameters": parameters,
+            "header_names": list(dict.fromkeys(headers))[:30], "assets": list(dict.fromkeys(assets))[:10]}
 
 
 def page_product(html: str) -> dict:
@@ -294,7 +348,51 @@ class TrendyolProvider(Provider):
         log(f"Trendyol ek veri bloğu: ürün={product.get('id')} | " + json.dumps({
             "type": type(props).__name__, "keys": list(props) if isinstance(props, dict) else [],
             "coupon_fields": embedded_coupon_fields(props)}, ensure_ascii=False, default=str)[:20000])
-        self.coupons(product, url, ctx, diagnostic=True)
+        calls = props.get("clientServiceCalls") if isinstance(props, dict) else None
+        log(f"Trendyol servis sözleşmesi: ürün={product.get('id')} | " + json.dumps(source_contract(calls), ensure_ascii=False))
+        self.inspect_client_sources(html, url, product.get("id"), ctx)
+
+    def inspect_client_sources(self, html, url, content_id, ctx):
+        soup = soup_from_html(html)
+        sources = [node.get("src") for node in soup.select("script[src]")]
+        sources += [node.get("href") for node in soup.select('link[rel="modulepreload"], link[as="script"]')]
+        sources = list(dict.fromkeys(urljoin(url, source) for source in sources if source))
+        queue = sorted((source for source in sources if allowed_source_asset(source)),
+                       key=lambda source: ("coupon" not in source.lower(), "product" not in source.lower()))
+        log(f"Trendyol istemci kaynakları: ürün={content_id} | " + json.dumps([
+            urlunsplit((*urlsplit(source)[:3], "", "")) for source in queue[:30]]))
+        seen = getattr(self, "_inspected_coupon_assets", set())
+        self._inspected_coupon_assets = seen
+        fetched = 0
+        while queue and fetched < 4:
+            source = queue.pop(0)
+            if source in seen:
+                continue
+            seen.add(source)
+            fetched += 1
+            ctx.pace("Trendyol istemci kaynağı")
+            try:
+                response = ctx.session.get(source, headers={"User-Agent": CHROME_USER_AGENT, "Accept": "*/*", "Referer": url},
+                                           timeout=min(ctx.timeout, 12), stream=True, allow_redirects=False)
+                try:
+                    if response.status_code != 200:
+                        log(f"Trendyol istemci kaynağı: HTTP={response.status_code}")
+                        continue
+                    raw = bytearray()
+                    for chunk in response.iter_content(16384):
+                        raw.extend(chunk)
+                        if len(raw) >= 2 * 1024 * 1024:
+                            break
+                    contract = coupon_client_contracts(raw.decode("utf-8", errors="replace"))
+                    safe_url = urlunsplit((*urlsplit(source)[:3], "", ""))
+                    log("Trendyol istemci sözleşmesi: " + json.dumps({"source": safe_url, "bytes": len(raw),
+                        "truncated": len(raw) >= 2 * 1024 * 1024, **contract}, ensure_ascii=False))
+                    queue[0:0] = [candidate for asset in contract["assets"]
+                                  if allowed_source_asset(candidate := urljoin(source, asset))]
+                finally:
+                    response.close()
+            except Exception as exc:  # noqa: BLE001 - source diagnostics never change product pricing
+                log(f"Trendyol istemci kaynağı okunamadı: {type(exc).__name__}")
 
     def read_page(self, url, ctx) -> tuple[str, dict]:
         html = read_site_html(fetch_with_retries(ctx.session, url, ctx.timeout), "Trendyol")
@@ -334,7 +432,10 @@ class TrendyolProvider(Provider):
             if not title:
                 title, selected_color = _title(product), color
                 if COUPON_DIAGNOSTICS:
-                    self.inspect_coupon_sources(html, product, color_url, ctx)
+                    try:
+                        self.inspect_coupon_sources(html, product, color_url, ctx)
+                    except Exception as exc:  # noqa: BLE001 - diagnostics cannot invalidate the actual product read
+                        log(f"Trendyol kaynak tanısı tamamlanamadı: {type(exc).__name__}")
             if color and color not in colors:
                 colors.append(color)
             entries = [item for item in product.get("variants") or [] if isinstance(item, dict) and item.get("value")]

@@ -37,6 +37,31 @@ def coupon(discount, kind="AMOUNT", lower=0, cap=None, plus=False):
 
 
 class TrendyolPriceTests(unittest.TestCase):
+    def test_client_source_allowlist_rejects_other_hosts_credentials_and_ports(self):
+        self.assertTrue(trendyol.allowed_source_asset("https://cdn.dsmcdn.com/product.js?v=1"))
+        for url in ("http://cdn.dsmcdn.com/a.js", "https://cdn.dsmcdn.com.evil/a.js",
+                    "https://u:p@cdn.dsmcdn.com/a.js", "https://cdn.dsmcdn.com:8099/a.js",
+                    "https://127.0.0.1/a.js", "https://cdn.dsmcdn.com/a.json"):
+            with self.subTest(url=url):
+                self.assertFalse(trendyol.allowed_source_asset(url))
+
+    def test_client_contract_extracts_paths_and_names_without_executing_code(self):
+        code = 'const url=`https://apigw.trendyol.com/api/coupons/${contentId}/search?merchantId=123`;'
+        code += 'const h={"x-web-req-source":"private-value"};globalThis.side_effect=true;'
+        data = trendyol.coupon_client_contracts(code)
+        self.assertEqual(data["paths"], ["https://apigw.trendyol.com/api/coupons/${contentId}/search"])
+        self.assertEqual(data["candidate_parameters"], ["contentId", "merchantId"])
+        self.assertEqual(data["header_names"], ["x-web-req-source"])
+        self.assertNotIn("private-value", json.dumps(data))
+
+    def test_service_contract_never_contains_query_or_account_values(self):
+        data = {"get": {"url": "https://apigw.trendyol.com/coupons?contentId=123", "token": "private"},
+                "user": {"name": "private"}, "headers": {"Cookie": "private"}}
+        result = trendyol.source_contract(data)
+        self.assertNotIn("private", json.dumps(result))
+        self.assertEqual(result["get"]["url"]["query_keys"], ["contentId"])
+        self.assertNotIn("123", json.dumps(result))
+
     def test_coupon_request_has_api_headers_not_navigation_headers(self):
         headers = trendyol.coupon_headers(URL)
         self.assertEqual(headers["Sec-Fetch-Mode"], "cors")
@@ -113,6 +138,41 @@ class TrendyolPriceTests(unittest.TestCase):
 
 
 class TrendyolProviderTests(unittest.TestCase):
+    def test_source_diagnostic_failure_does_not_change_product_price(self):
+        html = page(price(949.99), [("M", True)])
+        provider = TrendyolProvider()
+        provider.read_page = Mock(return_value=(html, trendyol.page_product(html)))
+        provider.inspect_coupon_sources = Mock(side_effect=ValueError("invalid diagnostic data"))
+        result = provider.inspect(URL, ReadContext(5, Mock()))
+        self.assertEqual(result.variants[0].price, Decimal("949.99"))
+        self.assertTrue(result.variants[0].in_stock)
+
+    def test_static_source_discovery_caches_assets_and_closes_responses(self):
+        source = "https://cdn.dsmcdn.com/product.js"
+        child = "https://cdn.dsmcdn.com/coupon.chunk.js"
+        code = ('const url="/api/coupons/${contentId}/search";const next="' + child + '";').encode()
+        first = SimpleNamespace(status_code=200, iter_content=lambda _: [code], close=Mock())
+        second = SimpleNamespace(status_code=200, iter_content=lambda _: [b'const path="/api/coupons/search";'], close=Mock())
+        ctx = ReadContext(5, Mock(), pace=Mock())
+        ctx.session.get.side_effect = [first, second]
+        provider = TrendyolProvider()
+        html = f'<script src="{source}"></script><script src="https://evil.example/price.js"></script>'
+        provider.inspect_client_sources(html, URL, 1, ctx)
+        provider.inspect_client_sources(html, URL, 1, ctx)
+        self.assertEqual(ctx.session.get.call_count, 2)
+        self.assertEqual([call.args[0] for call in ctx.session.get.call_args_list], [source, child])
+        first.close.assert_called_once()
+        second.close.assert_called_once()
+        self.assertFalse(ctx.session.get.call_args.kwargs["allow_redirects"])
+
+    def test_static_source_redirect_is_not_followed(self):
+        response = SimpleNamespace(status_code=302, close=Mock())
+        ctx = ReadContext(5, Mock())
+        ctx.session.get.return_value = response
+        TrendyolProvider().inspect_client_sources('<script src="https://cdn.dsmcdn.com/a.js"></script>', URL, 1, ctx)
+        ctx.session.get.assert_called_once()
+        response.close.assert_called_once()
+
     def ctx(self, html, coupon_response):
         session = Mock()
         page_response = SimpleNamespace(status_code=200, headers={"content-type": "text/html; charset=utf-8"},

@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.39.9
+
+- Trendyol kupon kaynağı araştırması tarayıcısız sürer: ürün kontrolünde sayfanın servis yapısı ve birinci taraf statik istemci dosyaları metin olarak incelenir; JavaScript çalıştırılmaz. Kaynak/okuma sınırı uygulanır, yönlendirme takip edilmez ve istek değerleri kayda alınmaz. Tanı hatası ürün fiyatını bozmaz; eski 403 kupon çağrısı tekrarlanmaz.
+
 ## 4.39.8
 
 - Trendyol kupon isteği belge gezintisi yerine API başlıkları kullanır; yerel HTTP istemcisinin kimliği tutarlıdır ve Pi ürün oturumunun anonim çerezleri yalnız bellekte aktarılır. Ürün kontrolündeki erişim tanısı kontrollü olarak tekrar sınanır; otomatik kupon uygulaması kapalıdır.
