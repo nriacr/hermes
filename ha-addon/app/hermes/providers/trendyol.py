@@ -16,9 +16,10 @@ from ..constants import SITE_TRENDYOL
 from ..errors import HermesError, OutOfStockHermesError, PriceUnavailableHermesError
 from ..logging_utils import log
 from ..models import OfferResult, ProductPreview, VariantPreview
+from ..traffic import count_curl
 from ..utils import build_headers, format_tl as whole_tl, parse_decimal
 from .base import Provider, outside_variant_filter
-from .http import fetch_with_retries, read_site_html
+from .http import curl_requests, fetch_with_retries, read_site_html
 from .size_availability import size_matches
 
 # Nuri is a Trendyol Plus member: Plus prices and Plus coupons are his payable prices.
@@ -26,6 +27,8 @@ PLUS_MEMBER = True
 # The coupon endpoint is behind Cloudflare bot protection and refuses Hermes (403).
 # Nuri 2026-11-02: prices stay without coupon and no coupon request is sent.
 COUPONS_ENABLED = False
+# Explicit product inspection probes coupon sources; automated watches stay unchanged.
+COUPON_DIAGNOSTICS = True
 SHARED_PROPS = re.compile(r'window\["__envoy__SHARED_PROPS"\]\s*=\s*')
 COUPON_URL = ("https://apigw.trendyol.com/discovery-storefront-trproductgw-service/api/coupons/{}/search"
               "?storefrontId=1&culture=tr-TR&channelId=1")
@@ -195,13 +198,23 @@ class TrendyolProvider(Provider):
 
     card_options = ("size", "variant_filter")
 
-    def coupons(self, product: dict, url: str, ctx) -> Optional[list]:
+    def coupons(self, product: dict, url: str, ctx, diagnostic: bool = False) -> Optional[list]:
         """The product's coupons, or None when they cannot be read (the price then stays without coupon)."""
         content_id = product.get("id")
-        if not COUPONS_ENABLED or not content_id:
+        if not (COUPONS_ENABLED or diagnostic) or not content_id:
             return None
         try:
             response = ctx.session.get(COUPON_URL.format(content_id), headers=coupon_headers(url), timeout=ctx.timeout)
+            if diagnostic:
+                log(f"Trendyol kupon kaynağı: ürün={content_id} | istemci=requests | HTTP={response.status_code}")
+            if diagnostic and response.status_code == 403 and curl_requests is not None:
+                # The same native HTTP library already used by Hermes's other providers.
+                ctx.pace("Trendyol kupon kaynağı")
+                response = count_curl(curl_requests.get(
+                    COUPON_URL.format(content_id), headers=coupon_headers(url), timeout=ctx.timeout,
+                    impersonate="chrome124", allow_redirects=False,
+                ))
+                log(f"Trendyol kupon kaynağı: ürün={content_id} | istemci=curl | HTTP={response.status_code}")
             response.raise_for_status()
             data = response.json()
         except Exception as exc:  # noqa: BLE001 - a missing coupon must not drop the price
@@ -211,7 +224,29 @@ class TrendyolProvider(Provider):
         if not isinstance(result, list):
             log(f"Trendyol kuponu okunamadı, kuponsuz fiyat kullanılıyor: {url} | beklenmeyen cevap")
             return None
+        if diagnostic:
+            # The unauthenticated endpoint's public coupon rules, not headers or sessions.
+            log(f"Trendyol kupon kuralları: ürün={content_id} | " + json.dumps(result, ensure_ascii=False, default=str)[:12000])
         return [item for item in result if isinstance(item, dict)]
+
+    def inspect_coupon_sources(self, html, product, url, ctx):
+        listing = product.get("merchantListing") or {}
+        winner = listing.get("winnerVariant") or {}
+        merchant = listing.get("merchant") or winner.get("merchant") or {}
+        merchant_id = merchant.get("id") if isinstance(merchant, dict) else None
+        log("Trendyol fiyat kaynağı: " + json.dumps({"id": product.get("id"),
+            "price": winner.get("price"), "isTyPlusEligible": winner.get("isTyPlusEligible"),
+            "merchant_id": merchant_id or listing.get("merchantId") or winner.get("merchantId"),
+            "listing_keys": list(listing), "winner_keys": list(winner)}, ensure_ascii=False, default=str))
+        modules = list(dict.fromkeys(re.findall(r'window\["(__envoy__[^"\\]+)"\]\s*=', html)))
+        log(f"Trendyol sayfa modülleri: ürün={product.get('id')} | " + json.dumps(modules))
+        # Product-scoped embedded coupon/promotion fields only; never dump the page's user/session data.
+        fields = {key: value for key, value in product.items()
+                  if any(term in key.lower() for term in ("coupon", "campaign", "promotion"))}
+        fields["winner"] = {key: value for key, value in winner.items()
+                            if any(term in key.lower() for term in ("coupon", "campaign", "promotion"))}
+        log(f"Trendyol gömülü kupon verisi: ürün={product.get('id')} | " + json.dumps(fields, ensure_ascii=False, default=str)[:12000])
+        self.coupons(product, url, ctx, diagnostic=True)
 
     def read_page(self, url, ctx) -> tuple[str, dict]:
         html = read_site_html(fetch_with_retries(ctx.session, url, ctx.timeout), "Trendyol")
@@ -250,6 +285,8 @@ class TrendyolProvider(Provider):
             color = str((product.get("slicingAttributes") or {}).get("DsmColor") or "").strip()
             if not title:
                 title, selected_color = _title(product), color
+                if COUPON_DIAGNOSTICS:
+                    self.inspect_coupon_sources(html, product, color_url, ctx)
             if color and color not in colors:
                 colors.append(color)
             entries = [item for item in product.get("variants") or [] if isinstance(item, dict) and item.get("value")]

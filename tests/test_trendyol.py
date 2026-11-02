@@ -106,6 +106,37 @@ class TrendyolProviderTests(unittest.TestCase):
         self.assertEqual(offers[0].price, Decimal("1799"))
         self.assertEqual(ctx.session.get.call_count, 1)
 
+    def test_coupon_diagnostic_uses_existing_native_client_after_403(self):
+        blocked = SimpleNamespace(status_code=403)
+        body = {"isSuccess": True, "result": [coupon(70, lower=1250)]}
+        native = SimpleNamespace(status_code=200, raise_for_status=lambda: None, json=lambda: body)
+        curl = SimpleNamespace(get=Mock(return_value=native))
+        ctx = ReadContext(5, Mock(), pace=Mock())
+        ctx.session.get.return_value = blocked
+        with patch.object(trendyol, "curl_requests", curl):
+            result = TrendyolProvider().coupons({"id": 1}, URL, ctx, diagnostic=True)
+        self.assertEqual(result, body["result"])
+        self.assertEqual(curl.get.call_args.kwargs["impersonate"], "chrome124")
+        ctx.pace.assert_called_once()
+
+    def test_coupon_diagnostic_does_not_retry_other_failures(self):
+        response = SimpleNamespace(status_code=500, raise_for_status=Mock(side_effect=RuntimeError("HTTP 500")))
+        ctx = ReadContext(5, Mock())
+        ctx.session.get.return_value = response
+        curl = SimpleNamespace(get=Mock())
+        with patch.object(trendyol, "curl_requests", curl):
+            self.assertIsNone(TrendyolProvider().coupons({"id": 1}, URL, ctx, diagnostic=True))
+        curl.get.assert_not_called()
+
+    def test_coupon_diagnostic_does_not_enable_automated_coupon_reads(self):
+        ctx = ReadContext(5, Mock())
+        ctx.session.get.return_value = SimpleNamespace(status_code=200, raise_for_status=lambda: None,
+                                                       json=lambda: {"isSuccess": True, "result": []})
+        provider = TrendyolProvider()
+        self.assertEqual(provider.coupons({"id": 1}, URL, ctx, diagnostic=True), [])
+        self.assertIsNone(provider.coupons({"id": 1}, URL, ctx))
+        self.assertEqual(ctx.session.get.call_count, 1)
+
     def test_requested_size_has_its_own_price(self):
         data = trendyol.page_product(page(price(949.99), [("S", True), ("M", True)]))
         data["variants"][1]["price"] = {"value": 1099.99}

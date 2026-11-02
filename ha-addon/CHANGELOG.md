@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.39.6
+
+- Trendyol ürün kontrolünde Pi üzerinden kupon kaynağı tanısı: ürünün fiyat/Plus alanları, gömülü kupon alanları ve kupon API yanıtı incelenir; 403 yanıtında Hermes’in mevcut yerel HTTP kütüphanesi bir kez denenir. Otomatik kupon uygulaması doğrulanana kadar kapalıdır.
+
 ## 4.39.5
 
 - Telegram hızlı eklemede fiyat yalnız anketler tamamlandıktan sonra alınır; fiyat sorusuna Yanıtla desteklenir. Uzun anketlerde seçenek kaybolmaz, bölüm atlanabilir; anket gönderimi başarısızsa kayıt akışı durur. Kısa link çözümü Telegram olay döngüsünü bekletmez, soru ve seçim adımları izlenebilir.
