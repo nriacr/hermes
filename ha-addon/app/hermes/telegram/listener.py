@@ -13,9 +13,9 @@ from urllib.parse import parse_qs, urljoin, urlparse
 import requests
 
 from .. import traffic
-from ..config import format_variant_filter, read_options, watch_urls
+from ..config import format_variant_filter, parse_variant_filter, read_options, watch_urls
 from ..constants import (
-    DEFAULT_PRIORITY,
+    PRIORITY_LABELS,
     TELEGRAM_ERROR_EVENTS_PATH,
     TELEGRAM_LOGIN_STATE_PATH,
     TELEGRAM_QUICK_ADD_PATH,
@@ -58,6 +58,11 @@ URL_PATTERN = re.compile(r"https?://[^\s<>]+", re.IGNORECASE)
 PRICE_ONLY_PATTERN = re.compile(r"^[\d\s.,]+(?:tl|₺)?$", re.IGNORECASE)
 BOT_PREFIX = "Hermes:"
 PREVIEW_ATTEMPTS = 4
+POLL_ANSWER_LIMIT = 10
+POLL_TEXT_LIMIT = 100
+# Telegram-added cards are read every 15 minutes until changed on the settings page.
+QUICK_ADD_PRIORITY = "15m"
+SINGLE_CHOICE_KEYS = {"model", "priority"}
 PREVIEW_WAIT_SECONDS = 2
 
 
@@ -342,6 +347,7 @@ def _quick_add_card(url: str, providers=None) -> Dict[str, Any]:
     dimensions = result.get("dimensions") or {}
     defaults = result.get("defaults") or {}
     title = str(result.get("title") or "").strip()
+    groups = _choice_groups(options, dimensions, defaults, result.get("variants") or [])
     # A model site (Togg) names the card after the model, as the new card does.
     name = ((defaults.get("Model") or [""])[0] if "model" in options else title).strip()
     size = ""
@@ -356,7 +362,104 @@ def _quick_add_card(url: str, providers=None) -> Dict[str, Any]:
             picked = [value for value in defaults.get(dimension) or [] if value in values]
             if picked:
                 chosen[dimension] = picked
-    return {"title": title or name, "name": name, "size": size, "variant_filter": format_variant_filter(chosen)}
+    return {"title": title or name, "name": name, "size": size, "variant_filter": format_variant_filter(chosen),
+            "groups": groups}
+
+
+def _choice_groups(options, dimensions, defaults, variants) -> list:
+    """The new card's choice boxes, as poll groups: sizes, variant values and models with two or more values."""
+    in_stock = {value for item in variants if item.get("in_stock") for value in (item.get("attributes") or {}).values()}
+    every = {value for item in variants for value in (item.get("attributes") or {}).values()}
+    out = sorted(every - in_stock)
+    groups = []
+    for dimension, values in dimensions.items():
+        values = [str(value) for value in values]
+        if len(values) < 2:
+            continue
+        if dimension == "Model" and "model" in options:
+            key = "model"
+        elif dimension == "Beden" and "size" in options:
+            key = "size"
+        elif "variant_filter" in options and not (dimension == "Beden" and "size" in options):
+            key = f"variant:{dimension}"
+        else:
+            continue
+        groups.append({"key": key, "title": dimension, "values": values, "out": [value for value in values if value in out],
+                       "chosen": [value for value in defaults.get(dimension) or [] if value in values]})
+    groups.append({"key": "priority", "title": f"Tarama aralığı (işaretlemezsen {PRIORITY_LABELS[QUICK_ADD_PRIORITY]})",
+                   "values": list(PRIORITY_LABELS.values()), "out": [], "chosen": []})
+    return groups
+
+
+def _poll_media(group: Dict[str, Any], values: list, part: str):
+    from telethon.tl.types import InputMediaPoll, Poll, PollAnswer, TextWithEntities
+
+    answers = [PollAnswer(TextWithEntities((value + (" (tükendi)" if value in group["out"] else ""))[:POLL_TEXT_LIMIT], []),
+                          str(index).encode()) for index, value in enumerate(values)]
+    question = TextWithEntities(f"{group['title']}{part}", [])
+    poll = Poll(id=int.from_bytes(uuid.uuid4().bytes[:8], "big") >> 1, question=question, answers=answers,
+                multiple_choice=group["key"] not in SINGLE_CHOICE_KEYS)
+    return InputMediaPoll(poll=poll)
+
+
+async def _send_choice_polls(event, card: Dict[str, Any]) -> list:
+    """One poll for each choice group (split at Telegram's answer limit); a poll that cannot be sent is skipped."""
+    sent = []
+    client = getattr(event, "client", None)
+    for group in card.get("groups") or []:
+        chunks = [group["values"][start:start + POLL_ANSWER_LIMIT] for start in range(0, len(group["values"]), POLL_ANSWER_LIMIT)]
+        for number, values in enumerate(chunks, start=1):
+            if len(values) < 2:
+                continue  # Telegram needs two answers; a single leftover value stays a link choice
+            part = f" ({number}/{len(chunks)})" if len(chunks) > 1 else ""
+            try:
+                message = await client.send_file(event.chat_id, _poll_media(group, values, part))
+            except Exception as exc:  # noqa: BLE001
+                log(f"Telegram seçenek anketi gönderilemedi: {group['title']} | {exc}")
+                continue
+            sent.append({"message_id": getattr(message, "id", None), "key": group["key"], "values": values})
+    return sent
+
+
+async def _poll_choices(event, polls: list) -> Dict[str, list]:
+    """What the user ticked in the choice polls; an untouched group keeps the link's choice."""
+    chosen: Dict[str, list] = {}
+    ids = [poll["message_id"] for poll in polls if poll.get("message_id")]
+    client = getattr(event, "client", None)
+    if not ids or client is None:
+        return chosen
+    try:
+        messages = await client.get_messages(event.chat_id, ids=ids)
+    except Exception as exc:  # noqa: BLE001
+        log(f"Telegram seçenek anketleri okunamadı: {exc}")
+        return chosen
+    by_id = {getattr(message, "id", None): message for message in messages or [] if message is not None}
+    for poll in polls:
+        results = getattr(getattr(getattr(by_id.get(poll.get("message_id")), "media", None), "results", None), "results", None) or []
+        picked = [poll["values"][int(item.option.decode())] for item in results
+                  if getattr(item, "chosen", False) and item.option.decode().isdigit() and int(item.option.decode()) < len(poll["values"])]
+        if picked:
+            chosen.setdefault(poll["key"], []).extend(picked)
+    return chosen
+
+
+def _apply_poll_choices(pending: Dict[str, Any], chosen: Dict[str, list]) -> Dict[str, str]:
+    card = {"name": str(pending.get("name") or ""), "size": str(pending.get("size") or ""),
+            "variant_filter": str(pending.get("variant_filter") or ""),
+            "priority": str(pending.get("priority") or QUICK_ADD_PRIORITY)}
+    priorities = {label: key for key, label in PRIORITY_LABELS.items()}
+    if chosen.get("priority") and chosen["priority"][0] in priorities:
+        card["priority"] = priorities[chosen["priority"][0]]
+    if chosen.get("model"):
+        card["name"] = chosen["model"][0]
+    if chosen.get("size"):
+        card["size"] = "; ".join(chosen["size"])
+    variants = parse_variant_filter(card["variant_filter"])
+    for key, values in chosen.items():
+        if key.startswith("variant:"):
+            variants[key.split(":", 1)[1]] = values
+    card["variant_filter"] = format_variant_filter(variants)
+    return card
 
 
 def _choice_text(card: Dict[str, Any]) -> str:
@@ -369,13 +472,15 @@ def _choice_text(card: Dict[str, Any]) -> str:
 QUICK_ADD_DONE = "Takip kaydı eklendi"
 
 
-def _quick_add_watch(url: str, target_price, name: str = "", size: str = "", variant_filter: str = "") -> str:
+def _quick_add_watch(url: str, target_price, name: str = "", size: str = "", variant_filter: str = "",
+                     priority: str = QUICK_ADD_PRIORITY) -> str:
     """Append a Saved Messages watch through the same options path as the UI."""
     with OPTIONS_LOCK:
-        return _quick_add_watch_locked(url, target_price, name, size, variant_filter)
+        return _quick_add_watch_locked(url, target_price, name, size, variant_filter, priority)
 
 
-def _quick_add_watch_locked(url: str, target_price, name: str, size: str = "", variant_filter: str = "") -> str:
+def _quick_add_watch_locked(url: str, target_price, name: str, size: str = "", variant_filter: str = "",
+                            priority: str = QUICK_ADD_PRIORITY) -> str:
     options = read_options()
     watches = [dict(item) for item in options.get("takip_edilenler", []) if isinstance(item, dict)] \
         if isinstance(options.get("takip_edilenler"), list) else []
@@ -393,7 +498,7 @@ def _quick_add_watch_locked(url: str, target_price, name: str, size: str = "", v
         "name": normalized_name,
         "target_price": float(target_price),
         "include_variations": bool(variant_filter),
-        "priority": DEFAULT_PRIORITY,
+        "priority": priority if priority in PRIORITY_LABELS else QUICK_ADD_PRIORITY,
         "official_seller_only": False,
         "active": True,
     }
@@ -428,12 +533,13 @@ async def _handle_saved_message_quick_add(event, providers=None) -> bool:
     if pending and pending.get("stage") == "target_price":
         target_price = _parse_target_price(text)
         if target_price is None:
-            await event.reply("Hermes: hedef fiyatı örneğin `40000` veya `40.000 TL` biçiminde yaz.")
+            await event.reply("Hermes: hedef fiyatı sayı olarak yaz.")
             payload["pending"] = pending_items
             save_json(TELEGRAM_QUICK_ADD_PATH, payload)
             return True
-        result = _quick_add_watch(str(pending["url"]), target_price, str(pending.get("name") or ""),
-                                  str(pending.get("size") or ""), str(pending.get("variant_filter") or ""))
+        pending.update(_apply_poll_choices(pending, await _poll_choices(event, pending.get("polls") or [])))
+        result = _quick_add_watch(str(pending["url"]), target_price, pending["name"], pending["size"], pending["variant_filter"],
+                                  pending["priority"])
         pending_items.remove(pending)
         payload["pending"] = pending_items
         save_json(TELEGRAM_QUICK_ADD_PATH, payload)
@@ -468,10 +574,12 @@ async def _handle_saved_message_quick_add(event, providers=None) -> bool:
         log(f"Telegram Kayıtlı Mesajlar bağlantısı okunamadı: {url} | {card['error']}")
         return True
     choice = _choice_text(card)
+    polls = await _send_choice_polls(event, card)
     await prompt.edit(
         f"Hermes: {card.get('title') or 'Ürün'}"
-        + (f"\nSeçim: {choice}" if choice else "")
-        + "\nHedef fiyat nedir? Örnek: `40000` veya `40.000 TL`."
+        + (f"\nLinkteki seçim: {choice}" if choice else "")
+        + ("\nSeçenekleri aşağıdaki anketlerde işaretle; işaretlemediğin grupta linkteki seçim kalır." if polls else "")
+        + "\nHedef fiyat nedir?"
     )
     payload = _load_quick_adds()  # the page read can take minutes; keep answers saved meanwhile
     pending_items = _prune_pending_quick_adds(payload["pending"])
@@ -483,6 +591,7 @@ async def _handle_saved_message_quick_add(event, providers=None) -> bool:
         "name": card.get("name", ""),
         "size": card.get("size", ""),
         "variant_filter": card.get("variant_filter", ""),
+        "polls": polls,
         "stage": "target_price",
         "created_at": local_now().isoformat(),
     })

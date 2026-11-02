@@ -1,5 +1,10 @@
 # Değişiklik günlüğü
 
+## 4.38.0
+
+- Telegram ile ekleme: beden, renk, model ve tarama aralığı Kayıtlı Mesajlar'a anket olarak gelir (tükenenler işaretli); işaretlenmeyen grupta linkteki seçim, aralıkta 15 dk kalır.
+- Hedef fiyat sorusu örneksiz sorulur.
+
 ## 4.37.2
 
 - Telegram ile ekleme: Hermes'in açamadığı kısa linklerde (Hepsiburada app.hb.biz) ürün adresi Telegram'ın link önizlemesinden alınır. Adres bulunamazsa Hermes sessiz kalmaz, takip eklenmediğini yazar.

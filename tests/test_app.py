@@ -113,7 +113,7 @@ class TelegramQuickAddTests(unittest.TestCase):
         self.assertTrue(card.pop("id"))
         self.assertTrue(card.pop("check_now_token"))
         self.assertEqual(card, {"name": "edifier m60", "target_price": 8700.0, "include_variations": False,
-                                "priority": "1m", "official_seller_only": False, "active": True, "url_1": url})
+                                "priority": "15m", "official_seller_only": False, "active": True, "url_1": url})
 
     def test_quick_add_keeps_the_choices_the_link_names(self):
         url = "https://www.hm.com/tr_tr/productpage.1.html"
@@ -122,7 +122,11 @@ class TelegramQuickAddTests(unittest.TestCase):
                  "defaults": {"Renk": ["Siyah"], "Beden": ["M"]}}
         with patch("hermes.web.settings.check_link", return_value=check):
             card = telegram._quick_add_card(url, providers=object())
+        groups = card.pop("groups")
         self.assertEqual(card, {"title": "Gömlek", "name": "Gömlek", "size": "M", "variant_filter": "Renk=Siyah"})
+        self.assertEqual([(group["key"], group["values"], group["chosen"]) for group in groups],
+                         [("variant:Renk", ["Siyah", "Beyaz"], ["Siyah"]), ("size", ["S", "M"], ["M"]),
+                          ("priority", list(telegram.PRIORITY_LABELS.values()), [])])
         with patch("hermes.web.settings.check_link", return_value={"ok": False, "error": "Sayfa okunamadı: 403"}):
             self.assertEqual(telegram._quick_add_card(url, providers=object()), {"error": "Sayfa okunamadı: 403"})
         with (patch.object(telegram, "read_options", return_value={"takip_edilenler": []}),
@@ -131,6 +135,26 @@ class TelegramQuickAddTests(unittest.TestCase):
         saved = save.call_args.args[0]["takip_edilenler"][0]
         self.assertEqual((saved["name"], saved["size"], saved["variant_filter"], saved["include_variations"]),
                          ("Gömlek", "M", "Renk=Siyah", True))
+
+    def test_choice_polls_are_sent_and_their_ticks_override_the_link_choice(self):
+        group = {"key": "size", "title": "Beden", "values": [str(n) for n in range(12)], "out": ["3"], "chosen": []}
+        client = SimpleNamespace(send_file=AsyncMock(side_effect=[SimpleNamespace(id=20), SimpleNamespace(id=21)]))
+        event = SimpleNamespace(chat_id=7, client=client)
+        polls = asyncio.run(telegram._send_choice_polls(event, {"groups": [group]}))
+        self.assertEqual([(poll["message_id"], len(poll["values"])) for poll in polls], [(20, 10), (21, 2)])
+        media = client.send_file.call_args_list[0].args[1]
+        self.assertEqual(media.poll.question.text, "Beden (1/2)")
+        self.assertEqual(media.poll.answers[3].text.text, "3 (tükendi)")
+        self.assertTrue(media.poll.multiple_choice)
+        votes = SimpleNamespace(id=20, media=SimpleNamespace(results=SimpleNamespace(results=[
+            SimpleNamespace(option=b"1", chosen=True), SimpleNamespace(option=b"2", chosen=False)])))
+        client.get_messages = AsyncMock(return_value=[votes, None])
+        chosen = asyncio.run(telegram._poll_choices(event, polls))
+        self.assertEqual(chosen, {"size": ["1"]})
+        pending = {"name": "Gömlek", "size": "M", "variant_filter": "Renk=Siyah", "priority": "15m"}
+        self.assertEqual(telegram._apply_poll_choices(pending, {"size": ["S", "L"], "variant:Renk": ["Beyaz"], "priority": ["3 saat"]}),
+                         {"name": "Gömlek", "size": "S; L", "variant_filter": "Renk=Beyaz", "priority": "3h"})
+        self.assertEqual(telegram._apply_poll_choices(pending, {}), pending)
 
     def test_an_already_watched_link_is_not_added_twice(self):
         url = "https://www.amazon.com.tr/dp/B000000001"
@@ -244,7 +268,7 @@ class TelegramConnectionTests(unittest.TestCase):
                 # A bare price answers the latest question; no Telegram reply is needed.
                 answer = SimpleNamespace(raw_text="40.000 TL", chat_id=7, id=13, message=None, reply=AsyncMock())
                 self.assertTrue(asyncio.run(telegram._handle_saved_message_quick_add(answer)))
-            add.assert_called_once_with(url, Decimal("40000"), "Kulaklık", "", "Renk=Siyah")
+            add.assert_called_once_with(url, Decimal("40000"), "Kulaklık", "", "Renk=Siyah", "15m")
             self.assertIn("Takip kaydı eklendi", answer.reply.call_args.args[0])
             self.assertIn("Seçim: Renk=Siyah", answer.reply.call_args.args[0])
             self.assertEqual(json.loads((data.root / "quick.json").read_text())["pending"], [])
