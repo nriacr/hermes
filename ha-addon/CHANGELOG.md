@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.39.2
+
+- Trendyol ürün kontrolünde renk/beden kaynak yapısı Pi üzerinde tanılanır; fiyat ve takip davranışı korunur.
+
 ## 4.39.1
 
 - Trendyol kupon isteği kapatıldı: kupon adresi Cloudflare bot korumasıyla Hermes'i reddediyor (403). Fiyat sayfadan (Plus fiyatı dahil) kuponsuz okunur, boş istek ve günlük uyarısı oluşmaz.

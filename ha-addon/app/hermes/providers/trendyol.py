@@ -38,7 +38,7 @@ def format_tl(value: Decimal, with_currency: bool = True) -> str:
     return whole_tl(value, with_currency=False) + (f",{cents:02d}" if cents else "") + (" TL" if with_currency else "")
 
 
-def page_product(html: str) -> dict:
+def page_payload(html: str) -> dict:
     match = SHARED_PROPS.search(html)
     if not match:
         return {}
@@ -46,7 +46,11 @@ def page_product(html: str) -> dict:
         payload, _ = json.JSONDecoder().raw_decode(html[match.end():])
     except json.JSONDecodeError:
         return {}
-    product = payload.get("product") if isinstance(payload, dict) else None
+    return payload if isinstance(payload, dict) else {}
+
+
+def page_product(html: str) -> dict:
+    product = page_payload(html).get("product")
     return product if isinstance(product, dict) else {}
 
 
@@ -189,6 +193,15 @@ class TrendyolProvider(Provider):
 
     def inspect(self, url, ctx):
         html, product = self.read_page(url, ctx)
+        # Product-page data only: inspect on the Pi before extending variant discovery.
+        payload = page_payload(html)
+        selected = {key: value for key, value in product.items()
+                    if any(part in key.lower() for part in ("slic", "variant", "color", "group"))}
+        related = {key: value for key, value in payload.items()
+                   if key != "product" and any(part in key.lower() for part in ("slic", "variant", "color"))}
+        log("Trendyol varyant tanısı: " + json.dumps({"id": product.get("id"),
+            "product_keys": list(product), "page_keys": list(payload),
+            "product_variants": selected, "page_variants": related}, ensure_ascii=False, default=str)[:24000])
         offer = extract_offers(html, url, coupons=self.coupons(product, url, ctx))[0]
         return size_preview(self.site, offer.title, offer.price, page_sizes(product))
 

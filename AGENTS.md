@@ -164,6 +164,20 @@ of each site are described in `docs/ARCHITECTURE.md`.
 
 ## Change workflow
 
+### Explicit development and installation authorization (Nuri, 2026-11-02)
+
+For development and bug fixes explicitly requested by Nuri, the working agent
+is authorized to prepare diagnostic code, intermediate test releases and new
+features, test them, publish to GitHub main, install on the Pi and verify live
+behavior. Necessary Hermes restarts are included; do not request approval again
+for each installation within that requested work. This includes the Trendyol
+variant diagnostic installation prepared on 2026-11-02.
+
+Existing backup, source equality, testing and user-data protection requirements
+remain in force. Data deletion and restoration from a backup require separate
+explicit authorization. Real site-read tests run through Hermes on the Pi.
+This work authorization does not override platform access or approval decisions.
+
 1. Inspect the current implementation and relevant tests before editing.
 2. Confirm the working tree and current version in `ha-addon/config.yaml`.
 3. Add a regression test that demonstrates parser or business-rule bugs.
