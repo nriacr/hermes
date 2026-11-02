@@ -48,6 +48,7 @@ OPTION_DEFAULTS: Dict[str, Any] = {
     "public_dashboard_token": "",
     "telegram_enabled": False,
     "telegram_saved_messages_enabled": True,
+    "telegram_bot_token": "",
     "api_id": "",
     "api_hash": "",
     "phone_number": "",
@@ -281,13 +282,14 @@ def prepare_telegram_config(payload: Dict[str, object]) -> TelegramConfig:
         keywords=string_list(payload.get("keywords")),
         exclude_keywords=string_list(payload.get("exclude_keywords")),
         saved_messages_enabled=parse_bool(payload.get("telegram_saved_messages_enabled"), default=True),
+        bot_token=str(payload.get("telegram_bot_token") or "").strip(),
     )
 
 
 def load_config(payload: Optional[Dict[str, Any]] = None, *, tolerant=False) -> HermesConfig:
     if payload is None:
         payload = read_options()
-    configure_secrets(payload.get(key) for key in ("pushover_user_key", "pushover_api_token", "api_hash", "phone_number", "verification_code", "public_dashboard_token"))
+    configure_secrets(payload.get(key) for key in ("pushover_user_key", "pushover_api_token", "api_hash", "phone_number", "verification_code", "public_dashboard_token", "telegram_bot_token"))
     interval_seconds = _bounded_integer(payload, "interval_seconds", DEFAULT_INTERVAL_SECONDS, 1, 86400)
     request_delay_min_seconds = _bounded_integer(
         payload, "request_delay_min_seconds", DEFAULT_REQUEST_DELAY_MIN_SECONDS, 0, 120
@@ -311,9 +313,9 @@ def load_config(payload: Optional[Dict[str, Any]] = None, *, tolerant=False) -> 
     if telegram.enabled:
         if not telegram.api_id or not telegram.api_hash or not telegram.phone_number:
             raise HermesError("Telegram aktifse api_id, api_hash ve phone_number zorunlu.")
-        if not telegram.channels and not telegram.saved_messages_enabled:
+        if not telegram.channels and not telegram.saved_messages_enabled and not telegram.bot_token:
             raise HermesError("Telegram aktifse en az bir channels kaydı tanımlanmalı.")
-        if not telegram.keywords and not telegram.saved_messages_enabled:
+        if not telegram.keywords and not telegram.saved_messages_enabled and not telegram.bot_token:
             raise HermesError("Telegram aktifse en az bir keywords kaydı tanımlanmalı.")
 
     return HermesConfig(

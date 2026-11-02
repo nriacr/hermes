@@ -127,7 +127,7 @@ class TelegramQuickAddTests(unittest.TestCase):
         with patch("hermes.web.settings.check_link", return_value=check):
             card = telegram._quick_add_card(url, providers=object())
         groups = card.pop("groups")
-        self.assertEqual(card, {"title": "Gömlek", "name": "Gömlek", "size": "M", "variant_filter": "Renk=Siyah"})
+        self.assertEqual(card, {"title": "Gömlek", "name": "Gömlek", "size": "M", "variant_filter": "Renk=Siyah", "prices": []})
         self.assertEqual([(group["key"], group["values"], group["chosen"]) for group in groups],
                          [("variant:Renk", ["Siyah", "Beyaz"], ["Siyah"]), ("size", ["S", "M"], ["M"]),
                           ("priority", list(telegram.PRIORITY_LABELS.values()), [])])

@@ -103,6 +103,7 @@ class TelegramConfig:
     keywords: List[str]
     exclude_keywords: List[str]
     saved_messages_enabled: bool = True
+    bot_token: str = field(default="", repr=False)
 
 
 @dataclass

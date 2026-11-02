@@ -366,7 +366,7 @@ def _quick_add_card(url: str, providers=None) -> Dict[str, Any]:
             if picked:
                 chosen[dimension] = picked
     return {"title": title or name, "name": name, "size": size, "variant_filter": format_variant_filter(chosen),
-            "groups": groups}
+            "groups": groups, "prices": result.get("variant_prices") or []}
 
 
 def _choice_groups(options, dimensions, defaults, variants) -> list:
@@ -815,10 +815,11 @@ async def _listen(config: HermesConfig, notifier: Pushover, providers=None) -> N
     client = TelegramClient(str(TELEGRAM_SESSION_PATH), telegram_config.api_id, telegram_config.api_hash)
     try:
         await _ensure_login(client, telegram_config)
+        owner = await client.get_me()
         resolved_channels = await _resolve_channels(client, telegram_config.channels)
-        saved_messages_chat = await client.get_me() if telegram_config.saved_messages_enabled else None
+        saved_messages_chat = owner if telegram_config.saved_messages_enabled else None
         listened_chats = list(resolved_channels) + ([saved_messages_chat] if saved_messages_chat is not None else [])
-        if not listened_chats:
+        if not listened_chats and not telegram_config.bot_token:
             record_telegram_error("Dinlenebilir Telegram kanalı bulunamadı.")
             raise WaitingForUser()
 
@@ -881,10 +882,18 @@ async def _listen(config: HermesConfig, notifier: Pushover, providers=None) -> N
         saved_note = " | Kayıtlı Mesajlar hızlı ekleme aktif" if saved_messages_chat else ""
         log(f"Telegram kanal dinleme aktif: kanal={len(resolved_channels)} | keyword={len(telegram_config.keywords)}{saved_note}")
         heartbeat = asyncio.ensure_future(_heartbeat())
+        bot_task = None
         try:
+            if telegram_config.bot_token:
+                from .bot import run_bot
+
+                bot_task = asyncio.create_task(run_bot(telegram_config, owner.id, providers))
             await client.run_until_disconnected()
         finally:
             heartbeat.cancel()
+            if bot_task is not None:
+                bot_task.cancel()
+                await asyncio.gather(bot_task, return_exceptions=True)
             if poll_watch is not None:
                 poll_watch.cancel()
         raise ConnectionError("Telegram bağlantısı kapandı.")

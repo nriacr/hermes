@@ -360,3 +360,29 @@ cannot bypass unfinished polls. Replies to the actual price prompt and bare
 prices both work. Saved Messages and poll updates serialize their pending-state
 changes together. Successful option persistence is followed by the summary
 confirmation and the normal Hermes restart.
+
+### Owner-only bot quick add
+
+An optional `telegram_bot_token` starts a second Telegram client in the existing
+listener event loop with a MemorySession. The personal login still owns channel
+monitoring and supplies the bot owner's immutable numeric user ID. Only private
+messages/callbacks from that ID can inspect links or change watches. No public
+endpoint, webhook, extra server or first-message pairing is used. The token is
+masked in settings, omitted from config repr and redacted from logging; blank
+settings input preserves it. Bot failures retry independently of channel reads.
+
+`telegram/bot.py` owns bot transport and persisted conversation state in
+`/data/telegram_bot_quick_add.json`. It reuses the existing provider inspection,
+variant choice application and locked watch writer. Color/size buttons toggle
+multiple choices and require explicit completion; pagination preserves choices.
+Model/interval buttons select one value. A flow/step/message identity rejects
+stale callbacks, and an asyncio lock serializes text and callback answers. State
+survives reconnect/restart and expires after 24 hours. Saved Messages retains its
+existing poll transport for compatibility.
+
+Target suggestions retain the provider's exact decimal price and match all
+selected dimensions. The minimum in-stock selected price is shown as the basis.
+Discounts 5/10/15/25/40 percent round upward to multiples of 50 TL; duplicate and
+non-lower targets are omitted. Missing prices fall back to manual entry. One
+target button or a typed price completes the watch once, using the existing
+Supervisor option persistence and restart; it cannot bypass unfinished choices.

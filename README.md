@@ -20,7 +20,8 @@ takip add-on'udur.
   Takip kartının adı/hedefi değişince kalıcı kimliği değişmez.
 - Amazon davranışı değişmedi; kendi erişim/varyant kuralları site modülünde korunur.
 - Telegram kanallarında keyword takibi ve Kayıtlı Mesajlar'dan hızlı takip
-  ekleme.
+  ekleme. İsteğe bağlı Hermes bot sohbetinde renk/beden çoklu seçim düğmeleri,
+  tarama aralığı ve hazır hedef fiyatlar bulunur; manuel fiyat da yazılabilir.
 - Panel: özet tablo, istatistik ve ayarlar. Home Assistant
   içinden (ingress) ve isteğe bağlı token'lı public adresten aynı şekilde
   çalışır.
@@ -32,6 +33,23 @@ Ayrıntılar: [add-on kılavuzu](ha-addon/README.md),
 [değişiklik günlüğü](ha-addon/CHANGELOG.md),
 [mimari](docs/ARCHITECTURE.md). Geliştirme kuralları [AGENTS.md](AGENTS.md)
 dosyasındadır.
+
+## Telegram bot bağlantısı
+
+BotFather'da `/newbot` ile bot oluştur. Hermes > Ayarlar > Telegram ayarları
+altındaki **Hermes bot erişim anahtarı** alanına BotFather anahtarını girip
+kaydet. Telegram takip açık ve mevcut kişisel hesap bağlantısı etkin olmalı.
+Bot yalnız bu kişisel hesabın özel mesajlarını kabul eder; kullanıcı adı
+büyük/küçük harfine veya ilk mesaj atan kişiye göre yetki verilmez.
+Anahtar sayfada tekrar gösterilmez; alanı boş bırakmak mevcut anahtarı korur.
+Bot sohbetinde Başlat'a basıp ürün bağlantısını paylaş.
+
+Renk ve bedende birden fazla değer işaretlenebilir; **Seçimi tamamla** ile
+ilerlenir. Model ve tarama aralığı tek seçimdir. Hedef fiyat seçenekleri seçili,
+stokta olan varyantların en düşük güncel fiyatının %5/10/15/25/40 altından
+hesaplanır ve üstteki 50 TL katına yuvarlanır. Aynı çıkan veya mevcut fiyata
+eşit/üstündeki tutarlar çıkarılır. Fiyat okunamadığında yalnız manuel giriş
+sunulur. Hedefte tek düğmeye basmak veya doğrudan fiyat yazmak kaydı tamamlar.
 
 Yayın erişimi ve otomatik yetki kontrolü: [yayın erişimi kılavuzu](docs/RELEASE_ACCESS.md).
 

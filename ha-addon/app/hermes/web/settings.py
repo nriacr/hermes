@@ -342,6 +342,9 @@ def _telegram_section(options: Dict[str, Any]) -> str:
         _checkbox("", "telegram_enabled", "Telegram takip aktif", options.get("telegram_enabled", False)),
         _checkbox("", "telegram_saved_messages_enabled", "Kayıtlı Mesajlar'dan hızlı takip ekleme aktif",
                   options.get("telegram_saved_messages_enabled", True)),
+        _field("", "telegram_bot_token", "Hermes bot erişim anahtarı (boş bırakırsan mevcut anahtar korunur)", "", "password"),
+        "<p>BotFather anahtarını buraya girip kaydet. Bot yalnız mevcut Telegram hesabından gelen özel mesajları kabul eder. "
+        "Anahtar kaydedildikten sonra bot sohbetinde Başlat'a basıp ürün bağlantısını paylaşabilirsin.</p>",
         _field("", "api_id", "Telegram API ID", options.get("api_id", "")),
         _field("", "api_hash", "Telegram API Hash", options.get("api_hash", "")),
         _field("", "phone_number", "Telefon numarası", options.get("phone_number", "")),
@@ -599,6 +602,11 @@ def _update_telegram_options(options: Dict[str, Any], form) -> None:
     options["telegram_enabled"] = "telegram_enabled" in form
     # An unchecked box is simply absent from the posted form.
     options["telegram_saved_messages_enabled"] = "telegram_saved_messages_enabled" in form
+    token = _first(form, "telegram_bot_token")
+    if token:
+        if not re.fullmatch(r"\d+:[A-Za-z0-9_-]{20,}", token):
+            raise ValueError("Bot erişim anahtarı geçersiz. BotFather'ın verdiği anahtarı eksiksiz gir.")
+        options["telegram_bot_token"] = token
     for key in ("api_id", "api_hash", "phone_number", "verification_code"):
         options[key] = _first(form, key)
     options["session_name"] = _first(form, "session_name", "telegram_keyword_alert") or "telegram_keyword_alert"
@@ -755,6 +763,8 @@ def check_link(url: str, providers) -> Dict[str, Any]:
         "title": _distinct_parts(preview.title),
         "variants": [{"label": _distinct_parts(variant.label), "price": format_tl(variant.price, with_currency=True) if variant.price is not None else "",
                       "in_stock": variant.in_stock, "attributes": variant.attributes} for variant in preview.variants],
+        "variant_prices": [{"price": str(variant.price) if variant.price is not None else "",
+                            "in_stock": variant.in_stock, "attributes": variant.attributes} for variant in preview.variants],
         "dimensions": preview.dimensions,
         "defaults": preview.defaults,
     }
