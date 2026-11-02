@@ -290,7 +290,14 @@ screen: automatic submit after the fourth digit and explicit/manual locking.
 - Hepsiburada: product, variant and search pages; payable campaign prices
   (`Sepete özel`, Premium) win; each variant keeps its own price and label;
   search cards get their variant label from the product page.
-- Trendyol: product price.
+- Trendyol: current product data from `__envoy__SHARED_PROPS`; each size's
+  own price and stock. Link inspection discovers same-slug product candidates
+  sequentially and includes only pages with the same `productGroupId` and
+  matching content ID; unrelated same-name products stay separate. Inspection
+  lists color/size combinations, normal watches honor the selected colors and
+  size. Missing size prices never inherit the main price; Plus pricing is used
+  only for the selected size. Coupon requests are disabled (the endpoint
+  refuses Hermes on the Pi with HTTP 403).
 - Network, Beymen Club: `Sepette` / `2 ve üzeri` campaign prices win; requested
   sizes are case-insensitive; a missing size is a stock state.
 - Zara, H&M: colors and the requested size; a missing size is a stock state.
