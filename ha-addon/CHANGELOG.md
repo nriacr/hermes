@@ -1,5 +1,10 @@
 # Değişiklik günlüğü
 
+## 4.39.0
+
+- Telegram ile ekleme: seçenek anketleri tek tek gelir; her cevap "... seçildi" diye onaylanır, sonra sıradaki soru ve en son hedef fiyat sorulur. Tarama aralığı tek seçimli, diğerleri çoklu.
+- Sonuçta takibin eklendiği (ad, hedef fiyat, seçim, tarama) ya da eklenmediği ve nedeni yazılır.
+
 ## 4.38.1
 
 - Hermes sitelerden brotli (br) sıkıştırması istemez; Trendyol bazı ürün sayfalarını bu sıkıştırmayla gönderdiğinde sayfa okunamıyor ve "fiyat doğrulanamadı" hatası veriyordu.

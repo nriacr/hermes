@@ -140,21 +140,18 @@ class TelegramQuickAddTests(unittest.TestCase):
         self.assertEqual((saved["name"], saved["size"], saved["variant_filter"], saved["include_variations"]),
                          ("Gömlek", "M", "Renk=Siyah", True))
 
-    def test_choice_polls_are_sent_and_their_ticks_override_the_link_choice(self):
+    def test_choice_polls_are_split_and_their_ticks_override_the_link_choice(self):
         group = {"key": "size", "title": "Beden", "values": [str(n) for n in range(12)], "out": ["3"], "chosen": []}
-        client = SimpleNamespace(send_file=AsyncMock(side_effect=[SimpleNamespace(id=20), SimpleNamespace(id=21)]))
-        event = SimpleNamespace(chat_id=7, client=client)
-        polls = asyncio.run(telegram._send_choice_polls(event, {"groups": [group]}))
-        self.assertEqual([(poll["message_id"], len(poll["values"])) for poll in polls], [(20, 10), (21, 2)])
-        media = client.send_file.call_args_list[0].args[1]
+        steps = telegram._poll_steps({"groups": [group]})
+        self.assertEqual([(step["part"], len(step["values"])) for step in steps], [(" (1/2)", 10), (" (2/2)", 2)])
+        media = telegram._poll_media(steps[0], steps[0]["values"], steps[0]["part"])
         self.assertEqual(media.poll.question.text, "Beden (1/2)")
         self.assertEqual(media.poll.answers[3].text.text, "3 (tükendi)")
         self.assertTrue(media.poll.multiple_choice)
-        votes = SimpleNamespace(id=20, media=SimpleNamespace(results=SimpleNamespace(results=[
-            SimpleNamespace(option=b"1", chosen=True), SimpleNamespace(option=b"2", chosen=False)])))
-        client.get_messages = AsyncMock(return_value=[votes, None])
-        chosen = asyncio.run(telegram._poll_choices(event, polls))
-        self.assertEqual(chosen, {"size": ["1"]})
+        priority = {"key": "priority", "title": "Tarama aralığı", "values": ["1 dk", "5 dk"], "out": []}
+        self.assertFalse(telegram._poll_media(priority, priority["values"], "").poll.multiple_choice)
+        results = SimpleNamespace(results=[SimpleNamespace(option=b"1", chosen=True), SimpleNamespace(option=b"2", chosen=False)])
+        self.assertEqual(telegram._chosen_values(results, ["a", "b", "c"]), ["b"])
         pending = {"name": "Gömlek", "size": "M", "variant_filter": "Renk=Siyah", "priority": "15m"}
         self.assertEqual(telegram._apply_poll_choices(pending, {"size": ["S", "L"], "variant:Renk": ["Beyaz"], "priority": ["3 saat"]}),
                          {"name": "Gömlek", "size": "S; L", "variant_filter": "Renk=Beyaz", "priority": "3h"})
@@ -252,29 +249,42 @@ class TelegramConnectionTests(unittest.TestCase):
         finally:
             data.cleanup()
 
-    def test_saved_messages_conversation_asks_for_a_price_then_adds_the_card(self):
+    def test_saved_messages_conversation_asks_each_choice_then_the_price(self):
         data = TempData()
         url = "https://www.amazon.com.tr/dp/B000000001"
         try:
-            card = {"title": "Kulaklık", "name": "Kulaklık", "size": "", "variant_filter": "Renk=Siyah"}
+            groups = [{"key": "variant:Renk", "title": "Renk", "values": ["Siyah", "Beyaz"], "out": [], "chosen": ["Siyah"]},
+                      {"key": "priority", "title": "Tarama aralığı", "values": ["15 dk", "3 saat"], "out": [], "chosen": []}]
+            card = {"title": "Kulaklık", "name": "Kulaklık", "size": "", "variant_filter": "Renk=Siyah", "groups": groups}
             prompt = SimpleNamespace(id=11, edit=AsyncMock())
+            polls = iter([SimpleNamespace(id=20, media=SimpleNamespace(poll=SimpleNamespace(id=500))),
+                          SimpleNamespace(id=21, media=SimpleNamespace(poll=SimpleNamespace(id=501)))])
+            client = SimpleNamespace(send_file=AsyncMock(side_effect=lambda *_: next(polls)), send_message=AsyncMock(),
+                                     get_messages=AsyncMock())
+            vote = lambda poll_id, option: SimpleNamespace(poll_id=poll_id, results=SimpleNamespace(  # noqa: E731
+                results=[SimpleNamespace(option=option, chosen=True)]))
             with (patch.object(telegram, "TELEGRAM_QUICK_ADD_PATH", data.root / "quick.json"),
                   patch.object(telegram, "_quick_add_card", return_value=card),
                   patch.object(telegram, "_quick_add_watch", return_value=telegram.QUICK_ADD_DONE) as add):
-                first = SimpleNamespace(raw_text=f"Şuna bak {url}", chat_id=7, id=10, message=None,
+                first = SimpleNamespace(raw_text=f"Şuna bak {url}", chat_id=7, id=10, message=None, client=client,
                                         reply=AsyncMock(return_value=prompt))
                 self.assertTrue(asyncio.run(telegram._handle_saved_message_quick_add(first)))
-                self.assertIn("Kulaklık", prompt.edit.call_args.args[0])
                 self.assertIn("Renk=Siyah", prompt.edit.call_args.args[0])
+                self.assertEqual(client.send_file.call_count, 1)  # one question at a time
+                self.assertFalse(asyncio.run(telegram._handle_poll_vote(client, vote(501, b"1"))))  # not asked yet
+                self.assertTrue(asyncio.run(telegram._handle_poll_vote(client, vote(500, b"1"))))
+                self.assertIn("Renk: Beyaz seçildi", client.send_message.call_args_list[0].args[1])
+                self.assertEqual(client.send_file.call_count, 2)
+                self.assertTrue(asyncio.run(telegram._handle_poll_vote(client, vote(501, b"1"))))
+                self.assertIn("Hedef fiyat nedir?", client.send_message.call_args.args[1])
                 own = SimpleNamespace(raw_text="Hermes: 40.000 TL", chat_id=7, id=12, message=None, reply=AsyncMock())
                 self.assertTrue(asyncio.run(telegram._handle_saved_message_quick_add(own)))
                 add.assert_not_called()
-                # A bare price answers the latest question; no Telegram reply is needed.
                 answer = SimpleNamespace(raw_text="40.000 TL", chat_id=7, id=13, message=None, reply=AsyncMock())
                 self.assertTrue(asyncio.run(telegram._handle_saved_message_quick_add(answer)))
-            add.assert_called_once_with(url, Decimal("40000"), "Kulaklık", "", "Renk=Siyah", "15m")
-            self.assertIn("Takip kaydı eklendi", answer.reply.call_args.args[0])
-            self.assertIn("Seçim: Renk=Siyah", answer.reply.call_args.args[0])
+            add.assert_called_once_with(url, Decimal("40000"), "Kulaklık", "", "Renk=Beyaz", "3h")
+            self.assertIn("✅ Takip kaydı eklendi: Kulaklık", answer.reply.call_args.args[0])
+            self.assertIn("Tarama: 3 saat", answer.reply.call_args.args[0])
             self.assertEqual(json.loads((data.root / "quick.json").read_text())["pending"], [])
         finally:
             data.cleanup()
