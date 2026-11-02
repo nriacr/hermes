@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.39.5
+
+- Telegram hızlı eklemede fiyat yalnız anketler tamamlandıktan sonra alınır; fiyat sorusuna Yanıtla desteklenir. Uzun anketlerde seçenek kaybolmaz, bölüm atlanabilir; anket gönderimi başarısızsa kayıt akışı durur. Kısa link çözümü Telegram olay döngüsünü bekletmez, soru ve seçim adımları izlenebilir.
+
 ## 4.39.4
 
 - Trendyol renk adayları sırayla okunup ürün aile kimliğiyle doğrulanır; önizlemede her renk/bedenin kendi fiyatı ve stoku gösterilir. Beden fiyatı eksikse ana fiyat kopyalanmaz; seçili bedene ait Plus fiyatı başka bedene taşınmaz. Renk seçimi normal takipte de uygulanır.

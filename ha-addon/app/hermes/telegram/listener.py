@@ -61,10 +61,11 @@ PREVIEW_ATTEMPTS = 4
 POLL_ANSWER_LIMIT = 10
 POLL_CHECK_SECONDS = 3
 POLL_TEXT_LIMIT = 100
+POLL_SKIP_LABEL = "Bu bölümde seçimim yok"
 # Telegram-added cards are read every 15 minutes until changed on the settings page.
 QUICK_ADD_PRIORITY = "15m"
 SINGLE_CHOICE_KEYS = {"model", "priority"}
-# A price answers a waiting question; one written before the last poll keeps the choices so far.
+# A price is accepted only after every choice question has completed.
 ANSWER_STAGES = {"poll", "target_price"}
 PREVIEW_WAIT_SECONDS = 2
 
@@ -303,7 +304,9 @@ def _pending_for_reply(event, pending_items: Iterable[Dict[str, Any]]) -> Option
         return None
     chat_id = str(getattr(event, "chat_id", ""))
     for item in pending_items:
-        if str(item.get("chat_id", "")) == chat_id and reply_id in {item.get("source_message_id"), item.get("prompt_message_id")}:
+        message_ids = {item.get("source_message_id"), item.get("prompt_message_id"), item.get("price_message_id"),
+                       (item.get("current") or {}).get("message_id")}
+        if str(item.get("chat_id", "")) == chat_id and reply_id in message_ids:
             return item
     return None
 
@@ -328,9 +331,6 @@ def _quick_add_search_name(url: str) -> str:
         if value:
             return value[:160]
     return ""
-
-
-QUICK_ADD_DONE = "Takip kaydı eklendi"
 
 
 def _quick_add_card(url: str, providers=None) -> Dict[str, Any]:
@@ -409,10 +409,15 @@ def _poll_steps(card: Dict[str, Any]) -> list:
     """The choice questions in order, one poll each (split at Telegram's answer limit)."""
     steps = []
     for group in card.get("groups") or []:
-        chunks = [group["values"][start:start + POLL_ANSWER_LIMIT] for start in range(0, len(group["values"]), POLL_ANSWER_LIMIT)]
+        # Leave room for skipping a section, so every value remains selectable
+        # without forcing a choice from every section of a long list.
+        width = POLL_ANSWER_LIMIT - 1 if len(group["values"]) > POLL_ANSWER_LIMIT else POLL_ANSWER_LIMIT
+        chunks = [group["values"][start:start + width] for start in range(0, len(group["values"]), width)]
         for number, values in enumerate(chunks, start=1):
+            if len(chunks) > 1:
+                values = values + [POLL_SKIP_LABEL]
             if len(values) < 2:
-                continue  # Telegram needs two answers; a single leftover value stays a link choice
+                continue
             part = f" ({number}/{len(chunks)})" if len(chunks) > 1 else ""
             steps.append({"key": group["key"], "title": group["title"], "part": part, "values": values, "out": group["out"]})
     return steps
@@ -430,13 +435,23 @@ async def _send_poll(client, chat_id, step: Dict[str, Any]) -> Optional[Dict[str
 
 async def _ask_next(client, pending: Dict[str, Any]) -> None:
     """Send the next choice poll; after the last one ask for the target price."""
-    while pending.get("steps"):
-        sent = await _send_poll(client, int(pending["chat_id"]), pending["steps"].pop(0))
+    if pending.get("steps"):
+        step = pending["steps"][0]
+        sent = await _send_poll(client, int(pending["chat_id"]), step)
         if sent:
+            pending["steps"].pop(0)
             pending.update(stage="poll", current=sent)
+            log(f"Telegram hızlı ekleme sorusu: {step['title']}{step['part']}")
             return
+        pending.update(stage="failed", current=None)
+        await client.send_message(int(pending["chat_id"]),
+                                  f"Hermes: {step['title']} anketi gönderilemedi. Takip eklenmedi; bağlantıyı yeniden paylaş.")
+        return
     pending.update(stage="target_price", current=None)
-    await client.send_message(int(pending["chat_id"]), "Hermes: Hedef fiyat nedir?")
+    message = await client.send_message(int(pending["chat_id"]), "Hermes: Hedef fiyat nedir?")
+    message_id = getattr(message, "id", None)
+    pending["price_message_id"] = message_id if isinstance(message_id, int) else None
+    log("Telegram hızlı ekleme sorusu: Hedef fiyat")
 
 
 def _chosen_values(results, values: list) -> list:
@@ -450,8 +465,13 @@ def _chosen_values(results, values: list) -> list:
 
 async def _advance(client, pending: Dict[str, Any], picked: list) -> None:
     current = pending["current"]
-    pending.setdefault("choices", {}).setdefault(current["key"], []).extend(picked)
-    await client.send_message(int(pending["chat_id"]), f"Hermes: {current['title']}{current['part']}: {', '.join(picked)} seçildi.")
+    values = [value for value in picked if value != POLL_SKIP_LABEL]
+    if values:
+        choices = pending.setdefault("choices", {})
+        choices[current["key"]] = list(dict.fromkeys(choices.get(current["key"], []) + values))
+    text = f"{', '.join(values)} seçildi." if values else "Bu bölümde seçim yapılmadı."
+    await client.send_message(int(pending["chat_id"]), f"Hermes: {current['title']}{current['part']}: {text}")
+    log(f"Telegram hızlı ekleme seçimi: {current['title']}{current['part']}: {text}")
     await _ask_next(client, pending)
 
 
@@ -602,7 +622,11 @@ async def _handle_saved_message_quick_add(event, providers=None) -> bool:
     if pending is None and _reply_to_message_id(event) is None and PRICE_ONLY_PATTERN.match(text):
         pending = _latest_pending(event, pending_items)
 
-    if pending and pending.get("stage") in ANSWER_STAGES:
+    if pending and pending.get("stage") == "poll":
+        await event.reply("Hermes: Önce açık anketteki seçimini gönder; hedef fiyatı bütün sorulardan sonra soracağım.")
+        return True
+
+    if pending and pending.get("stage") == "target_price":
         target_price = _parse_target_price(text)
         if target_price is None:
             await event.reply("Hermes: hedef fiyatı sayı olarak yaz.")
@@ -627,19 +651,22 @@ async def _handle_saved_message_quick_add(event, providers=None) -> bool:
             await event.reply(f"Hermes: ❌ Takip eklenmedi. {result}")
         return True
 
-    url = _extract_supported_url(text)
+    if not URL_PATTERN.search(text):
+        return False
+    prompt = await event.reply("Hermes: bağlantı çözülüyor, ürün ve seçenekler kontrol ediliyor…")
+    url = await asyncio.to_thread(_extract_supported_url, text)
     if not url and URL_PATTERN.search(text):
         url = await _preview_url(event)
         if not url:
             payload["pending"] = pending_items
             save_json(TELEGRAM_QUICK_ADD_PATH, payload)
-            await event.reply("Hermes: bu bağlantıdan desteklenen bir ürün sayfasına ulaşılamadı; takip eklenmedi.")
+            await prompt.edit("Hermes: bu bağlantıdan desteklenen bir ürün sayfasına ulaşılamadı; takip eklenmedi.")
             return True
     if not url:
         payload["pending"] = pending_items
         save_json(TELEGRAM_QUICK_ADD_PATH, payload)
         return False
-    prompt = await event.reply("Hermes: bağlantı okunuyor, ürün ve seçenekler kontrol ediliyor…")
+    log("Telegram paylaşım bağlantısı çözüldü: " + urlparse(url)._replace(query="", fragment="").geturl())
     card = await asyncio.to_thread(_quick_add_card, url, providers)
     if card.get("error"):
         await prompt.edit(f"Hermes: {card['error']}. Takip eklenmedi; bağlantıyı Hermes Ayarlar ekranında Kontrol et ile ekleyebilirsin.")
@@ -795,6 +822,8 @@ async def _listen(config: HermesConfig, notifier: Pushover, providers=None) -> N
             record_telegram_error("Dinlenebilir Telegram kanalı bulunamadı.")
             raise WaitingForUser()
 
+        poll_lock = asyncio.Lock()
+
         async def handle_message(event) -> None:
             text = event.raw_text or ""
             _update_status(last_check=_now_text(), telegram_state="Dinleniyor")
@@ -804,7 +833,8 @@ async def _listen(config: HermesConfig, notifier: Pushover, providers=None) -> N
                 # Only messages the user writes in Saved Messages start or answer a flow.
                 if getattr(event, "out", False):
                     try:
-                        await _handle_saved_message_quick_add(event, providers)
+                        async with poll_lock:
+                            await _handle_saved_message_quick_add(event, providers)
                         _first_time_seen(_message_key(event))
                     except Exception as exc:  # noqa: BLE001
                         record_telegram_error(f"Kayıtlı Mesajlar ile takip eklenemedi: {exc}", "Telegram hızlı ekleme")
@@ -835,8 +865,6 @@ async def _listen(config: HermesConfig, notifier: Pushover, providers=None) -> N
         client.add_event_handler(handle_message, events.NewMessage(chats=listened_chats))
         if saved_messages_chat is not None:
             from telethon.tl.types import UpdateMessagePoll
-
-            poll_lock = asyncio.Lock()
 
             async def handle_poll_vote(update) -> None:
                 try:

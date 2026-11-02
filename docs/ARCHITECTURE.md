@@ -24,7 +24,8 @@ The owner approved this migration on 2026-10-09. `AGENTS.md` is the development 
 Card frequency has eight shared intervals: 1, 5, 15, 30, 60 minutes, 3, 6 and
 12 hours. The old `cycle` key is a read-time alias for `1m`; the existing longer
 choices retain their intervals. The panel emits only current keys on save,
-Telegram quick-add and new model instances default to `1m`. Existing state,
+new model instances default to `1m`. Telegram quick-add asks for the interval
+and uses `15m` only as a compatibility fallback. Existing state,
 read records and watch identities are preserved. Historical `cycle` and `high`
 samples still contribute to the fastest-card statistics. All panel dots use
 one CSS color property palette from red to green.
@@ -345,3 +346,17 @@ with events updated/resolved after the reset. The last-cycle tile reads statisti
 seeded once from existing request measurements and committed/pruned with each request.
 It is independent of erasable statistics so reset/restart preserves provider pacing.
 It contains no product URL, watch identity, price or credentials.
+
+### Saved Messages quick add
+
+Mobile share links are resolved by Hermes on the Pi, checking each redirect
+against private/local addresses. Telegram's product preview is a fallback;
+resolution and product inspection run off the Telegram event loop. The shared
+provider inspection supplies the color/size options, with one poll at a time,
+then the interval poll and the target price. Long polls include all choices
+and allow skipping a section without saving the skip label as a variant.
+A failed poll stops the flow and asks the user to reshare the link; a price
+cannot bypass unfinished polls. Replies to the actual price prompt and bare
+prices both work. Saved Messages and poll updates serialize their pending-state
+changes together. Successful option persistence is followed by the summary
+confirmation and the normal Hermes restart.

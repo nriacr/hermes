@@ -143,7 +143,7 @@ class TelegramQuickAddTests(unittest.TestCase):
     def test_choice_polls_are_split_and_their_ticks_override_the_link_choice(self):
         group = {"key": "size", "title": "Beden", "values": [str(n) for n in range(12)], "out": ["3"], "chosen": []}
         steps = telegram._poll_steps({"groups": [group]})
-        self.assertEqual([(step["part"], len(step["values"])) for step in steps], [(" (1/2)", 10), (" (2/2)", 2)])
+        self.assertEqual([(step["part"], len(step["values"])) for step in steps], [(" (1/2)", 10), (" (2/2)", 4)])
         media = telegram._poll_media(steps[0], steps[0]["values"], steps[0]["part"])
         self.assertEqual(media.poll.question.text, "Beden (1/2)")
         self.assertEqual(media.poll.answers[3].text.text, "3 (tükendi)")
@@ -259,7 +259,7 @@ class TelegramConnectionTests(unittest.TestCase):
             prompt = SimpleNamespace(id=11, edit=AsyncMock())
             polls = iter([SimpleNamespace(id=20, media=SimpleNamespace(poll=SimpleNamespace(id=500))),
                           SimpleNamespace(id=21, media=SimpleNamespace(poll=SimpleNamespace(id=501)))])
-            client = SimpleNamespace(send_file=AsyncMock(side_effect=lambda *_: next(polls)), send_message=AsyncMock(),
+            client = SimpleNamespace(send_file=AsyncMock(side_effect=lambda *_: next(polls)), send_message=AsyncMock(return_value=SimpleNamespace(id=40)),
                                      get_messages=AsyncMock())
             vote = lambda poll_id, option: SimpleNamespace(poll_id=poll_id, results=SimpleNamespace(  # noqa: E731
                 results=[SimpleNamespace(option=option, chosen=True)]))
@@ -340,12 +340,98 @@ class TelegramConnectionTests(unittest.TestCase):
             with (patch.object(telegram, "TELEGRAM_QUICK_ADD_PATH", data.root / "quick.json"),
                   patch.object(telegram, "_extract_supported_url", return_value=""),
                   patch.object(telegram, "_preview_url", AsyncMock(return_value=""))):
-                event = SimpleNamespace(raw_text="https://app.hb.biz/x", chat_id=7, id=10, message=None, reply=AsyncMock())
+                prompt = SimpleNamespace(edit=AsyncMock())
+                event = SimpleNamespace(raw_text="https://app.hb.biz/x", chat_id=7, id=10, message=None,
+                                        reply=AsyncMock(return_value=prompt))
                 self.assertTrue(asyncio.run(telegram._handle_saved_message_quick_add(event)))
-                self.assertIn("takip eklenmedi", event.reply.call_args.args[0])
+                self.assertIn("takip eklenmedi", prompt.edit.call_args.args[0])
                 note = SimpleNamespace(raw_text="süt al", chat_id=7, id=11, message=None, reply=AsyncMock())
                 self.assertFalse(asyncio.run(telegram._handle_saved_message_quick_add(note)))
                 note.reply.assert_not_called()
+        finally:
+            data.cleanup()
+
+    def test_long_polls_keep_every_value_and_allow_skipping_sections(self):
+        for count in (11, 21, 31):
+            with self.subTest(count=count):
+                values = [str(i) for i in range(count)]
+                group = {"key": "size", "title": "Beden", "values": values, "out": []}
+                steps = telegram._poll_steps({"groups": [group]})
+                actual = [v for step in steps for v in step["values"] if v != telegram.POLL_SKIP_LABEL]
+                self.assertEqual(actual, values)
+                self.assertTrue(all(2 <= len(step["values"]) <= telegram.POLL_ANSWER_LIMIT for step in steps))
+                self.assertTrue(all(telegram.POLL_SKIP_LABEL in step["values"] for step in steps))
+
+    def test_failed_poll_stops_the_flow_without_skipping_the_question(self):
+        step = {"key": "size", "title": "Beden", "values": ["S", "M"], "out": [], "part": ""}
+        pending = {"chat_id": "7", "steps": [step, dict(step, key="priority")]}
+        client = SimpleNamespace(send_file=AsyncMock(side_effect=RuntimeError("send failed")), send_message=AsyncMock())
+        asyncio.run(telegram._ask_next(client, pending))
+        self.assertEqual(pending["stage"], "failed")
+        self.assertEqual(len(pending["steps"]), 2)
+        client.send_file.assert_awaited_once()
+        self.assertIn("Takip eklenmedi", client.send_message.call_args.args[1])
+        self.assertNotIn("Hedef fiyat", client.send_message.call_args.args[1])
+
+    def test_skipping_a_poll_section_is_not_saved_as_a_variant(self):
+        current = {"key": "variant:Renk", "title": "Renk", "part": " (1/2)"}
+        pending = {"chat_id": "7", "current": current, "steps": [], "variant_filter": "Renk=Siyah"}
+        client = SimpleNamespace(send_message=AsyncMock(return_value=SimpleNamespace(id=55)))
+        asyncio.run(telegram._advance(client, pending, [telegram.POLL_SKIP_LABEL]))
+        self.assertEqual(pending.get("choices", {}), {})
+        self.assertEqual(telegram._apply_poll_choices(pending, {})["variant_filter"], "Renk=Siyah")
+
+    def test_a_price_during_poll_does_not_finish_or_discard_the_pending_flow(self):
+        data = TempData()
+        try:
+            pending = {"chat_id": "7", "stage": "poll", "created_at": telegram.local_now().isoformat()}
+            path = data.root / "quick.json"
+            path.write_text(json.dumps({"pending": [pending]}))
+            event = SimpleNamespace(raw_text="900", chat_id=7, id=20, message=None, reply=AsyncMock())
+            with patch.object(telegram, "TELEGRAM_QUICK_ADD_PATH", path), patch.object(telegram, "_quick_add_watch") as add:
+                self.assertTrue(asyncio.run(telegram._handle_saved_message_quick_add(event)))
+                add.assert_not_called()
+                self.assertIn("Önce açık anketteki", event.reply.call_args.args[0])
+                self.assertEqual(json.loads(path.read_text())["pending"], [pending])
+        finally:
+            data.cleanup()
+
+    def test_reply_to_the_actual_price_question_is_matched_and_saves_once(self):
+        data = TempData()
+        try:
+            pending = {"chat_id": "7", "source_message_id": 10, "prompt_message_id": 11, "steps": [],
+                       "url": "https://www.trendyol.com/h-m/5-li-kolsuz-ust-p-1183419110", "name": "Ürün",
+                       "created_at": telegram.local_now().isoformat()}
+            client = SimpleNamespace(send_message=AsyncMock(return_value=SimpleNamespace(id=55)))
+            asyncio.run(telegram._ask_next(client, pending))
+            event = SimpleNamespace(raw_text="900", chat_id=7, id=20, message=SimpleNamespace(reply_to_msg_id=55), reply=AsyncMock())
+            self.assertIs(telegram._pending_for_reply(event, [pending]), pending)
+            path = data.root / "quick.json"
+            path.write_text(json.dumps({"pending": [pending]}))
+            with patch.object(telegram, "TELEGRAM_QUICK_ADD_PATH", path), patch.object(telegram, "_quick_add_watch", return_value=telegram.QUICK_ADD_DONE) as add:
+                self.assertTrue(asyncio.run(telegram._handle_saved_message_quick_add(event)))
+                self.assertFalse(asyncio.run(telegram._handle_saved_message_quick_add(event)))
+                add.assert_called_once()
+            self.assertEqual(json.loads(path.read_text())["pending"], [])
+        finally:
+            data.cleanup()
+
+    def test_short_link_resolution_does_not_block_the_telegram_event_loop(self):
+        data = TempData()
+        try:
+            main_thread = threading.get_ident()
+            url = "https://www.trendyol.com/h-m/5-li-kolsuz-ust-p-1183419110"
+            def resolve(_):
+                self.assertNotEqual(threading.get_ident(), main_thread)
+                return url
+            prompt = SimpleNamespace(id=11, edit=AsyncMock())
+            event = SimpleNamespace(raw_text="https://ty.gl/example", chat_id=7, id=10, message=None, reply=AsyncMock(return_value=prompt))
+            with (patch.object(telegram, "TELEGRAM_QUICK_ADD_PATH", data.root / "quick.json"),
+                  patch.object(telegram, "_extract_supported_url", side_effect=resolve),
+                  patch.object(telegram, "_quick_add_card", return_value={"error": "örnek hata"}) as read):
+                self.assertTrue(asyncio.run(telegram._handle_saved_message_quick_add(event)))
+                self.assertEqual(read.call_args.args[0], url)
+            self.assertIn("bağlantı çözülüyor", event.reply.call_args.args[0])
         finally:
             data.cleanup()
 
