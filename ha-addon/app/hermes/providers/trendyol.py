@@ -22,6 +22,9 @@ from .size_availability import size_matches
 
 # Nuri is a Trendyol Plus member: Plus prices and Plus coupons are his payable prices.
 PLUS_MEMBER = True
+# The coupon endpoint is behind Cloudflare bot protection and refuses Hermes (403).
+# Nuri 2026-11-02: prices stay without coupon and no coupon request is sent.
+COUPONS_ENABLED = False
 SHARED_PROPS = re.compile(r'window\["__envoy__SHARED_PROPS"\]\s*=\s*')
 COUPON_URL = ("https://apigw.trendyol.com/discovery-storefront-trproductgw-service/api/coupons/{}/search"
               "?storefrontId=1&culture=tr-TR&channelId=1")
@@ -165,7 +168,7 @@ class TrendyolProvider(Provider):
     def coupons(self, product: dict, url: str, ctx) -> Optional[list]:
         """The product's coupons, or None when they cannot be read (the price then stays without coupon)."""
         content_id = product.get("id")
-        if not content_id:
+        if not COUPONS_ENABLED or not content_id:
             return None
         try:
             response = ctx.session.get(COUPON_URL.format(content_id), headers=coupon_headers(url), timeout=ctx.timeout)

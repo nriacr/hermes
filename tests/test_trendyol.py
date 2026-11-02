@@ -2,13 +2,14 @@ import json
 import unittest
 from decimal import Decimal
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import support  # noqa: F401 - puts the add-on on the import path
 
 from hermes.errors import OutOfStockHermesError, PriceUnavailableHermesError
 from hermes.models import WatchRule
 from hermes.providers.base import WatchRead
+from hermes.providers import trendyol
 from hermes.providers.trendyol import TrendyolProvider, extract_offers
 
 URL = "https://www.trendyol.com/h-m/urun-p-1"
@@ -98,6 +99,14 @@ class TrendyolProviderTests(unittest.TestCase):
         session.get.side_effect = [page_response, coupon_response]
         return SimpleNamespace(session=session, timeout=5)
 
+    def test_coupons_disabled_sends_no_coupon_request(self):
+        ctx = self.ctx(page(price(1799)), None)
+        watch = WatchRule(name="Nevresim", site="trendyol", url=URL, target_price=Decimal(2000))
+        offers = TrendyolProvider().read(watch, ctx, WatchRead())
+        self.assertEqual(offers[0].price, Decimal("1799"))
+        self.assertEqual(ctx.session.get.call_count, 1)
+
+    @patch.object(trendyol, "COUPONS_ENABLED", True)
     def test_read_applies_coupon_from_endpoint(self):
         body = {"isSuccess": True, "result": [coupon(15, "PERCENTAGE", cap=150)]}
         response = SimpleNamespace(raise_for_status=lambda: None, json=lambda: body)
@@ -107,6 +116,7 @@ class TrendyolProviderTests(unittest.TestCase):
         self.assertEqual(offers[0].price, Decimal("1649"))
         self.assertIn("/api/coupons/1/search", ctx.session.get.call_args_list[1].args[0])
 
+    @patch.object(trendyol, "COUPONS_ENABLED", True)
     def test_blocked_coupon_endpoint_keeps_page_price(self):
         def blocked():
             raise RuntimeError("403")

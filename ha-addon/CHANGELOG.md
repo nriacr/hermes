@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.39.1
+
+- Trendyol kupon isteği kapatıldı: kupon adresi Cloudflare bot korumasıyla Hermes'i reddediyor (403). Fiyat sayfadan (Plus fiyatı dahil) kuponsuz okunur, boş istek ve günlük uyarısı oluşmaz.
+
 ## 4.39.0
 
 - Telegram ile ekleme: seçenek anketleri tek tek gelir; her cevap "... seçildi" diye onaylanır, sonra sıradaki soru ve en son hedef fiyat sorulur. Tarama aralığı tek seçimli, diğerleri çoklu.
