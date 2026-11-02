@@ -169,7 +169,7 @@ def beymenclub_headers(url: str) -> Dict[str, str]:
         "User-Agent": CHROME_USER_AGENT,
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
         "Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7",
-        "Accept-Encoding": "gzip, deflate, br",
+        "Accept-Encoding": "gzip, deflate",
         "Cache-Control": "max-age=0",
         "Connection": "keep-alive",
         "Upgrade-Insecure-Requests": "1",

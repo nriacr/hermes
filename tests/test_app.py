@@ -78,6 +78,10 @@ class ConfigTests(unittest.TestCase):
 
 
 class TelegramQuickAddTests(unittest.TestCase):
+    def test_requests_never_ask_for_brotli_the_add_on_cannot_decode(self):
+        from hermes.constants import DEFAULT_HEADERS
+        self.assertNotIn("br", DEFAULT_HEADERS["Accept-Encoding"])
+
     def test_supported_links_are_extracted_and_share_links_resolved(self):
         self.assertEqual(telegram._extract_supported_url("Buna bakar mısın? https://www.amazon.com.tr/dp/B0B2PSDNV1?th=1"),
                          "https://www.amazon.com.tr/dp/B0B2PSDNV1?th=1")

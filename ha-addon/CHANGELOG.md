@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.38.1
+
+- Hermes sitelerden brotli (br) sıkıştırması istemez; Trendyol bazı ürün sayfalarını bu sıkıştırmayla gönderdiğinde sayfa okunamıyor ve "fiyat doğrulanamadı" hatası veriyordu.
+
 ## 4.38.0
 
 - Telegram ile ekleme: beden, renk, model ve tarama aralığı Kayıtlı Mesajlar'a anket olarak gelir (tükenenler işaretli); işaretlenmeyen grupta linkteki seçim, aralıkta 15 dk kalır.
