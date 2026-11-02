@@ -58,6 +58,11 @@ of each site are described in `docs/ARCHITECTURE.md`.
   enough. New and used offers for the same ASIN are separate rows.
 - Amazon search parsing stops before the section headed
   `All Departments içindeki sonuçlar gösteriliyor` and ignores everything below.
+- Test where it will run (Nuri 2026-11-02): Hermes runs autonomously on the Pi,
+  so every first and every later read test of a site, endpoint or coupon API runs
+  through Hermes on the Pi (its own code, session, network and libraries). A read
+  that worked only in a browser, on the Mac or with tools Hermes does not use is
+  not evidence and must not be reported as working or used to design a provider.
 - Search-name matching is phrase based, not an unordered bag of words. Excluded
   terms are comma-separated OR filters.
 
