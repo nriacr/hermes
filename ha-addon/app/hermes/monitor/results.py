@@ -186,8 +186,9 @@ class ResultRecorder:
                                        "search_group": recorded.search_group, "search_group_label": recorded.search_group_label,
                                        "warehouse_evidence": bool(offer.is_warehouse)}
                 continue
+            price_note = f" | hesap: {offer.price_note}" if offer.price_note and wants_alert else ""
             log(f"Kontrol edildi: {seller} | {display_name} | fiyat={format_tl(offer.price, with_currency=True)} | "
-                f"hedef={format_tl(watch.target_price, with_currency=True)}")
+                f"hedef={format_tl(watch.target_price, with_currency=True)}{price_note}")
 
             alert_queued = wants_alert
             seller_note = f" ({offer.seller})" if offer.seller and (provider.alert_shows_seller or offer.is_warehouse) else ""
@@ -205,7 +206,7 @@ class ResultRecorder:
                     "last_price_checked_at": price_checked_at, "search_group": recorded.search_group,
                     "search_group_label": recorded.search_group_label, "is_warehouse": offer.is_warehouse,
                     "warehouse_evidence": bool(offer.is_warehouse), "source": offer.source or provider.site,
-                    "currency": offer.currency, "conditions": offer.conditions, "last_error": None, "last_error_status": None,
+                    "currency": offer.currency, "conditions": offer.conditions, "price_note": offer.price_note, "last_error": None, "last_error_status": None,
                 })
                 if alert_queued:
                     updated["pending_alert_price"] = str(offer.price)

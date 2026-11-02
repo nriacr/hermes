@@ -335,10 +335,8 @@ def _listing_mapping_price(mapping: dict) -> Optional[Decimal]:
             if price >= lowest_reasonable_price or _price_context_is_premium(context)
         ]
     if entries:
-        price = min(price for price, _context in entries)
-        discount = _premium_tag_discount(mapping, price)
-        # Explicit Premium prices returned above already include the benefit.
-        return price - discount if discount > 0 and _valid_price(price - discount) else price
+        # Coupon tags outlive their coupons; the cart evaluation applies coupons.
+        return min(price for price, _context in entries)
 
     final_price = _number_price(mapping.get("finalPriceOnSale"))
     if final_price is not None:

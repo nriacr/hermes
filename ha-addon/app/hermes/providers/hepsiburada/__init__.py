@@ -4,6 +4,7 @@ import contextlib
 import threading
 import time
 from collections import Counter
+from dataclasses import replace
 from decimal import Decimal
 from typing import Dict, List, Optional
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -18,6 +19,7 @@ from ...models import OfferResult, ProductPreview, VariantPreview
 from ...utils import build_headers, format_tl, is_hepsiburada_search_url, normalize_offer_text
 from ..base import Provider, excluded_term_in_title, outside_variant_filter
 from ..http import curl_requests, decode_response_text, has_generic_challenge, read_site_html
+from . import cart as hepsiburada_cart
 from . import parser
 from .parser import clean_display_title, is_product_url
 
@@ -391,7 +393,7 @@ class HepsiburadaProvider(Provider):
                     continue
                 seen_offer_keys.add(dedupe_key)
                 found += 1
-                yield OfferResult(title=offer_title, price=offer.price, seller=offer.seller, url=variant_url)
+                yield OfferResult(title=offer_title, price=offer.price, seller=offer.seller, url=variant_url, price_note=offer.price_note)
             except Exception as exc:  # noqa: BLE001
                 errors.append(f"{variant_url} | {exc}")
                 log(f"Hepsiburada varyasyon okunamadı: {variant_url} | {exc}")
@@ -407,32 +409,60 @@ class HepsiburadaProvider(Provider):
         offer, variant_html = self._page_offer(ctx, watch, html, variant_url)
         if not variant_html:
             return offer, variant_html
+        listings: Optional[List[dict]] = None
         shown = parser.shown_seller(variant_html, variant_url)
-        if normalize_offer_text(offer.seller or "") == normalize_offer_text(shown):
-            return offer, variant_html
-        live_prices = self._live_seller_prices(ctx, variant_url)
-        verified = parser.extract_verified_offer(variant_html, variant_url, shown, live_prices)
-        if normalize_offer_text(verified.seller or "") != normalize_offer_text(offer.seller or ""):
-            log(f"Hepsiburada satıcısı canlı listede doğrulanmadı, sayılmadı: {offer.seller} | {format_tl(offer.price, with_currency=True)}")
-        return verified, variant_html
+        if normalize_offer_text(offer.seller or "") != normalize_offer_text(shown):
+            listings = self._listings(ctx, variant_url)
+            verified = parser.extract_verified_offer(variant_html, variant_url, shown, parser.live_seller_prices(listings))
+            if normalize_offer_text(verified.seller or "") != normalize_offer_text(offer.seller or ""):
+                log(f"Hepsiburada satıcısı canlı listede doğrulanmadı, sayılmadı: {offer.seller} | {format_tl(offer.price, with_currency=True)}")
+            offer = verified
+        return self._with_cart_price(ctx, offer, variant_html, variant_url, listings), variant_html
 
-    def _live_seller_prices(self, ctx, url: str) -> Dict[str, Decimal]:
+    def _with_cart_price(self, ctx, offer: OfferResult, page_html: str, url: str, listings: Optional[List[dict]]) -> OfferResult:
+        """The offer at the price the site itself evaluates for the cart, with how it was reached."""
+        if listings is None:
+            listings = self._listings(ctx, url)
+        seller = normalize_offer_text(offer.seller or "")
+        listing = next((item for item in listings if normalize_offer_text(str(item.get("merchantName") or "")) == seller), None)
+        if listing is None:
+            return replace(offer, price_note=f"sayfa fiyatı {format_tl(offer.price, with_currency=True)} (canlı listede satıcı yok)")
+        if not hepsiburada_cart.needs_evaluation(listing):
+            return replace(offer, price_note=f"sayfa fiyatı {format_tl(offer.price, with_currency=True)} (kampanya etiketi yok)")
+        product = hepsiburada_cart.page_product(page_html)
+        payload = hepsiburada_cart.evaluation_payload(listing, product, parser.product_id_from_url(url)) if product else None
+        if payload is None:
+            return replace(offer, price_note=f"sayfa fiyatı {format_tl(offer.price, with_currency=True)} (kampanya sorgusu kurulamadı)")
+        headers = _api_headers(url)
+        headers.update(hepsiburada_cart.EVALUATE_HEADERS)
+        headers["Origin"] = HOME_URL.rstrip("/")
+        try:
+            response = count_curl(curl_requests.Session().post(
+                HOME_URL + hepsiburada_cart.EVALUATE_PATH, headers=headers,
+                data=hepsiburada_cart.payload_json(payload).encode(), timeout=ctx.timeout, impersonate="chrome124",
+            ))
+            response.raise_for_status()
+            price, note = hepsiburada_cart.cart_price(response.json(), listing)
+        except Exception as exc:  # noqa: BLE001
+            log(f"Hepsiburada sepet fiyatı sorgulanamadı: {url} | {exc}")
+            return replace(offer, price_note=f"sayfa fiyatı {format_tl(offer.price, with_currency=True)} (kampanya sorgusu başarısız)")
+        if price is None:
+            return replace(offer, price_note=f"sayfa fiyatı {format_tl(offer.price, with_currency=True)} ({note})")
+        return replace(offer, price=price, price_note=note)
+
+    def _listings(self, ctx, url: str) -> List[dict]:
         """The site's live seller list; empty when it cannot be read, so only the shown seller counts."""
         api_url = f"{HOME_URL}api/v1/product/listings/{parser.product_id_from_url(url)}"
-        headers = hepsiburada_headers(url)
-        headers.pop("Upgrade-Insecure-Requests", None)
-        headers.pop("Sec-Fetch-User", None)
-        headers.update({"Accept": "application/json", "Referer": url, "Sec-Fetch-Dest": "empty", "Sec-Fetch-Mode": "cors"})
         try:
-            response = count_curl(curl_requests.Session().get(api_url, headers=headers, timeout=ctx.timeout, impersonate="chrome124"))
+            response = count_curl(curl_requests.Session().get(api_url, headers=_api_headers(url), timeout=ctx.timeout, impersonate="chrome124"))
             response.raise_for_status()
-            prices = parser.live_seller_prices(response.json())
+            listings = parser.live_listings(response.json())
         except Exception as exc:  # noqa: BLE001
             log(f"Hepsiburada canlı satıcı listesi okunamadı: {api_url} | {exc}")
-            return {}
-        if not prices:
+            return []
+        if not listings:
             log(f"Hepsiburada canlı satıcı listesi boş: {api_url}")
-        return prices
+        return listings
 
     def _page_offer(self, ctx, watch, html: str, variant_url: str):
         embedded_offer = parser.extract_embedded_variant_offer(html, variant_url)
@@ -449,6 +479,14 @@ class HepsiburadaProvider(Provider):
         except Exception as exc:  # noqa: BLE001
             log(f"Hepsiburada varyasyon sayfası premium kontrolü atlandı: {variant_url} | {exc}")
             return embedded_offer, variant_html
+
+
+def _api_headers(url: str) -> dict:
+    headers = hepsiburada_headers(url)
+    headers.pop("Upgrade-Insecure-Requests", None)
+    headers.pop("Sec-Fetch-User", None)
+    headers.update({"Accept": "application/json", "Referer": url, "Sec-Fetch-Dest": "empty", "Sec-Fetch-Mode": "cors"})
+    return headers
 
 
 def _lower_offer(first: Optional[OfferResult], second: Optional[OfferResult]) -> OfferResult:

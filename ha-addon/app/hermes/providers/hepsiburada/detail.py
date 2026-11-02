@@ -243,14 +243,20 @@ def shown_seller(html: str, source_url: str) -> str:
     return _detail_seller(_visible_lines_until_details(soup))
 
 
-def live_seller_prices(payload) -> dict[str, Decimal]:
-    """Salable sellers and their prices from the listings API, by normalized seller name."""
+def live_listings(payload) -> list[dict]:
+    """Salable listings from the listings API."""
     data = payload.get("data") if isinstance(payload, dict) else None
     listings = data.get("listings") if isinstance(data, dict) else None
+    return [
+        listing for listing in (listings if isinstance(listings, list) else [])
+        if isinstance(listing, dict) and listing.get("isSalable") is not False
+    ]
+
+
+def live_seller_prices(listings: list[dict]) -> dict[str, Decimal]:
+    """Live listing prices by normalized seller name."""
     prices: dict[str, Decimal] = {}
-    for listing in listings if isinstance(listings, list) else []:
-        if not isinstance(listing, dict) or listing.get("isSalable") is False:
-            continue
+    for listing in listings:
         seller = normalize_offer_text(_clean_text(listing.get("merchantName") or ""))
         price = _listing_mapping_price(listing)
         if seller and price is not None:

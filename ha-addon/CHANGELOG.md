@@ -1,5 +1,10 @@
 # Değişiklik günlüğü
 
+## 4.35.0
+
+- Hepsiburada: kupon ve sepet indirimi etiketlerden değil, sitenin "şu an geçerli kampanya ve kuponlar" cevabından hesaplanır. Biten kuponlar düşülmez; geçerli Premium kuponlarında fiyatın geçtiği en yüksek alt limitli kupon düşülür.
+- Fırsat bildirimi günlük satırına ve ürün kaydına fiyatın nasıl hesaplandığı yazılır (liste fiyatı, kampanya, kupon, sepet fiyatı).
+
 ## 4.34.4
 
 - Fırsat kartı ışığı sol ve sağ sütun kenarında kesilmez, sayfanın kenarına kadar yayılır.

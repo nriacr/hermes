@@ -88,6 +88,8 @@ class OfferResult:
     conditions: str = ""
     # Amazon offerListingId of this exact offer, used only by the opt-in cart action.
     offer_id: str = ""
+    # How the price was reached (list price, campaign, coupon), kept for later debugging.
+    price_note: str = ""
 
 
 @dataclass

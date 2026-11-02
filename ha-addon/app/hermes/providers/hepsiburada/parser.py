@@ -10,6 +10,7 @@ from .detail import (
     extract_embedded_variant_offer,
     extract_offer,
     extract_verified_offer,
+    live_listings,
     live_seller_prices,
     shown_seller,
 )
@@ -36,6 +37,7 @@ __all__ = [
     "extract_variant_urls",
     "extract_verified_offer",
     "is_product_url",
+    "live_listings",
     "live_seller_prices",
     "product_id_from_url",
     "shown_seller",

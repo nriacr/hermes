@@ -8,7 +8,8 @@ from support import APP_PATH  # noqa: F401
 
 from hermes.providers import hepsiburada
 from hermes.providers.hepsiburada import HepsiburadaProvider
-from hermes.providers.hepsiburada.parser import extract_embedded_variant_offer, extract_offer, live_seller_prices
+from hermes.providers.hepsiburada import cart
+from hermes.providers.hepsiburada.parser import extract_embedded_variant_offer, extract_offer
 
 
 SKU = "HBCV00009Z3Z8C"
@@ -40,18 +41,14 @@ def page(mapping, visible="", *, escaped=False):
 
 
 class HepsiburadaPremiumTests(unittest.TestCase):
-    def test_current_product_campaign_uses_current_listing_price(self):
+    def test_coupon_tags_alone_never_reduce_the_price(self):
         for escaped in (False, True):
             with self.subTest(escaped=escaped):
                 html = page(product(), escaped=escaped)
                 for read in (extract_offer, extract_embedded_variant_offer):
                     offer = read(html, URL)
-                    self.assertEqual(offer.price, Decimal("111199"))
+                    self.assertEqual(offer.price, Decimal("111699"))
                     self.assertEqual(offer.seller, "Hepsiburada")
-
-    def test_repeated_tags_are_deducted_once(self):
-        mapping = product(tags=TAG + "," + TAG)
-        self.assertEqual(extract_offer(page(mapping), URL).price, Decimal("111199"))
 
     def test_other_variant_does_not_inherit_main_campaign(self):
         mapping = product()
@@ -90,16 +87,11 @@ class HepsiburadaPremiumTests(unittest.TestCase):
                 with self.subTest(price=price, read=read.__name__):
                     self.assertEqual(read(page(product(price=price), visible), URL).price, Decimal("111199"))
 
-    def test_tag_list_alone_supports_other_fixed_amounts(self):
-        mapping = product(tags="")
-        mapping["tagList"] = [{"tagId": "telefonlarda-premiuma-ozel-1-000-tl-kupon-firsati"}]
-        self.assertEqual(extract_offer(page(mapping), URL).price, Decimal("110699"))
-
     def test_main_price_replaces_stale_lower_price_for_the_same_listing(self):
         mapping = product(price=120000)
         mapping["prices"] = [{"value": 120000}]
         mapping["variants"][0]["variantListing"] = mapping["variants"][0]["variantListing"][:1]
-        self.assertEqual(extract_offer(page(mapping), URL).price, Decimal("119500"))
+        self.assertEqual(extract_offer(page(mapping), URL).price, Decimal("120000"))
 
     def test_invalid_discount_cannot_make_nonpositive_price(self):
         mapping = product(price=100, tags=TAG)
@@ -161,7 +153,7 @@ class HepsiburadaLiveSellerTests(unittest.TestCase):
 
     def test_seller_missing_from_live_list_is_dropped(self):
         offer = self.read(live_payload(live_listing("Hepsiburada", 111049), live_listing("Troy Apple", 114824.08)))
-        self.assertEqual((offer.seller, offer.price), ("Hepsiburada", Decimal("110549")))
+        self.assertEqual((offer.seller, offer.price), ("Hepsiburada", Decimal("111049")))
 
     def test_unsalable_seller_is_dropped(self):
         offer = self.read(live_payload(live_listing("Hepsiburada", 111049), live_listing("MARTEKNOLOJİ", 110231.08, isSalable=False)))
@@ -173,51 +165,121 @@ class HepsiburadaLiveSellerTests(unittest.TestCase):
 
     def test_seller_whose_live_price_rose_loses_to_the_shown_seller(self):
         offer = self.read(live_payload(live_listing("Hepsiburada", 111049), live_listing("MARTEKNOLOJİ", 112000)))
-        self.assertEqual((offer.seller, offer.price), ("Hepsiburada", Decimal("110549")))
+        self.assertEqual((offer.seller, offer.price), ("Hepsiburada", Decimal("111049")))
 
     def test_unreadable_or_empty_live_list_keeps_only_the_shown_seller(self):
         for payload in (RuntimeError("403"), live_payload(), {"data": None}):
             with self.subTest(payload=payload):
                 offer = self.read(payload)
-                self.assertEqual((offer.seller, offer.price), ("Hepsiburada", Decimal("110549")))
-
-    def test_shown_seller_being_cheapest_needs_no_live_read(self):
-        provider = HepsiburadaProvider()
-        with patch.object(provider, "_live_seller_prices") as live:
-            offer, _page_html = provider._variant_offer(SimpleNamespace(timeout=5), SimpleNamespace(url=URL), page(product()), URL)
-        live.assert_not_called()
-        self.assertEqual(offer.price, Decimal("111199"))
+                self.assertEqual((offer.seller, offer.price), ("Hepsiburada", Decimal("111049")))
 
 
-class HepsiburadaCouponLimitTests(unittest.TestCase):
-    TIERS = ",".join(
-        f"cep-telefonu-aksesuarlarinda-{limit}-tl-ve-uzeri-alisverise-premium-a-ozel-{amount}-tl-kupon"
-        for limit, amount in ((1000, 100), (2000, 200), (3000, 300))
-    ) + ",cep-telefonu-aksesuarlarinda-premium-a-ozel-300-tl-ye-varan-kupon-firsati"
+PAGE_FIELDS = (
+    '<script>window.meta = {"productId":"HBC00009Z3SG3","definitionId":"60","definitionName":"Cep Telefonu",'
+    '"product_category_ids":["2147483642","371965","60005202"]};</script>'
+)
 
-    def payable(self, price, tags=TIERS):
-        return extract_offer(page(product(price=price, tags=tags)), URL).price
 
-    def test_highest_reached_limit_applies(self):
-        for price, expected in ((6699, 6399), (3000, 2700), (2999, 2799), (2000, 1800), (1500, 1400)):
+def listing(price=6699, tags="kampanya-premium-a-ozel-kupon", **extra):
+    return {"merchantName": "Hepsiburada", "merchantId": "merchant", "listingId": "listing", "isSalable": True,
+            "price": {"currency": 0, "value": price}, "prices": [{"value": price}], "paymentTag": tags, **extra}
+
+
+def evaluation(coupons=(), premium=None, campaign=None):
+    evaluated = {}
+    if premium is not None:
+        evaluated["evaluateAsPremiumResult"] = {"discountedPrice": premium}
+    if campaign is not None:
+        evaluated["evaluateResult"] = {"discountedPrice": campaign}
+    return {"data": {"result": {"product": {"priceData": {"status": "NODATA"}, "promoData": {"data": {
+        "campaignEvaluateResult": evaluated, "coupons": list(coupons)}}}}}}
+
+
+def coupon(limit, amount, premium=True, end="2099-01-01T00:00:00+03:00"):
+    return {"conditionAmount": limit, "discount": amount, "isPremium": premium, "endDateTime": end,
+            "label": f"Ek {amount} TL Kupon"}
+
+
+TIERS = [coupon(1000, 100), coupon(2000, 200), coupon(3000, 300)]
+
+
+class HepsiburadaCartPriceTests(unittest.TestCase):
+    """The site's own evaluation decides which coupon applies, as long as it is valid."""
+
+    def price(self, response, price=6699):
+        return cart.cart_price(response, listing(price))[0]
+
+    def test_highest_reached_coupon_limit_applies(self):
+        for price, expected in ((6699, 6399), (3000, 2700), (2999, 2799), (2000, 1800), (1500, 1400), (999, 999)):
             with self.subTest(price=price):
-                self.assertEqual(self.payable(price), Decimal(expected))
+                self.assertEqual(self.price(evaluation(TIERS), price), Decimal(expected))
 
-    def test_price_under_every_limit_gets_no_coupon(self):
-        self.assertEqual(self.payable(999), Decimal("999"))
+    def test_ended_or_non_premium_coupons_do_not_count(self):
+        coupons = [coupon(3000, 300, end="2026-11-01T23:59:00+03:00"), coupon(1000, 150, premium=False)]
+        self.assertEqual(self.price(evaluation(coupons)), Decimal("6699"))
 
-    def test_limit_is_checked_against_the_price_before_the_coupon(self):
-        self.assertEqual(self.payable(3100), Decimal("2800"))
+    def test_no_coupon_in_the_answer_keeps_the_list_price(self):
+        price, note = cart.cart_price(evaluation(), listing(113349))
+        self.assertEqual(price, Decimal("113349"))
+        self.assertIn("liste 113.349 TL", note)
 
-    def test_thousands_in_tags_and_ne_uzerine_form(self):
-        tags = "secili-urunlerde-20-000-tl-ve-uzerine-premiuma-ozel-1-000-tl-indirim"
-        self.assertEqual(self.payable(25000, tags), Decimal("24000"))
-        self.assertEqual(self.payable(19000, tags), Decimal("19000"))
+    def test_cart_campaign_comes_before_the_coupon_limit(self):
+        price, note = cart.cart_price(evaluation([coupon(3000, 300)], campaign=2900), listing(3100))
+        self.assertEqual(price, Decimal("2900"))
+        self.assertIn("sepet kampanyası", note)
 
-    def test_non_premium_coupon_and_up_to_tags_are_ignored(self):
-        tags = "cep-telefonu-aksesuarlarinda-750-tl-ve-uzerine-150-tl-kupon-indirimi,cep-telefonu-aksesuarlarinda-premium-a-ozel-300-tl-ye-varan-kupon-firsati"
-        self.assertEqual(self.payable(6699, tags), Decimal("6699"))
+    def test_site_premium_price_is_used_as_is(self):
+        price, note = cart.cart_price(evaluation(TIERS, premium=110549), listing(111049))
+        self.assertEqual(price, Decimal("110549"))
+        self.assertIn("site Premium hesabı", note)
 
-    def test_live_seller_list_uses_the_same_rule(self):
-        listing = live_listing("Hepsiburada", 6699, paymentTag=self.TIERS)
-        self.assertEqual(live_seller_prices(live_payload(listing))["hepsiburada"], Decimal("6399"))
+    def test_unreadable_answer_is_unknown(self):
+        self.assertIsNone(cart.cart_price({"data": {"result": {"product": None}}}, listing())[0])
+
+    def test_payload_carries_the_listing_and_page_fields(self):
+        product_fields = cart.page_product(PAGE_FIELDS)
+        payload = cart.evaluation_payload(listing(), product_fields, SKU)["product"]
+        self.assertEqual(payload["rootCategoryList"], [2147483642, 371965, 60005202])
+        self.assertEqual((payload["listingId"], payload["merchantId"], payload["finalPrice"]), ("listing", "merchant", 6699.0))
+        self.assertEqual(payload["productTags"], ["kampanya-premium-a-ozel-kupon"])
+
+
+class FakeSession:
+    def __init__(self, listings, answer):
+        self.listings, self.answer, self.posts = listings, answer, []
+
+    def get(self, *args, **kwargs):
+        return FakeLiveResponse(live_payload(*self.listings))
+
+    def post(self, url, **kwargs):
+        self.posts.append(json.loads(kwargs["data"]))
+        return FakeLiveResponse(self.answer)
+
+
+class HepsiburadaCartReadTests(unittest.TestCase):
+    def read(self, listings, answer, tags=TAG):
+        html = page(product(price=6699, tags=tags)) + PAGE_FIELDS
+        session = FakeSession(listings, answer)
+        with patch.object(hepsiburada, "curl_requests", SimpleNamespace(Session=lambda: session)), \
+             patch.object(hepsiburada, "count_curl", lambda response: response):
+            offer, _page_html = HepsiburadaProvider()._variant_offer(SimpleNamespace(timeout=5), SimpleNamespace(url=URL), html, URL)
+        return offer, session
+
+    def test_valid_coupon_gives_the_cart_price_and_its_calculation(self):
+        offer, session = self.read([listing(6699)], evaluation(TIERS))
+        self.assertEqual(offer.price, Decimal("6399"))
+        self.assertIn("alt limit 3.000 TL", offer.price_note)
+        self.assertEqual(session.posts[0]["product"]["sku"], SKU)
+
+    def test_ended_coupon_leaves_the_list_price(self):
+        offer, _session = self.read([listing(6699)], evaluation())
+        self.assertEqual(offer.price, Decimal("6699"))
+
+    def test_failed_evaluation_keeps_the_page_price(self):
+        offer, _session = self.read([listing(6699)], RuntimeError("403"))
+        self.assertEqual(offer.price, Decimal("6699"))
+        self.assertIn("kampanya sorgusu başarısız", offer.price_note)
+
+    def test_listing_without_campaign_tags_is_not_evaluated(self):
+        offer, session = self.read([listing(6699, tags="kargo-bedava")], evaluation(TIERS), tags="")
+        self.assertEqual((offer.price, session.posts), (Decimal("6699"), []))
