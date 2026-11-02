@@ -42,15 +42,50 @@ def format_tl(value: Decimal, with_currency: bool = True) -> str:
     return whole_tl(value, with_currency=False) + (f",{cents:02d}" if cents else "") + (" TL" if with_currency else "")
 
 
-def page_payload(html: str) -> dict:
-    match = SHARED_PROPS.search(html)
+def page_payload(html: str, name: str = "__envoy__SHARED_PROPS") -> Any:
+    pattern = SHARED_PROPS if name == "__envoy__SHARED_PROPS" else re.compile(r'window\["' + re.escape(name) + r'"\]\s*=\s*')
+    match = pattern.search(html)
     if not match:
         return {}
     try:
         payload, _ = json.JSONDecoder().raw_decode(html[match.end():])
     except json.JSONDecodeError:
         return {}
-    return payload if isinstance(payload, dict) else {}
+    allowed = (dict,) if name == "__envoy__SHARED_PROPS" else (dict, list)
+    return payload if isinstance(payload, allowed) else {}
+
+
+def embedded_coupon_fields(value, path="", depth=0):
+    """Locate coupon/promotion branches for source inspection without logging account data."""
+    if depth > 12:
+        return {}
+    found = {}
+    if isinstance(value, dict):
+        for key, child in value.items():
+            lower = key.lower()
+            if any(term in lower for term in ("token", "cookie", "session", "user", "customer", "header", "secret", "authorization")):
+                continue
+            child_path = f"{path}.{key}" if path else key
+            if any(term in lower for term in ("coupon", "collectable", "promotion")):
+                # Recursively keep only public scalar fields; strip credentials at every depth.
+                found[child_path] = public_coupon_fields(child)
+            else:
+                found.update(embedded_coupon_fields(child, child_path, depth + 1))
+    elif isinstance(value, list):
+        for index, child in enumerate(value[:60]):
+            found.update(embedded_coupon_fields(child, f"{path}[{index}]", depth + 1))
+    return found
+
+
+def public_coupon_fields(value, depth=0):
+    if depth > 8:
+        return "…"
+    if isinstance(value, dict):
+        return {key: public_coupon_fields(child, depth + 1) for key, child in value.items()
+                if not any(term in key.lower() for term in ("token", "cookie", "session", "user", "customer", "header", "secret", "authorization"))}
+    if isinstance(value, list):
+        return [public_coupon_fields(child, depth + 1) for child in value[:60]]
+    return value[:1000] if isinstance(value, str) else value
 
 
 def page_product(html: str) -> dict:
@@ -226,7 +261,7 @@ class TrendyolProvider(Provider):
             return None
         if diagnostic:
             # The unauthenticated endpoint's public coupon rules, not headers or sessions.
-            log(f"Trendyol kupon kuralları: ürün={content_id} | " + json.dumps(result, ensure_ascii=False, default=str)[:12000])
+            log(f"Trendyol kupon kuralları: ürün={content_id} | " + json.dumps(public_coupon_fields(result), ensure_ascii=False, default=str)[:12000])
         return [item for item in result if isinstance(item, dict)]
 
     def inspect_coupon_sources(self, html, product, url, ctx):
@@ -243,10 +278,16 @@ class TrendyolProvider(Provider):
         # Product-scoped embedded coupon/promotion fields only; never dump the page's user/session data.
         fields = {key: value for key, value in product.items()
                   if any(term in key.lower() for term in ("coupon", "campaign", "promotion"))}
-        fields["winner"] = {key: value for key, value in winner.items()
+        fields["listing"] = {key: value for key, value in listing.items()
                             if any(term in key.lower() for term in ("coupon", "campaign", "promotion"))}
+        fields["winner"] = {key: value for key, value in winner.items()
+                            if any(term in key.lower() for term in ("coupon", "campaign", "promotion", "collectable"))}
         log(f"Trendyol gömülü kupon verisi: ürün={product.get('id')} | " + json.dumps(fields, ensure_ascii=False, default=str)[:12000])
-        self.coupons(product, url, ctx, diagnostic=True)
+        props = page_payload(html, "__envoy__PROPS")
+        log(f"Trendyol ek veri bloğu: ürün={product.get('id')} | " + json.dumps({
+            "type": type(props).__name__, "keys": list(props) if isinstance(props, dict) else [],
+            "coupon_fields": embedded_coupon_fields(props)}, ensure_ascii=False, default=str)[:20000])
+        # Both clients returned 403 on 2026-11-03; do not repeat blocked requests on each inspection.
 
     def read_page(self, url, ctx) -> tuple[str, dict]:
         html = read_site_html(fetch_with_retries(ctx.session, url, ctx.timeout), "Trendyol")

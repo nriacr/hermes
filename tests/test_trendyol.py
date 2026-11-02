@@ -37,6 +37,18 @@ def coupon(discount, kind="AMOUNT", lower=0, cap=None, plus=False):
 
 
 class TrendyolPriceTests(unittest.TestCase):
+    def test_extra_page_props_share_the_json_parser(self):
+        data = [{"coupon": {"discount": 15, "discountType": "PERCENTAGE"}}]
+        html = 'window["__envoy__PROPS"] = ' + json.dumps(data)
+        self.assertEqual(trendyol.page_payload(html, "__envoy__PROPS"), data)
+        self.assertEqual(trendyol.page_product(html), {})
+
+    def test_embedded_coupon_diagnostics_exclude_account_and_nested_credentials(self):
+        data = {"user": {"coupon": "private"}, "module": {"coupons": [{"discount": 70,
+                "headers": {"Authorization": "private"}, "token": "private", "lowerLimit": 1250}]}}
+        found = trendyol.embedded_coupon_fields(data)
+        self.assertEqual(found, {"module.coupons": [{"discount": 70, "lowerLimit": 1250}]})
+
     def test_plain_price_with_sizes(self):
         html = page(price(949.99), [("2-4 Yaş", True), ("4-6 Yaş", True), ("6-8 Yaş", True), ("8-10 Yaş", True)])
         offer = extract_offers(html, URL, coupons=[])[0]

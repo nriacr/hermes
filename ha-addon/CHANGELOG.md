@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.39.7
+
+- Trendyol kupon kaynak tanısı ürünün diğer gömülü veri bloğunu ve seçili teklifin kampanya alanlarını inceler; hesap/oturum alanları kayda alınmaz. İki Pi istemcisinde 403 doğrulanan kupon servisine ürün kontrolünde tekrar istek gönderilmez.
+
 ## 4.39.6
 
 - Trendyol ürün kontrolünde Pi üzerinden kupon kaynağı tanısı: ürünün fiyat/Plus alanları, gömülü kupon alanları ve kupon API yanıtı incelenir; 403 yanıtında Hermes’in mevcut yerel HTTP kütüphanesi bir kez denenir. Otomatik kupon uygulaması doğrulanana kadar kapalıdır.
