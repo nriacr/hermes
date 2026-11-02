@@ -1,6 +1,6 @@
 # Değişiklik günlüğü
 
-## Sürüm ayrılamadı; erişimi, sürüm dosyalarını ve ortak kilidi kontrol et.
+## 4.37.2
 
 - Telegram ile ekleme: Hermes'in açamadığı kısa linklerde (Hepsiburada app.hb.biz) ürün adresi Telegram'ın link önizlemesinden alınır. Adres bulunamazsa Hermes sessiz kalmaz, takip eklenmediğini yazar.
 
