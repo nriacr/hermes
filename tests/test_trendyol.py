@@ -37,6 +37,15 @@ def coupon(discount, kind="AMOUNT", lower=0, cap=None, plus=False):
 
 
 class TrendyolPriceTests(unittest.TestCase):
+    def test_coupon_request_has_api_headers_not_navigation_headers(self):
+        headers = trendyol.coupon_headers(URL)
+        self.assertEqual(headers["Sec-Fetch-Mode"], "cors")
+        self.assertEqual(headers["Sec-Fetch-Dest"], "empty")
+        self.assertEqual(headers["Sec-Fetch-Site"], "same-site")
+        self.assertEqual(headers["User-Agent"], trendyol.CHROME_USER_AGENT)
+        self.assertNotIn("Upgrade-Insecure-Requests", headers)
+        self.assertNotIn("Sec-Fetch-User", headers)
+
     def test_extra_page_props_share_the_json_parser(self):
         data = [{"coupon": {"discount": 15, "discountType": "PERCENTAGE"}}]
         html = 'window["__envoy__PROPS"] = ' + json.dumps(data)
@@ -125,10 +134,12 @@ class TrendyolProviderTests(unittest.TestCase):
         curl = SimpleNamespace(get=Mock(return_value=native))
         ctx = ReadContext(5, Mock(), pace=Mock())
         ctx.session.get.return_value = blocked
+        ctx.session.cookies.get_dict.return_value = {"anonymous_site_cookie": "in-memory"}
         with patch.object(trendyol, "curl_requests", curl):
             result = TrendyolProvider().coupons({"id": 1}, URL, ctx, diagnostic=True)
         self.assertEqual(result, body["result"])
         self.assertEqual(curl.get.call_args.kwargs["impersonate"], "chrome124")
+        self.assertEqual(curl.get.call_args.kwargs["cookies"], {"anonymous_site_cookie": "in-memory"})
         ctx.pace.assert_called_once()
 
     def test_coupon_diagnostic_does_not_retry_other_failures(self):

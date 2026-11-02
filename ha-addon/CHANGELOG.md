@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.39.8
+
+- Trendyol kupon isteği belge gezintisi yerine API başlıkları kullanır; yerel HTTP istemcisinin kimliği tutarlıdır ve Pi ürün oturumunun anonim çerezleri yalnız bellekte aktarılır. Ürün kontrolündeki erişim tanısı kontrollü olarak tekrar sınanır; otomatik kupon uygulaması kapalıdır.
+
 ## 4.39.7
 
 - Trendyol kupon kaynak tanısı ürünün diğer gömülü veri bloğunu ve seçili teklifin kampanya alanlarını inceler; hesap/oturum alanları kayda alınmaz. İki Pi istemcisinde 403 doğrulanan kupon servisine ürün kontrolünde tekrar istek gönderilmez.

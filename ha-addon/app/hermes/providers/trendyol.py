@@ -12,7 +12,7 @@ from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, Optional
 from urllib.parse import urlsplit
 
-from ..constants import SITE_TRENDYOL
+from ..constants import CHROME_USER_AGENT, SITE_TRENDYOL
 from ..errors import HermesError, OutOfStockHermesError, PriceUnavailableHermesError
 from ..logging_utils import log
 from ..models import OfferResult, ProductPreview, VariantPreview
@@ -222,7 +222,11 @@ def extract_offers(html: str, url: str, size: str = "", coupons: Optional[list] 
 
 def coupon_headers(url: str) -> dict:
     headers = build_headers(url)
+    for key in ("Upgrade-Insecure-Requests", "Sec-Fetch-User"):
+        headers.pop(key, None)
     headers.update({"Accept": "application/json, text/plain, */*", "Content-Type": "application/json",
+                    "User-Agent": CHROME_USER_AGENT, "Sec-Fetch-Dest": "empty", "Sec-Fetch-Mode": "cors",
+                    "Sec-Fetch-Site": "same-site",
                     "Origin": "https://www.trendyol.com", "Referer": url,
                     "x-web-req-source": "StorefrontProductGateway"})
     return headers
@@ -245,9 +249,12 @@ class TrendyolProvider(Provider):
             if diagnostic and response.status_code == 403 and curl_requests is not None:
                 # The same native HTTP library already used by Hermes's other providers.
                 ctx.pace("Trendyol kupon kaynağı")
+                jar = getattr(ctx.session, "cookies", None)
+                cookies = jar.get_dict() if jar is not None and hasattr(jar, "get_dict") else {}
+                cookies = cookies if isinstance(cookies, dict) else {}
                 response = count_curl(curl_requests.get(
                     COUPON_URL.format(content_id), headers=coupon_headers(url), timeout=ctx.timeout,
-                    impersonate="chrome124", allow_redirects=False,
+                    impersonate="chrome124", cookies=cookies, allow_redirects=False,
                 ))
                 log(f"Trendyol kupon kaynağı: ürün={content_id} | istemci=curl | HTTP={response.status_code}")
             response.raise_for_status()
@@ -287,7 +294,7 @@ class TrendyolProvider(Provider):
         log(f"Trendyol ek veri bloğu: ürün={product.get('id')} | " + json.dumps({
             "type": type(props).__name__, "keys": list(props) if isinstance(props, dict) else [],
             "coupon_fields": embedded_coupon_fields(props)}, ensure_ascii=False, default=str)[:20000])
-        # Both clients returned 403 on 2026-11-03; do not repeat blocked requests on each inspection.
+        self.coupons(product, url, ctx, diagnostic=True)
 
     def read_page(self, url, ctx) -> tuple[str, dict]:
         html = read_site_html(fetch_with_retries(ctx.session, url, ctx.timeout), "Trendyol")
