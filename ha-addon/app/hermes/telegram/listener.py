@@ -5,6 +5,7 @@ import ipaddress
 import re
 import socket
 import threading
+import uuid
 from datetime import datetime, timedelta
 from typing import Any, Dict, Iterable, Optional
 from urllib.parse import parse_qs, urljoin, urlparse
@@ -12,7 +13,7 @@ from urllib.parse import parse_qs, urljoin, urlparse
 import requests
 
 from .. import traffic
-from ..config import read_options, watch_urls
+from ..config import format_variant_filter, read_options, watch_urls
 from ..constants import (
     DEFAULT_PRIORITY,
     TELEGRAM_ERROR_EVENTS_PATH,
@@ -36,6 +37,7 @@ from ..utils import (
     local_now,
     normalize_offer_text,
     parse_decimal,
+    utc_now,
     watch_name_required_for_url,
 )
 
@@ -52,6 +54,9 @@ QUICK_ADD_EXPIRY_HOURS = 24
 RECONNECT_DELAY_SECONDS = 60
 FLAME = "\U0001F525"
 URL_PATTERN = re.compile(r"https?://[^\s<>]+", re.IGNORECASE)
+# A bare price answers the latest question without a Telegram reply.
+PRICE_ONLY_PATTERN = re.compile(r"^[\d\s.,]+(?:tl|₺)?$", re.IGNORECASE)
+BOT_PREFIX = "Hermes:"
 
 
 class WaitingForUser(Exception):
@@ -289,13 +294,57 @@ def _quick_add_search_name(url: str) -> str:
 QUICK_ADD_DONE = "Takip kaydı eklendi"
 
 
-def _quick_add_watch(url: str, target_price, name: str = "") -> str:
+def _quick_add_card(url: str, providers=None) -> Dict[str, Any]:
+    """Read the link like the new card's Kontrol et and keep the choices the link itself names."""
+    from ..providers.registry import ProviderSet
+    from ..web.settings import check_link  # imported here: the web package is heavier than the listener
+
+    result = check_link(url, providers if providers is not None else ProviderSet())
+    if not result.get("ok"):
+        return {"error": str(result.get("error") or "Sayfa okunamadı.")}
+    if result.get("search"):
+        name = _quick_add_search_name(url)
+        if not name:
+            return {"error": "Arama bağlantısındaki ürün adı çözümlenemedi"}
+        return {"title": name, "name": name, "size": "", "variant_filter": ""}
+    options = set(result.get("options") or [])
+    dimensions = result.get("dimensions") or {}
+    defaults = result.get("defaults") or {}
+    title = str(result.get("title") or "").strip()
+    # A model site (Togg) names the card after the model, as the new card does.
+    name = ((defaults.get("Model") or [""])[0] if "model" in options else title).strip()
+    size = ""
+    sizes = [str(value) for value in defaults.get("Beden") or []]
+    if "size" in options and len(sizes) == 1:
+        size = sizes[0]
+    chosen: Dict[str, list] = {}
+    if "variant_filter" in options:
+        for dimension, values in dimensions.items():
+            if len(values) < 2 or (dimension == "Beden" and "size" in options):
+                continue
+            picked = [value for value in defaults.get(dimension) or [] if value in values]
+            if picked:
+                chosen[dimension] = picked
+    return {"title": title or name, "name": name, "size": size, "variant_filter": format_variant_filter(chosen)}
+
+
+def _choice_text(card: Dict[str, Any]) -> str:
+    parts = [f"Beden={card['size']}"] if card.get("size") else []
+    if card.get("variant_filter"):
+        parts.append(str(card["variant_filter"]))
+    return "; ".join(parts)
+
+
+QUICK_ADD_DONE = "Takip kaydı eklendi"
+
+
+def _quick_add_watch(url: str, target_price, name: str = "", size: str = "", variant_filter: str = "") -> str:
     """Append a Saved Messages watch through the same options path as the UI."""
     with OPTIONS_LOCK:
-        return _quick_add_watch_locked(url, target_price, name)
+        return _quick_add_watch_locked(url, target_price, name, size, variant_filter)
 
 
-def _quick_add_watch_locked(url: str, target_price, name: str) -> str:
+def _quick_add_watch_locked(url: str, target_price, name: str, size: str = "", variant_filter: str = "") -> str:
     options = read_options()
     watches = [dict(item) for item in options.get("takip_edilenler", []) if isinstance(item, dict)] \
         if isinstance(options.get("takip_edilenler"), list) else []
@@ -307,39 +356,62 @@ def _quick_add_watch_locked(url: str, target_price, name: str) -> str:
         normalized_name = _quick_add_search_name(normalized_url)
         if not normalized_name:
             return "Arama bağlantısındaki ürün adı çözümlenemedi. Bağlantıyı Hermes Ayarlar ekranından ekle."
-    options["takip_edilenler"] = watches + [{
+    # The same card the settings page saves for a new watch.
+    item: Dict[str, Any] = {
+        "id": uuid.uuid4().hex,
         "name": normalized_name,
         "target_price": float(target_price),
-        "url_1": normalized_url,
-        "active": True,
+        "include_variations": bool(variant_filter),
         "priority": DEFAULT_PRIORITY,
-    }]
+        "official_seller_only": False,
+        "active": True,
+    }
+    if size:
+        item["size"] = size
+    if variant_filter:
+        item["variant_filter"] = variant_filter
+    item["url_1"] = normalized_url
+    item["check_now_token"] = utc_now()
+    options["takip_edilenler"] = watches + [item]
     save_options_and_restart(options)
     return QUICK_ADD_DONE
 
 
-async def _handle_saved_message_quick_add(event) -> bool:
+def _latest_pending(event, pending_items: Iterable[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    chat_id = str(getattr(event, "chat_id", ""))
+    waiting = [item for item in pending_items if str(item.get("chat_id", "")) == chat_id and item.get("stage") == "target_price"]
+    return waiting[-1] if waiting else None
+
+
+async def _handle_saved_message_quick_add(event, providers=None) -> bool:
     """Run the short Saved Messages conversation for adding a Hermes watch."""
+    text = (event.raw_text or "").strip()
+    if text.startswith(BOT_PREFIX):
+        return True  # Hermes's own answers in Saved Messages
     payload = _load_quick_adds()
     pending_items = _prune_pending_quick_adds(payload["pending"])
     pending = _pending_for_reply(event, pending_items)
-    text = event.raw_text or ""
+    if pending is None and _reply_to_message_id(event) is None and PRICE_ONLY_PATTERN.match(text):
+        pending = _latest_pending(event, pending_items)
 
     if pending and pending.get("stage") == "target_price":
         target_price = _parse_target_price(text)
         if target_price is None:
-            await event.reply("Hermes: hedef fiyatı örneğin `40000` veya `40.000 TL` biçiminde yanıtla.")
+            await event.reply("Hermes: hedef fiyatı örneğin `40000` veya `40.000 TL` biçiminde yaz.")
             payload["pending"] = pending_items
             save_json(TELEGRAM_QUICK_ADD_PATH, payload)
             return True
-        result = _quick_add_watch(str(pending["url"]), target_price)
+        result = _quick_add_watch(str(pending["url"]), target_price, str(pending.get("name") or ""),
+                                  str(pending.get("size") or ""), str(pending.get("variant_filter") or ""))
         pending_items.remove(pending)
         payload["pending"] = pending_items
         save_json(TELEGRAM_QUICK_ADD_PATH, payload)
         if result == QUICK_ADD_DONE:
+            choice = _choice_text(pending)
             await event.reply(
-                f"Hermes: {result}. Hedef fiyat: {format_tl(target_price, with_currency=True)}. "
-                "Beden ve diğer ayarları Hermes Ayarlar ekranından düzenleyebilirsin."
+                f"Hermes: {result}. Hedef fiyat: {format_tl(target_price, with_currency=True)}."
+                + (f" Seçim: {choice}." if choice else "")
+                + " Diğer ayarları Hermes Ayarlar ekranından düzenleyebilirsin."
             )
             log(f"Telegram Kayıtlı Mesajlar ile takip eklendi: {pending['url']}")
         else:
@@ -351,12 +423,28 @@ async def _handle_saved_message_quick_add(event) -> bool:
         payload["pending"] = pending_items
         save_json(TELEGRAM_QUICK_ADD_PATH, payload)
         return False
-    prompt = await event.reply("Hermes: bu bağlantı için hedef fiyat nedir? Örnek: `40000` veya `40.000 TL`.")
+    prompt = await event.reply("Hermes: bağlantı okunuyor, ürün ve seçenekler kontrol ediliyor…")
+    card = await asyncio.to_thread(_quick_add_card, url, providers)
+    if card.get("error"):
+        await prompt.edit(f"Hermes: {card['error']}. Takip eklenmedi; bağlantıyı Hermes Ayarlar ekranında Kontrol et ile ekleyebilirsin.")
+        log(f"Telegram Kayıtlı Mesajlar bağlantısı okunamadı: {url} | {card['error']}")
+        return True
+    choice = _choice_text(card)
+    await prompt.edit(
+        f"Hermes: {card.get('title') or 'Ürün'}"
+        + (f"\nSeçim: {choice}" if choice else "")
+        + "\nHedef fiyat nedir? Örnek: `40000` veya `40.000 TL`."
+    )
+    payload = _load_quick_adds()  # the page read can take minutes; keep answers saved meanwhile
+    pending_items = _prune_pending_quick_adds(payload["pending"])
     pending_items.append({
         "chat_id": str(getattr(event, "chat_id", "")),
         "source_message_id": getattr(event, "id", None),
         "prompt_message_id": getattr(prompt, "id", None),
         "url": url,
+        "name": card.get("name", ""),
+        "size": card.get("size", ""),
+        "variant_filter": card.get("variant_filter", ""),
         "stage": "target_price",
         "created_at": local_now().isoformat(),
     })
@@ -475,7 +563,7 @@ async def _heartbeat() -> None:
         log("Telegram kanal dinleme devam ediyor.")
 
 
-async def _listen(config: HermesConfig, notifier: Pushover) -> None:
+async def _listen(config: HermesConfig, notifier: Pushover, providers=None) -> None:
     """Listen until Telegram disconnects; the caller reconnects."""
     telegram_config = config.telegram
     _update_status(telegram_enabled=True, telegram_state="Bağlanıyor", telegram_channels=len(telegram_config.channels),
@@ -500,7 +588,7 @@ async def _listen(config: HermesConfig, notifier: Pushover) -> None:
                 # Only messages the user writes in Saved Messages start or answer a flow.
                 if getattr(event, "out", False):
                     try:
-                        await _handle_saved_message_quick_add(event)
+                        await _handle_saved_message_quick_add(event, providers)
                         _first_time_seen(_message_key(event))
                     except Exception as exc:  # noqa: BLE001
                         record_telegram_error(f"Kayıtlı Mesajlar ile takip eklenemedi: {exc}", "Telegram hızlı ekleme")
@@ -538,7 +626,7 @@ async def _listen(config: HermesConfig, notifier: Pushover) -> None:
         await client.disconnect()
 
 
-def run_telegram_listener(config: HermesConfig, stop: Optional[threading.Event] = None, notifier=None) -> None:
+def run_telegram_listener(config: HermesConfig, stop: Optional[threading.Event] = None, notifier=None, providers=None) -> None:
     stop = stop or threading.Event()
     if not config.telegram.enabled:
         _update_status(telegram_enabled=False, telegram_state="Pasif", telegram_channels=0, telegram_keywords=0,
@@ -552,7 +640,7 @@ def run_telegram_listener(config: HermesConfig, stop: Optional[threading.Event] 
         raise RuntimeError("Telegram bildirim kuyruğu yapılandırılmadı.")
     while not stop.is_set():
         try:
-            asyncio.run(_listen(config, notifier))
+            asyncio.run(_listen(config, notifier, providers))
         except WaitingForUser:
             log("Telegram kullanıcı işlemi bekliyor; ayarlar kaydedilince yeniden denenecek.")
             return
@@ -561,10 +649,11 @@ def run_telegram_listener(config: HermesConfig, stop: Optional[threading.Event] 
         stop.wait(RECONNECT_DELAY_SECONDS)
 
 
-def start_telegram_listener(config: HermesConfig, stop: Optional[threading.Event] = None, notifier=None) -> Optional[threading.Thread]:
+def start_telegram_listener(config: HermesConfig, stop: Optional[threading.Event] = None, notifier=None,
+                            providers=None) -> Optional[threading.Thread]:
     if not config.telegram.enabled:
         run_telegram_listener(config, stop, notifier)
         return None
-    thread = threading.Thread(target=run_telegram_listener, args=(config, stop, notifier), name="telegram-listener", daemon=True)
+    thread = threading.Thread(target=run_telegram_listener, args=(config, stop, notifier, providers), name="telegram-listener", daemon=True)
     thread.start()
     return thread

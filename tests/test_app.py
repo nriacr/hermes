@@ -109,10 +109,28 @@ class TelegramQuickAddTests(unittest.TestCase):
         with (patch.object(telegram, "read_options", return_value={"gruplar": ["Teknoloji"], "takip_edilenler": []}),
               patch.object(telegram, "save_options_and_restart") as save):
             self.assertEqual(telegram._quick_add_watch(url, Decimal("8700")), telegram.QUICK_ADD_DONE)
-        saved = save.call_args.args[0]
-        self.assertEqual(saved["takip_edilenler"][0], {"name": "edifier m60", "target_price": 8700.0,
-                                                       "url_1": url, "active": True,
-                                                       "priority": "1m"})
+        card = save.call_args.args[0]["takip_edilenler"][0]
+        self.assertTrue(card.pop("id"))
+        self.assertTrue(card.pop("check_now_token"))
+        self.assertEqual(card, {"name": "edifier m60", "target_price": 8700.0, "include_variations": False,
+                                "priority": "1m", "official_seller_only": False, "active": True, "url_1": url})
+
+    def test_quick_add_keeps_the_choices_the_link_names(self):
+        url = "https://www.hm.com/tr_tr/productpage.1.html"
+        check = {"ok": True, "search": False, "options": ["size", "variant_filter"], "title": "Gömlek",
+                 "dimensions": {"Renk": ["Siyah", "Beyaz"], "Beden": ["S", "M"]},
+                 "defaults": {"Renk": ["Siyah"], "Beden": ["M"]}}
+        with patch("hermes.web.settings.check_link", return_value=check):
+            card = telegram._quick_add_card(url, providers=object())
+        self.assertEqual(card, {"title": "Gömlek", "name": "Gömlek", "size": "M", "variant_filter": "Renk=Siyah"})
+        with patch("hermes.web.settings.check_link", return_value={"ok": False, "error": "Sayfa okunamadı: 403"}):
+            self.assertEqual(telegram._quick_add_card(url, providers=object()), {"error": "Sayfa okunamadı: 403"})
+        with (patch.object(telegram, "read_options", return_value={"takip_edilenler": []}),
+              patch.object(telegram, "save_options_and_restart") as save):
+            telegram._quick_add_watch(url, Decimal("900"), "Gömlek", "M", "Renk=Siyah")
+        saved = save.call_args.args[0]["takip_edilenler"][0]
+        self.assertEqual((saved["name"], saved["size"], saved["variant_filter"], saved["include_variations"]),
+                         ("Gömlek", "M", "Renk=Siyah", True))
 
     def test_an_already_watched_link_is_not_added_twice(self):
         url = "https://www.amazon.com.tr/dp/B000000001"
@@ -176,7 +194,7 @@ class TelegramConnectionTests(unittest.TestCase):
         stop = threading.Event()
         attempts = []
 
-        async def listen(_config, _notifier):
+        async def listen(_config, _notifier, _providers=None):
             attempts.append(1)
             if len(attempts) == 2:
                 stop.set()
@@ -210,17 +228,40 @@ class TelegramConnectionTests(unittest.TestCase):
         data = TempData()
         url = "https://www.amazon.com.tr/dp/B000000001"
         try:
+            card = {"title": "Kulaklık", "name": "Kulaklık", "size": "", "variant_filter": "Renk=Siyah"}
+            prompt = SimpleNamespace(id=11, edit=AsyncMock())
             with (patch.object(telegram, "TELEGRAM_QUICK_ADD_PATH", data.root / "quick.json"),
+                  patch.object(telegram, "_quick_add_card", return_value=card),
                   patch.object(telegram, "_quick_add_watch", return_value=telegram.QUICK_ADD_DONE) as add):
                 first = SimpleNamespace(raw_text=f"Şuna bak {url}", chat_id=7, id=10, message=None,
-                                        reply=AsyncMock(return_value=SimpleNamespace(id=11)))
+                                        reply=AsyncMock(return_value=prompt))
                 self.assertTrue(asyncio.run(telegram._handle_saved_message_quick_add(first)))
-                answer = SimpleNamespace(raw_text="40.000 TL", chat_id=7, id=12, message=SimpleNamespace(reply_to_msg_id=11),
-                                         reply=AsyncMock())
+                self.assertIn("Kulaklık", prompt.edit.call_args.args[0])
+                self.assertIn("Renk=Siyah", prompt.edit.call_args.args[0])
+                own = SimpleNamespace(raw_text="Hermes: 40.000 TL", chat_id=7, id=12, message=None, reply=AsyncMock())
+                self.assertTrue(asyncio.run(telegram._handle_saved_message_quick_add(own)))
+                add.assert_not_called()
+                # A bare price answers the latest question; no Telegram reply is needed.
+                answer = SimpleNamespace(raw_text="40.000 TL", chat_id=7, id=13, message=None, reply=AsyncMock())
                 self.assertTrue(asyncio.run(telegram._handle_saved_message_quick_add(answer)))
-            add.assert_called_once_with(url, Decimal("40000"))
+            add.assert_called_once_with(url, Decimal("40000"), "Kulaklık", "", "Renk=Siyah")
             self.assertIn("Takip kaydı eklendi", answer.reply.call_args.args[0])
+            self.assertIn("Seçim: Renk=Siyah", answer.reply.call_args.args[0])
             self.assertEqual(json.loads((data.root / "quick.json").read_text())["pending"], [])
+        finally:
+            data.cleanup()
+
+    def test_an_unreadable_link_adds_nothing(self):
+        data = TempData()
+        try:
+            prompt = SimpleNamespace(id=11, edit=AsyncMock())
+            with (patch.object(telegram, "TELEGRAM_QUICK_ADD_PATH", data.root / "quick.json"),
+                  patch.object(telegram, "_quick_add_card", return_value={"error": "Sayfa okunamadı: 403"})):
+                event = SimpleNamespace(raw_text="https://www.amazon.com.tr/dp/B000000001", chat_id=7, id=10, message=None,
+                                        reply=AsyncMock(return_value=prompt))
+                self.assertTrue(asyncio.run(telegram._handle_saved_message_quick_add(event)))
+            self.assertIn("Takip eklenmedi", prompt.edit.call_args.args[0])
+            self.assertFalse((data.root / "quick.json").exists())
         finally:
             data.cleanup()
 

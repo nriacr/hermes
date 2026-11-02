@@ -129,7 +129,8 @@ def main() -> int:
     signal.signal(signal.SIGINT, request_stop)
     try:
         if runtime.service is not None:
-            start_telegram_listener(config, runtime.stop_event, runtime.service.monitor.delivery)
+            start_telegram_listener(config, runtime.stop_event, runtime.service.monitor.delivery,
+                                    runtime.service.monitor.providers)
             runtime.service.run()
         else:
             runtime.stop_event.wait()

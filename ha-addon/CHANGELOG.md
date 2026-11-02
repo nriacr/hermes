@@ -1,5 +1,10 @@
 # Değişiklik günlüğü
 
+## 4.37.0
+
+- Telegram Kayıtlı Mesajlar ile ekleme yeni kartla aynı çalışır: link Kontrol et gibi okunur, ürün adı ve linkteki beden/renk seçimi karta yazılır, sayfa okunamazsa takip eklenmez.
+- Hedef fiyat Yanıtla demeden düz mesajla yazılabilir (son soruya cevap sayılır).
+
 ## 4.36.0
 
 - Trendyol yeniden okunuyor: fiyat sayfanın kendi ürün verisinden alınır (indirimli fiyat; liste fiyatı ve "TL / Adet" birim fiyatı kullanılmaz). Plus üyesi olduğun için Plus'a özel fiyat varsa o esas alınır.
