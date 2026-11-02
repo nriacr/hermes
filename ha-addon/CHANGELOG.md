@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.39.4
+
+- Trendyol renk adayları sırayla okunup ürün aile kimliğiyle doğrulanır; önizlemede her renk/bedenin kendi fiyatı ve stoku gösterilir. Beden fiyatı eksikse ana fiyat kopyalanmaz; seçili bedene ait Plus fiyatı başka bedene taşınmaz. Renk seçimi normal takipte de uygulanır.
+
 ## 4.39.3
 
 - Telegram ile ekleme: telefonda verilen anket oyu Hermes'e bildirim olarak gelmezse açık anket 3 saniyede bir okunur; oy verilince sıradaki soruya geçilir.

@@ -10,13 +10,14 @@ import json
 import re
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, Optional
+from urllib.parse import urlsplit
 
 from ..constants import SITE_TRENDYOL
 from ..errors import HermesError, OutOfStockHermesError, PriceUnavailableHermesError
 from ..logging_utils import log
-from ..models import OfferResult
+from ..models import OfferResult, ProductPreview, VariantPreview
 from ..utils import build_headers, format_tl as whole_tl, parse_decimal
-from .base import Provider, size_preview
+from .base import Provider, outside_variant_filter
 from .http import fetch_with_retries, read_site_html
 from .size_availability import size_matches
 
@@ -134,6 +135,26 @@ def page_sizes(product: dict) -> list[tuple[str, bool]]:
             for item in product.get("variants") or [] if isinstance(item, dict) and item.get("value")]
 
 
+def size_price(product: dict, variant: dict) -> tuple[Decimal, Decimal, str]:
+    """Use the size's own price; the selected size may also carry a Plus offer."""
+    value = _amount(variant.get("price"))
+    if value is None:
+        raise PriceUnavailableHermesError(f"Trendyol beden fiyatı doğrulanamadı: {variant.get('value', '')}")
+    if variant.get("isSelected"):
+        return page_prices(product)
+    return value, value, f"beden fiyatı {format_tl(value)}"
+
+
+def family_urls(html: str, url: str) -> list[str]:
+    """Candidate product links with the same slug; membership must be verified on each page."""
+    path = urlsplit(url).path
+    match = re.fullmatch(r"(.+)-p-\d+", path)
+    if not match:
+        return []
+    paths = re.findall(re.escape(match[1]) + r"-p-\d+(?!\d)", html.replace('\\/', '/'))
+    return list(dict.fromkeys("https://www.trendyol.com" + path for path in paths))
+
+
 def extract_offers(html: str, url: str, size: str = "", coupons: Optional[list] = None) -> list[OfferResult]:
     product = page_product(html)
     if not product:
@@ -142,15 +163,20 @@ def extract_offers(html: str, url: str, size: str = "", coupons: Optional[list] 
     sizes = page_sizes(product)
     requested = str(size or "").strip()
     if requested:
-        matching = [(name, stock) for name, stock in sizes if size_matches(name, requested)]
+        matching = [item for item in product.get("variants") or []
+                    if isinstance(item, dict) and size_matches(item.get("value"), requested)]
         if not matching:
             raise OutOfStockHermesError(f"Trendyol beden bulunamadı: {requested}", title, url)
-        if not any(stock for _, stock in matching):
+        available = [item for item in matching if item.get("inStock")]
+        if not available:
             raise OutOfStockHermesError(f"Trendyol beden stokta değil: {requested}", title, url)
-        title = f"{title} / {matching[0][0]}"
+        variant = available[0]
+        title = f"{title} / {variant['value']}"
+        price, base, note = size_price(product, variant)
     elif product.get("inStock") is False or (sizes and not any(stock for _, stock in sizes)):
         raise OutOfStockHermesError("Ürün stokta yok.", title, url)
-    price, base, note = page_prices(product)
+    if not requested:
+        price, base, note = page_prices(product)
     if coupons is not None:
         price, note = apply_best_coupon(price, base, coupons, note)
     return [OfferResult(title=title, price=price, seller="Trendyol", url=url, source="trendyol-page", price_note=note)]
@@ -167,7 +193,7 @@ def coupon_headers(url: str) -> dict:
 class TrendyolProvider(Provider):
     site = SITE_TRENDYOL
 
-    card_options = ("size",)
+    card_options = ("size", "variant_filter")
 
     def coupons(self, product: dict, url: str, ctx) -> Optional[list]:
         """The product's coupons, or None when they cannot be read (the price then stays without coupon)."""
@@ -191,23 +217,79 @@ class TrendyolProvider(Provider):
         html = read_site_html(fetch_with_retries(ctx.session, url, ctx.timeout), "Trendyol")
         return html, page_product(html)
 
-    def inspect(self, url, ctx):
+    def family_pages(self, url, ctx, include_colors=True):
         html, product = self.read_page(url, ctx)
-        # Product-page data only: inspect on the Pi before extending variant discovery.
-        payload = page_payload(html)
-        selected = {key: value for key, value in product.items()
-                    if any(part in key.lower() for part in ("slic", "variant", "color", "group"))}
-        related = {key: value for key, value in payload.items()
-                   if key != "product" and any(part in key.lower() for part in ("slic", "variant", "color"))}
-        log("Trendyol varyant tanısı: " + json.dumps({"id": product.get("id"),
-            "product_keys": list(product), "page_keys": list(payload),
-            "product_variants": selected, "page_variants": related}, ensure_ascii=False, default=str)[:24000])
-        offer = extract_offers(html, url, coupons=self.coupons(product, url, ctx))[0]
-        return size_preview(self.site, offer.title, offer.price, page_sizes(product))
+        if not product:
+            raise PriceUnavailableHermesError("Trendyol ürününe ait fiyat doğrulanamadı.")
+        yield url, html, product
+        group = product.get("productGroupId")
+        if not include_colors or not group:
+            return
+        seen = {str(product.get("id"))}
+        candidates = family_urls(html, url)
+        log(f"Trendyol renk bağlantıları: ürün={product.get('id')} | aile={group} | " + json.dumps(candidates))
+        if len(candidates) > 60:
+            raise PriceUnavailableHermesError("Trendyol renk bağlantıları güvenli tarama sınırını aşıyor.")
+        for candidate in candidates:
+            content_id = urlsplit(candidate).path.rsplit('-p-', 1)[-1]
+            if content_id in seen:
+                continue
+            seen.add(content_id)
+            ctx.pace("Trendyol renk sayfası")
+            color_html, color = self.read_page(candidate, ctx)
+            if not color:
+                raise PriceUnavailableHermesError("Trendyol renk sayfası doğrulanamadı.")
+            if str(color.get("id")) != content_id or color.get("productGroupId") != group:
+                continue
+            yield candidate, color_html, color
+
+    def inspect(self, url, ctx):
+        variants, colors, sizes, title = [], [], [], ""
+        selected_color = ""
+        for color_url, html, product in self.family_pages(url, ctx):
+            color = str((product.get("slicingAttributes") or {}).get("DsmColor") or "").strip()
+            if not title:
+                title, selected_color = _title(product), color
+            if color and color not in colors:
+                colors.append(color)
+            entries = [item for item in product.get("variants") or [] if isinstance(item, dict) and item.get("value")]
+            if not entries:
+                entries = [{"value": "", "inStock": product.get("inStock", True), "isSelected": True}]
+            for item in entries:
+                size = str(item["value"])
+                available = bool(item.get("inStock")) and product.get("inStock") is not False
+                if size and size not in sizes:
+                    sizes.append(size)
+                value = None
+                if available or item.get("price") is not None:
+                    value = size_price(product, item)[0] if size else page_prices(product)[0]
+                attributes = {key: value for key, value in (("Renk", color), ("Beden", size)) if value}
+                variants.append(VariantPreview(" / ".join(part for part in (color, size) if part) or title,
+                                               value, available, attributes))
+            log(f"Trendyol renk okundu: {product.get('id')} | {color} | " + json.dumps([
+                {"beden": item["value"], "stok": item.get("inStock"), "fiyat": item.get("price")}
+                for item in entries], ensure_ascii=False))
+        dimensions = {key: values for key, values in (("Renk", colors), ("Beden", sizes)) if values}
+        return ProductPreview(self.site, title, variants, dimensions,
+                              {"Renk": [selected_color]} if selected_color else {})
+
+    def keeps_offer(self, watch, offer):
+        return not outside_variant_filter(watch, offer.title, whole_parts=True)
 
     def read(self, watch, ctx, outcome):
-        html, product = self.read_page(watch.url, ctx)
-        coupons = self.coupons(product, watch.url, ctx) if product else None
-        offers = extract_offers(html, watch.url, size=watch.size, coupons=coupons)
-        log(f"Trendyol fiyat hesabı: {offers[0].title} | {offers[0].price_note}")
+        offers = []
+        for color_url, html, product in self.family_pages(watch.url, ctx, watch.include_variations or bool(watch.variant_filter)):
+            coupons = self.coupons(product, color_url, ctx)
+            try:
+                current = extract_offers(html, color_url, size=watch.size, coupons=coupons)
+            except OutOfStockHermesError as exc:
+                if color_url == watch.url and not (watch.include_variations or watch.variant_filter):
+                    raise
+                outcome.unavailable.append({"product_title": exc.product_title or _title(product),
+                                            "product_url": color_url, "reason": str(exc)})
+                continue
+            for offer in current:
+                if self.keeps_offer(watch, offer):
+                    log(f"Trendyol fiyat hesabı: {offer.title} | {offer.price_note}")
+                    offers.append(offer)
         return offers

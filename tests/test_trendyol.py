@@ -8,7 +8,7 @@ import support  # noqa: F401 - puts the add-on on the import path
 
 from hermes.errors import OutOfStockHermesError, PriceUnavailableHermesError
 from hermes.models import WatchRule
-from hermes.providers.base import WatchRead
+from hermes.providers.base import ReadContext, WatchRead
 from hermes.providers import trendyol
 from hermes.providers.trendyol import TrendyolProvider, extract_offers
 
@@ -105,6 +105,55 @@ class TrendyolProviderTests(unittest.TestCase):
         offers = TrendyolProvider().read(watch, ctx, WatchRead())
         self.assertEqual(offers[0].price, Decimal("1799"))
         self.assertEqual(ctx.session.get.call_count, 1)
+
+    def test_requested_size_has_its_own_price(self):
+        data = trendyol.page_product(page(price(949.99), [("S", True), ("M", True)]))
+        data["variants"][1]["price"] = {"value": 1099.99}
+        html = 'window["__envoy__SHARED_PROPS"]=' + json.dumps({"product": data})
+        self.assertEqual(extract_offers(html, URL, size="M")[0].price, Decimal("1099.99"))
+
+    def test_missing_size_price_does_not_copy_the_main_price(self):
+        data = trendyol.page_product(page(price(949.99), [("M", True)]))
+        del data["variants"][0]["price"]
+        html = 'window["__envoy__SHARED_PROPS"]=' + json.dumps({"product": data})
+        with self.assertRaises(PriceUnavailableHermesError):
+            extract_offers(html, URL, size="M")
+
+    def test_plus_is_not_copied_to_another_size(self):
+        data = trendyol.page_product(page(price(1000, plus=900), [("S", True), ("M", True)], plus_eligible=True))
+        data["variants"][0]["isSelected"] = True
+        html = 'window["__envoy__SHARED_PROPS"]=' + json.dumps({"product": data})
+        self.assertEqual(extract_offers(html, URL, size="S")[0].price, Decimal("900"))
+        self.assertEqual(extract_offers(html, URL, size="M")[0].price, Decimal("1000"))
+
+    def test_inspect_reads_family_and_rejects_unrelated_product(self):
+        provider = TrendyolProvider()
+        root = trendyol.page_product(page(price(949.99), [("S", True), ("M", False)], color="Mavi"))
+        root.update(id=1, productGroupId=50)
+        sibling = trendyol.page_product(page(price(700), [("S", True), ("M", True)], color="Beyaz"))
+        sibling.update(id=2, productGroupId=50)
+        sibling["variants"][1]["price"] = {"value": 800}
+        unrelated = dict(root, id=3, productGroupId=51)
+        html = '<a href="/h-m/urun-p-1"></a><a href="/h-m/urun-p-2"></a><a href="/h-m/urun-p-3"></a>'
+        provider.read_page = Mock(side_effect=[(html, root), ("", sibling), ("", unrelated)])
+        pace = Mock()
+        result = provider.inspect(URL, ReadContext(5, Mock(), pace=pace))
+        self.assertEqual(result.dimensions, {"Renk": ["Mavi", "Beyaz"], "Beden": ["S", "M"]})
+        self.assertEqual([v.price for v in result.variants], [Decimal("949.99"), Decimal("949.99"), Decimal(700), Decimal(800)])
+        self.assertEqual([v.in_stock for v in result.variants], [True, False, True, True])
+        self.assertEqual(pace.call_count, 2)
+        self.assertEqual(result.defaults, {"Renk": ["Mavi"]})
+
+    def test_inspect_keeps_all_out_of_stock_sizes(self):
+        data = trendyol.page_product(page(price(949.99), [("M", False)]))
+        provider = TrendyolProvider()
+        provider.read_page = Mock(return_value=("", data))
+        result = provider.inspect(URL, ReadContext(5, Mock()))
+        self.assertFalse(result.variants[0].in_stock)
+
+    def test_candidate_links_are_deduplicated_and_same_slug_only(self):
+        html = '<a href="/h-m/urun-p-2?x=1"></a><a href="/h-m/urun-p-2"></a><a href="/other/urun-p-3"></a>'
+        self.assertEqual(trendyol.family_urls(html, URL), ["https://www.trendyol.com/h-m/urun-p-2"])
 
     @patch.object(trendyol, "COUPONS_ENABLED", True)
     def test_read_applies_coupon_from_endpoint(self):
