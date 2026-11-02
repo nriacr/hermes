@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.37.1
+
+- Özet sayfasında fırsat glow'u ve nabız animasyonu otomatik yenilemede baştan başlamaz, kaldığı yerden döner.
+
 ## 4.37.0
 
 - Telegram Kayıtlı Mesajlar ile ekleme yeni kartla aynı çalışır: link Kontrol et gibi okunur, ürün adı ve linkteki beden/renk seçimi karta yazılır, sayfa okunamazsa takip eklenmez.

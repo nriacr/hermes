@@ -15,7 +15,17 @@
       if (data.same || typeof data.html !== 'string') return;
       const open = new Set([...region.querySelectorAll('details[data-key][open]')].map((item) => item.dataset.key));
       const scroll = window.scrollY;
+      const phases = region.getAnimations({ subtree: true })
+        .filter((item) => item.effect.getComputedTiming().iterations === Infinity)
+        .map((item) => [item.animationName, item.currentTime]);
       region.innerHTML = data.html;
+      // Sonsuz animasyonlar (fırsat glow'u, nabız) yenilemede baştan başlamasın.
+      region.getAnimations({ subtree: true })
+        .filter((item) => item.effect.getComputedTiming().iterations === Infinity)
+        .forEach((item, index) => {
+          const old = phases[index];
+          if (old && old[0] === item.animationName) item.currentTime = old[1];
+        });
       document.dispatchEvent(new Event('hermes-live'));
       region.querySelectorAll('details[data-key]').forEach((item) => { if (open.has(item.dataset.key)) item.open = true; });
       window.scrollTo(0, scroll);
