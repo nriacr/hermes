@@ -9,6 +9,7 @@ page; the site's coupon endpoint lists them with their lower limit and cap.
 import json
 import re
 from decimal import ROUND_HALF_UP, Decimal
+from html import unescape
 from typing import Any, Optional
 from urllib.parse import parse_qsl, urljoin, urlsplit, urlunsplit
 
@@ -104,6 +105,12 @@ def source_contract(value, depth=0):
             return "<url>"
         return {"path": urlunsplit((parsed.scheme, parsed.netloc, parsed.path, "", "")),
                 "query_keys": [key for key, _ in parse_qsl(parsed.query)]}
+    if (isinstance(value, str) and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.:/-]{0,119}", value)
+            and any(term in value.lower() for term in ("coupon", "collectable", "product", "merchant", "discovery", "pdp", "fetch"))
+            and not any(term in value.lower() for term in ("token", "cookie", "session", "secret", "authorization"))):
+        return value
+    if isinstance(value, bool):
+        return value
     return type(value).__name__
 
 
@@ -112,7 +119,9 @@ def allowed_source_asset(url):
         parsed = urlsplit(url)
         host = (parsed.hostname or "").lower()
         return (parsed.scheme == "https" and not parsed.username and not parsed.password
-                and parsed.port in (None, 443) and parsed.path.endswith(".js")
+                and parsed.port in (None, 443) and parsed.path.endswith((".js", ".mjs"))
+                and not any(part in parsed.path.lower() for part in ("/eye-able/", "/ring/"))
+                and not any(char in parsed.path for char in ("$", "{", "}", "[", "]"))
                 and (host == "trendyol.com" or host.endswith(".trendyol.com")
                      or host == "dsmcdn.com" or host.endswith(".dsmcdn.com")))
     except ValueError:
@@ -121,7 +130,7 @@ def allowed_source_asset(url):
 
 def coupon_client_contracts(code):
     """Inspect static client code as text. No JavaScript is executed."""
-    paths, assets = [], []
+    paths, assets, methods = [], [], []
     for match in re.finditer(r'''["'`]([^"'`\r\n]{0,250}(?:coupon|collectable)[^"'`\r\n]{0,250})["'`]''', code.replace('\\/', '/'), re.I):
         value = match[1]
         if "/" not in value or re.search(r"\s", value) or any(term in value.lower() for term in ("token", "secret", "authorization")):
@@ -135,11 +144,28 @@ def coupon_client_contracts(code):
                 continue
             if not parsed.username and not parsed.password:
                 paths.append(urlunsplit((parsed.scheme, parsed.netloc, parsed.path, "", "")))
+                methods.extend(re.findall(r"\.(get|post|put|delete|patch)\s*\(", code[max(0, match.start() - 250):match.start()]))
     parameters = [name for name in ("contentId", "merchantId", "storefrontId", "culture", "channelId", "listingId", "variantId")
                   if name in code]
     headers = re.findall(r'''["'](x-[A-Za-z0-9-]+|Authorization|Accept-Language)["']\s*:''', code)
+    bases = re.findall(r"https://[A-Za-z0-9.-]+\.trendyol\.com/(?:discovery|api|gateway)[A-Za-z0-9_./-]*", code)
+    public_headers = dict(re.findall(r'''["'](x-web-req-source|x-application-id|x-client-version|x-client-is-cacheable|x-platform|x-storefront-id|x-culture)["']\s*:\s*["']([A-Za-z0-9_.-]{1,80})["']''', code))
     return {"paths": list(dict.fromkeys(paths))[:30], "candidate_parameters": parameters,
-            "header_names": list(dict.fromkeys(headers))[:30], "assets": list(dict.fromkeys(assets))[:10]}
+            "candidate_methods": list(dict.fromkeys(methods)), "service_bases": list(dict.fromkeys(bases))[:20],
+            "header_names": list(dict.fromkeys(headers))[:30], "public_headers": public_headers,
+            "assets": list(dict.fromkeys(assets))[:10]}
+
+
+def client_source_urls(html, url):
+    soup = soup_from_html(html)
+    sources = [node.get("src") for node in soup.select("script[src]")]
+    sources += [node.get("href") for node in soup.select('link[rel="modulepreload"], link[as="script"]')]
+    normalized = unescape(html.replace('\\/', '/').replace('\\"', '"'))
+    sources += re.findall(r'''["'`]((?:https:)?//[^"'`\s<>]+?\.m?js(?:\?[^"'`\s<>]*)?)["'`]''', normalized)
+    found = list(dict.fromkeys(urljoin(url, source) for source in sources if source))
+    return sorted((source for source in found if allowed_source_asset(source)),
+                  key=lambda source: (not any(term in source.lower() for term in ("coupon", "collectable")),
+                                      not any(term in source.lower() for term in ("product", "pdp"))))
 
 
 def page_product(html: str) -> dict:
@@ -353,12 +379,7 @@ class TrendyolProvider(Provider):
         self.inspect_client_sources(html, url, product.get("id"), ctx)
 
     def inspect_client_sources(self, html, url, content_id, ctx):
-        soup = soup_from_html(html)
-        sources = [node.get("src") for node in soup.select("script[src]")]
-        sources += [node.get("href") for node in soup.select('link[rel="modulepreload"], link[as="script"]')]
-        sources = list(dict.fromkeys(urljoin(url, source) for source in sources if source))
-        queue = sorted((source for source in sources if allowed_source_asset(source)),
-                       key=lambda source: ("coupon" not in source.lower(), "product" not in source.lower()))
+        queue = client_source_urls(html, url)
         log(f"Trendyol istemci kaynakları: ürün={content_id} | " + json.dumps([
             urlunsplit((*urlsplit(source)[:3], "", "")) for source in queue[:30]]))
         seen = getattr(self, "_inspected_coupon_assets", set())

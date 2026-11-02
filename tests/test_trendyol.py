@@ -37,6 +37,32 @@ def coupon(discount, kind="AMOUNT", lower=0, cap=None, plus=False):
 
 
 class TrendyolPriceTests(unittest.TestCase):
+    def test_inline_product_modules_are_found_before_global_libraries(self):
+        html = '<script src="https://cdn.dsmcdn.com/react.js"></script>'
+        html += '<script type="module">import("https://cdn.dsmcdn.com/pdp/coupon.mjs");</script>'
+        html += '<script>let source="https://cdn.dsmcdn.com/pdp/product.js";</script>'
+        urls = trendyol.client_source_urls(html, URL)
+        self.assertEqual(urls[:2], ["https://cdn.dsmcdn.com/pdp/coupon.mjs", "https://cdn.dsmcdn.com/pdp/product.js"])
+
+    def test_accessibility_telemetry_and_unresolved_templates_are_not_fetched(self):
+        for url in ("https://cdn.dsmcdn.com/sfweb/eye-able/public/key/file.js",
+                    "https://cdn.dsmcdn.com/ring/manager.js", "https://cdn.dsmcdn.com/${chunk}.js"):
+            self.assertFalse(trendyol.allowed_source_asset(url))
+
+    def test_contract_keeps_public_header_constants_but_not_authorization(self):
+        code = 'api.get("/api/coupons/${contentId}/search");'
+        code += 'const base="https://apigw.trendyol.com/discovery-example-service";'
+        code += 'const h={"x-web-req-source":"ProductGateway","Authorization":"private"};'
+        result = trendyol.coupon_client_contracts(code)
+        self.assertEqual(result["candidate_methods"], ["get"])
+        self.assertEqual(result["service_bases"], ["https://apigw.trendyol.com/discovery-example-service"])
+        self.assertEqual(result["public_headers"], {"x-web-req-source": "ProductGateway"})
+        self.assertNotIn("private", json.dumps(result))
+
+    def test_service_function_names_and_boolean_flags_are_public_contract_data(self):
+        self.assertEqual(trendyol.source_contract([["pdpCoupons", "fetchProduct", [True, False]]]),
+                         [["pdpCoupons", "fetchProduct", [True, False]]])
+
     def test_client_source_allowlist_rejects_other_hosts_credentials_and_ports(self):
         self.assertTrue(trendyol.allowed_source_asset("https://cdn.dsmcdn.com/product.js?v=1"))
         for url in ("http://cdn.dsmcdn.com/a.js", "https://cdn.dsmcdn.com.evil/a.js",
@@ -47,11 +73,11 @@ class TrendyolPriceTests(unittest.TestCase):
 
     def test_client_contract_extracts_paths_and_names_without_executing_code(self):
         code = 'const url=`https://apigw.trendyol.com/api/coupons/${contentId}/search?merchantId=123`;'
-        code += 'const h={"x-web-req-source":"private-value"};globalThis.side_effect=true;'
+        code += 'const h={"x-web-req-source":"ProductGateway","Authorization":"private-value"};globalThis.side_effect=true;'
         data = trendyol.coupon_client_contracts(code)
         self.assertEqual(data["paths"], ["https://apigw.trendyol.com/api/coupons/${contentId}/search"])
         self.assertEqual(data["candidate_parameters"], ["contentId", "merchantId"])
-        self.assertEqual(data["header_names"], ["x-web-req-source"])
+        self.assertEqual(data["header_names"], ["x-web-req-source", "Authorization"])
         self.assertNotIn("private-value", json.dumps(data))
 
     def test_service_contract_never_contains_query_or_account_values(self):
