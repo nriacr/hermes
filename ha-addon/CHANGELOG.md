@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.39.14
+
+- Ürün detay grafiği: imleçle gezerken tarih son taramaya kadar ilerler; son fiyat değişiminde takılı kalmaz.
+
 ## 4.39.13
 
 - Ürün detay grafiği: fiyat değişmese de çizgi ve tarih ekseni son tarama zamanına uzar; yeni eklenen, henüz fiyatı değişmemiş ürünlerde de yatay çizgili grafik çizilir.

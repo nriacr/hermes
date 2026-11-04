@@ -186,10 +186,12 @@ def detail_chart(points: List[Point], target: float, other: List[Point] = (),
               f"<text x='{x(last):.1f}' y='{CHART_HEIGHT - 7}' text-anchor='end' font-size='11' fill='#9a95b8'>{_day(last, short)}</text>")
     goal_path = _steps(goal, x, y) if len(goal) > 1 else f"M{x(begin):.1f} {y(target):.1f}"
     # Each stored change as [x, y, epoch seconds, price]: the page script answers "what was the price then" on hover.
+    # The time axis as [x first, epoch first, x last, epoch last]: hover dates run to the last check, not the last change.
+    span = json.dumps([round(x(first), 1), int(first.timestamp()), round(x(last), 1), int(last.timestamp())])
     hover = json.dumps([[round(x(moment), 1), round(y(price), 1), int(moment.timestamp()), round(price)] for moment, price in points])
     return (
         f"<svg class='ov-chart' viewBox='0 0 {CHART_WIDTH} {CHART_HEIGHT}' role='img' aria-label='Fiyat geçmişi' "
-        f"data-points='{hover}'{partner_hover} data-top='{pad['top']}' data-bottom='{floor}'>"
+        f"data-points='{hover}'{partner_hover} data-span='{span}' data-top='{pad['top']}' data-bottom='{floor}'>"
         f"{grid}<path d='{goal_path}' fill='none' stroke='#f4f2ff' stroke-opacity='.8' stroke-dasharray='6 5' stroke-width='1.5'/>"
         f"<path class='ov-fade' d='{area}' fill='{own_color}' fill-opacity='.22'/>"
         f"<path class='ov-draw' pathLength='1' d='{steps}' fill='none' stroke='{own_color}' stroke-width='3' "

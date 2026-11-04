@@ -59,7 +59,8 @@
     for (const point of points) { if (point[0] <= x) hit = point; }
     const cross = chart.querySelector('.ov-cross');
     const dot = chart.querySelector('.ov-cross-dot');
-    const moment = Math.max(points[0][2], Math.min(points[points.length - 1][2], points[0][2] + (points[points.length - 1][2] - points[0][2]) * ((x - points[0][0]) / ((points[points.length - 1][0] - points[0][0]) || 1))));
+    const axis = JSON.parse(chart.dataset.span || 'null') || [points[0][0], points[0][2], points[points.length - 1][0], points[points.length - 1][2]];
+    const moment = Math.max(axis[1], Math.min(axis[3], axis[1] + (axis[3] - axis[1]) * ((x - axis[0]) / ((axis[2] - axis[0]) || 1))));
     cross.setAttribute('x1', x); cross.setAttribute('x2', x);
     cross.setAttribute('y1', chart.dataset.top); cross.setAttribute('y2', chart.dataset.bottom);
     dot.setAttribute('cx', x); dot.setAttribute('cy', hit[1]);

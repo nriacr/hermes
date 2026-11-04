@@ -11,6 +11,7 @@ class ChartUntilTests(unittest.TestCase):
         now = start + timedelta(days=3)
         chart = detail_chart(points, 800.0, until=now)
         self.assertIn("4 Kas", chart)
+        self.assertIn(f", {int(now.timestamp())}]'", chart)  # hover dates reach the last check
 
     def test_without_until_ends_at_last_point(self):
         start = datetime(2026, 11, 1, 12, 0)
