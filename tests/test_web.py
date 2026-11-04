@@ -897,8 +897,13 @@ class SettingsTests(DataFilesMixin, unittest.TestCase):
             self.assertNotIn(removed, zara)
         self.assertIn("data-active-switch", zara)
         amazon = settings.watch_form({"name": "Kulaklık", "variant_filter": "Renk=Siyah", "url_1": "https://www.amazon.com.tr/dp/B000000001"}, 1)
-        for text in ("Amazon.com.tr satıcısı", "Hariç tut", "value='Renk=Siyah'"):
-            self.assertIn(text, amazon)
+        for text in ("Amazon.com.tr satıcısı", "Hariç tut", "value='Renk=Siyah' data-variant-filter",
+                     "data-url='https://www.amazon.com.tr/dp/B000000001'", "data-variant-dim='Renk'",
+                     "<input type='checkbox' value='Siyah' checked>Siyah"):
+            self.assertIn(text, amazon)  # editing shows the new card's ticked boxes, not a text field
+        self.assertNotIn("Varyant seçimi", amazon)
+        self.assertIn("data-size-text", zara)
+        self.assertIn("data-size-boxes", zara)
         self.assertNotIn("sepete ekle", amazon)  # Depo deals always go to the cart
         self.assertNotIn("Hedef fiyat min", amazon)  # a product link has no minimum
         self.assertNotIn(">Beden<", amazon)
@@ -908,6 +913,8 @@ class SettingsTests(DataFilesMixin, unittest.TestCase):
         search = settings.watch_form({"name": "fırın", "url_1": "https://www.hepsiburada.com/ara?q=firin"}, 3)
         self.assertIn(">Ürün adı<", search)
         self.assertIn("Hedef fiyat min", search)
+        self.assertIn("data-edit-variants data-url=''", settings.watch_form(
+            {"name": "fırın", "variant_filter": "Renk=Beyaz", "url_1": "https://www.hepsiburada.com/ara?q=firin"}, 3))
         togg = settings.watch_form({"name": "T10X V2 RWD Uzun Menzil", "url_1": "https://configurator.togg.com.tr/"}, 5)
         self.assertIn(">Model<input type='text' name='watches_5_name' value='T10X V2 RWD Uzun Menzil'", togg)
         self.assertEqual(togg.count("name='watches_5_name'"), 1)

@@ -165,7 +165,6 @@ def _watch_site(item) -> str:
 # Fields only a search link shows; a product link takes them from the page.
 SEARCH_ONLY = ("name", "minimum_price")
 SELLER_LABELS = {"amazon": "Amazon.com.tr satıcısı", "hepsiburada": "Hepsiburada satıcısı"}
-CHOICE_LABELS = {"ikea": "Mağazalar"}
 
 
 def _active_switch(prefix, checked) -> str:
@@ -187,18 +186,46 @@ def _site_options(prefix, item, site, search) -> tuple:
         elif option == "minimum_price":
             parts.append(_field(prefix, "minimum_price", "Hedef fiyat min", _price_input_value(item.get("minimum_price", ""))))
         elif option == "size":
-            parts.append(_field(prefix, "size", "Beden", item.get("size", "")))
+            # The typed sizes until the page is read; then the same size boxes as a new card.
+            parts.append(_field(prefix, "size", "Beden", item.get("size", "")).replace("<label>", "<label data-size-text>", 1)
+                         .replace("<input ", "<input data-sizes ", 1) + "<div class='size-boxes' data-size-boxes hidden></div>")
         elif option == "exclude_terms":
             terms = item.get("exclude_terms", "")
             terms = ", ".join(str(term).strip() for term in terms if str(term).strip()) if isinstance(terms, list) else terms
             parts.append(_field(prefix, "exclude_terms", "Hariç tut", terms))
         elif option == "variant_filter":
-            parts.append(_field(prefix, "variant_filter", CHOICE_LABELS.get(site, "Varyant seçimi"), item.get("variant_filter", "")))
+            parts.append(f"<input type='hidden' name='{escape(prefix + 'variant_filter', quote=True)}' "
+                         f"value='{escape(str(item.get('variant_filter') or ''), quote=True)}' data-variant-filter>")
         elif option == "official_seller_only":
             flags.append(_checkbox(prefix, option, SELLER_LABELS.get(site, "Platform satıcısı"), item.get(option, False)))
         elif option == "night_mode":
             flags.append(_night_mode(prefix, item))
     return "".join(parts), "".join(flags)
+
+
+def _variant_chips(item) -> str:
+    """The saved variant choices as ticked boxes, the new card's look; the page read adds the other values."""
+    groups = []
+    for dimension, values in parse_variant_filter(item.get("variant_filter")).items():
+        chips = "".join(f"<label class='variant-chip'><input type='checkbox' value='{escape(value, quote=True)}' checked>{escape(value)}</label>"
+                        for value in values)
+        groups.append(f"<div class='variant-dim' data-variant-dim='{escape(dimension, quote=True)}'><span>{escape(dimension)}</span>"
+                      f"<div class='variant-chips'>{chips}</div></div>")
+    return "".join(groups)
+
+
+def _edit_variants(item, site, search) -> str:
+    """A saved card reads its page when opened, then shows the new card's variant table and choice boxes."""
+    options = SITE_OPTIONS.get(site, ())
+    if not {"variant_filter", "size"} & set(options):
+        return ""
+    url = "" if search else (watch_urls(item) or [""])[0]
+    chips = _variant_chips(item) if "variant_filter" in options else ""
+    if not url and not chips:
+        return ""
+    return (f"<div class='edit-variants' data-edit-variants data-url='{escape(url, quote=True)}'>"
+            "<p class='edit-status' data-edit-status hidden></p><div class='variant-table' data-variant-table hidden></div>"
+            f"<div class='variant-choices' data-variant-dims{'' if chips else ' hidden'}>{chips}</div></div>")
 
 
 def _time_field(prefix, name, label, value) -> str:
@@ -269,6 +296,7 @@ def watch_form(item: Dict[str, Any], index: int, known_titles=None) -> str:
         _hidden_identity(prefix, item) + name
         + f"<div class='watch-links'>{links}</div>"
         + f"<div class='watch-fields'>{_common_fields(prefix, item, False)}{site_fields}</div>"
+        + _edit_variants(item, _watch_site(item), search)
         + (f"<div class='watch-site-options'>{site_flags}</div>" if site_flags else "")
         + "<div class='watch-actions'><button class='button danger' type='button' data-delete-watch>Sil</button></div>"
     )
