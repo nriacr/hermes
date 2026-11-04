@@ -76,6 +76,25 @@ def relative_time_text(value) -> str:
     return f"{hours} sa önce" if hours < 24 else f"{hours // 24} gün önce"
 
 
+def elapsed_text(seconds: int) -> str:
+    seconds = max(0, int(seconds))
+    if seconds < 60:
+        return f"{seconds} sn önce"
+    minutes, rest = divmod(seconds, 60)
+    if minutes < 60:
+        return f"{minutes} dk {rest} sn önce"
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours} sa {minutes} dk önce" if hours < 24 else f"{hours // 24} gün önce"
+
+
+def live_ago_html(value) -> str:
+    parsed = _parse_local_time(value)
+    if not parsed:
+        return "<b>-</b>"
+    elapsed = int((datetime.now().astimezone() - parsed.astimezone()).total_seconds())
+    return f"<b data-ago='{int(parsed.timestamp())}'>{escape(elapsed_text(elapsed))}</b>"
+
+
 def duration_text(seconds_value, fallback="-") -> str:
     if seconds_value in (None, ""):
         return str(fallback or "-")
@@ -440,7 +459,7 @@ def render_summary(payload: Dict[str, Any], state: Dict[str, Any], telegram_stat
     watching = [offer for offer in offers if not offer.hit]
     cycle = escape(duration_text(payload.get("cycle_duration_seconds"), payload.get("cycle_duration_minutes") or "-"))
     status = (f"<div class='ov-status'><span class='ov-pulse'></span><p>Çevrim <b>{cycle}</b><br>Son güncelleme "
-              f"<b>{escape(relative_time_text(payload.get('checked_at')))}</b></p></div>")
+              f"{live_ago_html(payload.get('checked_at'))}</p></div>")
     numbers = (f"<div class='ov-nums'><div class='ov-num'><b>{len(offers)}</b><span>takipte</span></div>"
                f"<div class='ov-num'><b>{len(stock_rows)}</b><span>stokta yok</span></div>"
                f"<div class='ov-num deal'><b>{len(deals)}</b><span>fırsat</span></div></div>")

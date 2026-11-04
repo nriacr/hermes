@@ -21,6 +21,15 @@
     modal.hidden = false;
     document.documentElement.style.overflow = 'hidden';
   };
+  const tick = () => {
+    const now = Date.now() / 1000;
+    region.querySelectorAll('[data-ago]').forEach((el) => {
+      const s = Math.max(0, Math.floor(now - Number(el.dataset.ago)));
+      const m = Math.floor(s / 60);
+      el.textContent = s < 60 ? `${s} sn önce` : m < 60 ? `${m} dk ${s % 60} sn önce` : m < 1440 ? `${Math.floor(m / 60)} sa ${m % 60} dk önce` : `${Math.floor(m / 1440)} gün önce`;
+    });
+  };
+  window.setInterval(tick, 1000);
   document.addEventListener('click', (event) => {
     const target = event.target;
     if (target === modal || target.closest('[data-close]')) return close();

@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.39.15
+
+- Ana sayfa: "Son güncelleme" artık saniye saniye artan canlı sayaç (42 sn önce, 3 dk 12 sn önce).
+
 ## 4.39.14
 
 - Ürün detay grafiği: imleçle gezerken tarih son taramaya kadar ilerler; son fiyat değişiminde takılı kalmaz.
