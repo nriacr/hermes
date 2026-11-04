@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.39.13
+
+- Ürün detay grafiği: fiyat değişmese de çizgi ve tarih ekseni son tarama zamanına uzar; yeni eklenen, henüz fiyatı değişmemiş ürünlerde de yatay çizgili grafik çizilir.
+
 ## 4.39.11
 
 - Trendyol tarayıcısız kaynak tanısı HTML içindeki modül yükleme adreslerini de kapsar; kupon/ürün dosyaları önceliklenir, ölçüm/erişilebilirlik kaynakları dışlanır. API yolları, yöntem adayları ve açık istemci sabitleri çıkarılır; JavaScript yürütülmez ve gizli başlık değerleri alınmaz.

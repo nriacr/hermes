@@ -257,7 +257,7 @@ def detail_html(offer: Offer) -> str:
     names = ("Depo", "Yeni") if offer.warehouse else ("Yeni", "Depo")
     chart = (ranged_chart(offer.points, float(offer.target), _parse_local_time(offer.checked_at) or datetime.now().astimezone(),
                           offer.partner_points, names, offer.target_points)
-             if len(offer.points) > 1
+             if offer.points
              else "")
     product_url = str(offer.row.get("product_url") or "").strip()
     link_html = (f"<a class='ov-d-link' href='{escape(product_url, quote=True)}' target='_blank' rel='noopener noreferrer'>Ürüne git →</a>"

@@ -547,7 +547,7 @@ class DashboardTests(DataFilesMixin, unittest.TestCase):
         self.assertIn("<span>İlk kayıtlı fiyat</span><b>16.000 TL</b>", html)
         self.assertIn("Takip başlangıcı", html)
         self.data.write_summary({"rows": [price_row(price="14.000 TL", tracking_id="other card")]})
-        self.assertNotIn("class='ov-chart'", self.live())
+        self.assertIn("class='ov-chart'", self.live())  # a new product gets a flat line from its first price
         self.assertIn("<span class='ov-chg flat'>yeni</span>", self.live())
 
     def test_depo_and_new_offer_of_one_product_share_a_chart_with_two_lines(self):

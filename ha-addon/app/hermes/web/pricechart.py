@@ -88,12 +88,15 @@ def _steps(points: List[Point], x, y) -> str:
 
 
 def _scales(points: List[Point], left: float, right: float, top: float, bottom: float,
-            extra: Sequence[float] = (), headroom: float = 0.0, also: Sequence[Point] = ()):
+            extra: Sequence[float] = (), headroom: float = 0.0, also: Sequence[Point] = (),
+            until: datetime = None):
     """Maps time to x and price to y; `headroom` widens the price range by that share.
 
     `also` is a second line (the Depo or the new offer of the same product) drawn on the same scales."""
     started = min([points[0][0].timestamp()] + [moment.timestamp() for moment, _ in also[:1]])
     ended = max([points[-1][0].timestamp()] + [moment.timestamp() for moment, _ in also[-1:]])
+    if until is not None:
+        ended = max(ended, until.timestamp())
     prices = [price for _, price in points] + [price for _, price in also] + list(extra)
     low, high = min(prices), max(prices)
     margin = (high - low) * headroom or (high * 0.02 if headroom else 0.0)
@@ -140,8 +143,10 @@ def partner_legend(names: Tuple[str, str]) -> str:
 
 
 def detail_chart(points: List[Point], target: float, other: List[Point] = (),
-                 names: Tuple[str, str] = ("Yeni", "Depo"), targets: List[Point] = ()) -> str:
+                 names: Tuple[str, str] = ("Yeni", "Depo"), targets: List[Point] = (), until: datetime = None) -> str:
     """The detail sheet chart: price steps, the target line and the first and last day.
+
+    `until` (the last check) extends the lines flat past the last stored change, so an unchanged price still reaches today.
 
     With `other` the second offer of the product (Depo next to new, or the reverse) is a separate amber line."""
     other = list(other)
@@ -149,10 +154,10 @@ def detail_chart(points: List[Point], target: float, other: List[Point] = (),
     other_color = PAIR_COLORS[names[1]]
     pad = CHART_PAD
     begin = min([points[0][0]] + [moment for moment, _ in other[:1]])
-    finish = max([points[-1][0]] + [moment for moment, _ in other[-1:]])
+    finish = max([points[-1][0]] + [moment for moment, _ in other[-1:]] + ([until] if until else []))
     goal = target_series(list(targets), target, begin, finish)
     x, y, low, high = _scales(points, pad["left"], CHART_WIDTH - pad["right"], pad["top"], CHART_HEIGHT - pad["bottom"],
-                              [value for _, value in goal], headroom=0.14, also=other)
+                              [value for _, value in goal], headroom=0.14, also=other, until=finish)
     floor = CHART_HEIGHT - pad["bottom"]
     grid = "".join(
         f"<line x1='{pad['left']}' x2='{CHART_WIDTH - pad['right']}' y1='{y(level):.1f}' y2='{y(level):.1f}' stroke='rgba(255,255,255,.07)'/>"
@@ -160,15 +165,17 @@ def detail_chart(points: List[Point], target: float, other: List[Point] = (),
         for level in (low + (high - low) * step / 3 for step in range(4))
     )
     steps = _steps(points, x, y)
-    area = f"{steps} L{x(points[-1][0]):.1f} {floor} L{x(points[0][0]):.1f} {floor} Z"
+    if finish > points[-1][0]:
+        steps += f" L{x(finish):.1f} {y(points[-1][1]):.1f}"
+    area = f"{steps} L{x(finish):.1f} {floor} L{x(points[0][0]):.1f} {floor} Z"
     dots = "".join(f"<circle class='ov-fade' cx='{x(moment):.1f}' cy='{y(price):.1f}' r='4' fill='{own_color}' stroke='#0a0814' stroke-width='2'/>"
                    for moment, price in points)
     first = min([points[0][0]] + [moment for moment, _ in other[:1]])
-    last = max([points[-1][0]] + [moment for moment, _ in other[-1:]])
+    last = finish
     partner = ""
     partner_hover = ""
     if other:
-        partner = (f"<path d='{_steps(other, x, y)}' fill='none' stroke='{other_color}' stroke-width='3' "
+        partner = (f"<path d='{_steps(other + [(finish, other[-1][1])] if finish > other[-1][0] else other, x, y)}' fill='none' stroke='{other_color}' stroke-width='3' "
                    "stroke-linejoin='round' stroke-linecap='round'/>"
                    + "".join(f"<circle cx='{x(moment):.1f}' cy='{y(price):.1f}' r='4' fill='{other_color}' "
                              "stroke='#0a0814' stroke-width='2'/>" for moment, price in other))
@@ -217,13 +224,13 @@ def ranged_chart(points: List[Point], target: float, now: datetime, other: List[
     span = (end - start).days if points else 0
     options = [("24 saat" if days == 1 else f"{days} gün", str(days), window_points(points, now, days)) for days in RANGE_DAYS if days < span]
     if not options:
-        return legend + detail_chart(points, target, other, names, targets)
+        return legend + detail_chart(points, target, other, names, targets, now)
     options.append(("Tümü", "all", points))
     default = "all" if span <= RANGE_DAYS[-1] else str(RANGE_DAYS[-1])
     buttons = "".join(f"<button type='button' class='ov-range' data-range='{key}' aria-pressed='{str(key == default).lower()}'>{label}</button>"
                       for label, key, _ in options)
     charts = "".join(f"<div class='ov-chartwrap' data-range-pane='{key}'{'' if key == default else ' hidden'}>"
-                     f"{detail_chart(chosen if len(chosen) > 1 else points, target, _other_window(other, now, key), names, targets)}</div>"
+                     f"{detail_chart(chosen if len(chosen) > 1 else points, target, _other_window(other, now, key), names, targets, now)}</div>"
                      for _, key, chosen in options)
     return f"<div class='ov-ranges' role='group' aria-label='Zaman aralığı'>{buttons}</div>{legend}{charts}"
 
