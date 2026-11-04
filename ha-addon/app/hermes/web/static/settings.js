@@ -53,17 +53,32 @@
     if (text !== undefined) node.textContent = text;
     return node;
   };
-  const writeVariantFilter = () => {
-    const chosen = [...newWatch.querySelectorAll('[data-variant-dim]')].map((group) => {
+  // The new card and an opened saved card share the variant table, choice boxes and size boxes.
+  const writeVariantFilter = (root) => {
+    const chosen = [...root.querySelectorAll('[data-variant-dim]')].map((group) => {
       const values = [...group.querySelectorAll('input:checked')].map((box) => box.value);
       return values.length ? `${group.dataset.variantDim}=${values.join(', ')}` : '';
     }).filter(Boolean);
-    newWatch.querySelector('[data-variant-filter]').value = chosen.join('; ');
+    const field = root.querySelector('[data-variant-filter]');
+    if (field) field.value = chosen.join('; ');
+  };
+  document.addEventListener('change', (event) => {
+    if (!event.target.closest('[data-variant-dim]')) return;
+    writeVariantFilter(event.target.closest('[data-new-watch], [data-watch-card]'));
+  });
+  const parseChoices = (text) => {
+    const chosen = {};
+    String(text || '').split(';').forEach((part) => {
+      const [dimension, list] = part.split('=');
+      if (dimension && list) chosen[dimension.trim()] = list.split(',').map((value) => value.trim()).filter(Boolean);
+    });
+    return chosen;
   };
   // One size box per chosen size; choosing one opens the next. Saved as "M; L".
-  let sizeChoices = [];
-  const renderSizes = (chosen) => {
-    const boxes = newWatch.querySelector('[data-size-boxes]');
+  const renderSizes = (root, chosen) => {
+    const boxes = root.querySelector('[data-size-boxes]');
+    if (!boxes) return;
+    const sizeChoices = root.sizeChoices || [];
     boxes.replaceChildren();
     [...chosen, ''].forEach((value, position) => {
       const remaining = sizeChoices.filter(([size]) => size === value || !chosen.includes(size));
@@ -75,26 +90,20 @@
       select.value = value;
       select.addEventListener('change', () => {
         const next = [...boxes.querySelectorAll('select')].map((box) => box.value).filter(Boolean);
-        renderSizes([...new Set(next)]);
+        renderSizes(root, [...new Set(next)]);
       });
       label.appendChild(select);
       boxes.appendChild(label);
     });
-    newWatch.querySelector('[data-sizes]').value = chosen.join('; ');
+    root.querySelector('[data-sizes]').value = chosen.join('; ');
   };
-
-  let lastCheck = null;
-  const showProduct = (data) => {
-    lastCheck = data;
-    const body = newWatch.querySelector('[data-new-body]');
-    newWatch.querySelector('[data-product-title]').textContent = data.title || '';
-    const variants = data.variants || [];
-    const priced = variants.filter((item) => item.price);
-    // A single product shows its live price large; a family shows its variant count above the table.
-    newWatch.querySelector('[data-product-sub]').classList.toggle('is-price', variants.length <= 1);
-    newWatch.querySelector('[data-product-sub]').textContent = variants.length > 1
-      ? `${variants.length} ${'Mağaza' in (data.dimensions || {}) ? 'mağaza' : 'Model' in (data.dimensions || {}) ? 'model' : 'varyant'}` : (priced[0]?.price || '');
-    const table = newWatch.querySelector('[data-variant-table]');
+  // A value is out of stock only when no variant with it is in stock.
+  const outOfStockValues = (variants) => {
+    const inStock = new Set(variants.filter((item) => item.in_stock).flatMap((item) => Object.values(item.attributes || {})));
+    return new Set(variants.flatMap((item) => Object.values(item.attributes || {})).filter((value) => !inStock.has(value)));
+  };
+  const renderVariantTable = (root, variants) => {
+    const table = root.querySelector('[data-variant-table]');
     table.replaceChildren();
     if (variants.length > 1) {
       const grid = element('table');
@@ -109,6 +118,57 @@
       });
       table.appendChild(grid);
     }
+    table.hidden = !variants.length;
+  };
+  // Out-of-stock values stay choosable: the card waits for them to come back. A saved value the page
+  // no longer lists stays too, so a choice is never dropped silently.
+  const renderChips = (root, data, chosen, saved = {}) => {
+    const options = new Set(data.options || []);
+    const outOfStock = outOfStockValues(data.variants || []);
+    const dims = root.querySelector('[data-variant-dims]');
+    dims.replaceChildren();
+    if (options.has('variant_filter')) {
+      const dimensions = { ...(data.dimensions || {}) };
+      Object.entries(saved).forEach(([name, values]) => { dimensions[name] = [...new Set([...(dimensions[name] || []), ...values])]; });
+      Object.entries(dimensions).forEach(([name, values]) => {
+        if (values.length < 2 && !saved[name]) return;  // nothing to choose
+        if (name === 'Beden' && options.has('size') && !saved[name]) return;  // sizes have their own boxes
+        const listed = new Set(data.dimensions?.[name] || []);
+        const group = element('div', 'variant-dim');
+        group.dataset.variantDim = name;
+        group.appendChild(element('span', '', name));
+        const chips = element('div', 'variant-chips');
+        values.forEach((value) => {
+          const chip = element('label', outOfStock.has(value) || !listed.has(value) ? 'variant-chip is-out' : 'variant-chip');
+          const box = element('input');
+          box.type = 'checkbox';
+          box.value = value;
+          box.checked = (chosen[name] || []).includes(value);
+          chip.append(box, value);
+          chips.appendChild(chip);
+        });
+        group.appendChild(chips);
+        dims.appendChild(group);
+      });
+    }
+    dims.hidden = !dims.children.length;
+    writeVariantFilter(root);
+    const sizes = options.has('size') ? data.dimensions?.Beden || [] : [];
+    root.sizeChoices = sizes.map((size) => [size, outOfStock.has(size) ? `${size} (tükendi)` : size]);
+  };
+
+  let lastCheck = null;
+  const showProduct = (data) => {
+    lastCheck = data;
+    const body = newWatch.querySelector('[data-new-body]');
+    newWatch.querySelector('[data-product-title]').textContent = data.title || '';
+    const variants = data.variants || [];
+    const priced = variants.filter((item) => item.price);
+    // A single product shows its live price large; a family shows its variant count above the table.
+    newWatch.querySelector('[data-product-sub]').classList.toggle('is-price', variants.length <= 1);
+    newWatch.querySelector('[data-product-sub]').textContent = variants.length > 1
+      ? `${variants.length} ${'Mağaza' in (data.dimensions || {}) ? 'mağaza' : 'Model' in (data.dimensions || {}) ? 'model' : 'varyant'}` : (priced[0]?.price || '');
+    renderVariantTable(newWatch, variants);
     const options = new Set(data.options || []);
     const dimensions = data.dimensions || {};
     newWatch.querySelectorAll('[data-site-option]').forEach((node) => {
@@ -120,47 +180,65 @@
     newWatch.querySelector('[data-site-option="model"]').hidden = !options.has('model') || typedModel;
     if (typedModel) newWatch.querySelector('[data-site-option="name"]').hidden = false;
     newWatch.querySelector('[data-name-label]').textContent = options.has('model') ? 'Model' : 'Ürün adı';
-    // Out-of-stock values stay choosable: the card waits for them to come back.
-    // A value is out of stock only when no variant with it is in stock.
-    const inStock = new Set(variants.filter((item) => item.in_stock).flatMap((item) => Object.values(item.attributes || {})));
-    const outOfStock = new Set(variants.flatMap((item) => Object.values(item.attributes || {})).filter((value) => !inStock.has(value)));
     // A model site (Togg) names the card after the chosen model.
     const modelSelect = newWatch.querySelector('[data-model-select]');
     modelSelect.replaceChildren(new Option('Seç', ''), ...(dimensions.Model || []).map((model) => new Option(model, model)));
     modelSelect.onchange = () => { newWatch.querySelector('[data-product-name]').value = modelSelect.value; };
-    sizeChoices = (dimensions.Beden || []).map((size) => [size, outOfStock.has(size) ? `${size} (tükendi)` : size]);
-    renderSizes([]);
-    const dims = newWatch.querySelector('[data-variant-dims]');
-    dims.replaceChildren();
-    if (options.has('variant_filter')) {
-      Object.entries(dimensions).forEach(([name, values]) => {
-        if (values.length < 2) return;  // nothing to choose
-        if (name === 'Beden' && options.has('size')) return;  // sizes have their own boxes
-        const group = element('div', 'variant-dim');
-        group.dataset.variantDim = name;
-        group.appendChild(element('span', '', name));
-        const chips = element('div', 'variant-chips');
-        values.forEach((value) => {
-          const chip = element('label', outOfStock.has(value) ? 'variant-chip is-out' : 'variant-chip');
-          const box = element('input');
-          box.type = 'checkbox';
-          box.value = value;
-          box.checked = (data.defaults?.[name] || []).includes(value);
-          box.addEventListener('change', writeVariantFilter);
-          chip.append(box, value);
-          chips.appendChild(chip);
-        });
-        group.appendChild(chips);
-        dims.appendChild(group);
-      });
-      dims.hidden = !dims.children.length;
-    }
-    table.hidden = !variants.length;
-    writeVariantFilter();
+    renderChips(newWatch, data, data.defaults || {});
+    renderSizes(newWatch, []);
     const nameField = newWatch.querySelector('[data-product-name]');
     if (nameField && (!nameField.value || !data.search)) nameField.value = data.search ? nameField.value : (options.has('model') ? '' : data.title || '');
     body.hidden = false;
   };
+  // The check runs on Hermes in the background; ask for its result until it is ready.
+  const readLink = async (url) => {
+    const csrf = settingsForm.querySelector("[name='csrf_token']")?.value || '';
+    const ask = async (fields) => {
+      const response = await fetch(newWatch.dataset.checkPath, { method: 'POST', body: new URLSearchParams({ ...fields, csrf_token: csrf }),
+                                                                 credentials: 'same-origin' });
+      try { return await response.json(); } catch { throw new Error('Hermes yanıt vermedi; tekrar dene.'); }
+    };
+    const { job, error: startError } = await ask({ url });
+    if (!job) throw new Error(startError || 'Sayfa okunamadı.');
+    let data;
+    do {
+      await new Promise((resolve) => { setTimeout(resolve, 1500); });
+      data = await ask({ job });
+    } while (data.pending);
+    if (!data.ok) throw new Error(data.error || 'Sayfa okunamadı.');
+    return data;
+  };
+  // A saved card reads its page the first time it opens; a failed read tries again on the next open.
+  document.addEventListener('toggle', async (event) => {
+    const card = event.target;
+    const box = card.matches?.('[data-watch-card]') && card.open ? card.querySelector('[data-edit-variants]') : null;
+    if (!box?.dataset.url || box.dataset.state) return;
+    box.dataset.state = 'reading';
+    const status = box.querySelector('[data-edit-status]');
+    status.className = 'edit-status';
+    status.replaceChildren(element('span', 'spinner'), 'Okunuyor');
+    status.hidden = false;
+    try {
+      const data = await readLink(box.dataset.url);
+      renderVariantTable(box, data.variants || []);
+      const saved = parseChoices(card.querySelector('[data-variant-filter]')?.value);
+      renderChips(card, data, saved, saved);
+      const sizeText = card.querySelector('[data-size-text]');
+      if (sizeText) {
+        sizeText.hidden = true;
+        card.querySelector('[data-size-boxes]').hidden = false;
+        const sizes = sizeText.querySelector('input').value.split(';').map((size) => size.trim()).filter(Boolean);
+        card.sizeChoices.push(...sizes.filter((size) => !card.sizeChoices.some(([known]) => known === size)).map((size) => [size, size]));
+        renderSizes(card, sizes);
+      }
+      status.hidden = true;
+      box.dataset.state = 'done';
+    } catch (problem) {
+      status.className = 'check-error';
+      status.textContent = problem.message || 'Sayfa okunamadı.';
+      delete box.dataset.state;
+    }
+  }, true);
   const checkLink = async (button) => {
     const url = newWatch.querySelector('[data-check-url]').value.trim();
     const error = newWatch.querySelector('[data-check-error]');
@@ -170,22 +248,7 @@
     button.disabled = true;
     button.replaceChildren(element('span', 'spinner'), 'Okunuyor');
     try {
-      // The check runs on Hermes in the background; ask for its result until it is ready.
-      const csrf = settingsForm.querySelector("[name='csrf_token']")?.value || '';
-      const ask = async (fields) => {
-        const response = await fetch(newWatch.dataset.checkPath, { method: 'POST', body: new URLSearchParams({ ...fields, csrf_token: csrf }),
-                                                                   credentials: 'same-origin' });
-        try { return await response.json(); } catch { throw new Error('Hermes yanıt vermedi; tekrar dene.'); }
-      };
-      const { job, error: startError } = await ask({ url });
-      if (!job) throw new Error(startError || 'Sayfa okunamadı.');
-      let data;
-      do {
-        await new Promise((resolve) => { setTimeout(resolve, 1500); });
-        data = await ask({ job });
-      } while (data.pending);
-      if (!data.ok) throw new Error(data.error || 'Sayfa okunamadı.');
-      showProduct(data);
+      showProduct(await readLink(url));
     } catch (problem) {
       body.hidden = true;
       error.textContent = problem.message || 'Sayfa okunamadı.';
@@ -276,18 +339,14 @@
       if (field.type === 'checkbox') field.checked = field.name in values;
       else if (field.name in values) field.value = values[field.name];
     });
-    const chosen = {};
-    (values[`watches_${row.dataset.index}_variant_filter`] || '').split(';').forEach((part) => {
-      const [dimension, list] = part.split('=');
-      if (dimension && list) chosen[dimension.trim()] = list.split(',').map((value) => value.trim());
-    });
+    const chosen = parseChoices(values[`watches_${row.dataset.index}_variant_filter`]);
     newWatch.querySelectorAll('[data-variant-dim]').forEach((group) => {
       group.querySelectorAll('input').forEach((box) => { box.checked = (chosen[group.dataset.variantDim] || []).includes(box.value); });
     });
-    writeVariantFilter();
+    writeVariantFilter(newWatch);
     newWatch.querySelector('[data-model-select]').value = values[`watches_${row.dataset.index}_name`] || '';
     newWatch.querySelectorAll('[data-time-pick]').forEach(loadTimePick);
-    renderSizes((values[`watches_${row.dataset.index}_size`] || '').split(';').map((size) => size.trim()).filter(Boolean));
+    renderSizes(newWatch, (values[`watches_${row.dataset.index}_size`] || '').split(';').map((size) => size.trim()).filter(Boolean));
     const marker = element('div', 'queued-watch is-open');
     marker.dataset.reopened = row.dataset.index;
     marker.append(element('span', 'queued-name', `${row.querySelector('.queued-name').textContent} (düzeltiliyor)`));

@@ -4,6 +4,10 @@
 
 - Ürün detay grafiği: fiyat değişmese de çizgi ve tarih ekseni son tarama zamanına uzar; yeni eklenen, henüz fiyatı değişmemiş ürünlerde de yatay çizgili grafik çizilir.
 
+## 4.39.12
+
+- Ayarlar: kayıtlı takip açılınca sayfası okunur; yeni eklemedeki varyant tablosu, renk/kapasite tik kutuları ve beden kutuları düzenlemede de görünür, kayıtlı seçimler işaretli gelir. Sayfa okunamazsa kayıtlı seçimler kutu olarak kalır.
+
 ## 4.39.11
 
 - Trendyol tarayıcısız kaynak tanısı HTML içindeki modül yükleme adreslerini de kapsar; kupon/ürün dosyaları önceliklenir, ölçüm/erişilebilirlik kaynakları dışlanır. API yolları, yöntem adayları ve açık istemci sabitleri çıkarılır; JavaScript yürütülmez ve gizli başlık değerleri alınmaz.
