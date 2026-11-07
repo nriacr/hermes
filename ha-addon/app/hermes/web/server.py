@@ -22,7 +22,6 @@ from ..config import read_options
 from ..constants import APP_VERSION
 from ..logging_utils import log, redact
 from ..notifier import Pushover
-from ..providers.mediamarkt_diagnostic import inspect_source
 from ..providers.registry import ProviderSet
 from ..utils import parse_bool
 from . import assets
@@ -32,7 +31,7 @@ from .icons import HERMES_ICON_PNG, HERMES_ICON_SVG, render_web_manifest
 from .pages import link
 from .pin import csrf_field, render_configure_page, render_lock_button, render_pin_change_link, render_pin_page
 from .statistics import clear_statistics_cache, render_statistics_page, statistics_live_html
-from .settings import handle_restart, link_check_result, start_link_check, handle_settings_save, render_restart_page, render_settings_page
+from .settings import check_link, handle_restart, link_check_result, start_link_check, handle_settings_save, render_restart_page, render_settings_page
 
 PUBLIC_TOKEN_MIN_LENGTH = 24
 # Text responses above this size are gzip-compressed when the browser accepts it.
@@ -261,7 +260,13 @@ class Router:
         if path == "/internal/mediamarkt-source":
             if request.method != "GET" or not request.trusted_ingress:
                 return NOT_FOUND
-            payload = inspect_source(request.params.get("url", [""])[0])
+            url = request.params.get("url", [""])[0]
+            if url not in {
+                "https://www.mediamarkt.com.tr/tr/product/_dyson-spotscrubtm-ai-islak-ve-kuru-robot-supurge-1252146.html",
+                "https://www.mediamarkt.com.tr/tr/product/_mova-z70-ultra-roller-complete-robot-supurge-siyah-1256199.html",
+            }:
+                return NOT_FOUND
+            payload = check_link(url, self._providers())
             return Response(200, json.dumps(payload).encode(), "application/json; charset=utf-8")
         if path == "/internal/runtime":
             # HA-authenticated maintenance only; never accessible on the public surface.

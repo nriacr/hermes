@@ -9,7 +9,7 @@ from html import unescape
 from typing import Any, Dict, Optional
 from urllib.parse import parse_qs, urlparse, urlunparse
 
-from .constants import AMAZON_BASE_URL, DEFAULT_HEADERS, SITE_HOST_MARKERS, SITE_LABELS, USER_AGENTS
+from .constants import AMAZON_BASE_URL, DEFAULT_HEADERS, MEDIAMARKT_HOSTS, SITE_MEDIAMARKT, SITE_HOST_MARKERS, SITE_LABELS, USER_AGENTS
 from .errors import HermesError
 
 MOJIBAKE_MARKERS = ("Ã", "Ä", "Å", "Â", "�")
@@ -290,6 +290,8 @@ def tracking_offer_title_identity(
 def detect_site_from_url(url: str) -> str:
     # The host name only: user info or a port in the address must not match a site.
     host = (urlparse(url).hostname or "").casefold()
+    if host in MEDIAMARKT_HOSTS:
+        return SITE_MEDIAMARKT
     for marker, site in SITE_HOST_MARKERS:
         if marker in host:
             return site

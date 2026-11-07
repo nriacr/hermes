@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 
-APP_VERSION = "4.39.17"
+APP_VERSION = "4.39.18"
 
 # Persistent add-on data. File names are a public interface: 2.x releases read
 # the same files, so a rollback never loses history or notification state.
@@ -37,6 +37,8 @@ SITE_ZARA = "zara"
 SITE_HM = "hm"
 SITE_TOGG = "togg"
 SITE_IKEA = "ikea"
+SITE_MEDIAMARKT = "mediamarkt"
+MEDIAMARKT_HOSTS = {"mediamarkt.com.tr", "www.mediamarkt.com.tr"}
 SITE_LABELS = {
     SITE_AMAZON: "Amazon",
     SITE_HEPSIBURADA: "Hepsiburada",
@@ -47,6 +49,7 @@ SITE_LABELS = {
     SITE_HM: "H&M",
     SITE_TOGG: "Togg",
     SITE_IKEA: "IKEA",
+    SITE_MEDIAMARKT: "MediaMarkt",
 }
 # Host fragments are checked in this order; "amazon" stays last because other
 # hosts never contain it, while a broad match must not shadow a specific site.

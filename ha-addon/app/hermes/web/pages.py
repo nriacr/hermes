@@ -21,6 +21,7 @@ SITE_THEME_CLASSES = (
     ("h&m", "site-hm"),
     ("togg", "site-togg"),
     ("ikea", "site-ikea"),
+    ("mediamarkt", "site-mediamarkt"),
 )
 
 

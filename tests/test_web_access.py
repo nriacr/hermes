@@ -32,12 +32,11 @@ class AccessCase(unittest.TestCase):
 
     def test_mediamarkt_diagnostic_only_runs_through_ha_ingress(self):
         path = "/internal/mediamarkt-source"
-        with patch.object(server, "inspect_source", return_value={"status": 200}) as inspect:
+        with patch.object(server, "check_link") as inspect:
             self.assertEqual(self.request(path).status, 404)
             self.assertEqual(self.request(path, method="POST", trusted=True).status, 404)
+            self.assertEqual(self.request(path, trusted=True).status, 404)
             inspect.assert_not_called()
-            self.assertEqual(self.request(path, trusted=True).status, 200)
-            inspect.assert_called_once_with("")
 
     def challenge(self, scope="/public/test-link", trusted=False, configure=False):
         response = self.request("/auth/configure" if configure else "/auth/pin", scope=scope, trusted=trusted)

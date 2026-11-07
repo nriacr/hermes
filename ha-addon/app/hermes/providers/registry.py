@@ -10,6 +10,7 @@ from .beymenclub import BeymenClubProvider
 from .hepsiburada import HepsiburadaProvider
 from .hm import HMProvider
 from .ikea import IkeaProvider
+from .mediamarkt import MediaMarktProvider
 from .network import NetworkProvider
 from .togg import ToggProvider
 from .trendyol import TrendyolProvider
@@ -25,6 +26,7 @@ PROVIDER_TYPES = (
     HMProvider,
     ToggProvider,
     IkeaProvider,
+    MediaMarktProvider,
 )
 
 

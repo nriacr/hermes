@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.39.18
+
+- MediaMarkt Türkiye ürün linklerinde stok ve fiyat takibi. Ürüne özel, doğrulanmış sepet indirimi ödenecek fiyata yansır.
+
 ## 4.39.17
 
 - MediaMarkt ürün sayfası tanısında teslimat ve sepet fiyatı alanları incelenir.
