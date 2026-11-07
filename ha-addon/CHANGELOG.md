@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.39.19
+
+- MediaMarkt kabul kontrolünde kullanılan geçici tanı yolu kaldırıldı.
+
 ## 4.39.18
 
 - MediaMarkt Türkiye ürün linklerinde stok ve fiyat takibi. Ürüne özel, doğrulanmış sepet indirimi ödenecek fiyata yansır.

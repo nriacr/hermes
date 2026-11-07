@@ -5,7 +5,7 @@ Hermes, Home Assistant üzerinde çalışan çok siteli ürün ve Telegram fırs
 ## Özellikler
 
 - Takip edilenler: tek kayıt altında en fazla 5 link izleme
-- Linkten otomatik site algılama: Amazon, Hepsiburada, Trendyol, Network, Beymen Club, Zara, H&M, Togg, IKEA
+- Linkten otomatik site algılama: Amazon, Hepsiburada, Trendyol, Network, Beymen Club, Zara, H&M, Togg, IKEA, MediaMarkt
 - Ürün ve arama linklerini aynı takip kaydı içinde karışık kullanabilme
 - Arama linklerinde, takip adını keyword kabul ederek eşleşen sonuçlar arasından en iyi fiyatı seçme
 - Arama linklerinde sabit olarak en fazla 60 sonuç tarama
@@ -137,6 +137,7 @@ Hermes her siteyi kendi sağlayıcısında okur. Bir sitenin fiyat okuma kuralı
 
 - **Togg:** Konfigüratör sayfasının kullandığı herkese açık model listesini okur (dakikada en fazla bir istek, tüm Togg kartları için ortak). Kartın `name` alanına izlenecek model yazılır (örneğin `T10X V2 RWD Uzun Menzil`); model listede varsa stokta, yoksa `Stokta Olmayanlar` bölümünde görünür. Stokta olmaması hata sayılmaz. Model listeye girdiğinde tek bir stok bildirimi gönderilir. Fiyat takibi yoktur; kart biçimi gereği istenen hedef fiyat yüksek bir sayı girilebilir.
 - **IKEA:** Yalnız ürün sayfası linki (`/urun/...`). Fiyat sayfadan, stok IKEA'nın mağaza stok servisinden okunur. İnternet Mağazası veya IKEA Bayrampaşa "Stokta Var" ya da "Kritik Stok" diyorsa ürün stokta sayılır; diğer mağazalar dikkate alınmaz. Stok geri gelince bildirim gelir.
+- **MediaMarkt:** Türkiye ürün sayfası linkleri. Ürün stoktaysa doğrulanmış ürün sepet indirimi fiyata yansır. İndirim tutarı okunamazsa o kontrolde fiyat kaydedilmez.
 
 Her site kendi sırasıyla ve istekler arasında ayarlanan bekleme süresiyle okunur. Amazon ve Hepsiburada'nın bot koruması veya değişken sayfa yapısı nedeniyle ek kurtarma denemeleri yalnızca ilk okuma başarısız olduğunda çalışır. Amazon CAPTCHA/429/503 döndürürse, arama bağlantılarındaki 503 yanıtları dahil, Hermes yalnızca etkilenen takip bağlantısını önce 15 dakika, yinelenirse 30 ve en fazla 60 dakika bekletip kendiliğinden yeniden dener. Hata görünür kalır, başarılı okumada bekleme sıfırlanır; diğer bağlantılar taranmaya devam eder. Koruma, fiyat okunmuş bir varyanttan sonra gelirse o doğrulanmış teklif korunur. Amazon Depo teklifi denetimi otomatik yürür; hızlı çevrim için varyasyon taramasını yalnızca gerçekten ihtiyaç duyulan takiplerde etkinleştirmek en verimli yaklaşımdır.
 
