@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.39.20
+
+- Yeni takip kutusuna "Temizle" butonu: link, ürün ve girilen değerleri hiçbir şey kaydetmeden sıfırlar.
+
 ## 4.39.19
 
 - MediaMarkt kabul kontrolünde kullanılan geçici tanı yolu kaldırıldı.

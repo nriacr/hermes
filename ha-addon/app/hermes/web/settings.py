@@ -339,7 +339,7 @@ def new_watch_form(index: int, check_path: str) -> str:
         f"<div class='new-watch-fields'><input type='hidden' name='{escape(prefix + 'active', quote=True)}' value='1'>"
         f"<div class='watch-fields'>{_common_fields(prefix, {}, True)}{site_fields}</div>"
         f"<div class='watch-site-options'>{site_flags}</div>"
-        "<div class='new-watch-actions'><button class='button add' type='button' data-queue-watch>Ekle</button></div></div></div></div>"
+        "<div class='new-watch-actions'><button class='button add' type='button' data-queue-watch>Ekle</button><button class='button clear' type='button' data-clear-watch>Temizle</button></div></div></div></div>"
     )
 
 

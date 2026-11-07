@@ -314,6 +314,15 @@
     setDirty(true);
   });
 
+  // "Temizle" empties the form back to its default state; nothing is saved.
+  document.addEventListener('click', (event) => {
+    if (!event.target.closest('[data-clear-watch]')) return;
+    const index = newWatch.querySelector("input[name$='_url_1']").name.match(/^watches_(\d+)_/)[1];
+    queuedList.querySelector(`[data-reopened='${index}']`)?.remove();
+    openForm(index);
+    newWatch.querySelector('[data-check-url]').focus();
+  });
+
   const openForm = (index) => {
     const holder = document.createElement('div');
     holder.innerHTML = pristineWatch.replaceAll(`watches_${pristineIndex}_`, `watches_${index}_`);

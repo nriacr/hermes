@@ -848,6 +848,8 @@ class SettingsTests(DataFilesMixin, unittest.TestCase):
         page = settings.render_settings_page(".", {}).decode()
         self.assertLess(page.index("Yeni takip"), page.index("Takip edilenler"))
         self.assertLess(page.index("data-queue-watch"), page.index("data-queued-list"))
+        self.assertLess(page.index("data-queue-watch"), page.index("data-clear-watch"))
+        self.assertIn(">Temizle</button>", page)
         self.assertEqual(page.count("data-settings-save"), 1)
         for text in ("id='saving-overlay'", "Değişiklikleri uygula", "Ayarlar kaydediliyor", "id='watch-search'",
                      "data-watch-search='Mevcut'", "class='button danger'", "data-delete-watch", "value='100'",
