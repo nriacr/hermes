@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.39.17
+
+- MediaMarkt ürün sayfası tanısında teslimat ve sepet fiyatı alanları incelenir.
+
 ## 4.39.16
 
 - MediaMarkt Türkiye ürün kaynağı için Home Assistant içinden geçici okuma tanısı.

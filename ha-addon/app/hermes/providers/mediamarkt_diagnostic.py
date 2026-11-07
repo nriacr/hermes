@@ -1,6 +1,7 @@
 """Temporary, read-only MediaMarkt source check through the Hermes runtime."""
 
 import json
+import re
 from urllib.parse import urljoin, urlsplit
 
 import requests
@@ -16,6 +17,28 @@ HOSTS = {"www.mediamarkt.com.tr", "mediamarkt.com.tr"}
 def product_url(url):
     parsed = urlsplit(url)
     return parsed.scheme == "https" and parsed.netloc in HOSTS and parsed.path.startswith("/tr/product/")
+
+
+PRICE_LABEL = re.compile(r"sepette.{0,20}indirim|adrese.{0,20}teslimat|sepete ekle|66[.,]499|3[.,]499", re.I)
+
+
+def price_markup(soup):
+    matches = []
+    for text in soup.find_all(string=PRICE_LABEL):
+        if text.parent.name in {"script", "style", "noscript"}:
+            continue
+        lineage = []
+        for node in [text.parent, *text.parent.parents][:5]:
+            description = node.get_text(" ", strip=True)
+            if len(description) > 600:
+                break
+            attributes = {key: node.get(key) for key in ("data-testid", "data-test", "itemprop", "class") if node.has_attr(key)}
+            lineage.append({"tag": node.name, "attrs": attributes, "text": description})
+        if lineage and lineage not in matches:
+            matches.append(lineage)
+        if len(matches) == 18:
+            break
+    return matches
 
 
 def inspect_source(url):
@@ -60,5 +83,6 @@ def inspect_source(url):
             ]
             result["products"].append(product)
     result["products"] = result["products"][:8]
+    result["price_markup"] = price_markup(soup)
     result["scripts"] = [str(script.get("id"))[:80] for script in soup.select("script[id]")][:15]
     return result
