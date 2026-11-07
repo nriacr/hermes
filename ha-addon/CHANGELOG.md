@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.39.16
+
+- MediaMarkt Türkiye ürün kaynağı için Home Assistant içinden geçici okuma tanısı.
+
 ## 4.39.15
 
 - Ana sayfa: "Son güncelleme" artık saniye saniye artan canlı sayaç (42 sn önce, 3 dk 12 sn önce).

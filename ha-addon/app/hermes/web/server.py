@@ -22,6 +22,7 @@ from ..config import read_options
 from ..constants import APP_VERSION
 from ..logging_utils import log, redact
 from ..notifier import Pushover
+from ..providers.mediamarkt_diagnostic import inspect_source
 from ..providers.registry import ProviderSet
 from ..utils import parse_bool
 from . import assets
@@ -257,6 +258,11 @@ class Router:
         # An explicit guest allowlist keeps future management routes protected by default.
         if request.method == "GET" and path in {"/", "/live/dashboard", "/health", "/restarting", "/settings/restarting", *ASSETS}:
             return self._get(request, path)
+        if path == "/internal/mediamarkt-source":
+            if request.method != "GET" or not request.trusted_ingress:
+                return NOT_FOUND
+            payload = inspect_source(request.params.get("url", [""])[0])
+            return Response(200, json.dumps(payload).encode(), "application/json; charset=utf-8")
         if path == "/internal/runtime":
             # HA-authenticated maintenance only; never accessible on the public surface.
             if request.method == "GET" and request.trusted_ingress:
