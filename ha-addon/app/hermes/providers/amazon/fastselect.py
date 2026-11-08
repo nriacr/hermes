@@ -8,7 +8,7 @@ pseudo-classes, other attribute operators) falls back to soupsieve, so results n
 """
 
 import re
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Iterable, List, Optional, Tuple
 
 from bs4 import BeautifulSoup, Tag
 
@@ -109,9 +109,28 @@ class PageIndex:
             return self.by_tag.get(tag, [])
         return self.all
 
+    def _descendant_candidates(self, compounds: List[Compound]) -> Iterable[Tag]:
+        candidates = self._candidates(compounds[-1])
+        if len(compounds) < 2 or compounds[-1][0] != "li" or len(candidates) <= 64:
+            return candidates
+        # Variant selectors often end in li. Restrict that scan to the small
+        # identified Twister containers instead of all list items in the page.
+        anchor = compounds[0]
+        _, ids, _, attrs = anchor
+        if ids:
+            anchors = self.by_id.get(ids[0], [])
+        elif any(name == "id" and operator for name, operator, _ in attrs):
+            anchors = [node for node in self.by_attr.get("id", []) if not node.decomposed and _matches(node, anchor)]
+        else:
+            return candidates
+        if len(anchors) > 8:
+            return candidates
+        return (node for parent in anchors if not parent.decomposed
+                for node in parent.descendants if isinstance(node, Tag) and id(node) in self.order)
+
     def select(self, scope: Tag, compounds: List[Compound]) -> List[Tag]:
         found = []
-        for element in self._candidates(compounds[-1]):
+        for element in self._descendant_candidates(compounds):
             # A removed element (decompose) is no longer part of the page.
             if element.decomposed or not _matches(element, compounds[-1]):
                 continue

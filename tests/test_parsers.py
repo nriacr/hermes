@@ -2373,6 +2373,25 @@ class FastSelectTests(unittest.TestCase):
         self.assertEqual([str(item) for item in fast.select(".a-offscreen")], [str(item) for item in plain.select(".a-offscreen")])
 
 
+    def test_large_variant_selection_matches_soupsieve_with_removed_and_duplicate_ids(self):
+        from hermes.providers.amazon.fastselect import indexed
+        from bs4 import BeautifulSoup
+
+        html = ("<ul>" + "<li>Menu</li>" * 100 + "</ul>"
+                "<div id='variation_color_name'><ul><li>Abis</li>"
+                "<li id='removed'>Eski</li></ul></div>"
+                "<div id='variation_color_name'><ul><li>Gümüş</li></ul></div>")
+        reference = BeautifulSoup(html, "html.parser")
+        actual = indexed(BeautifulSoup(html, "html.parser"))
+        selectors = ["#variation_color_name li", "[id^='variation_'] li", "[id*='variation_color'] ul li"]
+        actual.select(selectors[0])  # create the index before deleting a node
+        for page in (reference, actual):
+            page.select_one("#removed").decompose()
+        for selector in selectors:
+            self.assertEqual([str(node) for node in actual.select(selector)],
+                             [str(node) for node in reference.select(selector)])
+
+
 class WarehouseRowTests(unittest.TestCase):
     def test_only_the_innermost_used_offer_row_is_read(self):
         from hermes.providers.amazon import parser as amazon_parser

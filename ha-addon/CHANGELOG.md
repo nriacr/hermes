@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.41.7
+
+- Amazon varyant seçicileri, büyük sayfalarda tüm liste öğelerini dolaşmadan ilgili ürün varyantı bölümlerinde arar. İstek ve okuma kuralları korunur.
+
 ## 4.41.6
 
 - Hepsiburada aynı okuma içinde aynı sayfadan çıkarılan teklif adaylarını yeniden kullanır. Canlı satıcı ve sepet doğrulaması korunur.
