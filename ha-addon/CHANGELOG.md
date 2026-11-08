@@ -1,5 +1,10 @@
 # Değişiklik günlüğü
 
+## 4.41.8
+
+- Geri dönüş: eklenti kodu 4.41.6 sürümündeki (kayıt 1a3e7bb) haline döndürüldü.
+- Fiyat geçmişi, takipler ve bildirim hafızası dahil Hermes verisine dokunulmadı; yedek geri yüklemesi yapılmadı.
+
 ## 4.41.7
 
 - Amazon varyant seçicileri, büyük sayfalarda tüm liste öğelerini dolaşmadan ilgili ürün varyantı bölümlerinde arar. İstek ve okuma kuralları korunur.
