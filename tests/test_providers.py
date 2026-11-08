@@ -1,10 +1,11 @@
 """Provider read flows: Amazon variants/search and the other sites' fetchers."""
 
+import json
 import time
 import unittest
 from decimal import Decimal
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import ANY, Mock, patch
 
 import requests
 
@@ -834,6 +835,36 @@ class OtherSiteTests(unittest.TestCase):
             rest = list(stream)
         self.assertEqual([first.url] + [item.url for item in rest], [main, keep])
         self.assertEqual(opened, [keep])  # the 512 GB variant was never opened
+
+    def test_hepsiburada_reads_selected_and_unknown_skus_without_opening_unselected_variants(self):
+        base = "https://www.hepsiburada.com/iphone-p-"
+        properties = {
+            "HBCV0001": {"Kapasite": "256 GB", "Renk": "Abis"},
+            "HBCV0002": {"Kapasite": "512 GB", "Renk": "Abis"},
+            "HBCV0003": {"Kapasite": "256 GB", "Renk": "Siyah"},
+            "HBCV0004": {"Kapasite": "256 GB", "Renk": "Gümüş"},
+        }
+        family = [
+            {"sku": sku, "properties": [
+                {"displayName": name, "valueObject": {"actualValue": value}}
+                for name, value in values.items()
+            ]}
+            for sku, values in properties.items()
+        ]
+        links = "".join(f'<a href="{base}{sku}">Renk seçeneği</a>' for sku in [*properties, "HBCV0005"])
+        html = f'<div class="variant">{links}</div><script>{json.dumps({"variants": family}, ensure_ascii=False)}</script>'
+        provider = HepsiburadaProvider()
+        # A stale value must not prevent reading a SKU absent from the current family data.
+        provider.families["HBCV0005"] = {"Kapasite": "512 GB"}
+        rule = watch(url=base + "HBCV0001", variant_filter={"Kapasite": ["256 GB"], "Renk": ["Abis", "Gümüş"]})
+        offer = OfferResult("Apple iPhone", Decimal("100"), "Hepsiburada", rule.url)
+        with patch.object(provider, "_page", return_value=html) as page, \
+                patch.object(provider, "_variant_offer", return_value=(offer, "")) as read_offer:
+            offers = list(provider.read(rule, context(), None))
+        page.assert_called_once_with(ANY, rule.url)
+        expected = [base + sku for sku in ("HBCV0001", "HBCV0004", "HBCV0005")]
+        self.assertEqual([call.args[-1] for call in read_offer.call_args_list], expected)
+        self.assertEqual([item.url for item in offers], expected)
 
     def test_hepsiburada_main_title_never_excludes_another_variant(self):
         from hermes.providers.hepsiburada import parser as hb_parser

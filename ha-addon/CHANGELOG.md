@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.40.1
+
+- Hepsiburada, ürün ailesinde rengi veya kapasitesi seçilmediği kesin olan varyantları sayfalarını açmadan eler. Bilgisi eksik varyantlar normal okunur.
+
 ## 4.40.0
 
 - Ürün kartlarında sitenin harfi yerine sitenin kendi sekme ikonu: Hermes ikonu haftada bir sitenin kendi okuma sırasında çeker (alınamazsa ertesi gün yeniden dener), arka planını siler, koyu kutuda okunmayan logoyu site rengine boyar ve tüm logoları aynı görsel büyüklüğe getirir. İkonu alınamayan sitede harf kalır.

@@ -293,18 +293,23 @@ class HepsiburadaProvider(Provider):
             title = ""
         return ProductPreview(self.site, title, variants, dimensions)
 
-    def _remember_family(self, html: str) -> None:
+    def _remember_family(self, html: str) -> Dict[str, Dict[str, str]]:
         """SKU -> its variant values, so a chosen colour/capacity is matched by the offer's own SKU."""
-        for entry in parser.variant_family(html):
-            self.families[entry["sku"]] = entry["values"]
+        family = {entry["sku"]: entry["values"] for entry in parser.variant_family(html)}
+        self.families.update(family)
+        return family
+
+    @staticmethod
+    def _unselected_dimension(watch, values: Dict[str, str]) -> str:
+        return next((name for name, chosen in watch.variant_filter.items()
+                     if name in values and values[name] not in chosen), "")
 
     def keeps_offer(self, watch, offer) -> bool:
         """The chosen variant values (by SKU when known), then the own-seller option (Hepsiburada itself)."""
         if watch.variant_filter:
             values = self.families.get(parser.product_id_from_url(offer.url or ""))
             if values is not None:
-                missing = next((name for name, chosen in watch.variant_filter.items()
-                                if name in values and values[name] not in chosen), "")
+                missing = self._unselected_dimension(watch, values)
             else:
                 missing = outside_variant_filter(watch, offer.title)
             if missing:
@@ -326,14 +331,13 @@ class HepsiburadaProvider(Provider):
 
     def read(self, watch, ctx, outcome):
         html = self._page(ctx, watch.url)
-        if watch.variant_filter:
-            self._remember_family(html)
+        family = self._remember_family(html) if watch.variant_filter else {}
         if not is_product_url(watch.url):
             offers = parser.extract_search_offers(html, source_url=watch.url, limit=self._scan_limit(watch))
             offers = self._with_variant_titles(ctx, offers)
             log(f"Hepsiburada arama kartları okundu: {watch.name or watch.url} | adet={len(offers)}")
             return offers
-        return self._product_offers(ctx, watch, html)
+        return self._product_offers(ctx, watch, html, family)
 
     @staticmethod
     def _scan_limit(watch) -> int:
@@ -356,7 +360,7 @@ class HepsiburadaProvider(Provider):
                 enriched.append(offer)
         return enriched
 
-    def _product_offers(self, ctx, watch, html: str):
+    def _product_offers(self, ctx, watch, html: str, family: Optional[Dict[str, Dict[str, str]]] = None):
         """Yields each variant's offer as soon as it is read, so the table refreshes variant by variant."""
         variant_urls = parser.extract_variant_urls(html, watch.url, self._scan_limit(watch))
         if len(variant_urls) > 1:
@@ -365,7 +369,16 @@ class HepsiburadaProvider(Provider):
         found = 0
         errors: List[str] = []
         seen_offer_keys: set[tuple[str, str, str, str]] = set()
+        skipped_by_selection = False
         for variant_url in variant_urls or [watch.url]:
+            # Pre-filter only by the SKU properties from this read's own family.
+            sku = parser.product_id_from_url(variant_url)
+            values = family.get(sku) if family else None
+            unselected = self._unselected_dimension(watch, values) if values is not None else ""
+            if unselected:
+                skipped_by_selection = True
+                log(f"Hepsiburada varyant okuması başlamadan atlandı (seçim: {unselected}): {sku} | {values[unselected]}")
+                continue
             try:
                 variant_label = parser.extract_embedded_variant_label(html, variant_url)
                 if variant_label and watch.excluded_terms and variant_url != watch.url:
@@ -403,6 +416,8 @@ class HepsiburadaProvider(Provider):
             return
         if errors:
             raise HermesError(errors[-1])
+        if skipped_by_selection:
+            return
         raise HermesError("Hepsiburada sayfasından fiyat bulunamadı.")
 
     def _variant_offer(self, ctx, watch, html: str, variant_url: str):
