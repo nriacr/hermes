@@ -314,7 +314,6 @@ def coupon_headers(url: str) -> dict:
 
 class TrendyolProvider(Provider):
     site = SITE_TRENDYOL
-    home_url = "https://www.trendyol.com/"
 
     card_options = ("size", "variant_filter")
 

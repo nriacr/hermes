@@ -84,7 +84,6 @@ def extract_offer(html: str, stock_payload: str, url: str = "", chosen: Optional
 
 class IkeaProvider(Provider):
     site = SITE_IKEA
-    home_url = "https://www.ikea.com.tr/"
     notifies_stock_return = True
     alert_shows_seller = True
 

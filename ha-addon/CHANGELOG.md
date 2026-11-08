@@ -1,5 +1,10 @@
 # Değişiklik günlüğü
 
+## 4.41.0
+
+- Site ikonları artık sitelerin iOS uygulama ikonları; Nuri'nin seçtiği görseller Hermes'e gömülü, zemini ve yuvarlak köşeleriyle gösterilir. Togg için sitenin elmas ikonu aynı biçimde hazırlandı. İnternetten ikon çekme ve haftalık güncelleme kaldırıldı, Pillow çıkarıldı.
+- Site renkleri logolardan: Amazon kum #F0BE86, Hepsiburada #FF6000, Trendyol #F27A1A, MediaMarkt #DF0000, H&M #E50010, IKEA #FFDB00, Togg #00B5E2, Network açık gri #C9CCD6, Zara beyaz, Beymen Club bej.
+
 ## 4.40.1
 
 - Hepsiburada, ürün ailesinde rengi veya kapasitesi seçilmediği kesin olan varyantları sayfalarını açmadan eler. Bilgisi eksik varyantlar normal okunur.

@@ -335,7 +335,6 @@ def fetch_zara_page(session: requests.Session, url: str, timeout: int) -> reques
 
 class ZaraProvider(Provider):
     site = SITE_ZARA
-    home_url = "https://www.zara.com/tr/"
 
     card_options = ("size",)
 

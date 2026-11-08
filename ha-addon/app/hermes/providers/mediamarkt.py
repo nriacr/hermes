@@ -84,7 +84,6 @@ def read_offer(html, url):
 
 class MediaMarktProvider(Provider):
     site = SITE_MEDIAMARKT
-    home_url = "https://www.mediamarkt.com.tr/"
     notifies_stock_return = True
 
     def read(self, watch, ctx, outcome):

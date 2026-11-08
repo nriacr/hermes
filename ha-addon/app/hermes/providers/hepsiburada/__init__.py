@@ -262,7 +262,6 @@ def fetch_hepsiburada_page(session: requests.Session, url: str, timeout: int):
 
 class HepsiburadaProvider(Provider):
     site = SITE_HEPSIBURADA
-    home_url = "https://www.hepsiburada.com/"
     alert_shows_seller = True
     card_options = ("name", "minimum_price", "official_seller_only", "exclude_terms", "variant_filter")
 

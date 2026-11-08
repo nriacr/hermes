@@ -137,7 +137,6 @@ def extract_offers(html: str, source_url: str = "", size: str = "") -> list[Offe
 
 class NetworkProvider(Provider):
     site = SITE_NETWORK
-    home_url = "https://www.network.com.tr/"
 
     card_options = ("size",)
 

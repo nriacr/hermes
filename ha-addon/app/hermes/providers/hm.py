@@ -446,7 +446,6 @@ def fetch_hm_page(session: requests.Session, url: str, timeout: int) -> HtmlResp
 
 class HMProvider(Provider):
     site = SITE_HM
-    home_url = "https://www2.hm.com/tr_tr/index.html"
 
     def __init__(self) -> None:
         self.pages: dict = {}

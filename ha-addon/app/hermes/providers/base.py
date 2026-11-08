@@ -269,9 +269,6 @@ class Provider:
     adds_deals_to_cart = False
     # Card options shown for this site besides the common ones ("size", "include_variations", ...).
     card_options: tuple = ()
-    # Main page whose tab icon is shown on the cards; icon_url names the icon file directly.
-    home_url = ""
-    icon_url = ""
 
     def set_request_delay(self, minimum: float, maximum: float) -> None:
         """The configured random wait before a request; only providers that space their own requests use it."""

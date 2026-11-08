@@ -32,12 +32,12 @@ def site_theme_class(seller: str) -> str:
 
 
 def site_avatar(label: str, css: Optional[str] = None) -> str:
-    """The card's site box: the site's own icon when Hermes has one, otherwise its first letter."""
+    """The card's site box: the site's app icon when Hermes has one, otherwise its first letter."""
     css = css or site_theme_class(label)
     site = css.removeprefix("site-")
-    version = siteicons.icon_version(site)
-    if version:
-        return f"<div class='ov-av ov-av-logo'><img src='site-icon/{site}.png?v={version}' alt='' loading='lazy'></div>"
+    if siteicons.has_icon(site):
+        return (f"<div class='ov-av ov-av-logo'><img src='site-icon/{site}.png?v={siteicons.icon_version()}' "
+                "alt='' loading='lazy'></div>")
     return f"<div class='ov-av'>{escape(repair_mojibake(label)[:1].upper())}</div>"
 
 
