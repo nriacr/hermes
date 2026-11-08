@@ -13,8 +13,6 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
-from .constants import APP_VERSION
-
 ICON_DIR = Path(__file__).parent / "web" / "static" / "site-icons"
 _SITE_KEY = re.compile(r"^[a-z0-9]+$")
 
@@ -32,7 +30,3 @@ def icon_png(site: str) -> Optional[bytes]:
 def has_icon(site: str) -> bool:
     return icon_png(site) is not None
 
-
-def icon_version() -> str:
-    """Icons change only with a release, so the version refreshes browser caches."""
-    return APP_VERSION

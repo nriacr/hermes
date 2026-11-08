@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.41.2
+
+- Site ikonları paylaşılan bağlantıda da açılır: görsel adresi stil dosyasından verilir, her sayfa adresinde doğru yere gider.
+
 ## 4.41.1
 
 - Amazon seçilmeyen ASIN’lerin teklifini atlar ve keşfedilen komşuları koruyarak sonraki istekleri önler. Trendyol ve H&M, doğrulanmış seçilmeyen renkleri sayfa ve toplu ürün isteklerinden çıkarır.

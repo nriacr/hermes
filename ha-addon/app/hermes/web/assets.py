@@ -11,7 +11,17 @@ STATIC_DIR = Path(__file__).with_name("static")
 def _asset(name: str) -> str:
     return (STATIC_DIR / name).read_text(encoding="utf-8")
 
-APP_CSS = "\n".join(_asset(name) for name in ("base.css", "overview.css", "settings.css", "statistics.css", "pin.css"))
+def _site_icon_css() -> str:
+    """Card icons are set in the stylesheet: url() resolves next to app.css, so ingress and public links both work."""
+    from ..constants import APP_VERSION
+    from ..siteicons import ICON_DIR
+
+    return "\n".join(f".ov-av.ov-logo-{path.stem} {{ background-image:url(site-icon/{path.stem}.png?v={APP_VERSION}); }}"
+                     for path in sorted(ICON_DIR.glob("*.png")))
+
+
+APP_CSS = "\n".join([*(_asset(name) for name in ("base.css", "overview.css", "settings.css", "statistics.css", "pin.css")),
+                      _site_icon_css()])
 PIN_SCRIPT = _asset("pin.js")
 SESSION_SCRIPT = _asset("session.js")
 SETTINGS_SCRIPT = _asset("settings.js")

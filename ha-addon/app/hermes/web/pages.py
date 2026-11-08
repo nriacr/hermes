@@ -36,8 +36,8 @@ def site_avatar(label: str, css: Optional[str] = None) -> str:
     css = css or site_theme_class(label)
     site = css.removeprefix("site-")
     if siteicons.has_icon(site):
-        return (f"<div class='ov-av ov-av-logo'><img src='site-icon/{site}.png?v={siteicons.icon_version()}' "
-                "alt='' loading='lazy'></div>")
+        # The image comes from app.css, whose address is correct on every surface.
+        return f"<div class='ov-av ov-av-logo ov-logo-{site}' role='img' aria-label='{escape(repair_mojibake(label), quote=True)}'></div>"
     return f"<div class='ov-av'>{escape(repair_mojibake(label)[:1].upper())}</div>"
 
 
