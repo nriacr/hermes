@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.41.5
+
+- Hepsiburada tanısı yerel keşif, etiket, teklif adayı, satıcı doğrulama ve sepet hazırlığı sürelerini ayırır.
+
 ## 4.41.4
 
 - Hepsiburada bir ürün okumasında aynı HTML ağacını ve gömülü metni yeniden kullanır. Ayrıştırma süreleri ölçülür.

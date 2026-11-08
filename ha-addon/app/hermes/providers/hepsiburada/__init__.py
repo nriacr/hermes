@@ -279,6 +279,11 @@ def _measure_stage(stage: str):
         timings[stage] = (count + 1, seconds + time.monotonic() - started)
 
 
+def _measure_parse(stage, operation, *args, **kwargs):
+    with _measure_stage(stage):
+        return operation(*args, **kwargs)
+
+
 class HepsiburadaProvider(Provider):
     site = SITE_HEPSIBURADA
     alert_shows_seller = True
@@ -367,14 +372,14 @@ class HepsiburadaProvider(Provider):
         try:
             with product_parse_scope() as stats:
                 html = self._page(ctx, watch.url)
-                family = self._remember_family(html) if watch.variant_filter else {}
+                family = _measure_parse("keşif", self._remember_family, html) if watch.variant_filter else {}
                 yield from self._product_offers(ctx, watch, html, family)
         finally:
             _read_timings.reset(token)
             elapsed = time.monotonic() - started
             accounted = sum(seconds for _, seconds in timings.values())
             parts = " | ".join(f"{stage}={seconds:.2f} sn/{count}"
-                               for stage in ("sayfa", "satıcı", "sepet")
+                               for stage in ("sayfa", "satıcı", "sepet", "keşif", "etiket", "aday", "doğrulama", "sepet_hazırlık")
                                for count, seconds in [timings.get(stage, (0, 0.0))])
             log(f"Hepsiburada süre ölçümü: {watch.name or watch.url} | toplam={elapsed:.2f} sn | "
                 f"{parts} | diğer={max(0.0, elapsed - accounted):.2f} sn | "
@@ -404,7 +409,7 @@ class HepsiburadaProvider(Provider):
 
     def _product_offers(self, ctx, watch, html: str, family: Optional[Dict[str, Dict[str, str]]] = None):
         """Yields each variant's offer as soon as it is read, so the table refreshes variant by variant."""
-        variant_urls = parser.extract_variant_urls(html, watch.url, self._scan_limit(watch))
+        variant_urls = _measure_parse("keşif", parser.extract_variant_urls, html, watch.url, self._scan_limit(watch))
         if len(variant_urls) > 1:
             log(f"Hepsiburada varyasyonları bulundu: {watch.name or watch.url} | adet={len(variant_urls)}")
 
@@ -422,7 +427,7 @@ class HepsiburadaProvider(Provider):
                 log(f"Hepsiburada varyant okuması başlamadan atlandı (seçim: {unselected}): {sku} | {values[unselected]}")
                 continue
             try:
-                variant_label = parser.extract_embedded_variant_label(html, variant_url)
+                variant_label = _measure_parse("etiket", parser.extract_embedded_variant_label, html, variant_url)
                 if variant_label and watch.excluded_terms and variant_url != watch.url:
                     # A variant whose own label carries an exclusion is dropped anyway; it is not opened.
                     # Only the label is checked: the main page's title names the main variant, not this one.
@@ -432,7 +437,7 @@ class HepsiburadaProvider(Provider):
                         continue
                 offer, variant_html = self._variant_offer(ctx, watch, html, variant_url)
                 if variant_html:
-                    variant_label = parser.extract_selected_variant_label(variant_html) or variant_label
+                    variant_label = _measure_parse("etiket", parser.extract_selected_variant_label, variant_html) or variant_label
                 offer_title = parser.title_with_variant_label(offer.title, variant_label)
                 variant_identity = normalize_offer_text(variant_label) or parser.product_id_from_url(variant_url)
                 dedupe_key = (
@@ -468,10 +473,11 @@ class HepsiburadaProvider(Provider):
         if not variant_html:
             return offer, variant_html
         listings: Optional[List[dict]] = None
-        shown = parser.shown_seller(variant_html, variant_url)
+        shown = _measure_parse("doğrulama", parser.shown_seller, variant_html, variant_url)
         if normalize_offer_text(offer.seller or "") != normalize_offer_text(shown):
             listings = self._listings(ctx, variant_url)
-            verified = parser.extract_verified_offer(variant_html, variant_url, shown, parser.live_seller_prices(listings))
+            verified = _measure_parse("doğrulama", parser.extract_verified_offer,
+                                      variant_html, variant_url, shown, parser.live_seller_prices(listings))
             if normalize_offer_text(verified.seller or "") != normalize_offer_text(offer.seller or ""):
                 log(f"Hepsiburada satıcısı canlı listede doğrulanmadı, sayılmadı: {offer.seller} | {format_tl(offer.price, with_currency=True)}")
             offer = verified
@@ -487,7 +493,7 @@ class HepsiburadaProvider(Provider):
             return replace(offer, price_note=f"sayfa fiyatı {format_tl(offer.price, with_currency=True)} (canlı listede satıcı yok)")
         if not hepsiburada_cart.needs_evaluation(listing):
             return replace(offer, price_note=f"sayfa fiyatı {format_tl(offer.price, with_currency=True)} (kampanya etiketi yok)")
-        product = hepsiburada_cart.page_product(page_html)
+        product = _measure_parse("sepet_hazırlık", hepsiburada_cart.page_product, page_html)
         payload = hepsiburada_cart.evaluation_payload(listing, product, parser.product_id_from_url(url)) if product else None
         if payload is None:
             return replace(offer, price_note=f"sayfa fiyatı {format_tl(offer.price, with_currency=True)} (kampanya sorgusu kurulamadı)")
@@ -525,17 +531,17 @@ class HepsiburadaProvider(Provider):
         return listings
 
     def _page_offer(self, ctx, watch, html: str, variant_url: str):
-        embedded_offer = parser.extract_embedded_variant_offer(html, variant_url)
+        embedded_offer = _measure_parse("aday", parser.extract_embedded_variant_offer, html, variant_url)
         if variant_url == watch.url:
-            return _lower_offer(embedded_offer, parser.extract_offer(html, source_url=variant_url)), html
+            return _lower_offer(embedded_offer, _measure_parse("aday", parser.extract_offer, html, source_url=variant_url)), html
         if not embedded_offer:
             variant_html = self._page(ctx, variant_url)
-            return parser.extract_offer(variant_html, source_url=variant_url), variant_html
+            return _measure_parse("aday", parser.extract_offer, variant_html, source_url=variant_url), variant_html
         variant_html = ""
         try:
             # The variant's own page can show a lower Premium/cart price.
             variant_html = self._page(ctx, variant_url)
-            return _lower_offer(embedded_offer, parser.extract_offer(variant_html, source_url=variant_url)), variant_html
+            return _lower_offer(embedded_offer, _measure_parse("aday", parser.extract_offer, variant_html, source_url=variant_url)), variant_html
         except Exception as exc:  # noqa: BLE001
             log(f"Hepsiburada varyasyon sayfası premium kontrolü atlandı: {variant_url} | {exc}")
             return embedded_offer, variant_html
