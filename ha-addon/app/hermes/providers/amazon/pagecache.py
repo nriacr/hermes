@@ -24,6 +24,10 @@ EXCLUDED_PAGES_SAVE_SECONDS = 60
 PERSIST_EXCLUDED_PAGES = True  # tests switch it off so cases do not share memory
 
 
+def selection_signature(watch) -> tuple:
+    return tuple((name, tuple(sorted(values))) for name, values in sorted(getattr(watch, "variant_filter", {}).items()))
+
+
 class PageCacheMixin:
     def _remember_page(self, url: str, snapshot: dict) -> None:
         # A cycle can contain several large families; keep enough parsed pages
@@ -69,7 +73,10 @@ class PageCacheMixin:
                     continue
                 client.excluded_pages[key] = {
                     "variations": [AmazonProductVariation(label=str(v[0]), url=str(v[1])) for v in item["variations"]],
-                    "terms": tuple(item["terms"]), "refresh_at": float(item["refresh_at"]) + offset}
+                    "terms": tuple(item["terms"]),
+                    "selection": tuple((name, tuple(values)) for name, values in item.get("selection", [])),
+                    "variant_selection": bool(item.get("variant_selection")),
+                    "refresh_at": float(item["refresh_at"]) + offset}
         except Exception as exc:  # noqa: BLE001 - the memory is only a saving; start empty
             log(f"Amazon hariç sayfa hafızası okunamadı: {type(exc).__name__}")
 
@@ -81,7 +88,7 @@ class PageCacheMixin:
         client.excluded_pages_saved_at = now
         offset = time.time() - now
         payload = {key: {"variations": [[v.label, v.url] for v in item["variations"]], "terms": list(item["terms"]),
-                         "refresh_at": item["refresh_at"] + offset}
+                         "selection": item.get("selection", ()), "variant_selection": bool(item.get("variant_selection")), "refresh_at": item["refresh_at"] + offset}
                    for key, item in client.excluded_pages.items()}
         try:
             export_json(EXCLUDED_PAGES_PATH, payload, now=True)
@@ -93,17 +100,19 @@ class PageCacheMixin:
         entry = self.client.excluded_pages.get(cache_key)
         if not entry:
             return None
-        if entry["terms"] != tuple(watch.excluded_terms) or time.monotonic() >= entry["refresh_at"]:
+        if (entry["terms"] != tuple(watch.excluded_terms) or entry.get("selection", ()) != selection_signature(watch)
+                or time.monotonic() >= entry["refresh_at"]):
             self.client.excluded_pages.pop(cache_key, None)
             return None
         return entry
 
-    def _remember_exclusion(self, cache_key: str, watch: WatchRule, variations) -> None:
+    def _remember_exclusion(self, cache_key: str, watch: WatchRule, variations, *, variant_selection: bool = False) -> None:
         cache = self.client.excluded_pages
         if cache_key not in cache and len(cache) >= EXCLUDED_PAGE_CACHE_LIMIT:
             cache.pop(next(iter(cache)))
         # Each page refreshes at its own time (15-45 minutes) so they never all expire in one sweep.
         spread = 0.5 + (zlib.crc32(cache_key.encode("utf-8")) % 100) / 100
         cache[cache_key] = {"variations": list(variations), "terms": tuple(watch.excluded_terms),
+                            "selection": selection_signature(watch), "variant_selection": variant_selection,
                             "refresh_at": time.monotonic() + AMAZON_EXCLUDED_PAGE_REFRESH_SECONDS * spread}
         self._save_excluded_pages()

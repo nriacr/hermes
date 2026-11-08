@@ -284,6 +284,20 @@ class TrendyolProviderTests(unittest.TestCase):
         self.assertEqual(pace.call_count, 2)
         self.assertEqual(result.defaults, {"Renk": ["Mavi"]})
 
+    def test_repeat_watch_skips_verified_unselected_colour_and_honours_a_new_selection(self):
+        sibling_url = "https://www.trendyol.com/h-m/urun-p-2"
+        provider = TrendyolProvider()
+        root = {"id": 1, "productGroupId": 50, "slicingAttributes": {"DsmColor": "Mavi"}}
+        sibling = {"id": 2, "productGroupId": 50, "slicingAttributes": {"DsmColor": "Beyaz"}}
+        html = '<a href="/h-m/urun-p-2">Renk</a>'
+        provider.read_page = Mock(side_effect=lambda url, ctx: (html, root) if url == URL else ("", sibling))
+        ctx = ReadContext(5, Mock())
+        self.assertEqual([url for url, _, _ in provider.family_pages(URL, ctx, selected_colors={"mavi"})], [URL, sibling_url])
+        provider.read_page.reset_mock()
+        self.assertEqual([url for url, _, _ in provider.family_pages(URL, ctx, selected_colors={"mavi"})], [URL])
+        provider.read_page.assert_called_once_with(URL, ctx)
+        self.assertEqual([url for url, _, _ in provider.family_pages(URL, ctx, selected_colors={"beyaz"})], [URL, sibling_url])
+
     def test_inspect_keeps_all_out_of_stock_sizes(self):
         data = trendyol.page_product(page(price(949.99), [("M", False)]))
         provider = TrendyolProvider()

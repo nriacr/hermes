@@ -251,7 +251,8 @@ def dimension_combinations(html: str) -> list[tuple[str, dict[str, str]]]:
     found = []
     for asin, values in combos.items():
         if re.fullmatch(r"[A-Z0-9]{10}", str(asin)) and isinstance(values, list) and len(values) == len(names):
-            found.append((asin, {name: _clean_variation_label(str(value)) for name, value in zip(names, values)}))
+            found.append((asin, {name: _clean_variation_label(value) for name, value in zip(names, values)
+                                if isinstance(value, str) and value.strip()}))
     return found
 
 

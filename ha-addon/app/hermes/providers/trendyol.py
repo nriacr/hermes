@@ -8,6 +8,7 @@ page; the site's coupon endpoint lists them with their lower limit and cap.
 
 import json
 import re
+import time
 from decimal import ROUND_HALF_UP, Decimal
 from html import unescape
 from typing import Any, Optional
@@ -18,7 +19,7 @@ from ..errors import HermesError, OutOfStockHermesError, PriceUnavailableHermesE
 from ..logging_utils import log
 from ..models import OfferResult, ProductPreview, VariantPreview
 from ..traffic import count_curl
-from ..utils import build_headers, format_tl as whole_tl, parse_decimal
+from ..utils import build_headers, normalize_offer_text, format_tl as whole_tl, parse_decimal
 from .base import Provider, outside_variant_filter, soup_from_html
 from .http import curl_requests, fetch_with_retries, read_site_html
 from .size_availability import size_matches
@@ -317,6 +318,9 @@ class TrendyolProvider(Provider):
 
     card_options = ("size", "variant_filter")
 
+    def __init__(self) -> None:
+        self.family_colors: dict[tuple[str, str], tuple[str, float]] = {}
+
     def coupons(self, product: dict, url: str, ctx, diagnostic: bool = False) -> Optional[list]:
         """The product's coupons, or None when they cannot be read (the price then stays without coupon)."""
         content_id = product.get("id")
@@ -419,7 +423,7 @@ class TrendyolProvider(Provider):
         html = read_site_html(fetch_with_retries(ctx.session, url, ctx.timeout), "Trendyol")
         return html, page_product(html)
 
-    def family_pages(self, url, ctx, include_colors=True):
+    def family_pages(self, url, ctx, include_colors=True, selected_colors=()):
         html, product = self.read_page(url, ctx)
         if not product:
             raise PriceUnavailableHermesError("Trendyol ürününe ait fiyat doğrulanamadı.")
@@ -437,13 +441,27 @@ class TrendyolProvider(Provider):
             if content_id in seen:
                 continue
             seen.add(content_id)
+            key = (str(group), content_id)
+            known = self.family_colors.get(key)
+            if selected_colors and known and time.monotonic() < known[1] and known[0] not in selected_colors:
+                log(f"Trendyol seçilmeyen renk sayfası atlandı: ürün={content_id} | aile={group}")
+                continue
             ctx.pace("Trendyol renk sayfası")
             color_html, color = self.read_page(candidate, ctx)
             if not color:
                 raise PriceUnavailableHermesError("Trendyol renk sayfası doğrulanamadı.")
             if str(color.get("id")) != content_id or color.get("productGroupId") != group:
                 continue
+            label = self._color(color)
+            if label:
+                if key not in self.family_colors and len(self.family_colors) >= 512:
+                    self.family_colors.pop(next(iter(self.family_colors)))
+                self.family_colors[key] = (label, time.monotonic() + 3600)
             yield candidate, color_html, color
+
+    @staticmethod
+    def _color(product: dict) -> str:
+        return normalize_offer_text(str((product.get("slicingAttributes") or {}).get("DsmColor") or ""))
 
     def inspect(self, url, ctx):
         variants, colors, sizes, title = [], [], [], ""
@@ -485,7 +503,14 @@ class TrendyolProvider(Provider):
 
     def read(self, watch, ctx, outcome):
         offers = []
-        for color_url, html, product in self.family_pages(watch.url, ctx, watch.include_variations or bool(watch.variant_filter)):
+        selected_colors = {normalize_offer_text(value) for value in watch.variant_filter.get("Renk", [])}
+        for color_url, html, product in self.family_pages(
+            watch.url, ctx, watch.include_variations or bool(watch.variant_filter), selected_colors,
+        ):
+            color = self._color(product)
+            if selected_colors and color and color not in selected_colors:
+                log(f"Trendyol seçilmeyen rengin teklifi okunmadı: ürün={product.get('id')}")
+                continue
             coupons = self.coupons(product, color_url, ctx)
             try:
                 current = extract_offers(html, color_url, size=watch.size, coupons=coupons)

@@ -1,5 +1,6 @@
 import json
 import re
+import time
 from decimal import Decimal
 from typing import Any, Dict, Iterable, List
 from urllib.parse import urlencode, urljoin
@@ -417,25 +418,43 @@ def _products_from_api_data(data: Dict[str, Any]) -> List[Dict[str, Any]]:
     return [item for item in product_list if isinstance(item, dict)] if isinstance(product_list, list) else []
 
 
-def _swatch_article_ids(products: List[Dict[str, Any]]) -> List[str]:
-    return [
-        str(swatch.get("articleId") or "").strip()
-        for product in products
-        for swatch in product.get("swatches") or []
-        if isinstance(swatch, dict) and str(swatch.get("articleId") or "").strip()
-    ]
-
-
-def fetch_hm_page(session: requests.Session, url: str, timeout: int) -> HtmlResponse:
+def fetch_hm_page(session: requests.Session, url: str, timeout: int, *, selected_colors=(), color_memory=None) -> HtmlResponse:
     article_id = article_id_from_url(url)
     products = _products_from_api_data(_api_get(session, _api_url([article_id]), url, timeout))
     if not products:
         raise HermesError("H&M API ürün verisi döndürmedi.")
-    swatch_ids = _swatch_article_ids(products)
+    now = time.monotonic()
+    swatch_ids: dict[str, None] = {}
+    skipped_ids = set()
+    for product in products:
+        for swatch in product.get("swatches") or []:
+            if not isinstance(swatch, dict):
+                continue
+            sku = str(swatch.get("articleId") or "").strip()
+            if not sku or sku == article_id:
+                continue
+            label = normalize_offer_text(_clean(swatch.get("colorName") or swatch.get("colourName")))
+            known = color_memory.get(sku) if color_memory is not None else None
+            if not label and known and now < known[1]:
+                label = known[0]
+            if selected_colors and label and label not in selected_colors:
+                skipped_ids.add(sku)
+            else:
+                swatch_ids[sku] = None
+    if skipped_ids - swatch_ids.keys():
+        log(f"H&M seçilmeyen renkler toplu istekten çıkarıldı: ürün={article_id} | adet={len(skipped_ids - swatch_ids.keys())}")
     if swatch_ids:
         products = _products_from_api_data(_api_get(session, _api_url([article_id, *swatch_ids]), url, timeout))
         if not products:
             raise HermesError("H&M API varyasyon verisi döndürmedi.")
+    if color_memory is not None:
+        for product in products:
+            sku = str(product.get("id") or product.get("articleId") or "").strip()
+            label = normalize_offer_text(_clean(_field(product, ("colorName", "colourName", "swatchColorName"))))
+            if sku in swatch_ids and label:
+                if sku not in color_memory and len(color_memory) >= 512:
+                    color_memory.pop(next(iter(color_memory)))
+                color_memory[sku] = (label, now + 3600)
     html = (
         '<html><body><script type="application/json" id="hm-product-data">'
         f"{json.dumps({'products': products}, ensure_ascii=False)}"
@@ -449,6 +468,7 @@ class HMProvider(Provider):
 
     def __init__(self) -> None:
         self.pages: dict = {}
+        self.color_memory: dict[str, tuple[str, float]] = {}
 
     def begin_cycle(self) -> None:
         self.pages = {}
@@ -485,10 +505,12 @@ class HMProvider(Provider):
         return not dimension
 
     def read(self, watch, ctx, outcome):
-        if watch.url not in self.pages:
-            self.pages[watch.url] = fetch_hm_page(ctx.session, watch.url, ctx.timeout)
+        colors = frozenset(normalize_offer_text(value) for value in watch.variant_filter.get("Renk", []))
+        key = (watch.url, colors)
+        if key not in self.pages:
+            self.pages[key] = fetch_hm_page(ctx.session, watch.url, ctx.timeout, selected_colors=colors, color_memory=self.color_memory)
         html = read_site_html(
-            self.pages[watch.url], "H&M", is_access_denied_page,
+            self.pages[key], "H&M", is_access_denied_page,
             message="H&M bot koruması nedeniyle ürün verisi okunamadı.",
         )
         offers = extract_offers(html, source_url=watch.url, size=watch.size)

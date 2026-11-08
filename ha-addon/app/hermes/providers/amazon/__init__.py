@@ -16,7 +16,7 @@ from ...constants import (
 from ...errors import EmptySearchResultsHermesError, HermesError, OutOfStockHermesError, PriceUnavailableHermesError
 from ...logging_utils import log, ProblemLog
 from ...models import OfferResult, ProductPreview, SearchResultItem, VariantPreview, WatchRule
-from ...utils import extract_asin_from_url, format_tl, is_amazon_search_url, log_cell
+from ...utils import extract_asin_from_url, format_tl, is_amazon_search_url, log_cell, normalize_offer_text
 from ..base import DEPO_LANE, Provider, ReadContext, WatchRead, excluded_term_in_title, outside_variant_filter
 from ..http import raise_if_age_verification
 from . import parser
@@ -24,7 +24,7 @@ from .access import MAIN_LANE, AmazonAccess
 from .client import AmazonClient, is_protection_error
 from .common import _current, _step
 from .matching import is_platform_seller, offers_from_search_results
-from .pagecache import PageCacheMixin
+from .pagecache import PageCacheMixin, selection_signature
 from .rhythm import RhythmMixin, WatchRhythm
 from .search import dedupe_results, extract_result_candidates, title_matches_any_keyword
 
@@ -445,6 +445,11 @@ class AmazonProvider(RhythmMixin, PageCacheMixin, Provider):
         absence_cache = self.client.unavailable_product_pages
         errors: List[str] = []
         found = discovery_pages = excluded_reads = skipped_excluded = 0
+        selection_skips = 0
+        selected = {name: {normalize_offer_text(value) for value in values}
+                    for name, values in watch.variant_filter.items()}
+        signature = selection_signature(watch)
+        known_variants: dict[str, dict[str, str]] = {}
 
         def enqueue(items) -> None:
             for item in items or []:
@@ -454,7 +459,6 @@ class AmazonProvider(RhythmMixin, PageCacheMixin, Provider):
                     pending.append(item)
 
         for variation in pending:
-            ctx.pace("Amazon varyant kontrolü")
             identity = extract_asin_from_url(variation.url) or variation.url
             cache_key = str(variation.url or "").strip()
             snapshot = self.pages.get(cache_key)
@@ -467,8 +471,10 @@ class AmazonProvider(RhythmMixin, PageCacheMixin, Provider):
             selected_label = str(snapshot.get("label") or variation.label) if snapshot else variation.label
             remembered = self._remembered_exclusion(cache_key, watch) if snapshot is None and follow_variations else None
             if remembered is not None:
-                # Excluded by title and read recently: its neighbours are known, the page is not needed.
+                # A recent read already discovered its neighbours.
                 skipped_excluded += 1
+                if remembered.get("variant_selection"):
+                    selection_skips += 1
                 self.client.access.count("hariç_atlanan")
                 enqueue(remembered["variations"])
                 continue
@@ -477,16 +483,20 @@ class AmazonProvider(RhythmMixin, PageCacheMixin, Provider):
                 needs_offer_upgrade = (
                     snapshot is not None
                     and snapshot.get("offers_skipped_by_exclusion")
-                    and tuple(snapshot.get("offer_skip_excluded_terms") or ()) != tuple(watch.excluded_terms)
+                    and (tuple(snapshot.get("offer_skip_excluded_terms") or ()) != tuple(watch.excluded_terms)
+                         or snapshot.get("offer_skip_variant_filter", ()) != signature)
                 )
                 if snapshot is None or needs_variation_upgrade or needs_offer_upgrade:
                     page_was_reused = False
+                    ctx.pace("Amazon varyant kontrolü")
                     html = self.fetch(variation.url, ctx)
                     timing = [(time.monotonic(), time.thread_time())]
                     _current.timing = timing
                     page_soup = parser.parse_product_page(html)
                     _mark(timing, "çözümleme")
                     discovered = None
+                    if selected:
+                        known_variants.update(parser.dimension_combinations(html))
                     if follow_variations:
                         discovery_pages += 1
                         discovered = parser.extract_product_variations(html, variation.url, limit, soup=page_soup)
@@ -498,14 +508,20 @@ class AmazonProvider(RhythmMixin, PageCacheMixin, Provider):
                     # Exclusions are decided from the title and selected variant
                     # before any price is read; variant discovery still continues.
                     exclusion_term = excluded_term_in_title(watch, " ".join((page_title, selected_label, variation.label)))
+                    outside_selection = next((name for name, value in known_variants.get(identity, {}).items()
+                                              if name in selected and normalize_offer_text(value)
+                                              and normalize_offer_text(value) not in selected[name]), "")
                     offer_error = None
-                    if exclusion_term:
+                    if exclusion_term or outside_selection:
                         excluded_reads += 1
                         if discovered is not None:
-                            self._remember_exclusion(cache_key, watch, discovered)
+                            self._remember_exclusion(cache_key, watch, discovered, variant_selection=bool(outside_selection))
                         page_offers: List[OfferResult] = []
-                        log("Amazon varyant fiyat okuması hariç tutuldu: "
-                            f"{log_cell(page_title or selected_label or variation.label, 90)} | hariç tut filtresi: {exclusion_term}")
+                        if outside_selection:
+                            log(f"Amazon seçilmeyen varyantın teklifi okunmadı: {identity} | {outside_selection}")
+                        else:
+                            log("Amazon varyant fiyat okuması hariç tutuldu: "
+                                f"{log_cell(page_title or selected_label or variation.label, 90)} | hariç tut filtresi: {exclusion_term}")
                     else:
                         try:
                             page_offers = self.page_offers(variation.url, html, ctx, outcome, soup=page_soup)
@@ -516,8 +532,9 @@ class AmazonProvider(RhythmMixin, PageCacheMixin, Provider):
                         "product_title": page_title,
                         "offers": page_offers,
                         "offer_error": offer_error,
-                        "offers_skipped_by_exclusion": bool(exclusion_term),
-                        "offer_skip_excluded_terms": tuple(watch.excluded_terms) if exclusion_term else (),
+                        "offers_skipped_by_exclusion": bool(exclusion_term or outside_selection),
+                        "offer_skip_excluded_terms": tuple(watch.excluded_terms),
+                        "offer_skip_variant_filter": signature,
                     }
                     _mark(timing, "teklif_kalan")
                     _current.timing = None
@@ -535,7 +552,7 @@ class AmazonProvider(RhythmMixin, PageCacheMixin, Provider):
                         # return to stock shows up at once; the 5-minute bound stays for everything else.
                         if not (variation.url == watch.url and self.is_red(watch)):
                             self._remember_absence(cache_key, snapshot)
-                    elif not exclusion_term:
+                    elif not (exclusion_term or outside_selection):
                         absence_cache.pop(cache_key, None)
                         self.client.excluded_pages.pop(cache_key, None)
 
@@ -590,7 +607,8 @@ class AmazonProvider(RhythmMixin, PageCacheMixin, Provider):
                 break
         log(f"Amazon varyasyon taraması: {watch.name or watch.url} | varyant={len(pending)} | teklif={found} | "
             f"hatalı={len(errors)} | varyant_keşif_sayfası={discovery_pages} | "
-            f"hariç_nedeniyle_fiyat_okuması_atlandı={excluded_reads} | hariç_nedeniyle_istek_atlandı={skipped_excluded}")
+            f"hariç_nedeniyle_fiyat_okuması_atlandı={excluded_reads} | hariç_nedeniyle_istek_atlandı={skipped_excluded} | "
+            f"seçim_nedeniyle_istek_atlandı={selection_skips}")
         outcome.errors.extend(errors)
         if found:
             return

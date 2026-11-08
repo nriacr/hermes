@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.41.1
+
+- Amazon seçilmeyen ASIN’lerin teklifini atlar ve keşfedilen komşuları koruyarak sonraki istekleri önler. Trendyol ve H&M, doğrulanmış seçilmeyen renkleri sayfa ve toplu ürün isteklerinden çıkarır.
+
 ## 4.41.0
 
 - Site ikonları artık sitelerin iOS uygulama ikonları; Nuri'nin seçtiği görseller Hermes'e gömülü, zemini ve yuvarlak köşeleriyle gösterilir. Togg için sitenin elmas ikonu aynı biçimde hazırlandı. İnternetten ikon çekme ve haftalık güncelleme kaldırıldı, Pillow çıkarıldı.

@@ -635,6 +635,29 @@ class AmazonProductTests(AmazonTestCase):
         self.assertEqual(asins, ["B000000001", "B000000002", "B000000003", "B000000001", "B000000003"])
         self.assertEqual(self.client.access.counters["hariç_atlanan"], 1)
 
+    def test_selected_amazon_variants_keep_discovery_edges_and_reopen_after_filter_change(self):
+        rule = watch(url=ROOT, include_variations=True, variant_filter={"Boyut": ["256 GB"]})
+        sizes = {"B000000001": "256 GB", "B000000002": "1 TB", "B000000003": "256 GB"}
+        edges = {"B000000001": ["B000000002"], "B000000002": ["B000000003"], "B000000003": []}
+
+        def page_for(url):
+            asin = extract_asin_from_url(url)
+            swatches = "".join(f'<li data-asin="{edge}">{sizes[edge]}</li>' for edge in edges[asin])
+            data = json.dumps({"dimensions": ["size_name"], "dimensionValuesDisplayData": {asin: [sizes[asin]]}})
+            return (f'<span id="productTitle">iPhone {sizes[asin]}</span>'
+                    f'<div id="variation_size_name"><ul>{swatches}</ul></div><script>{data}</script>'
+                    '<div id="corePriceDisplay_desktop_feature_div"><span class="a-price"><span class="a-offscreen">100.000,00 TL</span></span></div>')
+
+        with self.serve(page_for):
+            self.assertEqual([extract_asin_from_url(o.url) for o in self.read(rule)], ["B000000001", "B000000003"])
+            self.provider.begin_cycle()
+            self.fetched.clear()
+            self.assertEqual([extract_asin_from_url(o.url) for o in self.read(rule)], ["B000000001", "B000000003"])
+            self.assertEqual([extract_asin_from_url(url) for url in self.fetched], ["B000000001", "B000000003"])
+            self.provider.begin_cycle()
+            rule.variant_filter = {"Boyut": ["1 TB"]}
+            self.assertEqual([extract_asin_from_url(o.url) for o in self.read(rule)], ["B000000002"])
+
     def test_remembered_exclusion_expires_and_follows_the_watchs_terms(self):
         rule = watch(url=ROOT, include_variations=True, excluded_terms=["1 TB"])
         self.provider._remember_exclusion(CHILD, rule, [])
@@ -799,6 +822,20 @@ class OtherSiteTests(unittest.TestCase):
                 '<script>{"customerSettings":{"requireCaptchaValidation":true},"label":"robot"}</script>')
         self.assertFalse(zara_interstitial(html))
         self.assertTrue(zara_interstitial("bm-verify _sec/verify"))
+
+    def test_hm_batch_drops_known_unselected_swatch_ids_and_keeps_unknowns(self):
+        from hermes.providers import hm
+        url = "https://www2.hm.com/tr_tr/productpage.12345001.html"
+        root = {"id": "12345001", "swatches": [{"articleId": "12345002"}, {"articleId": "12345003"}]}
+        unselected = {"id": "12345002", "colorName": "Beyaz"}
+        unknown = {"id": "12345003"}
+        responses = [[root], [root, unselected, unknown], [root], [root, unknown]]
+        with patch.object(hm, "_api_get", side_effect=[{"articles": {"productList": rows}} for rows in responses]) as get:
+            memory = {}
+            hm.fetch_hm_page(Mock(), url, 5, selected_colors={"mavi"}, color_memory=memory)
+            hm.fetch_hm_page(Mock(), url, 5, selected_colors={"mavi"}, color_memory=memory)
+        self.assertEqual(get.call_args_list[1].args[1], hm._api_url(["12345001", "12345002", "12345003"]))
+        self.assertEqual(get.call_args_list[3].args[1], hm._api_url(["12345001", "12345003"]))
 
     def test_hepsiburada_security_page_is_a_challenge(self):
         self.assertTrue(hepsiburada_challenge("<html>HBBlockAndCaptcha</html>"))
