@@ -11,6 +11,7 @@ from ...models import OfferResult
 from ...utils import normalize_offer_text, repair_mojibake
 from ..base import extract_price_from_selectors, extract_title
 from .common import (
+    product_candidates_once,
     product_soup,
     DETAIL_PRICE_SELECTORS,
     PRODUCT_URL_RE,
@@ -112,6 +113,10 @@ def _current_product_listing_mapping(text: str, selected_product_id: str) -> Opt
 
 
 def _embedded_detail_candidates(soup, source_url: str = "") -> list[HepsiburadaCandidate]:
+    return product_candidates_once(soup, ("embedded", source_url), lambda: _build_embedded_candidates(soup, source_url))
+
+
+def _build_embedded_candidates(soup, source_url: str) -> list[HepsiburadaCandidate]:
     html = _embedded_text(soup)
     if '"merchantName"' not in html or not any(key in html for key in ('"minimumPrice"', '"finalPriceOnSale"', '"prices"')):
         return []
@@ -200,7 +205,12 @@ def _detail_candidate(soup, *, warn_missing_premium: bool = True) -> Optional[He
 
 
 def _product_candidates(soup, source_url: str, selected_product_id: str) -> list[HepsiburadaCandidate]:
-    candidates = _embedded_detail_candidates(soup, source_url=source_url)
+    return product_candidates_once(soup, ("product", source_url, selected_product_id),
+                                   lambda: _build_product_candidates(soup, source_url, selected_product_id))
+
+
+def _build_product_candidates(soup, source_url: str, selected_product_id: str) -> list[HepsiburadaCandidate]:
+    candidates = list(_embedded_detail_candidates(soup, source_url=source_url))
     detail = _detail_candidate(soup, warn_missing_premium=not any(item.has_preferred_price for item in candidates))
     if detail and (detail.has_preferred_price or not candidates):
         detail.identity = f"{selected_product_id}:{normalize_offer_text(detail.seller)}"

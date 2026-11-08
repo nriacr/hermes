@@ -384,7 +384,8 @@ class HepsiburadaProvider(Provider):
             log(f"Hepsiburada süre ölçümü: {watch.name or watch.url} | toplam={elapsed:.2f} sn | "
                 f"{parts} | diğer={max(0.0, elapsed - accounted):.2f} sn | "
                 f"html={stats.get('html_seconds', 0):.2f} sn/{stats.get('pages', 0)} | "
-                f"gömülü={stats.get('embedded_seconds', 0):.2f} sn | html_tekrar_kullanım={stats.get('hits', 0)}")
+                f"gömülü={stats.get('embedded_seconds', 0):.2f} sn | html_tekrar_kullanım={stats.get('hits', 0)} | "
+                f"aday_tekrar_kullanım={stats.get('candidate_hits', 0)}")
 
     @staticmethod
     def _scan_limit(watch) -> int:

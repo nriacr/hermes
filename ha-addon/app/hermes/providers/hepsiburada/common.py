@@ -442,6 +442,19 @@ def product_soup(html: str):
     return scope[0](html) if scope else soup_from_html(html)
 
 
+def product_candidates_once(soup, key, build):
+    """Cache page-derived candidates only while that product read is active."""
+    scope = _product_parse.get()
+    if scope is None:
+        return build()
+    cached = vars(soup).setdefault("_hermes_candidates", {})
+    if key not in cached:
+        cached[key] = build()
+    else:
+        scope[1]["candidate_hits"] = scope[1].get("candidate_hits", 0) + 1
+    return cached[key]
+
+
 def _embedded_text(soup) -> str:
     scope = _product_parse.get()
     if scope is None:

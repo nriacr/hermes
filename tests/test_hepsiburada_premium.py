@@ -158,6 +158,7 @@ class HepsiburadaLiveSellerTests(unittest.TestCase):
                 self.assertEqual(self.read(payload), expected)
             self.assertEqual(stats["pages"], 1)
             self.assertGreater(stats["hits"], 0)
+            self.assertEqual(stats["candidate_hits"], 2)
 
     def test_page_alone_still_prefers_the_ghost(self):
         self.assertEqual(extract_offer(self.page_with_ghost(), URL).seller, "MARTEKNOLOJİ")

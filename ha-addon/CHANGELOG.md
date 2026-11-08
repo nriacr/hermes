@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.41.6
+
+- Hepsiburada aynı okuma içinde aynı sayfadan çıkarılan teklif adaylarını yeniden kullanır. Canlı satıcı ve sepet doğrulaması korunur.
+
 ## 4.41.5
 
 - Hepsiburada tanısı yerel keşif, etiket, teklif adayı, satıcı doğrulama ve sepet hazırlığı sürelerini ayırır.
