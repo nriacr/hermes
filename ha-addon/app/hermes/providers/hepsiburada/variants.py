@@ -6,8 +6,8 @@ from typing import Any, Iterable, Optional
 from urllib.parse import unquote
 
 from ...utils import normalize_offer_text
-from ..base import soup_from_html
 from .common import (
+    product_soup,
     CAPACITY_RE,
     COLOR_LABELS,
     DETAIL_STOP_MARKERS,
@@ -123,7 +123,7 @@ def _variant_field_label(normalized_line: str) -> str:
 
 
 def extract_selected_variant_labels(html: str) -> list[str]:
-    soup = soup_from_html(html)
+    soup = product_soup(html)
     lines = _visible_lines_until_details(soup)
     values: list[str] = []
     seen: set[str] = set()
@@ -331,7 +331,7 @@ def extract_embedded_variant_label(html: str, source_url: str) -> str:
     selected_product_id = _product_id_from_url(source_url)
     if not selected_product_id:
         return ""
-    mapping = _selected_variant_mapping(_embedded_text(soup_from_html(html)), selected_product_id)
+    mapping = _selected_variant_mapping(_embedded_text(product_soup(html)), selected_product_id)
     return _clean_variant_label(_variant_label_from_mapping(mapping)) if mapping else ""
 
 
@@ -364,7 +364,7 @@ def extract_variant_urls(html: str, source_url: str, limit: int = 8) -> list[str
         urls.append(absolute)
 
     add(source_url)
-    soup = soup_from_html(html)
+    soup = product_soup(html)
     for link in soup.select("a[href]"):
         href = str(link.get("href") or "")
         if not PRODUCT_URL_RE.search(href):

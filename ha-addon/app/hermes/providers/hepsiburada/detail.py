@@ -9,8 +9,9 @@ from ...errors import HermesError
 from ...logging_utils import ProblemLog
 from ...models import OfferResult
 from ...utils import normalize_offer_text, repair_mojibake
-from ..base import extract_price_from_selectors, extract_title, soup_from_html
+from ..base import extract_price_from_selectors, extract_title
 from .common import (
+    product_soup,
     DETAIL_PRICE_SELECTORS,
     PRODUCT_URL_RE,
     HepsiburadaCandidate,
@@ -146,7 +147,7 @@ def _embedded_detail_candidates(soup, source_url: str = "") -> list[HepsiburadaC
 
 
 def extract_embedded_variant_offer(html: str, source_url: str) -> Optional[OfferResult]:
-    soup = soup_from_html(html)
+    soup = product_soup(html)
     candidates = _embedded_detail_candidates(soup, source_url=source_url)
     if not candidates:
         return None
@@ -208,7 +209,7 @@ def _product_candidates(soup, source_url: str, selected_product_id: str) -> list
 
 
 def extract_offer(html: str, source_url: str = "") -> OfferResult:
-    soup = soup_from_html(html)
+    soup = product_soup(html)
     selected_product_id = _product_id_from_url(source_url)
     if selected_product_id:
         candidates = _product_candidates(soup, source_url, selected_product_id)
@@ -236,7 +237,7 @@ def extract_offer(html: str, source_url: str = "") -> OfferResult:
 
 def shown_seller(html: str, source_url: str) -> str:
     """The seller the product page itself sells from; the only one its HTML proves is buyable."""
-    soup = soup_from_html(html)
+    soup = product_soup(html)
     current = _current_product_listing_mapping(_embedded_text(soup), _product_id_from_url(source_url))
     if current:
         return _clean_text(current.get("merchantName") or "")
@@ -270,7 +271,7 @@ def extract_verified_offer(html: str, source_url: str, shown: str, live_prices: 
     The page's compact seller list can keep sellers that are gone or carry old
     prices. Sellers other than the shown one count only with their live price.
     """
-    soup = soup_from_html(html)
+    soup = product_soup(html)
     shown_key = normalize_offer_text(shown)
     candidates = []
     for candidate in _product_candidates(soup, source_url, _product_id_from_url(source_url)):

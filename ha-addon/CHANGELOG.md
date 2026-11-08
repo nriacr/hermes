@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.41.4
+
+- Hepsiburada bir ürün okumasında aynı HTML ağacını ve gömülü metni yeniden kullanır. Ayrıştırma süreleri ölçülür.
+
 ## 4.41.3
 
 - Hepsiburada ürün okumalarında mevcut sayfa, satıcı ve sepet işlemlerinin süreleri ölçülür. İstekler ve takip ritmi aynı kalır.

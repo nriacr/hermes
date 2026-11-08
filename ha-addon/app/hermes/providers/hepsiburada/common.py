@@ -2,11 +2,16 @@
 
 import json
 import re
+import time
+from contextlib import contextmanager
+from contextvars import ContextVar
+from functools import lru_cache
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any, Iterable, Optional
 from urllib.parse import urljoin, urlsplit
 
+from ..base import soup_from_html
 from ...logging_utils import log
 from ...utils import format_tl, normalize_offer_text, repair_mojibake
 
@@ -407,8 +412,46 @@ def _first_mapping_url(mapping: dict) -> str:
     return ""
 
 
+_product_parse = ContextVar("hepsiburada_product_parse", default=None)
+
+
+@contextmanager
+def product_parse_scope():
+    """Reuse read-only parsed HTML within one card read, never across reads."""
+    stats = {"html_seconds": 0.0, "embedded_seconds": 0.0}
+
+    @lru_cache(maxsize=4)
+    def parse(html: str):
+        started = time.monotonic()
+        soup = soup_from_html(html)
+        stats["html_seconds"] += time.monotonic() - started
+        return soup
+
+    token = _product_parse.set((parse, stats))
+    try:
+        yield stats
+    finally:
+        stats["pages"] = parse.cache_info().misses
+        stats["hits"] = parse.cache_info().hits
+        parse.cache_clear()
+        _product_parse.reset(token)
+
+
+def product_soup(html: str):
+    scope = _product_parse.get()
+    return scope[0](html) if scope else soup_from_html(html)
+
+
 def _embedded_text(soup) -> str:
-    return repair_mojibake(_decode_escaped_fragments(str(soup)))
+    scope = _product_parse.get()
+    if scope is None:
+        return repair_mojibake(_decode_escaped_fragments(str(soup)))
+    attributes = vars(soup)
+    if "_hermes_embedded_text" not in attributes:
+        started = time.monotonic()
+        attributes["_hermes_embedded_text"] = repair_mojibake(_decode_escaped_fragments(str(soup)))
+        scope[1]["embedded_seconds"] += time.monotonic() - started
+    return attributes["_hermes_embedded_text"]
 
 
 def _readable_source_text(soup) -> str:

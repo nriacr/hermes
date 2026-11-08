@@ -22,6 +22,7 @@ from ..base import Provider, excluded_term_in_title, outside_variant_filter
 from ..http import curl_requests, decode_response_text, has_generic_challenge, read_site_html
 from . import cart as hepsiburada_cart
 from . import parser
+from .common import product_parse_scope
 from .parser import clean_display_title, is_product_url
 
 HOME_URL = "https://www.hepsiburada.com/"
@@ -362,10 +363,12 @@ class HepsiburadaProvider(Provider):
         timings: dict[str, tuple[int, float]] = {}
         token = _read_timings.set(timings)
         started = time.monotonic()
+        stats = {}
         try:
-            html = self._page(ctx, watch.url)
-            family = self._remember_family(html) if watch.variant_filter else {}
-            yield from self._product_offers(ctx, watch, html, family)
+            with product_parse_scope() as stats:
+                html = self._page(ctx, watch.url)
+                family = self._remember_family(html) if watch.variant_filter else {}
+                yield from self._product_offers(ctx, watch, html, family)
         finally:
             _read_timings.reset(token)
             elapsed = time.monotonic() - started
@@ -374,7 +377,9 @@ class HepsiburadaProvider(Provider):
                                for stage in ("sayfa", "satıcı", "sepet")
                                for count, seconds in [timings.get(stage, (0, 0.0))])
             log(f"Hepsiburada süre ölçümü: {watch.name or watch.url} | toplam={elapsed:.2f} sn | "
-                f"{parts} | diğer={max(0.0, elapsed - accounted):.2f} sn")
+                f"{parts} | diğer={max(0.0, elapsed - accounted):.2f} sn | "
+                f"html={stats.get('html_seconds', 0):.2f} sn/{stats.get('pages', 0)} | "
+                f"gömülü={stats.get('embedded_seconds', 0):.2f} sn | html_tekrar_kullanım={stats.get('hits', 0)}")
 
     @staticmethod
     def _scan_limit(watch) -> int:

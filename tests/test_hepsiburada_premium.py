@@ -148,6 +148,17 @@ class HepsiburadaLiveSellerTests(unittest.TestCase):
             offer, _page_html = provider._variant_offer(ctx, SimpleNamespace(url=URL), html, URL)
         return offer
 
+    def test_shared_parse_keeps_verified_offer_and_does_not_survive_a_read(self):
+        from hermes.providers.hepsiburada.common import product_parse_scope
+
+        payload = live_payload(live_listing("Hepsiburada", 111049), live_listing("Troy Apple", 110400))
+        expected = self.read(payload)
+        for _ in range(2):
+            with product_parse_scope() as stats:
+                self.assertEqual(self.read(payload), expected)
+            self.assertEqual(stats["pages"], 1)
+            self.assertGreater(stats["hits"], 0)
+
     def test_page_alone_still_prefers_the_ghost(self):
         self.assertEqual(extract_offer(self.page_with_ghost(), URL).seller, "MARTEKNOLOJİ")
 
