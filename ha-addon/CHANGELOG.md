@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.41.3
+
+- Hepsiburada ürün okumalarında mevcut sayfa, satıcı ve sepet işlemlerinin süreleri ölçülür. İstekler ve takip ritmi aynı kalır.
+
 ## 4.41.2
 
 - Site ikonları paylaşılan bağlantıda da açılır: görsel adresi stil dosyasından verilir, her sayfa adresinde doğru yere gider.

@@ -4,6 +4,7 @@ import contextlib
 import threading
 import time
 from collections import Counter
+from contextvars import ContextVar
 from dataclasses import replace
 from decimal import Decimal
 from typing import Dict, List, Optional
@@ -260,6 +261,23 @@ def fetch_hepsiburada_page(session: requests.Session, url: str, timeout: int):
     raise HttpStatusHermesError(0, url)
 
 
+_read_timings: ContextVar[Optional[dict]] = ContextVar("hepsiburada_read_timings", default=None)
+
+
+@contextlib.contextmanager
+def _measure_stage(stage: str):
+    timings = _read_timings.get()
+    if timings is None:
+        yield
+        return
+    started = time.monotonic()
+    try:
+        yield
+    finally:
+        count, seconds = timings.get(stage, (0, 0.0))
+        timings[stage] = (count + 1, seconds + time.monotonic() - started)
+
+
 class HepsiburadaProvider(Provider):
     site = SITE_HEPSIBURADA
     alert_shows_seller = True
@@ -326,17 +344,37 @@ class HepsiburadaProvider(Provider):
         return clean_display_title(title)
 
     def _page(self, ctx, url: str) -> str:
-        return read_site_html(fetch_hepsiburada_page(ctx.session, url, ctx.timeout), "Hepsiburada", is_challenge_page)
+        with _measure_stage("sayfa"):
+            return read_site_html(fetch_hepsiburada_page(ctx.session, url, ctx.timeout), "Hepsiburada", is_challenge_page)
 
     def read(self, watch, ctx, outcome):
+        if is_product_url(watch.url):
+            return self._measured_product(watch, ctx)
         html = self._page(ctx, watch.url)
-        family = self._remember_family(html) if watch.variant_filter else {}
-        if not is_product_url(watch.url):
-            offers = parser.extract_search_offers(html, source_url=watch.url, limit=self._scan_limit(watch))
-            offers = self._with_variant_titles(ctx, offers)
-            log(f"Hepsiburada arama kartları okundu: {watch.name or watch.url} | adet={len(offers)}")
-            return offers
-        return self._product_offers(ctx, watch, html, family)
+        if watch.variant_filter:
+            self._remember_family(html)
+        offers = parser.extract_search_offers(html, source_url=watch.url, limit=self._scan_limit(watch))
+        offers = self._with_variant_titles(ctx, offers)
+        log(f"Hepsiburada arama kartları okundu: {watch.name or watch.url} | adet={len(offers)}")
+        return offers
+
+    def _measured_product(self, watch, ctx):
+        timings: dict[str, tuple[int, float]] = {}
+        token = _read_timings.set(timings)
+        started = time.monotonic()
+        try:
+            html = self._page(ctx, watch.url)
+            family = self._remember_family(html) if watch.variant_filter else {}
+            yield from self._product_offers(ctx, watch, html, family)
+        finally:
+            _read_timings.reset(token)
+            elapsed = time.monotonic() - started
+            accounted = sum(seconds for _, seconds in timings.values())
+            parts = " | ".join(f"{stage}={seconds:.2f} sn/{count}"
+                               for stage in ("sayfa", "satıcı", "sepet")
+                               for count, seconds in [timings.get(stage, (0, 0.0))])
+            log(f"Hepsiburada süre ölçümü: {watch.name or watch.url} | toplam={elapsed:.2f} sn | "
+                f"{parts} | diğer={max(0.0, elapsed - accounted):.2f} sn")
 
     @staticmethod
     def _scan_limit(watch) -> int:
@@ -452,10 +490,11 @@ class HepsiburadaProvider(Provider):
         headers.update(hepsiburada_cart.EVALUATE_HEADERS)
         headers["Origin"] = HOME_URL.rstrip("/")
         try:
-            response = count_curl(curl_requests.Session().post(
-                HOME_URL + hepsiburada_cart.EVALUATE_PATH, headers=headers,
-                data=hepsiburada_cart.payload_json(payload).encode(), timeout=ctx.timeout, impersonate="chrome124",
-            ))
+            with _measure_stage("sepet"):
+                response = count_curl(curl_requests.Session().post(
+                    HOME_URL + hepsiburada_cart.EVALUATE_PATH, headers=headers,
+                    data=hepsiburada_cart.payload_json(payload).encode(), timeout=ctx.timeout, impersonate="chrome124",
+                ))
             response.raise_for_status()
             price, note = hepsiburada_cart.cart_price(response.json(), listing)
         except Exception as exc:  # noqa: BLE001
@@ -469,7 +508,8 @@ class HepsiburadaProvider(Provider):
         """The site's live seller list; empty when it cannot be read, so only the shown seller counts."""
         api_url = f"{HOME_URL}api/v1/product/listings/{parser.product_id_from_url(url)}"
         try:
-            response = count_curl(curl_requests.Session().get(api_url, headers=_api_headers(url), timeout=ctx.timeout, impersonate="chrome124"))
+            with _measure_stage("satıcı"):
+                response = count_curl(curl_requests.Session().get(api_url, headers=_api_headers(url), timeout=ctx.timeout, impersonate="chrome124"))
             response.raise_for_status()
             listings = parser.live_listings(response.json())
         except Exception as exc:  # noqa: BLE001
