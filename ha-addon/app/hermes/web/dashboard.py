@@ -25,7 +25,7 @@ from ..storage import load_json
 from ..diagnostics import Diagnostics
 from ..utils import PROCESS_STARTED_AT, format_tl, is_search_url, parse_bool, parse_iso_datetime, repair_mojibake, site_label
 from .opportunities import history_pane
-from .pages import link, render_notice, render_page, site_theme_class
+from .pages import link, render_notice, render_page, site_avatar, site_theme_class
 from ..pricestats import MIN_HISTORY_DAYS, WINDOW_DAYS, window_stats
 from .pricechart import SPOT_SIZE, load_histories, load_targets, ranged_chart, offer_index, sparkline, with_current
 
@@ -283,7 +283,7 @@ def detail_html(offer: Offer) -> str:
                  if product_url else "")
     depo = "<span class='ov-depo'>DEPO</span>" if offer.warehouse else ""
     return (
-        f"<div class='ov-d-top'><div class='ov-av'>{escape(offer.seller[:1].upper())}</div><h3>{escape(offer.title)}{depo}</h3>{link_html}"
+        f"<div class='ov-d-top'>{site_avatar(offer.seller, offer.site)}<h3>{escape(offer.title)}{depo}</h3>{link_html}"
         "<button type='button' class='ov-x' data-close aria-label='Kapat'>×</button></div>"
         f"<div class='ov-d-price'><b>{price_parts(offer.price)}</b>{change_chip(offer)}{gap_chip}{average_chip(offer)}</div>"
         f"<div class='ov-meter'><div class='ov-meter-track'><div class='ov-meter-fill' style='width:{proximity}%'></div></div>"
@@ -314,7 +314,7 @@ def render_tile(offer: Offer, tags: Optional[List[str]] = None, index: int = 0) 
     tag_html = f"<div class='ov-vars'>{depo}{''.join(f'<em>{escape(tag)}</em>' for tag in tags or [])}</div>" if tags or depo else ""
     return (
         f"<article class='ov-tile {offer.site}{' ov-tile-depo' if offer.warehouse else ''}' data-site='{offer.site}' style='--n:{index}' {card_attributes(offer)}>"
-        f"<div class='ov-av'>{escape(offer.seller[:1].upper())}</div>"
+        f"{site_avatar(offer.seller, offer.site)}"
         f"<div class='ov-tx'><h4 title='{escape(offer.title, quote=True)}'>{escape(offer.title)}</h4>{tag_html}"
         f"<div class='ov-price'>{price_parts(offer.price)}</div></div>"
         f"<div class='ov-side'>{sparkline(offer.points)}{change_chip(offer)}{ago_html(offer.checked_at)}</div>"
@@ -373,7 +373,7 @@ def render_stock_pane(rows: List[Dict[str, Any]]) -> str:
         url = str(row.get("product_url") or "").strip()
         name = (f"<a href='{escape(url, quote=True)}' target='_blank' rel='noopener noreferrer'>{escape(title)}</a>" if url else escape(title))
         items.append(
-            f"<li class='ov-row {site_theme_class(seller)}'><div class='ov-av'>{escape(seller[:1].upper())}</div>"
+            f"<li class='ov-row {site_theme_class(seller)}'>{site_avatar(seller)}"
             f"<div class='ov-tx'><h4>{name}</h4><span>{escape(seller)} · {escape(repair_mojibake(row.get('reason') or 'Stokta yok'))} · hedef "
             f"{escape(display_tl(row.get('target', '-')))}</span></div>{ago_html(row.get('checked_at'))}</li>")
     return f"<ul class='ov-rows'>{''.join(items)}</ul>"

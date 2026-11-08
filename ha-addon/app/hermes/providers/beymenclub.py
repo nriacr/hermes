@@ -303,6 +303,7 @@ def fetch_beymenclub_size_summary(session: requests.Session, product_url: str, p
 
 class BeymenClubProvider(Provider):
     site = SITE_BEYMENCLUB
+    home_url = "https://www.beymenclub.com/"
 
     card_options = ("size",)
 

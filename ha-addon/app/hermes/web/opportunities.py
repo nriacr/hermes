@@ -16,7 +16,7 @@ from ..history import _read, read_prices_by_key
 from ..monitor import summary as summary_ops
 from ..storage import load_json
 from ..utils import format_tl, parse_iso_datetime
-from .pages import site_theme_class
+from .pages import site_avatar, site_theme_class
 
 LIST_LIMIT = 100
 DAYS = 30
@@ -164,7 +164,7 @@ def render_rows(items: List[SentOpportunity], current: Current) -> str:
         held, ended = held_line(item)
         rows.append(
             f"<li class='ov-row ov-hist {site_theme_class(site)}'>"
-            f"<div class='ov-av'>{escape(site[:1].upper())}</div><div class='ov-tx'>"
+            f"{site_avatar(site)}<div class='ov-tx'>"
             f"<h4><a href='{escape(item.url, quote=True)}' target='_blank' rel='noopener noreferrer'>{escape(item.product)}</a></h4>"
             f"<span>{escape(item.sent_at.strftime('%d.%m %H:%M'))} · {escape(site)}{seller}</span>"
             f"<span>{depo}{kind}hedef {escape(target)}{now}</span></div>"

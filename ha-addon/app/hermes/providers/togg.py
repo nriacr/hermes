@@ -85,6 +85,7 @@ def fetch_products(session, timeout: int) -> str:
 
 class ToggProvider(Provider):
     site = SITE_TOGG
+    home_url = "https://www.togg.com.tr/"
     notifies_stock_return = True
     # The card names the watched model; the link check lists the models to choose from.
     card_options = ("model", "night_mode")

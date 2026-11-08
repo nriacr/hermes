@@ -1,5 +1,11 @@
 # Değişiklik günlüğü
 
+## 4.40.0
+
+- Ürün kartlarında sitenin harfi yerine sitenin kendi sekme ikonu: Hermes ikonu haftada bir sitenin kendi okuma sırasında çeker (alınamazsa ertesi gün yeniden dener), arka planını siler, koyu kutuda okunmayan logoyu site rengine boyar ve tüm logoları aynı görsel büyüklüğe getirir. İkonu alınamayan sitede harf kalır.
+- Site kutusu koyu zemin ve site renginde çerçeve oldu (B tasarımı).
+- Görsel işleme için Pillow eklendi.
+
 ## 4.39.20
 
 - Yeni takip kutusuna "Temizle" butonu: link, ürün ve girilen değerleri hiçbir şey kaydetmeden sıfırlar.

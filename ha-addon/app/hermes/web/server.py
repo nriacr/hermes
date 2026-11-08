@@ -22,7 +22,8 @@ from ..config import read_options
 from ..constants import APP_VERSION
 from ..logging_utils import log, redact
 from ..notifier import Pushover
-from ..providers.registry import ProviderSet
+from .. import siteicons
+from ..providers.registry import PROVIDER_TYPES, ProviderSet
 from ..utils import parse_bool
 from . import assets
 from .access import Session, WebAccess
@@ -148,6 +149,11 @@ def send_test_notification() -> Tuple[bool, str]:
         return False, f"Pushover test bildirimi gönderilemedi: {redact(detail)}. Anahtarları ve bağlantıyı kontrol et."
 
 
+def _site_icon(site: str) -> "Response":
+    data = siteicons.icon_png(site)
+    return Response(200, data, "image/png") if data else Response(404, b"", TEXT)
+
+
 ASSETS: Dict[str, Callable[[Request], Response]] = {
     "/app.css": lambda _r: Response(200, assets.APP_CSS.encode("utf-8"), "text/css; charset=utf-8"),
     "/settings.js": lambda _r: Response(200, assets.SETTINGS_SCRIPT.encode("utf-8"), "application/javascript; charset=utf-8"),
@@ -161,6 +167,7 @@ ASSETS: Dict[str, Callable[[Request], Response]] = {
     "/icon.png": lambda _r: Response(200, HERMES_ICON_PNG, "image/png"),
     "/icon.svg": lambda _r: Response(200, HERMES_ICON_SVG, "image/svg+xml"),
     "/manifest.webmanifest": lambda r: Response(200, render_web_manifest(r.base), "application/manifest+json; charset=utf-8"),
+    **{f"/site-icon/{provider.site}.png": (lambda _r, site=provider.site: _site_icon(site)) for provider in PROVIDER_TYPES},
 }
 
 

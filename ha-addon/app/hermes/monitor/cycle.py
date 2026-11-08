@@ -24,6 +24,7 @@ from ..constants import (
     STATE_PATH,
     SUMMARY_PATH,
 )
+from .. import siteicons
 from ..errors import BotProtectionHermesError, HermesError, OutOfStockHermesError, error_status
 from ..history import History, SUCCESS_OUTCOMES, read_requests
 from ..delivery import DeliveryQueue
@@ -372,6 +373,8 @@ class Monitor:
                 with traffic.bind(site), MeasuredSession(lambda method, kind, result, ms: self._measure_request(site, method, kind, result, ms)) as session:
                     ctx = context(session, site)
                     provider = self.providers[site]
+                    # The site's card icon, weekly, inside the site's own sequential queue.
+                    siteicons.refresh_if_due(provider, self.config.request_timeout_seconds)
                     for watch in scheduling.priority_order(site_watches, provider.read_rank):
                         # The Depo lane may be reading this watch's main page right now: wait for it.
                         while provider.is_watch_busy(watch) and not self.should_stop():

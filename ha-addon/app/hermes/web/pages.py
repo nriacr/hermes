@@ -5,6 +5,7 @@ from pathlib import Path
 from string import Template
 from typing import Optional
 
+from .. import siteicons
 from ..constants import APP_VERSION
 from ..utils import repair_mojibake
 from .icons import render_web_app_head
@@ -28,6 +29,16 @@ SITE_THEME_CLASSES = (
 def site_theme_class(seller: str) -> str:
     normalized = repair_mojibake(seller).casefold()
     return next((css for marker, css in SITE_THEME_CLASSES if marker in normalized), "site-other")
+
+
+def site_avatar(label: str, css: Optional[str] = None) -> str:
+    """The card's site box: the site's own icon when Hermes has one, otherwise its first letter."""
+    css = css or site_theme_class(label)
+    site = css.removeprefix("site-")
+    version = siteicons.icon_version(site)
+    if version:
+        return f"<div class='ov-av ov-av-logo'><img src='site-icon/{site}.png?v={version}' alt='' loading='lazy'></div>"
+    return f"<div class='ov-av'>{escape(repair_mojibake(label)[:1].upper())}</div>"
 
 
 PAGE_TEMPLATE = Template((Path(__file__).with_name("templates") / "page.html").read_text(encoding="utf-8"))

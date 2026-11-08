@@ -77,6 +77,7 @@ class AmazonProvider(RhythmMixin, PageCacheMixin, Provider):
         check_session()
 
     site = SITE_AMAZON
+    icon_url = "https://www.amazon.com.tr/favicon.ico"
     progress_timeout_seconds = 3 * 3600
     alert_shows_seller = False
     backs_off_on_protection = True
