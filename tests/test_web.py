@@ -615,6 +615,12 @@ class DashboardTests(DataFilesMixin, unittest.TestCase):
     def test_deal_glow_is_not_cut_at_the_page_column_edge(self):
         self.assertNotIn("main { overflow-x:clip; }", self.router_get("/app.css"))
 
+    def test_tab_row_stays_pinned_at_the_top_while_scrolling(self):
+        css = self.router_get("/app.css")
+        self.assertIn(".ov-tabs { position:sticky; top:calc(env(safe-area-inset-top,0px) + 8px); z-index:10;", css)
+        # body must not become a scroll box, or the row would never pin
+        self.assertIn("overflow-x:hidden; overflow-x:clip; }", css)
+
     def test_warehouse_deal_glow_uses_the_card_yellow(self):
         self.assertIn(".ov .ov-deal-depo::before, .ov .ov-deal-depo::after { --c:#ffd35c; --hi:#ffe9a8; }", self.router_get("/app.css"))
 

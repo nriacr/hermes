@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.41.10
+
+- Fırsat sayfası: Takipte / Stokta yok / Telegram / Fırsat Geçmişi sekme satırı kaydırınca en üstte sabit kalır ve tıklanabilir. Sabitken sekme değişince yeni liste baştan açılır.
+
 ## 4.41.8
 
 - Geri dönüş: eklenti kodu 4.41.6 sürümündeki (kayıt 1a3e7bb) haline döndürüldü.

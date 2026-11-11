@@ -41,7 +41,17 @@
     }
     if (target.closest('#ov-sheet')) return;
     const tab = target.closest('[data-tab]');
-    if (tab) { state.tab = tab.dataset.tab; return apply(); }
+    if (tab) {
+      // While the row is pinned, a new tab starts at its own top instead of mid-list.
+      const bar = tab.closest('.ov-tabs');
+      const top = bar ? parseFloat(getComputedStyle(bar).top) || 0 : 0;
+      const pinned = bar && bar.getBoundingClientRect().top <= top + 1 && window.scrollY > 0;
+      state.tab = tab.dataset.tab;
+      apply();
+      const panes = bar && bar.nextElementSibling;
+      if (pinned && panes) window.scrollTo({ top: Math.max(0, window.scrollY + panes.getBoundingClientRect().top - bar.offsetHeight - parseFloat(getComputedStyle(bar).marginBottom) - top) });
+      return;
+    }
     const chip = target.closest('[data-filter]');
     if (chip) { state.filter = chip.dataset.filter; return apply(); }
     const card = target.closest('[data-open]');
