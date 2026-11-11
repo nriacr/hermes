@@ -388,7 +388,9 @@
   document.addEventListener('click', (event) => {
     const activeSwitch = event.target.closest('[data-active-switch], [data-sound-toggle]');
     if (activeSwitch) {
-      // Inside a card's summary a click would also open the card; the switch only flips its own box.
+      // A click on the box itself flips it natively (and never opens the card); flipping it again here
+      // and cancelling the click left it unchanged. Elsewhere on the switch the summary would open the card.
+      if (event.target.matches('input')) return;
       event.preventDefault();
       const box = activeSwitch.querySelector('input');
       box.checked = !box.checked;

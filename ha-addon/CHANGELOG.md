@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.41.13
+
+- Kart başlığındaki hoparlör simgesine ve Aktif anahtarına tıklamak durumu değiştirmiyordu (tıklama iki kez çevrilip iptal ediliyordu). Kutunun kendisine tıklanınca artık yalnız tarayıcı çevirir; kart açılmaz.
+
 ## 4.41.12
 
 - Takip kartının başlık satırında hoparlör simgesi: tıklanınca sessiz hoparlöre döner ve o kartın fiyat ve stok bildirimleri yine gelir ama sessiz (Pushover ses yok). Varsayılan kapalı; mevcut kartlar değişmez. Togg kartında bu seçenek yoktur (gece penceresi zaten var).
