@@ -620,6 +620,14 @@ class DashboardTests(DataFilesMixin, unittest.TestCase):
         self.assertIn(".ov-tabs { position:sticky; top:calc(env(safe-area-inset-top,0px) + 8px); z-index:10;", css)
         # body must not become a scroll box, or the row would never pin
         self.assertIn("overflow-x:hidden; overflow-x:clip; }", css)
+        # pinned, the row turns light and the selected pill dark
+        self.assertIn(".ov-tabs.is-pinned { background:#e8e6f5; }", css)
+        self.assertIn(".ov-tabs.is-pinned::before { background:#161424; }", css)
+        # only colors change when pinned; both shapes keep their size
+        self.assertNotIn(".ov-tabs.is-pinned { padding", css)
+        self.assertIn(".ov-tabs { transition:background-color .45s ease; }", css)
+        # the selected pill has equal half-circle ends on phones too
+        self.assertIn(".ov-tabs::before { border-radius:99px; }", css)
 
     def test_warehouse_deal_glow_uses_the_card_yellow(self):
         self.assertIn(".ov .ov-deal-depo::before, .ov .ov-deal-depo::after { --c:#ffd35c; --hi:#ffe9a8; }", self.router_get("/app.css"))

@@ -104,8 +104,17 @@
   sheet.addEventListener('pointermove', probe);
   sheet.addEventListener('pointerdown', probe);
   sheet.addEventListener('pointerleave', () => probe({ target: document.body }));
+  // The tab row turns light while it is pinned at the top of the screen.
+  const pin = () => region.querySelectorAll('.ov-tabs').forEach((bar) => {
+    bar.classList.toggle('is-pinned', window.scrollY > 0 && bar.getBoundingClientRect().top <= (parseFloat(getComputedStyle(bar).top) || 0) + 0.5);
+  });
+  let pinFrame = 0;
+  window.addEventListener('scroll', () => { if (!pinFrame) pinFrame = requestAnimationFrame(() => { pinFrame = 0; pin(); }); }, { passive: true });
+  window.addEventListener('resize', pin);
+  document.addEventListener('hermes-live', pin);
   document.addEventListener('hermes-live', apply);
   apply();
+  pin();
   // The entrance animation plays once; later in-place refreshes must not replay it.
   window.setTimeout(() => document.body.classList.remove('ov-first'), 2500);
 })();

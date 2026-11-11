@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.41.11
+
+- Fırsat sayfası: sekme satırı üstte sabitlenince renkler yumuşak geçişle yer değiştirir (satır açık, seçili sekme koyu); boyutlar değişmez. Seçili sekmenin iki yanı telefonda da tam yarım daire.
+
 ## 4.41.10
 
 - Fırsat sayfası: Takipte / Stokta yok / Telegram / Fırsat Geçmişi sekme satırı kaydırınca en üstte sabit kalır ve tıklanabilir. Sabitken sekme değişince yeni liste baştan açılır.
