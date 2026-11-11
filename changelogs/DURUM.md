@@ -5,6 +5,7 @@ sonuç, gerçek kontrol ve yayın/kurulum bilgisi yeterlidir. Ayrıntı Git geç
 
 ## Yapılanlar
 
+- 2026-11-11 · Agent: Claude · Hermes 4.41.12: takip kartı başlığında hoparlör simgesi; tıklanınca sessiz hoparlöre döner, o kartın fiyat/stok bildirimleri Pushover'da sessiz gelir. Togg kartında yok (yapılandırmada da yok sayılır). 833 test, kaynak 4eba15e canlı, sağlık kontrolü başarılı. Tam yedek d74ea508; geri dönüş sh tools/rollback_rpi.sh d74ea508.
 - 2026-11-11 · Agent: Claude · Hermes 4.41.11: sabitlenen sekme satırı açık renge, seçili sekme koyuya yumuşak geçişle döner (boyutlar ölçülerek aynı), seçili sekme telefonda yarım daire uçlu. 831 test, kaynak 7f89b1c canlı, sağlık ve canlı CSS/JS kontrolü başarılı. Tam yedek d74ea508; geri dönüş sh tools/rollback_rpi.sh d74ea508.
 
 - 2026-11-11 · Agent: Claude · Hermes 4.41.10: fırsat sayfası sekme satırı (Takipte/Stokta yok/Telegram/Fırsat Geçmişi) kaydırınca üstte sabit kalır, tıklanabilir; sabitken sekme değişince liste baştan açılır. Önizleme telefon/masaüstü denendi, 831 test geçti. Kaynak 04649c4 canlı, sağlık ve canlı CSS/JS kontrolü başarılı. Tam yedek d74ea508; geri dönüş sh tools/rollback_rpi.sh d74ea508. Togg 4.41.9 yerel commiti (fef3977) yayımlanmadı, ona dokunulmadı.
