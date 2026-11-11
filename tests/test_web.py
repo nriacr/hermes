@@ -935,7 +935,9 @@ class SettingsTests(DataFilesMixin, unittest.TestCase):
         self.assertIn(">Model<input type='text' name='watches_5_name' value='T10X V2 RWD Uzun Menzil'", togg)
         self.assertEqual(togg.count("name='watches_5_name'"), 1)
         trendyol = settings.watch_form({"name": "Çanta", "url_1": "https://www.trendyol.com/stark"}, 4)
-        self.assertNotIn("watch-site-options", trendyol)
+        self.assertNotIn("official_seller_only", trendyol)
+        self.assertIn("watches_4_silent", trendyol)
+        self.assertNotIn("watches_5_silent", togg)
         self.assertIn(">Beden<", trendyol)
 
     def test_newest_card_is_listed_first_and_a_dragged_order_is_saved(self):
@@ -1001,7 +1003,7 @@ class SettingsTests(DataFilesMixin, unittest.TestCase):
                                  {"Beden": ["M", "L"]})
         provider = SimpleNamespace(card_options=("size",), inspect=lambda url, ctx: preview)
         result = settings.check_link("https://www.zara.com/tr/tr/polo-p01234567.html", {"zara": provider})
-        self.assertEqual((result["ok"], result["options"], result["dimensions"]), (True, ["size"], {"Beden": ["M", "L"]}))
+        self.assertEqual((result["ok"], result["options"], result["dimensions"]), (True, ["size", "silent"], {"Beden": ["M", "L"]}))
         self.assertEqual(result["variants"][1], {"label": "L", "price": "899 TL", "in_stock": False, "attributes": {"Beden": "L"}})
         self.assertEqual(settings.check_link("https://example.com/urun", {}), {"ok": False, "error": "Bu site desteklenmiyor."})
 

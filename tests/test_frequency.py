@@ -73,6 +73,9 @@ class FrequencyTests(unittest.TestCase):
         self.assertTrue(prepare_watches(saved)[0].silent)
         self.assertIn("name='watches_0_silent' value='1' checked", settings.watch_form(saved[0], 0))
         self.assertNotIn("name='watches_0_silent' value='1' checked", settings.watch_form(plain[0], 0))
+        togg = {**saved[0], "url_1": "https://www.togg.com.tr/x"}
+        self.assertFalse(prepare_watches([togg])[0].silent)
+        self.assertNotIn("watches_0_silent", settings.watch_form(togg, 0))
 
     def test_pre_update_form_saves_the_removed_choice_as_one_minute(self):
         saved = settings.build_watches({"watches_count": ["1"], "watches_0_name": ["Kart"],

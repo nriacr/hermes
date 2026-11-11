@@ -269,6 +269,8 @@ class Provider:
     adds_deals_to_cart = False
     # Card options shown for this site besides the common ones ("size", "include_variations", ...).
     card_options: tuple = ()
+    # Whether a card of this site may mute its notifications (Togg never: its own night window is enough).
+    allows_silent = True
 
     def set_request_delay(self, minimum: float, maximum: float) -> None:
         """The configured random wait before a request; only providers that space their own requests use it."""

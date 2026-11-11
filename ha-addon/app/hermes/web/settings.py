@@ -30,7 +30,8 @@ from .pages import link, render_notice, render_page, render_tool_actions, confir
 
 OTHER_SITE = "Diğer"
 # Card options each site shows besides the common ones.
-SITE_OPTIONS = {provider.site: provider.card_options for provider in PROVIDER_TYPES}
+SITE_OPTIONS = {provider.site: provider.card_options + (("silent",) if provider.allows_silent else ())
+                for provider in PROVIDER_TYPES}
 MAX_WATCH_CARDS = 500
 STALE_PAGE_MESSAGE = "Ayar sayfası eskimiş: takip listesi bu sayfa açıldıktan sonra değişti. Sayfayı yenile ve değişikliği tekrar yap."
 
@@ -200,6 +201,8 @@ def _site_options(prefix, item, site, search) -> tuple:
             flags.append(_checkbox(prefix, option, SELLER_LABELS.get(site, "Platform satıcısı"), item.get(option, False)))
         elif option == "night_mode":
             flags.append(_night_mode(prefix, item))
+        elif option == "silent":
+            flags.append(_checkbox(prefix, option, "Sessiz bildirim", item.get(option, False)))
     return "".join(parts), "".join(flags)
 
 
@@ -268,7 +271,6 @@ def _common_fields(prefix, item, is_new) -> str:
     return (
         f"{_field(prefix, 'target_price', 'Hedef fiyat', _price_input_value(item.get('target_price', ''))).replace('<label>', "<label class='target-price'>", 1)}"
         f"{_priority_field(prefix, item, is_new)}"
-        f"{_checkbox(prefix, 'silent', 'Sessiz bildirim', item.get('silent', False))}"
     )
 
 
@@ -322,6 +324,7 @@ def new_watch_form(index: int, check_path: str) -> str:
     )
     site_flags = (
         hidden("night_mode", _night_mode(prefix, {}))
+        + hidden("silent", _checkbox(prefix, "silent", "Sessiz bildirim", False))
         + hidden("official_seller_only", _checkbox(prefix, "official_seller_only", "Platform satıcısı", False)
                  .replace(">Platform satıcısı</label>", "><span data-seller-label></span></label>"))
     )
@@ -778,7 +781,7 @@ def check_link(url: str, providers) -> Dict[str, Any]:
     except HermesError:
         return {"ok": False, "error": "Bu site desteklenmiyor."}
     provider = providers[site]
-    result: Dict[str, Any] = {"site": site, "options": list(provider.card_options), "seller_label": SELLER_LABELS.get(site, ""),
+    result: Dict[str, Any] = {"site": site, "options": list(SITE_OPTIONS[site]), "seller_label": SELLER_LABELS.get(site, ""),
                               "search": watch_name_required_for_url(url)}
     if result["search"]:
         return {**result, "ok": True, "title": "", "variants": [], "dimensions": {}, "defaults": {}}

@@ -88,6 +88,7 @@ class ToggProvider(Provider):
     notifies_stock_return = True
     # The card names the watched model; the link check lists the models to choose from.
     card_options = ("model", "night_mode")
+    allows_silent = False
 
     def read_due(self, watch) -> bool:
         """Night mode pauses the card's reads between its two times."""

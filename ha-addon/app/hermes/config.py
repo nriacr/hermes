@@ -12,6 +12,7 @@ from .constants import (
     DEFAULT_REQUEST_TIMEOUT_SECONDS,
     OPTIONS_PATH,
     SEARCH_RESULT_LIMIT,
+    SITE_TOGG,
     normalize_priority,
 )
 from .errors import HermesError
@@ -247,7 +248,7 @@ def _prepare_watch(item):
                 include_variations=parse_bool(item.get("include_variations"), default=False),
                 priority=priority,
                 official_seller_only=parse_bool(item.get("official_seller_only"), default=False),
-                silent=parse_bool(item.get("silent"), default=False),
+                silent=parse_bool(item.get("silent"), default=False) and site != SITE_TOGG,
                 check_now_token=str(item.get("check_now_token") or "").strip(),
                 max_items_to_scan=SEARCH_RESULT_LIMIT,
                 active=True,
