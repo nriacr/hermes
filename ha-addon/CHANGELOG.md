@@ -2,7 +2,7 @@
 
 ## 4.41.12
 
-- Takip kartında "Sessiz bildirim" seçeneği: işaretli kartın fiyat ve stok bildirimleri yine gelir ama sessiz (Pushover ses yok). Varsayılan kapalı; mevcut kartlar değişmez. Togg kartında bu seçenek yoktur (gece penceresi zaten var).
+- Takip kartının başlık satırında hoparlör simgesi: tıklanınca sessiz hoparlöre döner ve o kartın fiyat ve stok bildirimleri yine gelir ama sessiz (Pushover ses yok). Varsayılan kapalı; mevcut kartlar değişmez. Togg kartında bu seçenek yoktur (gece penceresi zaten var).
 
 ## 4.41.11
 

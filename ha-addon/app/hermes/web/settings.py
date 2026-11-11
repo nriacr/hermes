@@ -174,6 +174,19 @@ def _active_switch(prefix, checked) -> str:
             f"value='1'{' checked' if parse_bool(checked, default=True) else ''} aria-label='Aktif'><span></span></label>")
 
 
+SPEAKER_SVG = ("<svg viewBox='0 0 24 24' aria-hidden='true'><path class='speaker-body' d='M4 9h4l5-4v14l-5-4H4z'/>"
+               "<path class='speaker-waves' d='M16 9.5a3.5 3.5 0 0 1 0 5M18.5 7a7 7 0 0 1 0 10'/>"
+               "<path class='speaker-cross' d='M16.5 9.5l5 5M21.5 9.5l-5 5'/></svg>")
+
+
+def _sound_toggle(prefix, silent, label="") -> str:
+    """A speaker icon; a click mutes it (the card's notifications then arrive without sound)."""
+    return (f"<label class='sound-toggle' data-sound-toggle title='Bildirim sesi: açık / kapalı'>"
+            f"<input type='checkbox' name='{escape(prefix + 'silent', quote=True)}' value='1'"
+            f"{' checked' if parse_bool(silent, default=False) else ''} aria-label='Sessiz bildirim'>"
+            f"{SPEAKER_SVG}{escape(label)}</label>")
+
+
 def _site_options(prefix, item, site, search) -> tuple:
     """The site's own (text fields, checkboxes) of a saved card; the product name only on search pages."""
     parts, flags = [], []
@@ -202,7 +215,7 @@ def _site_options(prefix, item, site, search) -> tuple:
         elif option == "night_mode":
             flags.append(_night_mode(prefix, item))
         elif option == "silent":
-            flags.append(_checkbox(prefix, option, "Sessiz bildirim", item.get(option, False)))
+            continue  # the speaker in the card's title row
     return "".join(parts), "".join(flags)
 
 
@@ -307,7 +320,8 @@ def watch_form(item: Dict[str, Any], index: int, known_titles=None) -> str:
             "<span class='drag-handle' data-drag-handle title='Sürükleyerek sırala' aria-hidden='true'></span>"
             "<input type='checkbox' class='bulk-pick' data-bulk-pick aria-label='Toplu işlem için seç'>"
             f"{priority_dot(_card_priority(item, False))}<span class='watch-title'>{escape(display_name)}</span>"
-            f"{_active_switch(prefix, item.get('active', True))}</summary><div class='form-grid'>{inner}</div></details>")
+            + (_sound_toggle(prefix, item.get("silent", False)) if "silent" in SITE_OPTIONS.get(_watch_site(item), ()) else "")
+            + f"{_active_switch(prefix, item.get('active', True))}</summary><div class='form-grid'>{inner}</div></details>")
 
 
 def new_watch_form(index: int, check_path: str) -> str:
@@ -324,7 +338,7 @@ def new_watch_form(index: int, check_path: str) -> str:
     )
     site_flags = (
         hidden("night_mode", _night_mode(prefix, {}))
-        + hidden("silent", _checkbox(prefix, "silent", "Sessiz bildirim", False))
+        + hidden("silent", _sound_toggle(prefix, False, "Bildirim sesi"))
         + hidden("official_seller_only", _checkbox(prefix, "official_seller_only", "Platform satıcısı", False)
                  .replace(">Platform satıcısı</label>", "><span data-seller-label></span></label>"))
     )
