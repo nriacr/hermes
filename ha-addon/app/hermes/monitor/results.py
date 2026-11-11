@@ -229,6 +229,7 @@ class ResultRecorder:
                         payload = {"title": title, "message": message, "url": matched_url,
                                    "offer_key": item_key, "price": str(offer.price), "target": str(watch.target_price),
                                    "generation": state.get("_meta", {}).get("notification_generation"),
+                                   **({"quiet": True} if watch.silent else {}),
                                    "opportunity": json.loads(json.dumps([asdict(watch), asdict(offer), display_name, matched_url], default=str))}
                         self.notifier.enqueue(payload, identity, state, price_statements)
                         with self.notifier.db.lock:
@@ -320,6 +321,7 @@ class ResultRecorder:
                 "message": f"Site: {seller}\n{lowest['title']}\nStok yeniden geldi.\nGüncel fiyat: {format_tl(Decimal(lowest['last_price']), with_currency=True)}",
                 "url": lowest["url"], "offer_key": offer_key, "price": lowest["last_price"],
                 "target": str(watch.target_price), "stock_return": True,
+                **({"quiet": True} if watch.silent else {}),
                 "generation": run.state.get("_meta", {}).get("notification_generation")},
                 hashlib.sha256(f"stock:{key}:{returned_at}".encode()).hexdigest(), run.state)
         self._add_rows(run, key, (), summary.cached_stock_rows(watch, run.state[key], seller))

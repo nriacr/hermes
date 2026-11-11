@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.41.12
+
+- Takip kartında "Sessiz bildirim" seçeneği: işaretli kartın fiyat ve stok bildirimleri yine gelir ama sessiz (Pushover ses yok). Varsayılan kapalı; mevcut kartlar değişmez.
+
 ## 4.41.11
 
 - Fırsat sayfası: sekme satırı üstte sabitlenince renkler yumuşak geçişle yer değiştirir (satır açık, seçili sekme koyu); boyutlar değişmez. Seçili sekmenin iki yanı telefonda da tam yarım daire.

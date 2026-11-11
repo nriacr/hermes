@@ -268,6 +268,7 @@ def _common_fields(prefix, item, is_new) -> str:
     return (
         f"{_field(prefix, 'target_price', 'Hedef fiyat', _price_input_value(item.get('target_price', ''))).replace('<label>', "<label class='target-price'>", 1)}"
         f"{_priority_field(prefix, item, is_new)}"
+        f"{_checkbox(prefix, 'silent', 'Sessiz bildirim', item.get('silent', False))}"
     )
 
 
@@ -562,6 +563,8 @@ def build_watch(form: Dict[str, List[str]], index: int) -> Optional[Dict[str, An
         "official_seller_only": prefix + "official_seller_only" in form,
         "active": prefix + "active" in form,
     }
+    if prefix + "silent" in form:
+        item["silent"] = True
     if minimum_price:
         item["minimum_price"] = _price_from_form(minimum_price)
     if exclude_terms:

@@ -78,6 +78,17 @@ class CycleTestCase(unittest.TestCase):
 
 
 class NotificationTests(CycleTestCase):
+    def test_silent_card_notifies_without_sound_and_others_keep_sound(self):
+        for silent in (True, False):
+            with self.subTest(silent=silent):
+                self.setUp()
+                rule = watch("Ürün", "https://www.trendyol.com/x")
+                rule.silent = silent
+                with patch.object(TrendyolProvider, "read", side_effect=reader([OfferResult("Ürün", Decimal("90"), url=rule.url)])):
+                    self.run_cycle(config([rule]))
+                self.notify.send.assert_called_once()
+                self.assertEqual(self.notify.send.call_args.kwargs.get("quiet", False), silent)
+
     def test_access_errors_are_silent_kinds(self):
         for error in (BotProtectionHermesError("Amazon bot koruması nedeniyle doğrulama (captcha) sayfası döndü."),
                       HttpStatusHermesError(503, "https://www.amazon.com.tr/s?k=test"),

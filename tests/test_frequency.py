@@ -63,6 +63,17 @@ class FrequencyTests(unittest.TestCase):
                 self.assertEqual(prepare_watches(saved)[0].priority, value)
                 self.assertIn(f"selected>{label}</option>", settings.watch_form(saved[0], 0))
 
+    def test_silent_choice_survives_panel_save_and_configuration_load(self):
+        form = {"watches_count": ["1"], "watches_0_name": ["Kart"], "watches_0_target_price": ["1000"],
+                "watches_0_url_1": [watch().url], "watches_0_active": ["on"], "watches_0_priority": ["1m"]}
+        plain = settings.build_watches(form)
+        self.assertNotIn("silent", plain[0])
+        self.assertFalse(prepare_watches(plain)[0].silent)
+        saved = settings.build_watches({**form, "watches_0_silent": ["1"]})
+        self.assertTrue(prepare_watches(saved)[0].silent)
+        self.assertIn("name='watches_0_silent' value='1' checked", settings.watch_form(saved[0], 0))
+        self.assertNotIn("name='watches_0_silent' value='1' checked", settings.watch_form(plain[0], 0))
+
     def test_pre_update_form_saves_the_removed_choice_as_one_minute(self):
         saved = settings.build_watches({"watches_count": ["1"], "watches_0_name": ["Kart"],
             "watches_0_target_price": ["1000"], "watches_0_url_1": [watch().url],
