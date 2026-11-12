@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.41.17
+
+- 4.41.16'daki koyu üst şerit kaldırıldı. Telefonda sayfa (logo dahil) saat/pil satırının altından başlar; sabitlenen sekme menüsü iOS'un bulanık alanının altında durur, böylece net kalır. Bilgisayar görünümü değişmedi.
+
 ## 4.41.16
 
 - Telefonda sekme menüsünün iki ucu yarım daire oldu (önceden köşeleri yuvarlatılmış dikdörtgendi). Menü sabitlenince saat/pil satırının altındaki şerit sayfanın koyu rengiyle kapanır; iOS'un oraya kayan kartları bulanıklaştırması artık görünmez, menü o şeridin hemen altından başlar.
