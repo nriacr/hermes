@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.41.18
+
+- Togg kart ikonu Nuri'nin verdiği Trumore (Togg) uygulama ikonuyla değiştirildi.
+
 ## 4.41.17
 
 - 4.41.16'daki koyu üst şerit kaldırıldı. Telefonda sayfa (logo dahil) saat/pil satırının altından başlar; sabitlenen sekme menüsü iOS'un bulanık alanının altında durur, böylece net kalır. Bilgisayar görünümü değişmedi.
