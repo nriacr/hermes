@@ -15,6 +15,7 @@ import requests
 from .. import traffic
 from ..config import format_variant_filter, parse_variant_filter, read_options, watch_urls
 from ..constants import (
+    CARD_PRIORITIES,
     PRIORITY_LABELS,
     TELEGRAM_ERROR_EVENTS_PATH,
     TELEGRAM_LOGIN_STATE_PATH,
@@ -390,7 +391,7 @@ def _choice_groups(options, dimensions, defaults, variants) -> list:
         groups.append({"key": key, "title": dimension, "values": values, "out": [value for value in values if value in out],
                        "chosen": [value for value in defaults.get(dimension) or [] if value in values]})
     groups.append({"key": "priority", "title": "Tarama aralığı",
-                   "values": list(PRIORITY_LABELS.values()), "out": [], "chosen": []})
+                   "values": [PRIORITY_LABELS[key] for key in CARD_PRIORITIES], "out": [], "chosen": []})
     return groups
 
 

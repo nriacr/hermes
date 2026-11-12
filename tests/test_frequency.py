@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 from support import key, watch
 from hermes.config import prepare_watches
-from hermes.constants import DEFAULT_PRIORITY, PRIORITIES, normalize_priority
+from hermes.constants import CARD_PRIORITIES, DEFAULT_PRIORITY, TOGG_PRIORITIES, normalize_priority
 from hermes.monitor import scheduling
 from hermes.web import settings
 from hermes.web.statistics import check_gaps
@@ -19,13 +19,44 @@ STEPS = (("1m", 60, "1 dk"), ("5m", 300, "5 dk"), ("15m", 900, "15 dk"),
 
 class FrequencyTests(unittest.TestCase):
     def test_only_the_eight_requested_intervals_are_selectable(self):
-        self.assertEqual(PRIORITIES, tuple(step[0] for step in STEPS))
+        self.assertEqual(CARD_PRIORITIES, tuple(step[0] for step in STEPS))
         self.assertEqual(DEFAULT_PRIORITY, "1m")
         html = settings.new_watch_form(0, "settings/check")
         self.assertNotIn("Her çevrim", html)
         for value, _seconds, label in STEPS:
             self.assertIn(f"value='{value}'", html)
             self.assertIn(f">{label}</option>", html)
+        self.assertNotIn(" sn</option>", html)
+
+    def test_only_togg_cards_offer_second_intervals(self):
+        togg_url = "https://configurator.togg.com.tr/"
+        self.assertEqual(TOGG_PRIORITIES, ("10s", "15s", "20s", "30s", "45s", "1m", "5m"))
+        togg = settings.watch_form({"name": "T10X", "url_1": togg_url, "priority": "15s"}, 0)
+        self.assertIn("value='15s' title='15 sn arayla taranır' selected>15 sn</option>", togg)
+        select = togg.split("data-watch-priority>", 1)[1].split("</select>", 1)[0]
+        self.assertEqual(select.count("<option value="), len(TOGG_PRIORITIES))
+        self.assertNotIn(">15 dk</option>", togg)
+        other = settings.watch_form({"name": "Kart", "url_1": watch().url, "priority": "10s"}, 1)
+        self.assertNotIn(" sn</option>", other)
+        self.assertIn("value='1m' title='1 dk arayla taranır' selected", other)
+        self.assertNotIn(" sn</option>", settings.bulk_toolbar())
+        form = {"watches_count": ["1"], "watches_0_name": ["T10X"], "watches_0_target_price": ["2000000"],
+                "watches_0_url_1": [togg_url], "watches_0_active": ["on"], "watches_0_priority": ["10s"]}
+        self.assertEqual(prepare_watches(settings.build_watches(form))[0].priority, "10s")
+        with self.assertRaises(ValueError):
+            settings.build_watches({**form, "watches_0_priority": ["12h"]})
+        with self.assertRaises(ValueError):
+            settings.build_watches({**form, "watches_0_url_1": [watch().url], "watches_0_priority": ["10s"]})
+        # A stored choice the site does not offer becomes its nearest offered one.
+        self.assertEqual(prepare_watches([{"name": "T10X", "target_price": 1, "url_1": togg_url, "priority": "6h"}])[0].priority, "5m")
+        self.assertEqual(prepare_watches([{"name": "K", "target_price": 1, "url_1": watch().url, "priority": "20s"}])[0].priority, "1m")
+
+    def test_togg_second_interval_is_due_after_its_seconds_with_five_second_rounds(self):
+        now = datetime.now(timezone.utc)
+        rule = prepare_watches([{"name": "T10X", "target_price": 1, "url_1": "https://configurator.togg.com.tr/", "priority": "10s"}])[0]
+        with patch.object(scheduling, "local_now", return_value=now):
+            self.assertFalse(scheduling.watch_check_due(rule, {"last_checked_at": (now - timedelta(seconds=9)).isoformat()}, 5))
+            self.assertTrue(scheduling.watch_check_due(rule, {"last_checked_at": (now - timedelta(seconds=10)).isoformat()}, 5))
 
     def test_boundary_for_each_interval_uses_minutes_even_with_five_second_rounds(self):
         now = datetime.now(timezone.utc)

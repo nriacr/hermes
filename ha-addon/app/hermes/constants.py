@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 
-APP_VERSION = "4.41.13"
+APP_VERSION = "4.41.14"
 
 # Persistent add-on data. File names are a public interface: 2.x releases read
 # the same files, so a rollback never loses history or notification state.
@@ -79,12 +79,17 @@ SEARCH_ERROR_NOTIFICATION_HOUR = 11
 TELEGRAM_STATUS_HEARTBEAT_SECONDS = 60 * 60
 # All card surfaces and providers use this one interval scale. Compatibility
 # keeps pre-3.12 unknown/missing choices at their previous six-hour interval.
-PRIORITY_INTERVAL_SECONDS = {"1m": 60, "5m": 300, "15m": 900, "30m": 1800,
+PRIORITY_INTERVAL_SECONDS = {"10s": 10, "15s": 15, "20s": 20, "30s": 30, "45s": 45,
+                             "1m": 60, "5m": 300, "15m": 900, "30m": 1800,
                              "60m": 3600, "3h": 10800, "6h": 21600, "12h": 43200}
+# Every known choice, shortest first (scheduling order).
 PRIORITIES = tuple(PRIORITY_INTERVAL_SECONDS)
+# The choices an ordinary card offers; a site may offer its own list (Togg: seconds to 5 minutes).
+CARD_PRIORITIES = ("1m", "5m", "15m", "30m", "60m", "3h", "6h", "12h")
+TOGG_PRIORITIES = ("10s", "15s", "20s", "30s", "45s", "1m", "5m")
 DEFAULT_PRIORITY = "1m"
 COMPATIBILITY_PRIORITY = "6h"
-PRIORITY_LABELS = {"1m": "1 dk", "5m": "5 dk", "15m": "15 dk", "30m": "30 dk",
+PRIORITY_LABELS = {"10s": "10 sn", "15s": "15 sn", "20s": "20 sn", "30s": "30 sn", "45s": "45 sn", "1m": "1 dk", "5m": "5 dk", "15m": "15 dk", "30m": "30 dk",
                    "60m": "60 dk", "3h": "3 saat", "6h": "6 saat", "12h": "12 saat"}
 PRIORITY_DESCRIPTIONS = {key: f"{label} arayla taranır" for key, label in PRIORITY_LABELS.items()}
 # Minimum time between two request starts to one site, on top of the random
@@ -101,6 +106,20 @@ def normalize_priority(value) -> str:
     if text == "cycle":
         return DEFAULT_PRIORITY
     return text if text in PRIORITIES else COMPATIBILITY_PRIORITY
+
+
+def site_priorities(site) -> tuple:
+    return TOGG_PRIORITIES if site == SITE_TOGG else CARD_PRIORITIES
+
+
+def site_priority(value, site) -> str:
+    """A stored choice the card's site does not offer becomes the nearest choice it does."""
+    choices = site_priorities(site)
+    priority = normalize_priority(value)
+    if priority in choices:
+        return priority
+    seconds = PRIORITY_INTERVAL_SECONDS[priority]
+    return min(choices, key=lambda choice: abs(PRIORITY_INTERVAL_SECONDS[choice] - seconds))
 
 # -- Amazon access control (3.3.0) ---------------------------------------------
 # Measured 2026-10-03 (Pi logs, 1,147 requests): three unbroken runs at ~10.8

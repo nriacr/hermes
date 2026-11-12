@@ -17,6 +17,7 @@ from ..constants import (
     APP_VERSION,
     CYCLE_HISTORY_PATH,
     DATABASE_PATH,
+    CARD_PRIORITIES,
     PRIORITIES,
     PRIORITY_INTERVAL_SECONDS,
     PRIORITY_LABELS,
@@ -248,6 +249,7 @@ class Monitor:
                 f"{label}={run.priority_scope[key]['started']} başladı, {run.priority_scope[key]['due']} sırası geldi, "
                 f"{run.priority_scope[key]['deferred']} ertelendi"
                 for key, label in PRIORITY_LABELS.items()
+                if key in CARD_PRIORITIES or any(run.priority_scope[key].values())
             ))
         with self._lock:
             if self.config.watches:

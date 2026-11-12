@@ -16,7 +16,7 @@ from ..config import (
     DEFAULT_TELEGRAM_CHANNELS, WATCH_URL_FIELDS, format_variant_filter, options_with_defaults, parse_variant_filter, read_options, watch_urls,
 )
 from ..constants import (
-    APP_VERSION, DEFAULT_PRIORITY, DEFAULT_REQUEST_TIMEOUT_SECONDS, PRIORITIES, PRIORITY_DESCRIPTIONS, PRIORITY_LABELS, STATE_PATH, SUMMARY_PATH, SITE_LABELS, normalize_priority,
+    APP_VERSION, DEFAULT_PRIORITY, DEFAULT_REQUEST_TIMEOUT_SECONDS, PRIORITIES, PRIORITY_DESCRIPTIONS, PRIORITY_LABELS, STATE_PATH, SUMMARY_PATH, SITE_LABELS, normalize_priority, site_priorities, site_priority, CARD_PRIORITIES,
 )
 from ..errors import HermesError
 from ..logging_utils import log
@@ -270,20 +270,24 @@ def _night_mode(prefix, item) -> str:
     )
 
 
-def _priority_field(prefix, item, is_new) -> str:
-    priority = _card_priority(item, is_new)
+def _priority_options(choices, priority) -> str:
+    return "".join(f"<option value='{value}' title='{escape(PRIORITY_DESCRIPTIONS[value], quote=True)}'"
+                   f"{' selected' if priority == value else ''}>{escape(PRIORITY_LABELS[value])}</option>" for value in choices)
+
+
+def _priority_field(prefix, item, is_new, site="") -> str:
+    priority = site_priority(_card_priority(item, is_new), site)
     return (
         f"<label class='watch-priority'>Öncelik<select name='{escape(prefix + 'priority', quote=True)}' data-watch-priority>"
-        + "".join(f"<option value='{value}' title='{escape(PRIORITY_DESCRIPTIONS[value], quote=True)}'"
-                  f"{' selected' if priority == value else ''}>{escape(PRIORITY_LABELS[value])}</option>" for value in PRIORITIES)
+        + _priority_options(site_priorities(site), priority)
         + "</select></label>"
     )
 
 
-def _common_fields(prefix, item, is_new) -> str:
+def _common_fields(prefix, item, is_new, site="") -> str:
     return (
         f"{_field(prefix, 'target_price', 'Hedef fiyat', _price_input_value(item.get('target_price', ''))).replace('<label>', "<label class='target-price'>", 1)}"
-        f"{_priority_field(prefix, item, is_new)}"
+        f"{_priority_field(prefix, item, is_new, site)}"
     )
 
 
@@ -311,7 +315,7 @@ def watch_form(item: Dict[str, Any], index: int, known_titles=None) -> str:
     inner = (
         _hidden_identity(prefix, item) + name
         + f"<div class='watch-links'>{links}</div>"
-        + f"<div class='watch-fields'>{_common_fields(prefix, item, False)}{site_fields}</div>"
+        + f"<div class='watch-fields'>{_common_fields(prefix, item, False, _watch_site(item))}{site_fields}</div>"
         + _edit_variants(item, _watch_site(item), search)
         + (f"<div class='watch-site-options'>{site_flags}</div>" if site_flags else "")
         + "<div class='watch-actions'><button class='button danger' type='button' data-delete-watch>Sil</button></div>"
@@ -451,7 +455,7 @@ def supported_sites_text() -> str:
 
 def bulk_toolbar() -> str:
     """Selection controls that only fill the existing card fields; saving stays the single apply step."""
-    priorities = "".join(f"<option value='{value}'>{escape(label)}</option>" for value, label in PRIORITY_LABELS.items())
+    priorities = "".join(f"<option value='{value}'>{escape(PRIORITY_LABELS[value])}</option>" for value in CARD_PRIORITIES)
     return (
         "<section class='settings-section bulk-tools' data-bulk-tools><h2>Toplu işlem</h2>"
         "<div class='bulk-row'><span class='bulk-count' data-bulk-count>0 seçili</span></div>"
@@ -564,7 +568,8 @@ def build_watch(form: Dict[str, List[str]], index: int) -> Optional[Dict[str, An
     priority = _first(form, prefix + "priority", DEFAULT_PRIORITY).casefold()
     if priority == "cycle":  # an already-open pre-update form can still save safely
         priority = normalize_priority(priority)
-    if priority not in PRIORITIES:
+    if priority not in PRIORITIES or priority not in site_priorities(_watch_site(
+            {field: _first(form, prefix + field) for field in WATCH_URL_FIELDS})):
         raise ValueError(f"{_card_context(index, name, [])}: öncelik geçersiz.")
     urls = list(dict.fromkeys(url for field in WATCH_URL_FIELDS if (url := _first(form, prefix + field))))
     if not any([target, size, *urls]):
@@ -795,7 +800,8 @@ def check_link(url: str, providers) -> Dict[str, Any]:
     except HermesError:
         return {"ok": False, "error": "Bu site desteklenmiyor."}
     provider = providers[site]
-    result: Dict[str, Any] = {"site": site, "options": list(SITE_OPTIONS[site]), "seller_label": SELLER_LABELS.get(site, ""),
+    result: Dict[str, Any] = {"site": site, "options": list(SITE_OPTIONS[site]),
+                              "priorities": [[value, PRIORITY_LABELS[value]] for value in site_priorities(site)], "seller_label": SELLER_LABELS.get(site, ""),
                               "search": watch_name_required_for_url(url)}
     if result["search"]:
         return {**result, "ok": True, "title": "", "variants": [], "dimensions": {}, "defaults": {}}

@@ -130,7 +130,7 @@ class TelegramQuickAddTests(unittest.TestCase):
         self.assertEqual(card, {"title": "Gömlek", "name": "Gömlek", "size": "M", "variant_filter": "Renk=Siyah", "prices": []})
         self.assertEqual([(group["key"], group["values"], group["chosen"]) for group in groups],
                          [("variant:Renk", ["Siyah", "Beyaz"], ["Siyah"]), ("size", ["S", "M"], ["M"]),
-                          ("priority", list(telegram.PRIORITY_LABELS.values()), [])])
+                          ("priority", [telegram.PRIORITY_LABELS[key] for key in telegram.CARD_PRIORITIES], [])])
         with patch("hermes.web.settings.check_link", return_value={"ok": False, "error": "Sayfa okunamadı: 403"}):
             self.assertEqual(telegram._quick_add_card(url, providers=object()), {"error": "Sayfa okunamadı: 403"})
         with (patch.object(telegram, "read_options", return_value={"takip_edilenler": []}),

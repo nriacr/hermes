@@ -14,6 +14,7 @@ from .constants import (
     SEARCH_RESULT_LIMIT,
     SITE_TOGG,
     normalize_priority,
+    site_priority,
 )
 from .errors import HermesError
 from .logging_utils import log, configure_secrets
@@ -246,7 +247,7 @@ def _prepare_watch(item):
                 night_start=night_window(item)[0],
                 night_end=night_window(item)[1],
                 include_variations=parse_bool(item.get("include_variations"), default=False),
-                priority=priority,
+                priority=site_priority(priority, site),
                 official_seller_only=parse_bool(item.get("official_seller_only"), default=False),
                 silent=parse_bool(item.get("silent"), default=False) and site != SITE_TOGG,
                 check_now_token=str(item.get("check_now_token") or "").strip(),

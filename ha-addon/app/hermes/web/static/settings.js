@@ -175,6 +175,13 @@
       node.hidden = !options.has(node.dataset.siteOption) || ('searchOnly' in node.dataset && !data.search);
     });
     newWatch.querySelector('[data-seller-label]').textContent = data.seller_label || '';
+    // A site with its own scan intervals (Togg) replaces the list; the choice is kept when the site offers it.
+    const prioritySelect = newWatch.querySelector('[data-watch-priority]');
+    if (prioritySelect && data.priorities) {
+      const chosen = prioritySelect.value;
+      prioritySelect.replaceChildren(...data.priorities.map(([value, label]) => new Option(label, value)));
+      prioritySelect.value = data.priorities.some(([value]) => value === chosen) ? chosen : '1m';
+    }
     // A model site whose list is empty right now asks for the model name to wait for.
     const typedModel = options.has('model') && !(data.dimensions?.Model || []).length;
     newWatch.querySelector('[data-site-option="model"]').hidden = !options.has('model') || typedModel;
@@ -439,6 +446,8 @@
     cards.forEach((card) => {
       const field = card.querySelector(selector);
       if (!field) return;
+      // A card whose site does not offer the chosen interval (Togg) keeps its own.
+      if (field.tagName === 'SELECT' && ![...field.options].some((option) => option.value === value)) return;
       if (field.type === 'checkbox') field.checked = value; else field.value = value;
       touch(field);
     });
