@@ -5,6 +5,7 @@ sonuç, gerçek kontrol ve yayın/kurulum bilgisi yeterlidir. Ayrıntı Git geç
 
 ## Yapılanlar
 
+- 2026-11-12 · Agent: Claude · Hermes 4.41.14: Togg kartına özel tarama aralıkları 10/15/20/30/45 sn, 1 dk, 5 dk (diğer kartlar, toplu işlem ve Telegram hızlı ekleme değişmedi). Gerçek sayfa HTML önizlemesi ve tıklama testi, 835 test; kaynak f3c3e42 canlı, sağlık başarılı (ilk denemede HA mağaza yenilemesi zaman aşımı, tekrar kurulumda geçti). Tam yedek 7084536b; geri dönüş sh tools/rollback_rpi.sh 7084536b.
 - 2026-11-11 · Agent: Claude · Hermes 4.41.13: kart başlığındaki hoparlör ve Aktif anahtarı tıklanınca değişmiyordu (settings.js tıklamayı iki kez çevirip iptal ediyordu); gerçek sayfa ve gerçek tıklamayla bulundu/doğrulandı. 833 test, kaynak ec32abf canlı, sağlık başarılı. Geri dönüş sh tools/rollback_rpi.sh d74ea508.
 - 2026-11-11 · Agent: Claude · Hermes 4.41.12: takip kartı başlığında hoparlör simgesi; tıklanınca sessiz hoparlöre döner, o kartın fiyat/stok bildirimleri Pushover'da sessiz gelir. Togg kartında yok (yapılandırmada da yok sayılır). 833 test, kaynak 4eba15e canlı, sağlık kontrolü başarılı. Tam yedek d74ea508; geri dönüş sh tools/rollback_rpi.sh d74ea508.
 - 2026-11-11 · Agent: Claude · Hermes 4.41.11: sabitlenen sekme satırı açık renge, seçili sekme koyuya yumuşak geçişle döner (boyutlar ölçülerek aynı), seçili sekme telefonda yarım daire uçlu. 831 test, kaynak 7f89b1c canlı, sağlık ve canlı CSS/JS kontrolü başarılı. Tam yedek d74ea508; geri dönüş sh tools/rollback_rpi.sh d74ea508.
