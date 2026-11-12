@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.41.16
+
+- Telefonda sekme menüsünün iki ucu yarım daire oldu (önceden köşeleri yuvarlatılmış dikdörtgendi). Menü sabitlenince saat/pil satırının altındaki şerit sayfanın koyu rengiyle kapanır; iOS'un oraya kayan kartları bulanıklaştırması artık görünmez, menü o şeridin hemen altından başlar.
+
 ## 4.41.15
 
 - Togg kartına "Test modu": açıkken bir okuma hatası olursa kart bir üst tarama aralığına geçer (15 sn → 20 sn → 30 sn → 45 sn → 1 dk → 5 dk), sonraki okuma yeni bağlantıyla yapılır. Başarılı okumada ulaşılan aralık korunur; kartta "Şu an …" olarak görünür. Gece modunda okuma yapılmadığı için hata sayılmaz. Test modu kapalıyken seçilen aralık hiçbir koşulda değişmez; aralığı elle değiştirmek adımı sıfırlar.
