@@ -147,6 +147,50 @@ class ToggCycleTests(CycleTestCase):
         self.assertEqual([row["product_title"] for row in self.published_rows()], [V2])
         self.assertEqual(self.published_stock(), [])
 
+    def test_test_mode_steps_to_the_next_interval_after_each_failed_read_and_keeps_it(self):
+        from dataclasses import replace
+        from hermes.monitor import scheduling
+        rule = replace(watch(V2, URL, target="99999999"), priority="15s", test_mode=True)
+        error = HttpStatusHermesError(503, URL)
+        with patch.object(ToggProvider, "_products_payload", side_effect=error):
+            state = self.run_cycle(config([rule]))
+            self.assertEqual((state[key(rule)]["test_priority"], state[key(rule)]["test_base_priority"]), ("20s", "15s"))
+            self.assertEqual(self.run_later(config([rule]), seconds=16)[key(rule)]["test_priority"], "20s")  # 20 sn not due yet
+            self.assertEqual(self.run_later(config([rule]), seconds=21)[key(rule)]["test_priority"], "30s")
+            for expected in ("45s", "1m", "5m", "5m"):
+                state = self.run_later(config([rule]), seconds=301)
+                self.assertEqual(state[key(rule)]["test_priority"], expected)
+        with patch.object(ToggProvider, "_products_payload", return_value=payload(V2)):
+            state = self.run_later(config([rule]), seconds=301)
+        self.assertIsNone(state[key(rule)]["last_error"])
+        self.assertEqual(scheduling.effective_priority(rule, state[key(rule)]), "5m")  # a good read keeps the step
+        # A new choice by the user, or test mode off, ignores the step.
+        self.assertEqual(scheduling.effective_priority(replace(rule, priority="10s"), state[key(rule)]), "10s")
+        self.assertEqual(scheduling.effective_priority(replace(rule, test_mode=False), state[key(rule)]), "15s")
+
+    def test_without_test_mode_a_failed_read_never_changes_the_interval(self):
+        from dataclasses import replace
+        rule = replace(watch(V2, URL, target="99999999"), priority="15s")
+        with patch.object(ToggProvider, "_products_payload", side_effect=HttpStatusHermesError(503, URL)):
+            state = self.run_cycle(config([rule]))
+        self.assertNotIn("test_priority", state[key(rule)])
+        self.assertTrue(state[key(rule)]["last_error"])
+
+    def test_test_mode_is_a_togg_only_card_option(self):
+        from hermes.config import prepare_watches
+        from hermes.web import settings
+        card = {"id": "t", "name": V2, "target_price": 1, "url_1": URL, "priority": "15s", "test_mode": True}
+        self.assertTrue(prepare_watches([card])[0].test_mode)
+        self.assertFalse(prepare_watches([{**card, "url_1": "https://www.trendyol.com/x"}])[0].test_mode)
+        html = settings.watch_form(card, 0, steps={"t": {"step": "20s", "base": "15s"}})
+        self.assertIn("name='watches_0_test_mode' value='1' checked>Test modu<span class='test-step'>Şu an 20 sn</span>", html)
+        self.assertNotIn("test-step", settings.watch_form(card, 0, steps={"t": {"step": "20s", "base": "10s"}}))
+        self.assertNotIn("test_mode", settings.watch_form({**card, "url_1": "https://www.trendyol.com/x"}, 0))
+        form = {"watches_count": ["1"], "watches_0_name": [V2], "watches_0_target_price": ["1"], "watches_0_url_1": [URL],
+                "watches_0_active": ["on"], "watches_0_priority": ["15s"], "watches_0_test_mode": ["1"]}
+        self.assertTrue(settings.build_watches(form)[0]["test_mode"])
+        self.assertNotIn("test_mode", settings.build_watches({k: v for k, v in form.items() if k != "watches_0_test_mode"})[0])
+
 
 if __name__ == "__main__":
     unittest.main()

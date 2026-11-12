@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.41.15
+
+- Togg kartına "Test modu": açıkken bir okuma hatası olursa kart bir üst tarama aralığına geçer (15 sn → 20 sn → 30 sn → 45 sn → 1 dk → 5 dk), sonraki okuma yeni bağlantıyla yapılır. Başarılı okumada ulaşılan aralık korunur; kartta "Şu an …" olarak görünür. Gece modunda okuma yapılmadığı için hata sayılmaz. Test modu kapalıyken seçilen aralık hiçbir koşulda değişmez; aralığı elle değiştirmek adımı sıfırlar.
+
 ## 4.41.14
 
 - Togg kartının tarama aralığı seçenekleri: 10, 15, 20, 30, 45 sn, 1 dk ve 5 dk. Diğer kartların seçenekleri değişmedi; toplu işlem ve Telegram hızlı ekleme saniyelik seçenek göstermez. Togg'da listede olmayan eski seçim en yakın seçeneğe (ör. 6 saat → 5 dk) döner.

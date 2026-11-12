@@ -1,5 +1,6 @@
 """One monitoring cycle: read due watches, record prices, notify, publish the table."""
 
+import contextlib
 import random
 import hashlib
 from dataclasses import asdict
@@ -490,7 +491,7 @@ class Monitor:
                 log_cycle_banner(self.config)
         started_at = time.monotonic()
         previous_check = parse_iso_datetime(entry.get("last_checked_at"))
-        interval = max(self.config.interval_seconds, PRIORITY_INTERVAL_SECONDS.get(scheduling.watch_priority(watch), 0))
+        interval = max(self.config.interval_seconds, PRIORITY_INTERVAL_SECONDS.get(scheduling.effective_priority(watch, entry), 0))
         with self._lock:
             startup_read = key in self._startup_pending
         planned = previous_check.timestamp() + interval if previous_check and not startup_read and not scheduling.manually_due(watch, entry) else None
@@ -545,6 +546,10 @@ class Monitor:
                                           context=incident_context)
             with self._lock:
                 self.results._record_failure(run, provider, watch, key, entry, seller, outcome, exc, load)
+            if watch.test_mode and not is_normal_empty_result(exc):
+                # A fresh connection for the next read: pooled connections are dropped.
+                with contextlib.suppress(Exception):
+                    ctx.session.close()
         finally:
             elapsed = round((time.monotonic() - started_at) * 1000)
             self.diagnostics.finish(job, watch.site, result, elapsed, str(failure) if failure else "",

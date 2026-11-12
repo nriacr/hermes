@@ -87,7 +87,7 @@ class ToggProvider(Provider):
     site = SITE_TOGG
     notifies_stock_return = True
     # The card names the watched model; the link check lists the models to choose from.
-    card_options = ("model", "night_mode")
+    card_options = ("model", "night_mode", "test_mode")
     allows_silent = False
 
     def read_due(self, watch) -> bool:

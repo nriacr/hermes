@@ -187,6 +187,25 @@ def _sound_toggle(prefix, silent, label="") -> str:
             f"{SPEAKER_SVG}{escape(label)}</label>")
 
 
+def _test_mode(prefix, item) -> str:
+    """Togg "Test modu": a failed read moves the card to its next longer interval; the note shows the step."""
+    step = item.get("_test_step") or ""
+    note = (f"<span class='test-step'>Şu an {escape(PRIORITY_LABELS[step])}</span>"
+            if parse_bool(item.get("test_mode"), default=False) and step in PRIORITY_LABELS else "")
+    return _checkbox(prefix, "test_mode", "Test modu", item.get("test_mode", False)).replace("</label>", note + "</label>", 1)
+
+
+def test_steps() -> Dict[str, Dict[str, str]]:
+    """Per card id, the interval test mode stepped to and the one it was taken from."""
+    try:
+        state = load_json(STATE_PATH, {})
+    except (RuntimeError, sqlite3.Error):
+        return {}
+    return {str(entry["tracking_id"]): {"step": str(entry["test_priority"]), "base": str(entry.get("test_base_priority") or "")}
+            for entry in (state.values() if isinstance(state, dict) else [])
+            if isinstance(entry, dict) and entry.get("tracking_id") and entry.get("test_priority")}
+
+
 def _site_options(prefix, item, site, search) -> tuple:
     """The site's own (text fields, checkboxes) of a saved card; the product name only on search pages."""
     parts, flags = [], []
@@ -216,6 +235,8 @@ def _site_options(prefix, item, site, search) -> tuple:
             flags.append(_night_mode(prefix, item))
         elif option == "silent":
             continue  # the speaker in the card's title row
+        elif option == "test_mode":
+            flags.append(_test_mode(prefix, item))
     return "".join(parts), "".join(flags)
 
 
@@ -296,7 +317,7 @@ def _hidden_identity(prefix, item) -> str:
             f"<input type='hidden' name='{escape(prefix + 'delete', quote=True)}' value='0' data-delete-flag>")
 
 
-def watch_form(item: Dict[str, Any], index: int, known_titles=None) -> str:
+def watch_form(item: Dict[str, Any], index: int, known_titles=None, steps=None) -> str:
     """A saved card: its links, the common fields and only its site's own fields."""
     prefix = f"watches_{index}_"
     display_name = watch_display_name(item, index, known_titles or {})
@@ -304,6 +325,9 @@ def watch_form(item: Dict[str, Any], index: int, known_titles=None) -> str:
     search = any(watch_name_required_for_url(url) for url in urls if url)
     links = "".join(_field(prefix, field_name, "Link" if number == 1 else f"Link {number}", url, "url")
                     for number, (field_name, url) in enumerate(zip(WATCH_URL_FIELDS, urls), start=1))
+    step = (steps or {}).get(str(item.get("id") or ""), {})
+    if step.get("base") == _card_priority(item, False) and step.get("step") != step.get("base"):
+        item = {**item, "_test_step": step.get("step")}
     site_fields, site_flags = _site_options(prefix, item, _watch_site(item), search)
     # The card's name is its own field on search pages and for a site that watches a named model.
     named = search or "model" in SITE_OPTIONS.get(_watch_site(item), ())
@@ -343,6 +367,7 @@ def new_watch_form(index: int, check_path: str) -> str:
     site_flags = (
         hidden("night_mode", _night_mode(prefix, {}))
         + hidden("silent", _sound_toggle(prefix, False, "Bildirim sesi"))
+        + hidden("test_mode", _checkbox(prefix, "test_mode", "Test modu", False))
         + hidden("official_seller_only", _checkbox(prefix, "official_seller_only", "Platform satıcısı", False)
                  .replace(">Platform satıcısı</label>", "><span data-seller-label></span></label>"))
     )
@@ -467,10 +492,10 @@ def bulk_toolbar() -> str:
     )
 
 
-def _site_groups(watches, known_titles) -> str:
+def _site_groups(watches, known_titles, steps=None) -> str:
     return "".join(
         f"<details class='site-group' data-site-group><summary>{escape(label)}<span class='site-count'>{len(cards)}</span></summary>"
-        f"<div class='site-cards'>{''.join(watch_form(item, index, known_titles) for index, item in cards)}</div></details>"
+        f"<div class='site-cards'>{''.join(watch_form(item, index, known_titles, steps) for index, item in cards)}</div></details>"
         for label, cards in sites_in_order(watches)
     )
 
@@ -493,7 +518,7 @@ def render_settings_page(base: str, params: Dict[str, List[str]], *, lock_button
         f"{new_watch_form(new_index, link(base, 'settings/check'))}<div class='queued-watches' data-queued-list></div></section>"
         "<section class='settings-section'><h2>Takip edilenler</h2>"
         "<input id='watch-search' type='search' placeholder='Ara' aria-label='Takip edilenlerde ara' autocomplete='off'>"
-        f"{_site_groups(watches, known_titles)}</section>"
+        f"{_site_groups(watches, known_titles, test_steps())}</section>"
         + bulk_toolbar()
         + _telegram_section(options)
         + _timing_section(options)
@@ -587,6 +612,8 @@ def build_watch(form: Dict[str, List[str]], index: int) -> Optional[Dict[str, An
     }
     if prefix + "silent" in form:
         item["silent"] = True
+    if prefix + "test_mode" in form:
+        item["test_mode"] = True
     if minimum_price:
         item["minimum_price"] = _price_from_form(minimum_price)
     if exclude_terms:

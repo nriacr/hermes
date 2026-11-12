@@ -250,6 +250,7 @@ def _prepare_watch(item):
                 priority=site_priority(priority, site),
                 official_seller_only=parse_bool(item.get("official_seller_only"), default=False),
                 silent=parse_bool(item.get("silent"), default=False) and site != SITE_TOGG,
+                test_mode=parse_bool(item.get("test_mode"), default=False) and site == SITE_TOGG,
                 check_now_token=str(item.get("check_now_token") or "").strip(),
                 max_items_to_scan=SEARCH_RESULT_LIMIT,
                 active=True,

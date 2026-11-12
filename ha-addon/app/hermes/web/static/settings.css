@@ -74,3 +74,4 @@ body.ov.settings-page .button[data-check-link]:disabled { opacity:1; } .settings
 .settings-page .sound-toggle svg { width:22px; height:22px; fill:none; stroke:currentColor; stroke-width:1.7; stroke-linecap:round; stroke-linejoin:round; } .settings-page .sound-toggle .speaker-body { fill:currentColor; }
 .settings-page .sound-toggle .speaker-cross { display:none; } .settings-page .sound-toggle:has(input:checked) { color:var(--mute); } .settings-page .sound-toggle:has(input:checked) .speaker-waves { display:none; } .settings-page .sound-toggle:has(input:checked) .speaker-cross { display:inline; }
 .settings-page .sound-toggle:has(input:focus-visible) svg { outline:2px solid rgba(201,229,154,.6); outline-offset:2px; border-radius:4px; }
+.settings-page .test-step { margin-left:8px; color:var(--mute); font-weight:500; }

@@ -18,7 +18,8 @@ from ..logging_utils import log
 from ..models import OfferResult, PriceSummaryRow, WatchRule
 from ..providers.base import Provider, WatchRead, excluded_term_in_title
 from ..utils import SystemLoad, canonical_tracking_url, format_tl, local_now, parse_iso_datetime, site_label, utc_now
-from . import alerts, state as state_ops, summary
+from ..constants import PRIORITY_LABELS
+from . import alerts, scheduling, state as state_ops, summary
 from .state import offer_key as make_offer_key, watch_key as make_watch_key
 
 
@@ -412,6 +413,12 @@ class ResultRecorder:
             if self._notify(f"{seller} arama hatası", message[:900], watch.url):
                 failed["last_error_notified_at"] = utc_now()
                 log(f"Arama hata bildirimi gönderildi: {seller} | {watch.name}")
+        if watch.test_mode and not normal_empty:
+            stepped = scheduling.next_test_priority(watch, failed)
+            if stepped != scheduling.effective_priority(watch, failed):
+                log(f"Test modu: {seller} | {watch.name or watch.url} okuma hatası; tarama aralığı "
+                    f"{PRIORITY_LABELS[scheduling.effective_priority(watch, failed)]} → {PRIORITY_LABELS[stepped]}, bağlantı yenileniyor.")
+            failed.update({"test_priority": stepped, "test_base_priority": scheduling.watch_priority(watch)})
         failed.update({
             **self._watch_fields(watch),
             "offer_keys": list(entry.get("offer_keys") or []) if kept_after_block else [],

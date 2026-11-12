@@ -26,6 +26,8 @@ class WatchRule:
     official_seller_only: bool = False
     # Deal and stock notifications of this card arrive without sound.
     silent: bool = False
+    # Togg test mode: a failed read moves the card to its next longer interval (state keeps the step).
+    test_mode: bool = False
     check_now_token: str = ""
     max_items_to_scan: int = 60
     active: bool = True
