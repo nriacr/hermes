@@ -5,6 +5,8 @@ sonuç, gerçek kontrol ve yayın/kurulum bilgisi yeterlidir. Ayrıntı Git geç
 
 ## Yapılanlar
 
+- 2026-11-13 · Agent: Codex · 4.41.20 (01914bb) canlı: yalnız Togg gece modunda 45 dk okuma uyarısı bekletilir; gece modu bitince süre sıfırdan başlar. 849 test ve HA yapılandırma kontrolü geçti. 18:58 TSİ canlı günlük gece modunu doğruladı, açık HA Togg uyarısı kapandı. Günlük tam kapsamlı yedek f21318c8 (05:00 TSİ, yaklaşık 14 saat); kod geri dönüşü prepare_code_rollback.sh d2ad812.
+
 - 2026-11-13 · Agent: Codex · 4.41.19 (d2ad812) canlı: doğrulanmış modem kesintisi ayrı durum ve bekleme, son fiyat korunur; okuma aşaması/kod/süre/modem kanıtı ve Amazon arama sayaçları kaydedilir. 847 test, HA yapılandırma ve Pi sağlık kontrolü başarılı. 09:54 TSİ canlı modem erişimi ve iki aramanın sayaçları doğrulandı (USB-C 1, Squire 11 Depo adayı, başlık eşleşmesi 0). Planlı/plansız kesinti testlerde doğrulandı; gerçek planlı kesinti kontrolü ilk 05:00 olayında. Günlük tam kapsamlı yedek f21318c8 (05:00 TSİ, kurulumda yaklaşık 5 saat), kod geri dönüşü prepare_code_rollback.sh 559a5e8.
 
 - 2026-11-12 · Agent: Claude · Hermes 4.41.15: Togg kartına Test modu (hata olunca bir üst aralık 15→20→30→45 sn→1 dk→5 dk, yeni bağlantı, ulaşılan aralık korunur, kartta "Şu an …"; kapalıyken aralık asla değişmez; gece modu hata sayılmaz). Gerçek sayfa HTML önizlemesi + tıklama testi, 838 test; kaynak e6f3dbd canlı, sağlık başarılı. Geri dönüş sh tools/rollback_rpi.sh 7084536b.
