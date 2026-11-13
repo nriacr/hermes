@@ -13,12 +13,13 @@ import traceback
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Optional
 
-from ..constants import APP_VERSION, PRIORITY_INTERVAL_SECONDS
+from ..constants import APP_VERSION, PRIORITY_INTERVAL_SECONDS, SITE_TOGG
 from ..history import History
 from ..homeassistant import HomeAssistantBridge
 from ..logging_utils import log
 from ..models import HermesConfig
 from ..notifier import Pushover
+from ..providers.base import in_night_window
 from ..providers.registry import ProviderSet
 from ..storage import file_lock, load_json, save_json
 from ..utils import local_now, site_label
@@ -130,15 +131,26 @@ class MonitorService:
     def _check_stalls(self, stall: StallWatch, sites, now: float) -> None:
         """Tell the user once when a site reads nothing successfully for a long time (see monitor/stall.py)."""
         thresholds = {}
+        clock = local_now()
+        bridge = self.monitor.home_assistant
         for site in sites:
+            watches = [watch for watch in self.config.watches if watch.active and watch.site == site]
+            if site == SITE_TOGG:
+                watches = [watch for watch in watches if not in_night_window(watch, clock)]
+                if not watches:
+                    if stall.pause(site):
+                        log("Togg gece modunda; okuma uyarısı beklemede.")
+                        if bridge and bridge.enabled:
+                            bridge.clear_problem(f"stall:{site}")
+                    continue
+                stall.resume(site, now)
             longest = max((max(self.config.interval_seconds, PRIORITY_INTERVAL_SECONDS.get(scheduling.watch_priority(watch), 0))
-                           for watch in self.config.watches if watch.active and watch.site == site), default=0)
+                           for watch in watches), default=0)
             thresholds[site] = stall_threshold(longest)
         with self.monitor._lock:
             guards = state_ops.guard_store(self.monitor._state)
             silent = [site for site in sites if (guards.get(state_ops.site_guard_key(site)) or {}).get("kind") in SILENT_GUARD_KINDS]
         began, recovered = stall.update(now, self.monitor.diagnostics.last_success, thresholds, silent)
-        bridge = self.monitor.home_assistant
         for site in recovered:
             log(f"{site} yeniden başarılı okuyor (takılma sona erdi).")
             if bridge and bridge.enabled:
@@ -151,7 +163,7 @@ class MonitorService:
                        "Ayrıntı Hermes panelinde (Tanı).")
             if bridge and bridge.enabled and site in began:
                 bridge.persistent_problem(f"stall:{site}", message)
-            if site not in stall.notified and not quiet_hours(local_now()):
+            if site not in stall.notified and not quiet_hours(clock):
                 self.monitor.delivery.send("Hermes takip uyarısı", message, event_id=f"stall:{site}:{round(time.time() - (now - since))}", quiet=True)
                 stall.notified.add(site)
 

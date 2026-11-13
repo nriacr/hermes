@@ -22,6 +22,21 @@ class StallWatch:
         self.started_at = started_at
         self.stalled: Dict[str, float] = {}
         self.notified: set = set()
+        self.paused: set[str] = set()
+        self.resumed_at: Dict[str, float] = {}
+
+    def pause(self, site: str) -> bool:
+        """Forget any active stall when the user intentionally pauses the site."""
+        first = site not in self.paused
+        self.paused.add(site)
+        self.stalled.pop(site, None)
+        self.notified.discard(site)
+        return first
+
+    def resume(self, site: str, now: float) -> None:
+        if site in self.paused:
+            self.paused.remove(site)
+            self.resumed_at[site] = now
 
     def update(self, now: float, last_success: Dict[str, float], thresholds: Dict[str, float],
                silent_sites: Iterable[str]) -> Tuple[List[str], List[str]]:
@@ -29,7 +44,10 @@ class StallWatch:
         silent = set(silent_sites)
         began, recovered = [], []
         for site, threshold in thresholds.items():
-            since = max(self.started_at, last_success.get(site, self.started_at))
+            if site in self.paused:
+                continue
+            since = max(self.started_at, last_success.get(site, self.started_at),
+                        self.resumed_at.get(site, self.started_at))
             idle = now - since
             if idle > threshold and site not in silent:
                 if site not in self.stalled:

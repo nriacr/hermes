@@ -1,7 +1,8 @@
 import unittest
+from datetime import datetime
 from unittest.mock import Mock, patch
 
-from support import APP_PATH  # noqa: F401
+from support import watch
 
 from hermes.monitor import runner
 from hermes.monitor.stall import StallWatch, stall_threshold
@@ -61,6 +62,38 @@ class ServiceStallTests(unittest.TestCase):
         with patch.object(runner, "quiet_hours", return_value=False), patch.object(runner.state_ops, "guard_store", return_value=guards):
             service._check_stalls(stall, ["amazon"], 3000)
         service.monitor.delivery.send.assert_not_called()
+
+    def test_togg_night_mode_silences_stall_and_starts_fresh_at_eight(self):
+        service = self.service({})
+        service.config.watches = [watch("Togg", "https://configurator.togg.com.tr/", priority="5m",
+                                        night_start="18:00", night_end="08:00"),
+                                  watch(priority="1m")]
+        stall = StallWatch(started_at=0)
+        with patch.object(runner, "quiet_hours", return_value=False), \
+             patch.object(runner, "local_now", return_value=datetime(2026, 11, 13, 18, 45)):
+            service._check_stalls(stall, ["togg", "amazon"], 2800)
+            service._check_stalls(stall, ["togg", "amazon"], 2900)
+        service.monitor.home_assistant.clear_problem.assert_called_once_with("stall:togg")
+        service.monitor.delivery.send.assert_called_once()
+        self.assertEqual(set(stall.stalled), {"amazon"})
+        with patch.object(runner, "quiet_hours", return_value=False), \
+             patch.object(runner, "local_now", return_value=datetime(2026, 11, 14, 8)):
+            service._check_stalls(stall, ["togg", "amazon"], 50000)
+            service._check_stalls(stall, ["togg", "amazon"], 52699)
+            self.assertNotIn("togg", stall.stalled)
+            service._check_stalls(stall, ["togg", "amazon"], 52701)
+        self.assertIn("togg", stall.stalled)
+        self.assertEqual(service.monitor.delivery.send.call_count, 2)
+
+    def test_a_second_awake_togg_card_still_reports_a_stall(self):
+        service = self.service({})
+        service.config.watches = [watch("Togg bekliyor", "https://configurator.togg.com.tr/",
+                                        night_start="18:00", night_end="08:00"),
+                                  watch("Togg uyanık", "https://configurator.togg.com.tr/")]
+        with patch.object(runner, "quiet_hours", return_value=False), \
+             patch.object(runner, "local_now", return_value=datetime(2026, 11, 13, 18, 45)):
+            service._check_stalls(StallWatch(started_at=0), ["togg"], 2800)
+        service.monitor.delivery.send.assert_called_once()
 
 
 if __name__ == "__main__":

@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.41.20
+
+- Togg gece modunda beklerken 45 dakikalık okuma uyarısı gönderilmez. Gece modu bitince uyarı süresi yeniden başlar.
+
 ## 4.41.19
 
 - Hermes, Home Assistant modem durumuyla doğrulanan kesintilerde okumaları bekletir ve son fiyatı korur. Panelde internet olayı site hatalarından ayrı görünür.
