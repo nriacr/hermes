@@ -22,6 +22,7 @@ from ..notifier import Pushover
 from ..providers.registry import ProviderSet
 from ..storage import file_lock, load_json, save_json
 from ..utils import local_now, site_label
+from .network import NETWORK_COMPONENT
 from . import scheduling, state as state_ops, summary
 from .alerts import SILENT_GUARD_KINDS, quiet_hours
 from .stall import StallWatch, stall_threshold
@@ -190,6 +191,38 @@ class MonitorService:
         diagnostics_at = 0.0
         communicated = {}
         stall = StallWatch(time.monotonic())
+        modem_at = 0.0
+        access_valid_until = 0.0
+        stall_after = 0.0
+        bridge = self.monitor.home_assistant
+        if bridge and bridge.enabled:
+            self.monitor.diagnostics.recover(NETWORK_COMPONENT, "Hermes yeniden başladı; modem durumu yeniden okunuyor.")
+
+        def refresh_access(now):
+            nonlocal access_valid_until, stall_after
+            previous = self.monitor.access
+            access = bridge.modem_access()
+            if access.state != "unknown":
+                access_valid_until = now + 15
+            elif previous.paused and now < access_valid_until:
+                return
+            self.monitor.access = access
+            if previous.state == access.state and previous.operation == access.operation:
+                bridge.publish_access(access)
+                return
+            if access.paused:
+                if previous.paused:
+                    self.monitor.diagnostics.recover(NETWORK_COMPONENT, access.label)
+                self.monitor.diagnostics.incident(NETWORK_COMPONENT, "network", access.label,
+                                                  context={"modem": access.evidence()})
+            elif previous.paused:
+                message = "İnternet erişimi doğrulandı" if access.state == "online" else "Modem durumu doğrulanamadı"
+                self.monitor.diagnostics.recover(NETWORK_COMPONENT, message)
+                stall_after = now + 60
+            else:
+                message = "Modem durumu alındı" if access.state == "online" else "Modem durumu doğrulanamadı"
+            bridge.publish_access(access)
+            log(f"Modem erişim durumu: {access.label or message} | {access.evidence()}")
 
         def work(site):
             error = None
@@ -222,6 +255,10 @@ class MonitorService:
                         self.monitor._state = self.monitor.load_state()
                     if run_now:
                         next_due = {site: 0.0 for site in sites}
+                if bridge and bridge.enabled and now >= modem_at:
+                    refresh_access(now)
+                    modem_at = time.monotonic() + 5
+                access_paused = self.monitor.access.paused
                 if now >= diagnostics_at:
                     active = self.monitor.diagnostics.active()
                     bridge = self.monitor.home_assistant
@@ -229,6 +266,8 @@ class MonitorService:
                                 if self.monitor.diagnostics.needs_attention(item)}
                     if bridge and bridge.enabled:
                         for identity, item in critical.items():
+                            if access_paused and item["kind"] in {"read", "partial"}:
+                                continue
                             if communicated.get(identity) == item["opened"]:
                                 continue
                             message = ("Bildirim gönderimi durdu. Pushover ayarlarını ve kotanı kontrol et. "
@@ -249,9 +288,9 @@ class MonitorService:
                         for identity in set(communicated) - set(critical):
                             if bridge.clear_problem(identity):
                                 communicated.pop(identity)
-                    for housekeeping in (lambda: self._check_stalls(stall, sites, now),):
+                    if not access_paused and now >= stall_after:
                         try:
-                            housekeeping()
+                            self._check_stalls(stall, sites, now)
                         except Exception as exc:  # noqa: BLE001 - an optional notice never stops the monitor
                             log(f"Yardımcı kontrol hatası: {type(exc).__name__}: {exc}")
                     diagnostics_at = now + 5
@@ -260,7 +299,7 @@ class MonitorService:
                     self.monitor.delivery.prune()
                     maintenance_at = now + 86400
                 for site in sites:
-                    if site in workers or now < next_due[site] or (not self._commands.empty() and workers):
+                    if access_paused or site in workers or now < next_due[site] or (not self._commands.empty() and workers):
                         continue
                     thread = threading.Thread(target=work, args=(site,), name=f"hermes-{site}-round", daemon=True)
                     workers[site] = thread

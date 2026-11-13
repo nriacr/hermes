@@ -32,7 +32,7 @@ from ..delivery import DeliveryQueue
 from ..cart import CartQueue
 from ..diagnostics import Diagnostics
 from ..homeassistant import HomeAssistantBridge
-from ..logging_utils import log
+from ..logging_utils import log, ProblemLog
 from ..models import HermesConfig, OfferResult, PriceSummaryRow, StockSummaryRow, WatchRule
 from ..notifier import Pushover
 from ..providers.base import DEPO_LANE, Provider, ReadContext, RequestSpacing, WatchRead
@@ -44,6 +44,7 @@ from ..storage import load_json, save_json, export_json
 from ..utils import SystemLoad, parse_iso_datetime, site_label, system_load, utc_now
 from . import alerts, scheduling, state as state_ops, summary
 from .state import watch_key as make_watch_key
+from .network import Access, NetworkPaused, TRANSPORT_STAGES, failure_details
 from .results import is_normal_empty_result, ResultRecorder
 
 # How often the Depo lane looks for a main-page read that has become due.
@@ -115,6 +116,8 @@ class Monitor:
                  startup_scan: bool = False) -> None:
         self.config = config
         self.home_assistant = home_assistant
+        self.access = Access()
+        self.read_problems = ProblemLog()
         self.should_stop = should_stop
         self.providers = providers or ProviderSet()
         for provider in self.providers:
@@ -324,11 +327,25 @@ class Monitor:
         self.diagnostics.progress[site] = time.monotonic()
         self._jobs.request_ms = getattr(self._jobs, "request_ms", 0) + duration_ms
         self._jobs.request_count = getattr(self._jobs, "request_count", 0) + 1
+        failed = getattr(self._jobs, "failed_requests", None)
+        if failed is not None and outcome != "ok" and len(failed) < 12:
+            failed.append({"method": method, "kind": kind, "outcome": outcome, "duration_ms": duration_ms})
         self.history.record_request(site, method, kind, outcome, duration_ms, getattr(self._jobs, "current", ""))
 
     def _check_stopping(self):
         if self.should_stop():
             raise ReadCancelled()
+
+    def _check_access(self) -> None:
+        self._check_stopping()
+        access = self.access
+        if access.paused:
+            raise NetworkPaused(access)
+
+    def _keep_previous(self, run, watch, key, entry, seller):
+        self.results._begin_rows(run, key)
+        self.results._add_rows(run, key, summary.cached_summary_rows(watch, key, run.state, seller),
+                               summary.cached_stock_rows(watch, entry, seller))
 
     def _site_pace(self, site: str) -> Callable[[str], None]:
         """The random delay, then the site's minimum gap since its previous request start."""
@@ -363,7 +380,7 @@ class Monitor:
 
         def context(session, site: str, lane: str = "") -> ReadContext:
             return ReadContext(timeout=self.config.request_timeout_seconds, session=session,
-                               pace=self._site_pace(site), watch_names=watch_names, lane=lane,
+                               pace=self._site_pace(site), watch_names=watch_names, lane=lane, check_access=self._check_access,
                                measure=lambda method, kind, result, ms, site=site:
                                self._measure_request(site, method, kind, result, ms))
 
@@ -372,7 +389,10 @@ class Monitor:
                 if not site_watches:
                     return
                 site = site_watches[0].site
-                with traffic.bind(site), MeasuredSession(lambda method, kind, result, ms: self._measure_request(site, method, kind, result, ms)) as session:
+                with traffic.bind(site), MeasuredSession(
+                    lambda method, kind, result, ms: self._measure_request(site, method, kind, result, ms),
+                    check_access=self._check_access,
+                ) as session:
                     ctx = context(session, site)
                     provider = self.providers[site]
                     for watch in scheduling.priority_order(site_watches, provider.read_rank):
@@ -405,7 +425,7 @@ class Monitor:
                             if self._depo_lane_due(run, provider, watch):
                                 self.check_watch(run, ctx, watch)
                                 progressed = True
-                        if sweep_done.is_set():
+                        if sweep_done.is_set() or self.access.paused:
                             return
                         if not progressed:
                             sweep_done.wait(DEPO_LANE_POLL_SECONDS)
@@ -479,6 +499,9 @@ class Monitor:
         with self._lock:
             entry = run.state.get(key, {})
             entry = entry if isinstance(entry, dict) else {}
+            if self.access.paused:
+                self._keep_previous(run, watch, key, entry, seller)
+                return
             if provider.backs_off_on_protection and self.results._guarded(run, watch, key, entry, seller):
                 return
             self.results._begin_rows(run, key)
@@ -501,6 +524,11 @@ class Monitor:
                 self._startup_pending.discard(key)
         self._jobs.current = job
         self._jobs.request_ms = self._jobs.request_count = self._jobs.persist_ms = 0
+        self._jobs.failed_requests = []
+        read_kind = "search" if provider.is_search_url(watch.url) else (
+            "variant" if watch.include_variations else "product")
+        initial_access = self.access
+        details = {}
         result = "ok"
         failure: Optional[BaseException] = None
         load: Optional[SystemLoad] = None
@@ -508,12 +536,50 @@ class Monitor:
             previous_success = self.diagnostics.db.connect().execute("SELECT at FROM successful_reads WHERE component=?", (key,)).fetchone()
         incident_context = {"last_successful_read": previous_success[0] if previous_success else None, "site": watch.site, "watch_name": watch.name, "watch_url": watch.url,
                             "failures": outcome.error_details}
+
+        def capture(exc=None, access=None):
+            details.update(read_kind=read_kind, lane=ctx.lane or "site",
+                           timeout_seconds=ctx.timeout, elapsed_ms=round((time.monotonic() - started_at) * 1000),
+                           modem_at_start=initial_access.evidence(), modem=(access or self.access).evidence(),
+                           failed_requests=self._jobs.failed_requests,
+                           last_successful_read=incident_context["last_successful_read"])
+            if exc:
+                details.update(failure_details(exc))
+            incident_context["read"] = details
+
+        def defer(access, exc=None):
+            nonlocal result, failure
+            result = "network_unavailable"
+            failure = exc
+            capture(exc, access)
+            with self._lock:
+                if startup_read:
+                    self._startup_pending.add(key)
+                # Offers already committed during the read retain their own price timestamps.
+                # Restore the previous rows alongside them for the unfinished variants.
+                old_rows = summary.cached_summary_rows(watch, key, run.state, seller)
+                current_rows = run.rows_of.get(key, ([], []))[0]
+                current = {(row.product_url, row.is_warehouse) for row in current_rows}
+                self.results._add_rows(run, key,
+                    [row for row in old_rows if (row.product_url, row.is_warehouse) not in current],
+                    summary.cached_stock_rows(watch, entry, seller))
+            self.read_problems.failure((key, result), f"Okuma ertelendi: {seller} | {watch.name} | {access.label} | {details}")
+
         try:
+            if self.access.paused:
+                raise NetworkPaused(self.access)
             ctx.pace(f"{seller} | {(watch.name or watch.url)[:64]}")
             offers = (offer for offer in provider.read(watch, ctx, outcome) if provider.keeps_offer(watch, offer))
             recorded = self.results._record_offers(run, provider, watch, entry, seller, offers)
+            if outcome.search_counts:
+                outcome.search_counts["filtre_sonrasi"] = len(recorded.offer_keys)
+            if outcome.errors and not outcome.blocked and self.access.paused and outcome.error_details and all(
+                    item.get("stage") in TRANSPORT_STAGES for item in outcome.error_details):
+                defer(self.access)
+                return
             if outcome.errors and not outcome.blocked:
                 result = "partial"
+                capture()
                 self.diagnostics.incident(key, "partial", "; ".join(outcome.errors),
                                           "Diğer varyantlar okunmaya devam etti", context=incident_context)
             elif not outcome.blocked:
@@ -521,11 +587,14 @@ class Monitor:
             if outcome.blocked:
                 failure = outcome.blocked
                 result = read_outcome(provider, failure)
+                capture(failure)
                 load = system_load()
                 self.diagnostics.incident(key, "read", str(failure), f"{seller}: mevcut erişim kuralı uygulanıyor",
                                           context=incident_context)
             with self._lock:
                 self.results._record_success(run, provider, watch, key, seller, recorded, outcome)
+        except NetworkPaused as exc:
+            defer(exc.args[0])
         except ReadCancelled:
             result = "interrupted"
             raise
@@ -540,6 +609,14 @@ class Monitor:
                 self.diagnostics.recover(key, "Arama sonucu doğrulandı")
             else:
                 failure = outcome.blocked or exc
+                capture(failure)
+                access = self.access
+                stages = {item.get("stage") for item in outcome.error_details}
+                if access.paused and not outcome.blocked and (
+                        (bool(stages) and stages <= TRANSPORT_STAGES)
+                        or (not stages and details["stage"] in TRANSPORT_STAGES)):
+                    defer(access, failure)
+                    return
                 result = read_outcome(provider, failure)
                 load = system_load()
                 self.diagnostics.incident(key, "read", str(failure), f"{seller}: sonraki planlı okumada tekrar denenecek",
@@ -552,27 +629,44 @@ class Monitor:
                     ctx.session.close()
         finally:
             elapsed = round((time.monotonic() - started_at) * 1000)
+            if result in {"ok", "stock", "empty"} and not outcome.error_details:
+                self.read_problems.recovered((key, "failure"))
+                self.read_problems.recovered((key, "network_unavailable"))
+            elif details and result != "network_unavailable":
+                stages = sorted({item.get("stage", "unknown") for item in outcome.error_details})
+                self.read_problems.failure((key, "failure"),
+                    f"Okuma tanısı: {seller} | {watch.name} | sonuç={result} | varyant_aşamaları={stages} | {details}")
+            if outcome.search_counts:
+                log(f"Arama tanısı: {seller} | {watch.name} | sonuç={result} | "
+                    + " | ".join(f"{name}={count}" for name, count in outcome.search_counts.items()))
             self.diagnostics.finish(job, watch.site, result, elapsed, str(failure) if failure else "",
                                     {"startup_scan": startup_read, "unavailable": len(outcome.unavailable), "partial_errors": outcome.errors,
                                      "requests": self._jobs.request_count, "request_ms": self._jobs.request_ms,
                                      "persist_ms": self._jobs.persist_ms,
                                      "provider_and_wait_ms": max(0, elapsed-self._jobs.request_ms-self._jobs.persist_ms),
+                                     **({"failure": details, "variants": outcome.error_details} if details else {}),
+                                     **({"search_counts": outcome.search_counts,
+                                         "search_detail_errors": outcome.error_details} if outcome.search_counts else {}),
                                      "config_id": hashlib.sha256(json.dumps(asdict(watch), sort_keys=True, default=str).encode()).hexdigest(),
                                      "offers": [{"key": item, "source": run.state.get(item, {}).get("source"),
                                          "currency": run.state.get(item, {}).get("currency"),
                                          "conditions": run.state.get(item, {}).get("conditions"),
                                          "checked_at": run.state.get(item, {}).get("last_price_checked_at")}
                                         for item in run.state.get(key, {}).get("offer_keys", [])]})
-            if startup_read:
+            if startup_read and result != "network_unavailable":
                 with self._lock:
                     self._startup_outcomes[key] = result
             if result in {"ok", "stock", "empty"}:
                 self.diagnostics.db.transaction([("INSERT OR REPLACE INTO successful_reads VALUES (?,?)", (key, time.time()))])
-            self.history.record_read(watch.site, result, round((time.monotonic() - started_at) * 1000), key,
-                                     scheduling.watch_priority(watch), str(failure) if failure else "", load)
+            self.history.record_read(watch.site, result, elapsed, key, scheduling.watch_priority(watch),
+                                     str(failure) if failure else "", load)
+            self._jobs.failed_requests = None
+            self._jobs.current = ""
 
     def _depo_lane_due(self, run: CycleRun, provider: Provider, watch: WatchRule) -> bool:
         """True for a watch whose next read is a quick main-page read and whose rhythm and schedule say it is due."""
+        if self.access.paused:
+            return False
         with self._lock:
             guard_key = state_ops.site_guard_key(watch.site)
             remaining = state_ops.guard_remaining_seconds(run.state, guard_key)

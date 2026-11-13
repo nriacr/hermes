@@ -157,11 +157,12 @@ def note_attempt(method: str, outcome) -> None:
 _curl_winner: dict = {}
 
 
-def _curl_first(url: str, timeout: int):
+def _curl_first(url: str, timeout: int, check_access=lambda: None):
     """The page from the address curl_cffi read before, or None (nothing remembered or it failed)."""
     candidate = _curl_winner.get(url)
     if not candidate or curl_requests is None:
         return None
+    check_access()
     try:
         page = _checked(
             count_curl(curl_requests.Session().get(
@@ -196,12 +197,13 @@ def _warm_up(session: requests.Session, timeout: int) -> None:
             setattr(session, WARMED_ATTRIBUTE, True)
 
 
-def _curl_page(url: str, variants: List[str], timeout: int, attempts: List[str]):
+def _curl_page(url: str, variants: List[str], timeout: int, attempts: List[str], check_access=lambda: None):
     """The first address curl_cffi reads (remembered for the next read), or (None, last error)."""
     last_error: Optional[Exception] = None
     try:
         curl_session = curl_requests.Session()
         for candidate in variants:
+            check_access()
             try:
                 page = _checked(
                     count_curl(curl_session.get(
@@ -229,19 +231,21 @@ def fetch_hepsiburada_page(session: requests.Session, url: str, timeout: int):
     Measured 2026-10-28: Hepsiburada answered every plain-requests read and home-page warm-up with 403
     (456 in 24 hours) while curl_cffi read every page; trying requests first only added blocked requests.
     """
-    remembered = _curl_first(url, timeout)
+    check_access = getattr(session, "check_access", lambda: None)
+    remembered = _curl_first(url, timeout, check_access)
     if remembered is not None:
         return remembered
     attempts: List[str] = []
     variants = url_variants(url)
     last_error: Optional[Exception] = None
     if curl_requests is not None:
-        page, last_error = _curl_page(url, variants, timeout, attempts)
+        page, last_error = _curl_page(url, variants, timeout, attempts, check_access)
         if page is not None:
             return page
     _warm_up(session, timeout)
     for method, client in (("requests", session), ("requests_fresh", CountedSession())):
         for candidate in variants:
+            check_access()
             try:
                 page = _checked(
                     client.get(candidate, headers=hepsiburada_headers(candidate), timeout=timeout, allow_redirects=True),
@@ -502,6 +506,7 @@ class HepsiburadaProvider(Provider):
         headers.update(hepsiburada_cart.EVALUATE_HEADERS)
         headers["Origin"] = HOME_URL.rstrip("/")
         try:
+            getattr(ctx, "check_access", lambda: None)()
             with _measure_stage("sepet"):
                 response = count_curl(curl_requests.Session().post(
                     HOME_URL + hepsiburada_cart.EVALUATE_PATH, headers=headers,
@@ -520,6 +525,7 @@ class HepsiburadaProvider(Provider):
         """The site's live seller list; empty when it cannot be read, so only the shown seller counts."""
         api_url = f"{HOME_URL}api/v1/product/listings/{parser.product_id_from_url(url)}"
         try:
+            getattr(ctx, "check_access", lambda: None)()
             with _measure_stage("satıcı"):
                 response = count_curl(curl_requests.Session().get(api_url, headers=_api_headers(url), timeout=ctx.timeout, impersonate="chrome124"))
             response.raise_for_status()

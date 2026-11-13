@@ -1,5 +1,10 @@
 # Değişiklik günlüğü
 
+## 4.41.19
+
+- Hermes, Home Assistant modem durumuyla doğrulanan kesintilerde okumaları bekletir ve son fiyatı korur. Panelde internet olayı site hatalarından ayrı görünür.
+- Okuma tanısına bağlantı aşaması, süreler, hata kodları ve modem durumu eklendi. Amazon aramalarında aday, başlık, fiyat ve teklif sayıları kaydedilir.
+
 ## 4.41.18
 
 - Togg kart ikonu Nuri'nin verdiği Trumore (Togg) uygulama ikonuyla değiştirildi.

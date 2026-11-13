@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional
 import requests
 
 from .logging_utils import log
+from .monitor.network import Access
 from .models import OfferResult, PriceSummaryRow, WatchRule
 from .utils import PROCESS_STARTED_AT, format_tl, parse_iso_datetime, site_label
 
@@ -20,6 +21,7 @@ CORE_API_URL = "http://supervisor/core/api"
 OPPORTUNITY_EVENT = "hermes_firsat"
 SENSOR_OPPORTUNITIES = "sensor.hermes_firsat_sayisi"
 SENSOR_LAST_CYCLE = "sensor.hermes_son_tur"
+SENSOR_ACCESS = "sensor.hermes_internet_erisim"
 SENSOR_ERRORS = "sensor.hermes_hata_sayisi"
 # Keep entity attributes small; Home Assistant's recorder warns above ~16 KB.
 MAX_LISTED_ITEMS = 25
@@ -39,6 +41,7 @@ class HomeAssistantBridge:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self._failing = False
+        self._modem_error = ""
         self._lock = threading.Lock()
         self._published: Dict[str, Any] = {}
         self._last_cycle_sent_at: Optional[datetime] = None
@@ -80,6 +83,37 @@ class HomeAssistantBridge:
         return self._post(f"/events/{event_type}", data)
 
     # -- Hermes data ---------------------------------------------------------------
+
+    def modem_access(self) -> Access:
+        if not self.enabled:
+            return Access()
+        try:
+            response = requests.post(f"{self.base_url}/services/h162_modem/status?return_response", json={},
+                                     timeout=min(self.timeout, 2),
+                                     headers={"Authorization": f"Bearer {self.token}"})
+            response.raise_for_status()
+            modem = response.json()["service_response"]
+            if not isinstance(modem, dict) or "ping" not in modem or "planned" not in modem:
+                raise ValueError("Modem durumu eksik")
+            access = Access.from_modem(modem)
+        except (requests.RequestException, ValueError, TypeError, KeyError) as exc:
+            error = type(exc).__name__
+            if error != self._modem_error:
+                log(f"Modem durumu alınamadı: {error} | doğrulanmış durum bekleniyor")
+            self._modem_error = error
+            return Access()
+        if self._modem_error:
+            log("Modem durum bilgisi yeniden alınıyor.")
+            self._modem_error = ""
+        return access
+
+    def publish_access(self, access: Access) -> None:
+        self._set_if_changed(SENSOR_ACCESS, access.label or {
+            "online": "Erişim var", "unknown": "Durum doğrulanamadı",
+        }[access.state], {
+            "friendly_name": "Hermes internet erişimi",
+            "icon": "mdi:wan",
+        })
 
     def persistent_problem(self, identity, message):
         return self._post("/services/persistent_notification/create", {

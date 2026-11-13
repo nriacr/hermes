@@ -234,6 +234,7 @@ class ReadContext:
     measure: Callable[[str, str, str, int], None] = lambda _method, _kind, _outcome, _ms: None
     # "" for the ordinary queue, DEPO_LANE for the quick main-page reads of a site with a Depo lane.
     lane: str = ""
+    check_access: Callable[[], None] = lambda: None
 
 
 @dataclass
@@ -249,6 +250,7 @@ class WatchRead:
     blocked: Optional[BaseException] = None
     # ISO time before which a new read cannot change the result.
     retry_after: Optional[str] = None
+    search_counts: dict[str, int] = field(default_factory=dict)
 
 
 class Provider:

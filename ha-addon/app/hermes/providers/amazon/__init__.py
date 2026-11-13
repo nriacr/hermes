@@ -15,6 +15,7 @@ from ...constants import (
 )
 from ...errors import EmptySearchResultsHermesError, HermesError, OutOfStockHermesError, PriceUnavailableHermesError
 from ...logging_utils import log, ProblemLog
+from ...monitor.network import failure_details
 from ...models import OfferResult, ProductPreview, SearchResultItem, VariantPreview, WatchRule
 from ...utils import extract_asin_from_url, format_tl, is_amazon_search_url, log_cell, normalize_offer_text
 from ..base import DEPO_LANE, Provider, ReadContext, WatchRead, excluded_term_in_title, outside_variant_filter
@@ -269,7 +270,8 @@ class AmazonProvider(RhythmMixin, PageCacheMixin, Provider):
 
     def fetch(self, url: str, ctx: ReadContext, expect_search: bool = False) -> str:
         try:
-            html = self.client.fetch(url, ctx.timeout, expect_search=expect_search, cache=self.responses, on_request=ctx.measure)
+            html = self.client.fetch(url, ctx.timeout, expect_search=expect_search, cache=self.responses, on_request=ctx.measure,
+                                     check_access=ctx.check_access)
         finally:
             # Every ten minutes, also in the middle of a long variant sweep (not only at a cycle start).
             self._log_measurements()
@@ -351,9 +353,15 @@ class AmazonProvider(RhythmMixin, PageCacheMixin, Provider):
         return results
 
     def read_search(self, watch: WatchRule, ctx: ReadContext, outcome: WatchRead) -> List[OfferResult]:
+        counts = outcome.search_counts
+        counts.update(sayfa_okundu=0, aday=0, depo_adayi=0, baslik_eslesmesi=0, fiyatli_eslesme=0,
+                      detay_hatasi=0, filtre_sonrasi=0)
         html = self.fetch(watch.url, ctx, expect_search=True)
+        counts["sayfa_okundu"] = 1
         warehouse_search = parser.is_warehouse_search_url(watch.url)
         candidates = extract_result_candidates(html, watch.max_items_to_scan, primary_is_warehouse=warehouse_search)
+        counts["aday"] = len(candidates)
+        counts["depo_adayi"] = sum(candidate.is_warehouse for candidate in candidates)
         target_keywords = [watch.name] if watch.name else []
         results: List[SearchResultItem] = []
         skipped_details = excluded = warehouse_scans = warehouse_hits = 0
@@ -366,6 +374,9 @@ class AmazonProvider(RhythmMixin, PageCacheMixin, Provider):
                 excluded += 1
                 continue
             matches_watch = not target_keywords or title_matches_any_keyword(candidate.title, target_keywords)
+            if matches_watch:
+                counts["baslik_eslesmesi"] += 1
+                counts["fiyatli_eslesme"] += candidate.price is not None
             if candidate.price is not None:
                 # A normal search card can mention a second-hand price without
                 # the seller. Never trust that card-level signal as DEPO; the
@@ -394,6 +405,9 @@ class AmazonProvider(RhythmMixin, PageCacheMixin, Provider):
                         if outcome.blocked:
                             break
                     except Exception as exc:  # noqa: BLE001
+                        counts["detay_hatasi"] += 1
+                        outcome.error_details.append({"product_title": candidate.title, "product_url": candidate.url,
+                                                      "reason": str(exc), **failure_details(exc)})
                         log(f"Amazon Depo detay fiyatı okunamadı: {log_cell(candidate.title, 60)} | {exc}")
                         if self._remember_block(outcome, exc):
                             break
@@ -402,10 +416,15 @@ class AmazonProvider(RhythmMixin, PageCacheMixin, Provider):
                 skipped_details += 1
                 continue
             try:
-                results.extend(self._detail_offers(candidate, ctx, outcome))
+                details = self._detail_offers(candidate, ctx, outcome)
+                counts["fiyatli_eslesme"] += bool(details)
+                results.extend(details)
                 if outcome.blocked:
                     break
             except Exception as exc:  # noqa: BLE001
+                counts["detay_hatasi"] += 1
+                outcome.error_details.append({"product_title": candidate.title, "product_url": candidate.url,
+                                              "reason": str(exc), **failure_details(exc)})
                 log(f"Amazon arama detay fiyatı okunamadı: {log_cell(candidate.title, 60)} | {exc}")
                 if self._remember_block(outcome, exc):
                     break
@@ -581,7 +600,7 @@ class AmazonProvider(RhythmMixin, PageCacheMixin, Provider):
                 variant = selected_label or variation.label
                 title = parser.title_with_variation(page_title, variant) if page_title else ""
                 outcome.error_details.append({"product_title": title, "product_url": variation.url,
-                                              "variant": variant, "reason": str(exc)})
+                                              "variant": variant, "reason": str(exc), **failure_details(exc)})
                 errors.append(f"{title or variant or 'Ürün adı bu okumada alınamadı'} | {variation.url} | {exc}")
                 if not page_was_reused:
                     self.problem_log.failure(variation.url, f"Amazon varyasyonu okunamadı: {errors[-1]}")

@@ -27,7 +27,7 @@ from ...logging_utils import log
 from ...traffic import CountedSession, count_curl
 from ...storage import load_json, save_json
 from ...utils import canonical_amazon_product_url, extract_asin_from_url, normalize_offer_text
-from ..http import cleaned_html, curl_requests, decode_response_text
+from ..http import CURL_TIMINGS, cleaned_html, curl_requests, decode_response_text
 from .access import MAIN_LANE, AmazonAccess
 
 PROTECTION_MESSAGE = "Amazon bot koruması nedeniyle doğrulama (captcha) sayfası döndü."
@@ -311,7 +311,7 @@ class AmazonClient:
         self.close()
 
     def fetch(self, url: str, timeout: int, expect_search: bool = False, cache: Optional[PageCache] = None,
-              on_request: Optional[Callable[[str, str, str, int], None]] = None) -> str:
+              on_request: Optional[Callable[[str, str, str, int], None]] = None, check_access=lambda: None) -> str:
         """Return the cleaned HTML of one Amazon page.
 
         A challenge or HTTP 429/503 is terminal, and for a while after it nothing
@@ -325,16 +325,17 @@ class AmazonClient:
         if key in cache:
             return cache[key]
         method = "curl" if curl_requests is not None else "requests"
-        html = self._timed(method, candidate, expect_search, lambda: self._http_read(candidate, timeout, expect_search), on_request)
+        html = self._timed(method, candidate, expect_search,
+                           lambda: self._http_read(candidate, timeout, expect_search), on_request, check_access)
         cache[key] = html
         return html
 
-    def _timed(self, method: str, url: str, expect_search: bool, read, on_request=None):
+    def _timed(self, method: str, url: str, expect_search: bool, read, on_request=None, check_access=lambda: None):
         lane = self.lane
         # The window is waited for before the request lock, so a full lane never holds the other one back.
         self.access.wait_for_window(lane)
         with self._turn(lane):
-            return self._timed_locked(method, url, expect_search, read, on_request, lane)
+            return self._timed_locked(method, url, expect_search, read, on_request, lane, check_access)
 
     @contextmanager
     def _turn(self, lane: str):
@@ -358,7 +359,7 @@ class AmazonClient:
                 self._last_turn_lane = lane
                 self._turn_lock.notify_all()
 
-    def _timed_locked(self, method: str, url: str, expect_search: bool, read, on_request, lane: str):
+    def _timed_locked(self, method: str, url: str, expect_search: bool, read, on_request, lane: str, check_access):
         # A random wait between two requests; right after a start and after a block it is stretched. Time
         # already spent since the previous request ended (parsing its page) counts towards it.
         low, high = self.delay_range
@@ -369,6 +370,7 @@ class AmazonClient:
             log(f"Amazon isteği öncesi {remaining:.2f} saniye bekleniyor (aralık {delay:.2f} sn).")
             self.sleep(remaining)
         # Checked last, right before sending: a block may have come while this request waited its turn.
+        check_access()
         held = self.access.hold_remaining()
         if held > 0:
             log(f"Amazon engelden sonra molada ({held / 60:.0f} dk kaldı); istek gönderilmedi: {_short_url(url)}")
@@ -410,17 +412,36 @@ class AmazonClient:
                 log("Amazon moladan sonra yeni bir anonim ziyaretçi olarak devam ediyor (eski çerezler bırakıldı).")
             if self.curl_session is None:
                 self.curl_session = curl_requests.Session()
+                self.curl_session.curl_infos = list(CURL_TIMINGS)
                 self.identity_started_at = self.access.wall()
                 _seed_session(self.curl_session)
                 restored = load_cookies(self.curl_session, self.cookies_path, blocked_at)
                 if restored:
                     log(f"Amazon çerezleri geri yüklendi: adet={restored}")
-            response = count_curl(self.curl_session.get(
-                url, headers=amazon_headers(), timeout=timeout, allow_redirects=True, impersonate=IMPERSONATE
-            ), "amazon")
+            try:
+                response = count_curl(self.curl_session.get(
+                    url, headers=amazon_headers(), timeout=timeout, allow_redirects=True, impersonate=IMPERSONATE
+                ), "amazon")
+            except Exception as exc:
+                self._attach_transport(exc, getattr(exc, "response", None))
+                raise
         else:
             response = self.requests_session.get(url, headers=amazon_headers(), timeout=timeout, allow_redirects=True)
-        return checked_html(response, expect_search)
+        try:
+            return checked_html(response, expect_search)
+        except Exception as exc:
+            self._attach_transport(exc, response)
+            raise
+
+    @staticmethod
+    def _attach_transport(exc, response):
+        infos = getattr(response, "infos", None) or {}
+        timings = {label: round(infos[info] * 1000, 2) for info, label in CURL_TIMINGS.items() if infos.get(info)}
+        address = getattr(response, "primary_ip", "")
+        if isinstance(address, str) and address:
+            timings["ip_family"] = "IPv6" if ":" in address else "IPv4"
+        if timings:
+            exc.hermes_transport = timings
 
     def _save_cookies_soon(self) -> None:
         now = time.monotonic()

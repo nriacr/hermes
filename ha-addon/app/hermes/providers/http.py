@@ -12,9 +12,11 @@ from ..traffic import CountedSession
 from ..utils import build_headers, normalize_offer_text, repair_mojibake
 
 try:
+    from curl_cffi import CurlInfo
     from curl_cffi import requests as curl_requests
 except Exception:  # noqa: BLE001 - optional native dependency
     curl_requests = None
+    CurlInfo = None
 
 AGE_VERIFICATION_MARKERS = (
     "yas dogrulamasi",
@@ -22,6 +24,14 @@ AGE_VERIFICATION_MARKERS = (
     "18 yasindan buyuk musunuz",
     "18 yaşından büyük müsünüz",
 )
+
+
+CURL_TIMINGS = {} if CurlInfo is None else {
+    CurlInfo.NAMELOOKUP_TIME: "dns_ms",
+    CurlInfo.CONNECT_TIME: "tcp_ready_ms",
+    CurlInfo.APPCONNECT_TIME: "tls_ready_ms",
+    CurlInfo.STARTTRANSFER_TIME: "first_byte_ms",
+}
 
 
 class HtmlResponse:
@@ -103,11 +113,13 @@ def read_site_html(response, label: str, is_challenge=has_generic_challenge, mes
 class MeasuredSession(CountedSession):
     """Persistent connections with one measurement for every actual request attempt."""
 
-    def __init__(self, measure):
+    def __init__(self, measure, check_access=lambda: None):
         super().__init__()
         self.measure = measure
+        self.check_access = check_access
 
     def request(self, method, url, **kwargs):
+        self.check_access()
         started = time.monotonic()
         outcome = "error"
         try:

@@ -55,6 +55,7 @@ class HermesRuntime:
                       active_cards=len({watch.tracking_id or watch.name for watch in self.config.watches}) if self.config else 0)
         if self.service is not None:
             result["startup_scan"] = self.service.monitor.startup_scan_metrics()
+            result["modem_access"] = self.service.monitor.access.evidence()
         return result
 
     def _action(self, name: str, apply, done_message: str, queued_message: str) -> Tuple[bool, str]:

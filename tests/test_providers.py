@@ -784,9 +784,13 @@ class AmazonSearchTests(AmazonTestCase):
         rule = watch("Edifier M60", "https://www.amazon.com.tr/s?k=edifier+m60&i=warehouse-deals", target="9000")
         candidates = [AmazonSearchCandidate("Edifier M60", ROOT, Decimal("8787.77"), is_warehouse=True),
                       AmazonSearchCandidate("Edifier M60 yeni", CHILD, Decimal("8899"))]
+        outcome = WatchRead()
         with self.serve(lambda _url: "html"), patch.object(amazon_reader, "extract_result_candidates", return_value=candidates):
-            offers = self.read(rule)
+            offers = list(self.provider.read(rule, context(), outcome))
         self.assertEqual([(offer.title, offer.is_warehouse) for offer in offers], [("Edifier M60", True)])
+        self.assertEqual({key: outcome.search_counts[key] for key in
+                          ("sayfa_okundu", "aday", "depo_adayi", "baslik_eslesmesi", "fiyatli_eslesme")},
+                         {"sayfa_okundu": 1, "aday": 2, "depo_adayi": 1, "baslik_eslesmesi": 1, "fiyatli_eslesme": 1})
 
     def test_overlapping_models_go_to_the_most_specific_configured_card(self):
         rule = watch("Apple iPhone 17 Pro", "https://www.amazon.com.tr/s?k=iphone+17+pro")

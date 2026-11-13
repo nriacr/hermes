@@ -569,7 +569,13 @@ def incident_errors(item: Dict[str, Any], state: Dict[str, Any]) -> List[Dict[st
         url = str(failure.get("product_url") or "")
         if not url.startswith(("https://", "http://")):
             url = ""
-        meta = " · ".join(value for value in (f"Varyant: {variant}" if variant else "", item["recovery"]) if value)
+        read = context.get("read") or {}
+        stage = failure.get("stage") or read.get("stage")
+        stages = {"dns": "DNS", "tcp": "TCP bağlantısı", "tls": "TLS", "http": "HTTP",
+                  "response_timeout": "Yanıt zaman aşımı", "timeout": "Zaman aşımı",
+                  "transport": "Bağlantı", "price": "Fiyat okuma", "content": "Sayfa okuma"}
+        meta = " · ".join(value for value in (f"Varyant: {variant}" if variant else "",
+                                              stages.get(stage, ""), item["recovery"]) if value)
         errors.append({"component": item["component"],
             "title": f"{site_label(site)}: {title}" if site else title, "meta": meta, "variant": variant,
             "message": clean_error_message(failure.get("reason") or item["detail"]),
@@ -654,11 +660,14 @@ def _build_dashboard_live_html(base: str) -> str:
     with _stage("tanı"):
         active = Diagnostics(DATABASE_PATH).active_since_reset()
     # One failing watch may exist both in state and in durable diagnostics.
+    access_notice = "".join(render_notice("warn", item["detail"] + " · Son doğrulanmış fiyatlar gösteriliyor.")
+                            for item in active if item["kind"] == "network")
     diagnosed = {item["component"] for item in active if item["kind"] in {"read", "partial"}}
     with _stage("hatalar"):
         errors = [error for error in collect_errors(state) if error["component"] not in diagnosed]
     for item in active:
-        errors.extend(incident_errors(item, state))
+        if item["kind"] != "network":
+            errors.extend(incident_errors(item, state))
     unique = {}
     for error in errors:
         identity = (error["component"], error["title"], error["url"], error["message"])
@@ -668,7 +677,7 @@ def _build_dashboard_live_html(base: str) -> str:
     with _stage("fırsat geçmişi"):
         history = history_pane()
     with _stage("çizim"):
-        return render_summary(payload if isinstance(payload, dict) else {}, state,
+        return access_notice + render_summary(payload if isinstance(payload, dict) else {}, state,
                               telegram_status if isinstance(telegram_status, dict) else {}, errors, history)
 
 

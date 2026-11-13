@@ -61,11 +61,12 @@ class NetworkOutageTests(unittest.TestCase):
         start = datetime(2026, 10, 28, 23, 23).astimezone()
         return [Read(start + timedelta(minutes=m), site, outcome, 0, "k", "p", detail) for m, site, outcome, detail in rows]
 
-    def test_two_sites_failing_together_are_not_counted(self):
-        rows = self.reads([(0, "togg", "connection", "SSLError"), (1, "amazon", "unreadable", "Operation timed out"),
-                           (2, "amazon", "partial", ""), (3, "amazon", "ok", "")])
+    def test_only_confirmed_network_outages_are_excluded(self):
+        rows = self.reads([(0, "togg", "connection", "SSLError"),
+                           (1, "amazon", "unreadable", "Operation timed out"),
+                           (2, "amazon", "network_unavailable", ""), (3, "amazon", "ok", "")])
         kept, dropped = page.without_network_outages(rows)
-        self.assertEqual((dropped, [item.outcome for item in kept]), (3, ["ok"]))
+        self.assertEqual((dropped, [item.outcome for item in kept]), (1, ["connection", "unreadable", "ok"]))
 
     def test_single_site_failure_stays(self):
         rows = self.reads([(0, "amazon", "timeout", ""), (90, "amazon", "unreadable", "Operation timed out")])
