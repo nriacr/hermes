@@ -1,5 +1,10 @@
 # Değişiklik günlüğü
 
+## 4.43.4
+
+- Düşen/artan çerçevesi kartları her kenarda ve köşede aynı boşlukla sarar (köşe yuvarlaklığı kartla uyumlu).
+- Telefonda Takipte kartları iki yandan 8 px daraldı; üst menü ve site düğmeleri aynı kaldı.
+
 ## 4.43.3
 
 - Düşen/artan çerçevelerindeki ışık (bilgisayar ve telefon) kaldırıldı; bunun yerine çerçeve çizgisi ve başlık pastel renkte: düşenler açık mint yeşili, artanlar açık gül kırmızısı.
