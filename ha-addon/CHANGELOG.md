@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.43.2
+
+- Telefonda düşen/artan çerçevelerinin rengi üstten aşağı doğru kaybolan hafif renk oldu (geniş ışık dar kutuda şerit gibi kalıyordu). Bilgisayar görünümü değişmedi.
+
 ## 4.43.1
 
 - Fiyatı En Çok Düşen çerçevesinin içi hafif yeşil, Fiyatı En Çok Artan çerçevesinin içi hafif kırmızı: üst ortadan yumuşak ışık ve çok hafif zemin rengi.
