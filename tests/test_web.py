@@ -616,19 +616,17 @@ class DashboardTests(DataFilesMixin, unittest.TestCase):
         return [price_row(product_title=name.upper(), product_url=urls[name], price=prices[name], min_price=prices[name],
                           target="5.000 TL") for name in "abcd"]
 
-    def test_movers_rank_by_percent_change_against_the_previous_price_and_leave_the_list(self):
+    def test_list_opens_with_biggest_falls_then_rises_by_percent_and_shows_each_offer_once(self):
         self.data.write_summary({"rows": self._mover_rows()})
         html = self.live()
-        movers = html[html.index("<div class='ov-movers'>"):]
-        falls, rises, lows = (movers.index(f">{label}</h3>") for label in ("En çok düşen", "En çok artan", "En düşük fiyatta"))
-        self.assertTrue(falls < movers.index("aria-label='B'") < rises < movers.index("aria-label='A'") < lows)
-        self.assertIn("▼ %12,5", movers)
-        self.assertIn("▲ %20,0", movers)
-        # B is also at its lowest price ever, but it is shown once only; the list below hides both movers.
-        self.assertEqual(movers.count("aria-label='B'"), 3)
+        grid = html[html.index("<div class='ov-tiles ov-list'>"):]
+        self.assertTrue(grid.index("data-mv='fall'") < grid.index("aria-label='B'") < grid.index("data-mv='rise'")
+                        < grid.index("aria-label='A'") < grid.index("aria-label='C'"))
+        self.assertIn("▼ %12,5", grid)
+        self.assertIn("▲ %20,0", grid)
+        self.assertNotIn("En düşük fiyatta", html)
         list_tiles = [tile for tile in re.findall(r"<article class='ov-tile [^>]*>", html) if "ov-mv" not in tile]
-        hidden = [tile for tile in list_tiles if " hidden " in tile]
-        self.assertEqual(len(hidden), 2)
+        self.assertEqual(len([tile for tile in list_tiles if " hidden " in tile]), 2)
 
     def test_unchanged_price_says_new_only_for_three_days(self):
         self.data.write_summary({"rows": self._mover_rows()})

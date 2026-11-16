@@ -123,7 +123,8 @@ STOCK_SUFFIX = re.compile(r"\s*\(Stok\s+(\d+)\)\s*$", re.IGNORECASE)
 VARIANT_SPLIT = re.compile(r"\s*[,/;]\s*")
 MAX_VARIANT_TAGS = 3
 NEW_DAYS = 3  # a watch without any price change counts as "yeni" this long after its first record
-MOVER_COUNT = 5  # cards in each column above the watch list
+MOVER_TITLES = {"fall": "Fiyatı En Çok Düşen", "rise": "Fiyatı En Çok Artan"}
+MOVER_COUNT = 3  # biggest falls, then biggest rises, open the watch list (one row each)
 
 
 def priority_dot(priority) -> str:
@@ -247,20 +248,12 @@ def last_change_chip(offer: Offer) -> str:
     return f"<span class='ov-chg {direction}'>{symbol} %{percent_text(change)}</span>"
 
 
-def is_all_time_low(offer: Offer) -> bool:
-    if len(offer.points) < 2:
-        return False
-    price = float(offer.price)
-    return price <= min(point[1] for point in offer.points) + 0.5 and price <= float(offer.low) + 0.5
-
-
 def mover_columns(offers: List[Offer]) -> List[Tuple[str, List[Offer]]]:
-    """Biggest falls, biggest rises (against the previous price) and offers at their lowest price ever, best first."""
+    """Biggest falls and biggest rises against the previous price, biggest first."""
     changes = [(offer, last_change(offer)) for offer in offers]
     falls = sorted(((o, c) for o, c in changes if c is not None and c < 0), key=lambda item: item[1])
     rises = sorted(((o, c) for o, c in changes if c is not None and c > 0), key=lambda item: -item[1])
-    lows = sorted((o for o in offers if is_all_time_low(o)), key=lambda o: float(o.price) / o.points[0][1] if o.points[0][1] else 1)
-    return [("En çok düşen", [o for o, _ in falls]), ("En çok artan", [o for o, _ in rises]), ("En düşük fiyatta", lows)]
+    return [("fall", [o for o, _ in falls]), ("rise", [o for o, _ in rises])]
 
 
 def pick_movers(columns: List[Tuple[str, List[Offer]]], site: str = "all") -> List[List[Offer]]:
@@ -355,12 +348,12 @@ def render_deal(offer: Offer) -> str:
 
 
 def render_tile(offer: Offer, tags: Optional[List[str]] = None, index: int = 0, key: str = "", hidden: bool = False,
-                mover: bool = False) -> str:
+                mover: str = "") -> str:
     """One watch card; a mover card (columns above the list) borrows the sheet of its list card instead of repeating it."""
     depo = "<span class='ov-depo'>DEPO</span>" if offer.warehouse else ""
     tag_html = f"<div class='ov-vars'>{depo}{''.join(f'<em>{escape(tag)}</em>' for tag in tags or [])}</div>" if tags or depo else ""
     classes = f"ov-tile {offer.site}{' ov-tile-depo' if offer.warehouse else ''}{' ov-mv' if mover else ''}"
-    extra = (f" data-k='{key}'" if key else "") + (" hidden" if hidden else "")
+    extra = (f" data-k='{key}'" if key else "") + (f" data-mv='{mover}'" if mover else "") + (" hidden" if hidden else "")
     return (
         f"<article class='{classes}' data-site='{offer.site}'{extra} style='--n:{index}' {card_attributes(offer)}>"
         f"{site_avatar(offer.seller, offer.site)}"
@@ -405,28 +398,30 @@ def render_watch_pane(offers: List[Offer]) -> str:
     columns = mover_columns(offers)
     shown = pick_movers(columns)
     used = {id(offer) for chosen in shown for offer in chosen}
-    movers = "<div class='ov-movers'>"
-    for (label, members), chosen in zip(columns, shown, strict=False):
+    # The list opens with a row of the biggest falls and a row of the biggest rises; every candidate is kept
+    # (hidden) so a site filter can pick its own without a reload. Those cards leave the list below.
+    movers = ""
+    for (kind, members), chosen in zip(columns, shown, strict=False):
         visible = {id(offer) for offer in chosen}
-        # Every candidate is kept (hidden) so a site filter can pick its own top cards without a reload.
-        cards = "".join(render_tile(offer, None, number, keys[id(offer)], id(offer) not in visible, mover=True)
+        cards = "".join(render_tile(offer, None, number, keys[id(offer)], id(offer) not in visible, mover=kind)
                         for number, offer in enumerate(members))
-        movers += (f"<section class='ov-mv-col'><h3 class='ov-sec'>{escape(label)}</h3>{cards}"
-                   f"<p class='ov-empty'{'' if not chosen else ' hidden'}>Yok.</p></section>")
-    movers += "</div>"
+        # The heading sits in the top edge of a thin frame around its row of cards.
+        movers += (f"<fieldset class='ov-mv-box' data-mv-head='{kind}'{'' if chosen else ' hidden'}>"
+                   f"<legend class='ov-sec'>{MOVER_TITLES[kind]}</legend><div class='ov-tiles ov-list'>{cards}</div></fieldset>")
     singles, sections = group_offers(offers)
 
     def tile(offer, tag, number):
         return render_tile(offer, tag, number, keys[id(offer)], id(offer) in used)
 
-    body = f"<div class='ov-tiles'>{''.join(tile(offer, None, number) for number, offer in enumerate(singles))}</div>" if singles else ""
+    first = movers + "".join(tile(offer, None, number) for number, offer in enumerate(singles))
+    body = f"<div class='ov-tiles ov-list'>{first}</div>" if first else ""
     for label, members in sections:
         tags = variant_labels([member.title for member in members])
         hidden = "" if any(id(member) not in used for member in members) else " hidden"
         body += (f"<section class='ov-group'{hidden}><h3 class='ov-group-head {members[0].site}'><i></i><b title='{escape(label, quote=True)}'>{escape(label)}</b>"
-                 f"<span>{len(members)} sonuç</span></h3><div class='ov-tiles'>"
+                 f"<span>{len(members)} sonuç</span></h3><div class='ov-tiles ov-list'>"
                  f"{''.join(tile(member, tag, number) for number, (member, tag) in enumerate(zip(members, tags, strict=False)))}</div></section>")
-    return chips + movers + body
+    return chips + body
 
 
 def render_stock_pane(rows: List[Dict[str, Any]]) -> str:

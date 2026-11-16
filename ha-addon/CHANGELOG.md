@@ -1,5 +1,10 @@
 # Değişiklik günlüğü
 
+## 4.43.0
+
+- Takipte listesi tek düzen oldu: bilgisayarda 3 kart yan yana, eşit aralık; telefonda alt alta. Kolonlar ve En düşük fiyatta kaldırıldı.
+- Listenin ilk satırı Fiyatı En Çok Düşen 3 ürün, ikinci satırı Fiyatı En Çok Artan 3 ürün (önceki fiyata göre yüzde); her satır başlığından başlayan ince bir çerçeve içinde. Bu ürünler listede tekrar görünmez; site seçilince o sitenin ürünleriyle dolar, yoksa satır gizlenir. Hedef altı fırsatlar en üstte kalır.
+
 ## 4.42.1
 
 - Takipte sekmesindeki En çok düşen / En çok artan / En düşük fiyatta kolonları 3 yerine 5 ürün gösterir.
