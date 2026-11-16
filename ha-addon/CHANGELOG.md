@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.43.1
+
+- Fiyatı En Çok Düşen çerçevesinin içi hafif yeşil, Fiyatı En Çok Artan çerçevesinin içi hafif kırmızı: üst ortadan yumuşak ışık ve çok hafif zemin rengi.
+
 ## 4.43.0
 
 - Takipte listesi tek düzen oldu: bilgisayarda 3 kart yan yana, eşit aralık; telefonda alt alta. Kolonlar ve En düşük fiyatta kaldırıldı.
