@@ -4,6 +4,7 @@ import gzip
 import threading
 import time
 import json
+import re
 import unittest
 
 from hermes.web.assets import APP_CSS
@@ -602,6 +603,42 @@ class DashboardTests(DataFilesMixin, unittest.TestCase):
         store.close()
         self.data.write_summary({"rows": [price_row(price="14.000 TL")]})
         self.assertIn("▲ %40,0", self.live())
+
+    def _mover_rows(self):
+        urls = {name: f"https://www.amazon.com.tr/dp/B00000000{n}" for n, name in enumerate("abcd", 1)}
+        self.data.write_state({name: {"url": url, "tracking_id": "", "is_warehouse": False} for name, url in urls.items()})
+        now = datetime.now(timezone.utc)
+        store = History.at(self.data.files.database)
+        for name, price, days in (("a", "10000", 5), ("a", "12000", 2), ("b", "16000", 5), ("c", "9000", 9), ("d", "9000", 1)):
+            store.record_price(name, "amazon", "Ürün", Decimal(price), now - timedelta(days=days))
+        store.close()
+        prices = {"a": "12.000 TL", "b": "14.000 TL", "c": "9.000 TL", "d": "9.000 TL"}
+        return [price_row(product_title=name.upper(), product_url=urls[name], price=prices[name], min_price=prices[name],
+                          target="5.000 TL") for name in "abcd"]
+
+    def test_movers_rank_by_percent_change_against_the_previous_price_and_leave_the_list(self):
+        self.data.write_summary({"rows": self._mover_rows()})
+        html = self.live()
+        movers = html[html.index("<div class='ov-movers'>"):]
+        falls, rises, lows = (movers.index(f">{label}</h3>") for label in ("En çok düşen", "En çok artan", "En düşük fiyatta"))
+        self.assertTrue(falls < movers.index("aria-label='B'") < rises < movers.index("aria-label='A'") < lows)
+        self.assertIn("▼ %12,5", movers)
+        self.assertIn("▲ %20,0", movers)
+        # B is also at its lowest price ever, but it is shown once only; the list below hides both movers.
+        self.assertEqual(movers.count("aria-label='B'"), 3)
+        list_tiles = [tile for tile in re.findall(r"<article class='ov-tile [^>]*>", html) if "ov-mv" not in tile]
+        hidden = [tile for tile in list_tiles if " hidden " in tile]
+        self.assertEqual(len(hidden), 2)
+
+    def test_unchanged_price_says_new_only_for_three_days(self):
+        self.data.write_summary({"rows": self._mover_rows()})
+        html = self.live()
+
+        def tile(title):
+            return html[html.rindex(f"aria-label='{title}'"):][:3000]
+
+        self.assertIn(">sabit</span>", tile("C"))
+        self.assertIn(">yeni</span>", tile("D"))
 
     def test_deal_heading_shows_only_with_deals_and_the_top_row_stays_one_block(self):
         self.data.write_summary({"rows": [price_row(price="14.000 TL")]})

@@ -9,12 +9,25 @@
     region.querySelectorAll('.ov-tabs').forEach((bar) => bar.style.setProperty('--i', String([...bar.querySelectorAll('[data-tab]')].findIndex((tab) => tab.dataset.tab === state.tab))));
     region.querySelectorAll('[data-pane]').forEach((pane) => { pane.hidden = pane.dataset.pane !== state.tab; });
     region.querySelectorAll('[data-filter]').forEach((chip) => chip.setAttribute('aria-pressed', String(chip.dataset.filter === state.filter)));
-    region.querySelectorAll('.ov-tile').forEach((tile) => { tile.hidden = state.filter !== 'all' && tile.dataset.site !== state.filter; });
+    // Columns above the list: the top cards of the chosen site, each offer once; those cards leave the list below.
+    const used = new Set();
+    region.querySelectorAll('.ov-mv-col').forEach((col) => {
+      let count = 0;
+      col.querySelectorAll('.ov-mv').forEach((tile) => {
+        const show = count < 3 && (state.filter === 'all' || tile.dataset.site === state.filter) && !used.has(tile.dataset.k);
+        tile.hidden = !show;
+        if (show) { count += 1; used.add(tile.dataset.k); }
+      });
+      const empty = col.querySelector('.ov-empty');
+      if (empty) empty.hidden = count > 0;
+    });
+    region.querySelectorAll('.ov-tile:not(.ov-mv)').forEach((tile) => { tile.hidden = (state.filter !== 'all' && tile.dataset.site !== state.filter) || used.has(tile.dataset.k); });
     region.querySelectorAll('.ov-group').forEach((group) => { group.hidden = !group.querySelector('.ov-tile:not([hidden])'); });
   };
   const close = () => { modal.hidden = true; sheet.innerHTML = ''; document.documentElement.style.overflow = ''; };
   const open = (card) => {
-    const detail = card.querySelector('.ov-detail');
+    const source = card.classList.contains('ov-mv') ? region.querySelector(`.ov-tile:not(.ov-mv)[data-k="${card.dataset.k}"]`) : card;
+    const detail = source && source.querySelector('.ov-detail');
     if (!detail) return;
     sheet.style.setProperty('--c', getComputedStyle(card).getPropertyValue('--c'));
     sheet.innerHTML = detail.innerHTML;

@@ -1,5 +1,10 @@
 # Değişiklik günlüğü
 
+## 4.42.0
+
+- Takipte sekmesinde site seçimlerinin altına üç kolon eklendi: En çok düşen, En çok artan, En düşük fiyatta (telefonda alt alta). Değişim, ürünün bir önceki kayıtlı fiyatına göre yüzde olarak hesaplanır; En düşük fiyatta kolonu tüm kayıtların en düşüğündeki ürünleri, ilk kayıtlı fiyattan en çok düşenden başlayarak gösterir. Her kolonda en fazla 3 ürün; bir ürün yalnız bir kolonda çıkar ve aşağıdaki listede tekrar gösterilmez. Site seçilince kolonlar o sitenin ilk 3'ünü gösterir. Kolondaki karta tıklayınca aynı ayrıntı açılır.
+- Fiyatı hiç değişmeyen ürünlerde "yeni" yalnız ilk kayıttan sonraki 3 gün görünür, sonra "sabit" yazar.
+
 ## 4.41.20
 
 - Togg gece modunda beklerken 45 dakikalık okuma uyarısı gönderilmez. Gece modu bitince uyarı süresi yeniden başlar.

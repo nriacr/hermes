@@ -122,6 +122,8 @@ def is_target_hit(row: Dict[str, Any]) -> bool:
 STOCK_SUFFIX = re.compile(r"\s*\(Stok\s+(\d+)\)\s*$", re.IGNORECASE)
 VARIANT_SPLIT = re.compile(r"\s*[,/;]\s*")
 MAX_VARIANT_TAGS = 3
+NEW_DAYS = 3  # a watch without any price change counts as "yeni" this long after its first record
+MOVER_COUNT = 3  # cards in each column above the watch list
 
 
 def priority_dot(priority) -> str:
@@ -218,7 +220,8 @@ def percent_text(value: float) -> str:
 def change_chip(offer: Offer) -> str:
     """Price movement since the first recorded point: lower is good (green), higher is red."""
     if len(offer.points) < 2:
-        return "<span class='ov-chg flat'>yeni</span>"
+        fresh = offer.points and datetime.now().astimezone() - offer.points[0][0] <= timedelta(days=NEW_DAYS)
+        return f"<span class='ov-chg flat'>{'yeni' if fresh else 'sabit'}</span>"
     first = offer.points[0][1]
     change = (float(offer.price) - first) / first * 100 if first else 0.0
     if abs(change) < 0.05:
@@ -226,6 +229,48 @@ def change_chip(offer: Offer) -> str:
     direction, symbol = ("up", "▲") if change > 0 else ("down", "▼")
     since = escape(offer.points[0][0].strftime("%d.%m.%Y"), quote=True)
     return f"<span class='ov-chg {direction}' title='İlk kayıtlı fiyata göre ({since})'>{symbol} %{percent_text(change)}</span>"
+
+
+def last_change(offer: Offer) -> Optional[float]:
+    """Percent change of today's price against the price recorded just before it."""
+    if len(offer.points) < 2 or not offer.points[-2][1]:
+        return None
+    change = (float(offer.price) - offer.points[-2][1]) / offer.points[-2][1] * 100
+    return change if abs(change) >= 0.05 else None
+
+
+def last_change_chip(offer: Offer) -> str:
+    change = last_change(offer)
+    if change is None:
+        return change_chip(offer)
+    direction, symbol = ("up", "▲") if change > 0 else ("down", "▼")
+    return f"<span class='ov-chg {direction}'>{symbol} %{percent_text(change)}</span>"
+
+
+def is_all_time_low(offer: Offer) -> bool:
+    if len(offer.points) < 2:
+        return False
+    price = float(offer.price)
+    return price <= min(point[1] for point in offer.points) + 0.5 and price <= float(offer.low) + 0.5
+
+
+def mover_columns(offers: List[Offer]) -> List[Tuple[str, List[Offer]]]:
+    """Biggest falls, biggest rises (against the previous price) and offers at their lowest price ever, best first."""
+    changes = [(offer, last_change(offer)) for offer in offers]
+    falls = sorted(((o, c) for o, c in changes if c is not None and c < 0), key=lambda item: item[1])
+    rises = sorted(((o, c) for o, c in changes if c is not None and c > 0), key=lambda item: -item[1])
+    lows = sorted((o for o in offers if is_all_time_low(o)), key=lambda o: float(o.price) / o.points[0][1] if o.points[0][1] else 1)
+    return [("En çok düşen", [o for o, _ in falls]), ("En çok artan", [o for o, _ in rises]), ("En düşük fiyatta", lows)]
+
+
+def pick_movers(columns: List[Tuple[str, List[Offer]]], site: str = "all") -> List[List[Offer]]:
+    """The cards each column shows for a site filter; an offer appears at most once (the JS repeats this)."""
+    used, picked = set(), []
+    for _label, members in columns:
+        chosen = [o for o in members if (site == "all" or o.site == site) and id(o) not in used][:MOVER_COUNT]
+        used.update(id(o) for o in chosen)
+        picked.append(chosen)
+    return picked
 
 
 def average_chip(offer: Offer) -> str:
@@ -309,16 +354,20 @@ def render_deal(offer: Offer) -> str:
     )
 
 
-def render_tile(offer: Offer, tags: Optional[List[str]] = None, index: int = 0) -> str:
+def render_tile(offer: Offer, tags: Optional[List[str]] = None, index: int = 0, key: str = "", hidden: bool = False,
+                mover: bool = False) -> str:
+    """One watch card; a mover card (columns above the list) borrows the sheet of its list card instead of repeating it."""
     depo = "<span class='ov-depo'>DEPO</span>" if offer.warehouse else ""
     tag_html = f"<div class='ov-vars'>{depo}{''.join(f'<em>{escape(tag)}</em>' for tag in tags or [])}</div>" if tags or depo else ""
+    classes = f"ov-tile {offer.site}{' ov-tile-depo' if offer.warehouse else ''}{' ov-mv' if mover else ''}"
+    extra = (f" data-k='{key}'" if key else "") + (" hidden" if hidden else "")
     return (
-        f"<article class='ov-tile {offer.site}{' ov-tile-depo' if offer.warehouse else ''}' data-site='{offer.site}' style='--n:{index}' {card_attributes(offer)}>"
+        f"<article class='{classes}' data-site='{offer.site}'{extra} style='--n:{index}' {card_attributes(offer)}>"
         f"{site_avatar(offer.seller, offer.site)}"
         f"<div class='ov-tx'><h4 title='{escape(offer.title, quote=True)}'>{escape(offer.title)}</h4>{tag_html}"
         f"<div class='ov-price'>{price_parts(offer.price)}</div></div>"
-        f"<div class='ov-side'>{sparkline(offer.points)}{change_chip(offer)}{ago_html(offer.checked_at)}</div>"
-        f"<div class='ov-detail' hidden>{detail_html(offer)}</div></article>"
+        f"<div class='ov-side'>{sparkline(offer.points)}{last_change_chip(offer) if mover else change_chip(offer)}{ago_html(offer.checked_at)}</div>"
+        + ("" if mover else f"<div class='ov-detail' hidden>{detail_html(offer)}</div>") + "</article>"
     )
 
 
@@ -352,14 +401,32 @@ def render_watch_pane(offers: List[Offer]) -> str:
                        for site, name in sites) + "</div>")
     if not offers:
         return chips + "<p class='ov-empty'>Yok.</p>"
+    keys = {id(offer): f"o{number}" for number, offer in enumerate(offers)}
+    columns = mover_columns(offers)
+    shown = pick_movers(columns)
+    used = {id(offer) for chosen in shown for offer in chosen}
+    movers = "<div class='ov-movers'>"
+    for (label, members), chosen in zip(columns, shown, strict=False):
+        visible = {id(offer) for offer in chosen}
+        # Every candidate is kept (hidden) so a site filter can pick its own top cards without a reload.
+        cards = "".join(render_tile(offer, None, number, keys[id(offer)], id(offer) not in visible, mover=True)
+                        for number, offer in enumerate(members))
+        movers += (f"<section class='ov-mv-col'><h3 class='ov-sec'>{escape(label)}</h3>{cards}"
+                   f"<p class='ov-empty'{'' if not chosen else ' hidden'}>Yok.</p></section>")
+    movers += "</div>"
     singles, sections = group_offers(offers)
-    body = f"<div class='ov-tiles'>{''.join(render_tile(offer, None, number) for number, offer in enumerate(singles))}</div>" if singles else ""
+
+    def tile(offer, tag, number):
+        return render_tile(offer, tag, number, keys[id(offer)], id(offer) in used)
+
+    body = f"<div class='ov-tiles'>{''.join(tile(offer, None, number) for number, offer in enumerate(singles))}</div>" if singles else ""
     for label, members in sections:
         tags = variant_labels([member.title for member in members])
-        body += (f"<section class='ov-group'><h3 class='ov-group-head {members[0].site}'><i></i><b title='{escape(label, quote=True)}'>{escape(label)}</b>"
+        hidden = "" if any(id(member) not in used for member in members) else " hidden"
+        body += (f"<section class='ov-group'{hidden}><h3 class='ov-group-head {members[0].site}'><i></i><b title='{escape(label, quote=True)}'>{escape(label)}</b>"
                  f"<span>{len(members)} sonuç</span></h3><div class='ov-tiles'>"
-                 f"{''.join(render_tile(member, tag, number) for number, (member, tag) in enumerate(zip(members, tags, strict=False)))}</div></section>")
-    return chips + body
+                 f"{''.join(tile(member, tag, number) for number, (member, tag) in enumerate(zip(members, tags, strict=False)))}</div></section>")
+    return chips + movers + body
 
 
 def render_stock_pane(rows: List[Dict[str, Any]]) -> str:
