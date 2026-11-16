@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.43.3
+
+- Düşen/artan çerçevelerindeki ışık (bilgisayar ve telefon) kaldırıldı; bunun yerine çerçeve çizgisi ve başlık pastel renkte: düşenler açık mint yeşili, artanlar açık gül kırmızısı.
+
 ## 4.43.2
 
 - Telefonda düşen/artan çerçevelerinin rengi üstten aşağı doğru kaybolan hafif renk oldu (geniş ışık dar kutuda şerit gibi kalıyordu). Bilgisayar görünümü değişmedi.
