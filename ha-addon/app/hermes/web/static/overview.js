@@ -14,7 +14,7 @@
     region.querySelectorAll('.ov-mv-col').forEach((col) => {
       let count = 0;
       col.querySelectorAll('.ov-mv').forEach((tile) => {
-        const show = count < 3 && (state.filter === 'all' || tile.dataset.site === state.filter) && !used.has(tile.dataset.k);
+        const show = count < 5 && (state.filter === 'all' || tile.dataset.site === state.filter) && !used.has(tile.dataset.k);
         tile.hidden = !show;
         if (show) { count += 1; used.add(tile.dataset.k); }
       });

@@ -123,7 +123,7 @@ STOCK_SUFFIX = re.compile(r"\s*\(Stok\s+(\d+)\)\s*$", re.IGNORECASE)
 VARIANT_SPLIT = re.compile(r"\s*[,/;]\s*")
 MAX_VARIANT_TAGS = 3
 NEW_DAYS = 3  # a watch without any price change counts as "yeni" this long after its first record
-MOVER_COUNT = 3  # cards in each column above the watch list
+MOVER_COUNT = 5  # cards in each column above the watch list
 
 
 def priority_dot(priority) -> str:

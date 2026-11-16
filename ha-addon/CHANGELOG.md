@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.42.1
+
+- Takipte sekmesindeki En çok düşen / En çok artan / En düşük fiyatta kolonları 3 yerine 5 ürün gösterir.
+
 ## 4.42.0
 
 - Takipte sekmesinde site seçimlerinin altına üç kolon eklendi: En çok düşen, En çok artan, En düşük fiyatta (telefonda alt alta). Değişim, ürünün bir önceki kayıtlı fiyatına göre yüzde olarak hesaplanır; En düşük fiyatta kolonu tüm kayıtların en düşüğündeki ürünleri, ilk kayıtlı fiyattan en çok düşenden başlayarak gösterir. Her kolonda en fazla 3 ürün; bir ürün yalnız bir kolonda çıkar ve aşağıdaki listede tekrar gösterilmez. Site seçilince kolonlar o sitenin ilk 3'ünü gösterir. Kolondaki karta tıklayınca aynı ayrıntı açılır.
