@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.44.0
+
+- Satır adları Düşüştekiler ve Yükseliştekiler oldu. Ürünler son 14 günün fiyat gidişatına göre seçilir: günlük fiyatlara bir eğilim çizgisi oturtulur; eğimi (haftalık yüzde) istikrarıyla (R²) ağırlıklandırılarak sıralanır. Bir günlük kampanya, zikzak, geri dönen düşüş/artış, 7 gündür değişmeyen fiyat ve 14 günde %0,5'ten az net değişim sayılmaz. Kartta "▼ haftada %…" görünür. 4.43.5'teki 5 günlük karşılaştırmanın yerini alır.
+
 ## 4.43.5
 
 - Fiyatı En Çok Düşen / Artan satırları son 5 günlük değişime göre: bugünkü fiyat, 5 gün önce geçerli olan fiyatla (5 günden yeni üründe ilk kayıtla) yüzde olarak karşılaştırılır. 5 gündür değişmeyen ürünler bu satırlara girmez.

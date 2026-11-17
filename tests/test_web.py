@@ -623,14 +623,33 @@ class DashboardTests(DataFilesMixin, unittest.TestCase):
         grid = html[html.index("<div class='ov-tiles ov-list'>"):]
         self.assertTrue(grid.index("data-mv='fall'") < grid.index("aria-label='B'") < grid.index("data-mv='rise'")
                         < grid.index("aria-label='A'") < grid.index("aria-label='C'"))
-        self.assertIn("▼ %12,5", grid)
-        self.assertIn("▲ %20,0", grid)
+        self.assertIn("▼ haftada %", grid)
+        self.assertIn("▲ haftada %", grid)
+        self.assertIn(">Düşüştekiler</legend>", grid)
         self.assertNotIn("En düşük fiyatta", html)
-        # E fell 50% eight days ago: older than the five-day window, so it is not a mover.
+        # E fell 50% eight days ago and has been flat since: no recent trend, so it is not a mover.
         movers = grid[:grid.rindex("</fieldset>")]
         self.assertNotIn("aria-label='E'", movers)
         list_tiles = [tile for tile in re.findall(r"<article class='ov-tile [^>]*>", html) if "ov-mv" not in tile]
         self.assertEqual(len([tile for tile in list_tiles if " hidden " in tile]), 2)
+
+    def test_trend_ignores_a_one_day_campaign_and_ranks_a_steady_fall(self):
+        from hermes.web import dashboard
+        now = datetime.now().astimezone()
+
+        def offer(points):
+            return dashboard.Offer(row={}, seller="Amazon", title="T", stock="", site="site-amazon", price=Decimal(str(points[-1][1])),
+                                   target=Decimal("1"), low=Decimal("1"), high=Decimal("1"), hit=False, warehouse=False,
+                                   checked_at="", points=[(now - timedelta(days=d), p) for d, p in points])
+
+        campaign = offer([(20, 10000.0), (4, 8000.0), (3, 10000.0)])
+        steady = offer([(14, 10000.0), (10, 9800.0), (7, 9600.0), (3, 9400.0), (1, 9200.0)])
+        self.assertIsNone(dashboard.price_trend(campaign, now))
+        came_back = offer([(14, 949.0), (9, 799.0), (0, 949.0)])
+        self.assertIsNone(dashboard.price_trend(came_back, now))
+        weekly, score = dashboard.price_trend(steady, now)
+        self.assertLess(weekly, 0)
+        self.assertLess(score, 0)
 
     def test_unchanged_price_says_new_only_for_three_days(self):
         self.data.write_summary({"rows": self._mover_rows()})

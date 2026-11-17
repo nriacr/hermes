@@ -123,8 +123,11 @@ STOCK_SUFFIX = re.compile(r"\s*\(Stok\s+(\d+)\)\s*$", re.IGNORECASE)
 VARIANT_SPLIT = re.compile(r"\s*[,/;]\s*")
 MAX_VARIANT_TAGS = 3
 NEW_DAYS = 3  # a watch without any price change counts as "yeni" this long after its first record
-MOVER_TITLES = {"fall": "Fiyatı En Çok Düşen", "rise": "Fiyatı En Çok Artan"}
-MOVER_DAYS = 5  # falls and rises are measured over this many days
+MOVER_TITLES = {"fall": "Düşüştekiler", "rise": "Yükseliştekiler"}
+TREND_DAYS = 14  # the price trend looks at this many days
+TREND_ACTIVE_DAYS = 7  # ...and needs a price change within this many
+TREND_MIN_STEADINESS = 0.3  # fit quality (R²) below which the move is a zigzag, not a trend
+TREND_MIN_NET = 0.5  # percent today's price must differ from the window's first price
 MOVER_COUNT = 3  # biggest falls, then biggest rises, open the watch list (one row each)
 
 
@@ -233,34 +236,57 @@ def change_chip(offer: Offer) -> str:
     return f"<span class='ov-chg {direction}' title='İlk kayıtlı fiyata göre ({since})'>{symbol} %{percent_text(change)}</span>"
 
 
-def last_change(offer: Offer, now: Optional[datetime] = None) -> Optional[float]:
-    """Percent change of today's price over the last MOVER_DAYS days: against the price that held at the start of the
-    window (or the first record, for a watch added inside it). None when the price did not move in the window."""
+def price_trend(offer: Offer, now: Optional[datetime] = None) -> Optional[Tuple[float, float]]:
+    """Recent direction of the price: (weekly percent change, ranking score) or None.
+
+    The price that held at the end of each of the last TREND_DAYS days (and now) is fitted with a straight line.
+    Its slope, as a share of the mean price per week, is the trend; the fit quality (R², 0..1) tells a steady
+    move from a zigzag or a one-day campaign that came back. The score is the slope weighted by that steadiness.
+    Today's price must also differ from the window's first price in the same direction.
+    A watch whose price did not move in the last TREND_ACTIVE_DAYS days has no trend.
+    """
     now = now or datetime.now().astimezone()
-    start = now - timedelta(days=MOVER_DAYS)
-    if len(offer.points) < 2 or offer.points[-1][0] <= start:
+    points = offer.points
+    if len(points) < 2 or points[-1][0] <= now - timedelta(days=TREND_ACTIVE_DAYS):
         return None
-    before = [price for moment, price in offer.points if moment <= start]
-    base = before[-1] if before else offer.points[0][1]
-    if not base:
+    samples = []
+    for day in range(TREND_DAYS, -1, -1):
+        moment = now - timedelta(days=day)
+        held = [price for at, price in points if at <= moment]
+        if held:
+            samples.append((float(TREND_DAYS - day), held[-1]))
+    if len(samples) < 3:
         return None
-    change = (float(offer.price) - base) / base * 100
-    return change if abs(change) >= 0.05 else None
+    count = len(samples)
+    mean_x = sum(x for x, _ in samples) / count
+    mean_y = sum(y for _, y in samples) / count
+    sxx = sum((x - mean_x) ** 2 for x, _ in samples)
+    syy = sum((y - mean_y) ** 2 for _, y in samples)
+    if not sxx or not syy or not mean_y:
+        return None
+    slope = sum((x - mean_x) * (y - mean_y) for x, y in samples) / sxx
+    steadiness = slope * slope * sxx / syy
+    weekly = slope * 7 / mean_y * 100
+    net = (samples[-1][1] - samples[0][1]) / samples[0][1] * 100 if samples[0][1] else 0.0
+    # A dip that came back (or a rise that fell back) is no trend, however the days in between weigh.
+    if steadiness < TREND_MIN_STEADINESS or abs(weekly) < 0.05 or net * weekly <= 0 or abs(net) < TREND_MIN_NET:
+        return None
+    return weekly, weekly * steadiness
 
 
 def last_change_chip(offer: Offer) -> str:
-    change = last_change(offer)
-    if change is None:
+    trend = price_trend(offer)
+    if trend is None:
         return change_chip(offer)
-    direction, symbol = ("up", "▲") if change > 0 else ("down", "▼")
-    return f"<span class='ov-chg {direction}'>{symbol} %{percent_text(change)}</span>"
+    direction, symbol = ("up", "▲") if trend[0] > 0 else ("down", "▼")
+    return f"<span class='ov-chg {direction}'>{symbol} haftada %{percent_text(trend[0])}</span>"
 
 
 def mover_columns(offers: List[Offer]) -> List[Tuple[str, List[Offer]]]:
-    """Biggest falls and biggest rises against the previous price, biggest first."""
-    changes = [(offer, last_change(offer)) for offer in offers]
-    falls = sorted(((o, c) for o, c in changes if c is not None and c < 0), key=lambda item: item[1])
-    rises = sorted(((o, c) for o, c in changes if c is not None and c > 0), key=lambda item: -item[1])
+    """Offers in a falling and in a rising trend, the strongest steady trend first."""
+    trends = [(offer, price_trend(offer)) for offer in offers]
+    falls = sorted(((o, t) for o, t in trends if t and t[0] < 0), key=lambda item: item[1][1])
+    rises = sorted(((o, t) for o, t in trends if t and t[0] > 0), key=lambda item: -item[1][1])
     return [("fall", [o for o, _ in falls]), ("rise", [o for o, _ in rises])]
 
 
