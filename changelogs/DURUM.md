@@ -5,6 +5,8 @@ sonuç, gerçek kontrol ve yayın/kurulum bilgisi yeterlidir. Ayrıntı Git geç
 
 ## Yapılanlar
 
+- 2026-11-17 · Agent: Codex · Hermes 4.44.1 (2a41c84) canlı: pasif/kaldırılan kartların eski HA uyarısı kapatılır, kayıt geçmişte kalır. Aktif kart yeniden okunmadan önceki hata bildirime dönmez; bildirim kartı, siteyi ve nedeni gösterir. 856 test ve HA yapılandırma kontrolü geçti. 22:48 TSİ Hue Flare eski kaydı canlı açılışta kapandı; açık kayıt 1→0, HA uyarısı yok ve yeni okumalar başarılı. Günlük tam kapsamlı yedek 88283520 (05:26 TSİ, yaklaşık 17 saat); kod geri dönüşü prepare_code_rollback.sh 2e66c93.
+
 - 2026-11-13 · Agent: Codex · 4.41.20 (01914bb) canlı: yalnız Togg gece modunda 45 dk okuma uyarısı bekletilir; gece modu bitince süre sıfırdan başlar. 849 test ve HA yapılandırma kontrolü geçti. 18:58 TSİ canlı günlük gece modunu doğruladı, açık HA Togg uyarısı kapandı. Günlük tam kapsamlı yedek f21318c8 (05:00 TSİ, yaklaşık 14 saat); kod geri dönüşü prepare_code_rollback.sh d2ad812.
 
 - 2026-11-13 · Agent: Codex · 4.41.19 (d2ad812) canlı: doğrulanmış modem kesintisi ayrı durum ve bekleme, son fiyat korunur; okuma aşaması/kod/süre/modem kanıtı ve Amazon arama sayaçları kaydedilir. 847 test, HA yapılandırma ve Pi sağlık kontrolü başarılı. 09:54 TSİ canlı modem erişimi ve iki aramanın sayaçları doğrulandı (USB-C 1, Squire 11 Depo adayı, başlık eşleşmesi 0). Planlı/plansız kesinti testlerde doğrulandı; gerçek planlı kesinti kontrolü ilk 05:00 olayında. Günlük tam kapsamlı yedek f21318c8 (05:00 TSİ, kurulumda yaklaşık 5 saat), kod geri dönüşü prepare_code_rollback.sh 559a5e8.
