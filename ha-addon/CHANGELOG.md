@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.43.5
+
+- Fiyatı En Çok Düşen / Artan satırları son 5 günlük değişime göre: bugünkü fiyat, 5 gün önce geçerli olan fiyatla (5 günden yeni üründe ilk kayıtla) yüzde olarak karşılaştırılır. 5 gündür değişmeyen ürünler bu satırlara girmez.
+
 ## 4.43.4
 
 - Düşen/artan çerçevesi kartları her kenarda ve köşede aynı boşlukla sarar (köşe yuvarlaklığı kartla uyumlu).

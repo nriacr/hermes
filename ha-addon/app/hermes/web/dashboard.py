@@ -124,6 +124,7 @@ VARIANT_SPLIT = re.compile(r"\s*[,/;]\s*")
 MAX_VARIANT_TAGS = 3
 NEW_DAYS = 3  # a watch without any price change counts as "yeni" this long after its first record
 MOVER_TITLES = {"fall": "Fiyatı En Çok Düşen", "rise": "Fiyatı En Çok Artan"}
+MOVER_DAYS = 5  # falls and rises are measured over this many days
 MOVER_COUNT = 3  # biggest falls, then biggest rises, open the watch list (one row each)
 
 
@@ -232,11 +233,18 @@ def change_chip(offer: Offer) -> str:
     return f"<span class='ov-chg {direction}' title='İlk kayıtlı fiyata göre ({since})'>{symbol} %{percent_text(change)}</span>"
 
 
-def last_change(offer: Offer) -> Optional[float]:
-    """Percent change of today's price against the price recorded just before it."""
-    if len(offer.points) < 2 or not offer.points[-2][1]:
+def last_change(offer: Offer, now: Optional[datetime] = None) -> Optional[float]:
+    """Percent change of today's price over the last MOVER_DAYS days: against the price that held at the start of the
+    window (or the first record, for a watch added inside it). None when the price did not move in the window."""
+    now = now or datetime.now().astimezone()
+    start = now - timedelta(days=MOVER_DAYS)
+    if len(offer.points) < 2 or offer.points[-1][0] <= start:
         return None
-    change = (float(offer.price) - offer.points[-2][1]) / offer.points[-2][1] * 100
+    before = [price for moment, price in offer.points if moment <= start]
+    base = before[-1] if before else offer.points[0][1]
+    if not base:
+        return None
+    change = (float(offer.price) - base) / base * 100
     return change if abs(change) >= 0.05 else None
 
 

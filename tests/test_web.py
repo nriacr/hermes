@@ -605,16 +605,17 @@ class DashboardTests(DataFilesMixin, unittest.TestCase):
         self.assertIn("▲ %40,0", self.live())
 
     def _mover_rows(self):
-        urls = {name: f"https://www.amazon.com.tr/dp/B00000000{n}" for n, name in enumerate("abcd", 1)}
+        urls = {name: f"https://www.amazon.com.tr/dp/B00000000{n}" for n, name in enumerate("abcde", 1)}
         self.data.write_state({name: {"url": url, "tracking_id": "", "is_warehouse": False} for name, url in urls.items()})
         now = datetime.now(timezone.utc)
         store = History.at(self.data.files.database)
-        for name, price, days in (("a", "10000", 5), ("a", "12000", 2), ("b", "16000", 5), ("c", "9000", 9), ("d", "9000", 1)):
+        for name, price, days in (("a", "10000", 5), ("a", "12000", 2), ("b", "16000", 5), ("c", "9000", 9), ("d", "9000", 1),
+                                  ("e", "20000", 9), ("e", "10000", 8)):
             store.record_price(name, "amazon", "Ürün", Decimal(price), now - timedelta(days=days))
         store.close()
-        prices = {"a": "12.000 TL", "b": "14.000 TL", "c": "9.000 TL", "d": "9.000 TL"}
+        prices = {"a": "12.000 TL", "b": "14.000 TL", "c": "9.000 TL", "d": "9.000 TL", "e": "10.000 TL"}
         return [price_row(product_title=name.upper(), product_url=urls[name], price=prices[name], min_price=prices[name],
-                          target="5.000 TL") for name in "abcd"]
+                          target="5.000 TL") for name in "abcde"]
 
     def test_list_opens_with_biggest_falls_then_rises_by_percent_and_shows_each_offer_once(self):
         self.data.write_summary({"rows": self._mover_rows()})
@@ -625,6 +626,9 @@ class DashboardTests(DataFilesMixin, unittest.TestCase):
         self.assertIn("▼ %12,5", grid)
         self.assertIn("▲ %20,0", grid)
         self.assertNotIn("En düşük fiyatta", html)
+        # E fell 50% eight days ago: older than the five-day window, so it is not a mover.
+        movers = grid[:grid.rindex("</fieldset>")]
+        self.assertNotIn("aria-label='E'", movers)
         list_tiles = [tile for tile in re.findall(r"<article class='ov-tile [^>]*>", html) if "ov-mv" not in tile]
         self.assertEqual(len([tile for tile in list_tiles if " hidden " in tile]), 2)
 
