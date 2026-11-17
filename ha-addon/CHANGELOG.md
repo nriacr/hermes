@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.44.1
+
+- Pasif veya kaldırılmış takiplerin eski Home Assistant uyarıları kapatılır ve hata geçmişi korunur. Aktif kartın uyarısı yeni bir başarısız okumayla doğrulanır ve kart adı, site ve hata nedenini gösterir.
+
 ## 4.44.0
 
 - Satır adları Düşüştekiler ve Yükseliştekiler oldu. Ürünler son 14 günün fiyat gidişatına göre seçilir: günlük fiyatlara bir eğilim çizgisi oturtulur; eğimi (haftalık yüzde) istikrarıyla (R²) ağırlıklandırılarak sıralanır. Bir günlük kampanya, zikzak, geri dönen düşüş/artış, 7 gündür değişmeyen fiyat ve 14 günde %0,5'ten az net değişim sayılmaz. Kartta "▼ haftada %…" görünür. 4.43.5'teki 5 günlük karşılaştırmanın yerini alır.

@@ -95,6 +95,10 @@ class Diagnostics:
         self.db.transaction([("UPDATE incidents SET resolved=?,recovery=? WHERE component=? AND resolved IS NULL",
                               (time.time(), recovery, component))])
 
+    def close_untracked_read(self, identity):
+        self.db.transaction([("UPDATE incidents SET resolved=?,recovery=? WHERE id=? AND resolved IS NULL",
+                              (time.time(), "Takip kapalı", identity))])
+
     def _records(self, where, params=()):
         with self.db.lock:
             rows = self.db.connect().execute(

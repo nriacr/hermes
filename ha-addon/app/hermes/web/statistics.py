@@ -640,7 +640,8 @@ def render_problem_history(span):
     records = Diagnostics(DATABASE_PATH).recent(span.total_seconds()/3600)
     items = []
     for item in records:
-        status = "Düzeldi" if item["resolved"] is not None else "Açık"
+        status = "Açık" if item["resolved"] is None else (
+            "Takip kapalı" if item["recovery"] == "Takip kapalı" else "Düzeldi")
         first = datetime.fromtimestamp(item["opened"]).astimezone().strftime("%d.%m %H:%M")
         last = datetime.fromtimestamp(item["resolved"] or item["updated"]).astimezone().strftime("%d.%m %H:%M")
         successful = item.get("last_successful_read")

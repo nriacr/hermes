@@ -22,7 +22,7 @@ from ..notifier import Pushover
 from ..providers.base import in_night_window
 from ..providers.registry import ProviderSet
 from ..storage import file_lock, load_json, save_json
-from ..utils import local_now, site_label
+from ..utils import PROCESS_STARTED_AT, local_now, site_label
 from .network import NETWORK_COMPONENT
 from . import scheduling, state as state_ops, summary
 from .alerts import SILENT_GUARD_KINDS, quiet_hours
@@ -32,6 +32,7 @@ from .cycle import DataFiles, Monitor
 # A cycle running longer than this is considered stuck; /health then fails so
 # the Supervisor watchdog restarts Hermes.
 STUCK_CYCLE_SECONDS = 3 * 60 * 60
+READ_INCIDENTS = {"read", "partial"}
 
 
 def reset_notifications(files: DataFiles) -> int:
@@ -189,11 +190,65 @@ class MonitorService:
                 command.done.set()
             run_now = run_now or command.run_cycle
 
+    def _publish_incidents(self, active_watches, communicated, access_paused):
+        diagnostics = self.monitor.diagnostics
+        bridge = self.monitor.home_assistant
+        connected = bridge and bridge.enabled
+        critical = {}
+        for item in diagnostics.active():
+            identity = item["id"]
+            alert = diagnostics.needs_attention(item)
+            if item["kind"] in READ_INCIDENTS:
+                if item["component"] not in active_watches:
+                    communicated.pop(identity, None)
+                    # Keep the episode open until HA accepted the dismissal, so it can be retried after restart.
+                    if alert and connected and not bridge.clear_problem(identity):
+                        continue
+                    diagnostics.close_untracked_read(identity)
+                    log(f"Takip kapalı; eski okuma kaydı kapatıldı: {identity}")
+                    continue
+                if item["updated"] < PROCESS_STARTED_AT.timestamp():
+                    continue
+            if alert:
+                critical[identity] = item
+
+        if not connected:
+            return
+        for identity, item in critical.items():
+            if access_paused and item["kind"] in READ_INCIDENTS:
+                continue
+            if communicated.get(identity) == item["opened"]:
+                continue
+            if item["kind"] in READ_INCIDENTS:
+                watch = active_watches[item["component"]]
+                failure = next(iter(item["context"].get("failures") or []), {})
+                name = watch.name or failure.get("product_title") or item["context"].get("watch_name") or "Takip kartı"
+                variant = str(failure.get("variant") or "").strip()
+                label = f"{name[:100]} ({variant[:50]})" if any(c.isalnum() for c in variant) else name[:100]
+                reason = " ".join(str(failure.get("reason") or item["detail"] or "Okuma hatası").split())[:240]
+                message = (f"{site_label(watch.site)} · {label} son denemede de okunamadı. "
+                           f"{reason} Ayrıntı Hermes panelinde.")
+            elif item["component"] == "delivery":
+                message = ("Bildirim gönderimi durdu. Pushover ayarlarını ve kotanı kontrol et. "
+                           "Ürün kontrolleri devam ediyor; sorunlu bildirim kaydı korunuyor.")
+            else:
+                message = ("Bir sitenin kontrolü tekrar tekrar tamamlanamadı. Diğer siteler çalışmaya devam ediyor. "
+                           "Sınırlı yeniden deneme yapıldı; kayıt geliştirici incelemesi için saklandı.")
+            if item["kind"] == "round":
+                self.monitor.delivery.send("Hermes takip uyarısı", message,
+                    event_id=f"incident:{identity}:{item['opened']}", quiet=True)
+            if bridge.persistent_problem(identity, message):
+                communicated[identity] = item["opened"]
+        for identity in set(communicated) - set(critical):
+            if bridge.clear_problem(identity):
+                communicated.pop(identity)
+
     def run(self) -> None:
         log(f"Servis başladı. Hermes v{APP_VERSION} | Bağımsız site kuyrukları")
         completions = queue.Queue()
         workers = {}
-        sites = sorted({watch.site for watch in self.config.watches if watch.active})
+        active_watches = {state_ops.watch_key(watch): watch for watch in self.config.watches if watch.active}
+        sites = sorted({watch.site for watch in active_watches.values()})
         next_due = {site: 0.0 for site in sites}
         failures = {site: 0 for site in sites}
         self.site_started = {}
@@ -201,7 +256,9 @@ class MonitorService:
         self.monitor.cart.start()
         maintenance_at = 0.0
         diagnostics_at = 0.0
-        communicated = {}
+        # Before any new reads, remember notices an earlier process may have left in HA.
+        communicated = {item["id"]: None for item in self.monitor.diagnostics.active()
+                        if item["kind"] in READ_INCIDENTS and self.monitor.diagnostics.needs_attention(item)}
         stall = StallWatch(time.monotonic())
         modem_at = 0.0
         access_valid_until = 0.0
@@ -272,34 +329,7 @@ class MonitorService:
                     modem_at = time.monotonic() + 5
                 access_paused = self.monitor.access.paused
                 if now >= diagnostics_at:
-                    active = self.monitor.diagnostics.active()
-                    bridge = self.monitor.home_assistant
-                    critical = {item["id"]: item for item in active
-                                if self.monitor.diagnostics.needs_attention(item)}
-                    if bridge and bridge.enabled:
-                        for identity, item in critical.items():
-                            if access_paused and item["kind"] in {"read", "partial"}:
-                                continue
-                            if communicated.get(identity) == item["opened"]:
-                                continue
-                            message = ("Bildirim gönderimi durdu. Pushover ayarlarını ve kotanı kontrol et. "
-                                "Ürün kontrolleri devam ediyor; sorunlu bildirim kaydı korunuyor."
-                                if item["component"] == "delivery" else
-                                "Bir sitenin kontrolü tekrar tekrar tamamlanamadı. Diğer siteler çalışmaya devam ediyor. "
-                                "Sınırlı yeniden deneme yapıldı; kayıt geliştirici incelemesi için saklandı.")
-                            if item["kind"] in {"read", "partial"}:
-                                failure = next(iter(item.get("context", {}).get("failures") or []), {})
-                                name = str(failure.get("product_title") or item.get("context", {}).get("watch_name") or "Ürün")[:100]
-                                variant = str(failure.get("variant") or "")
-                                message = f"{name} {variant}: en az 10 dakikadır tekrar tekrar okunamadı. Ayrıntı Hermes panelinde."
-                            if item["kind"] == "round":
-                                self.monitor.delivery.send("Hermes takip uyarısı", message,
-                                    event_id=f"incident:{identity}:{item['opened']}", quiet=True)
-                            if bridge.persistent_problem(identity, message):
-                                communicated[identity] = item["opened"]
-                        for identity in set(communicated) - set(critical):
-                            if bridge.clear_problem(identity):
-                                communicated.pop(identity)
+                    self._publish_incidents(active_watches, communicated, access_paused)
                     if not access_paused and now >= stall_after:
                         try:
                             self._check_stalls(stall, sites, now)

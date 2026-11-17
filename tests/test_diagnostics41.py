@@ -11,6 +11,7 @@ from decimal import Decimal
 from hermes.logging_utils import ProblemLog
 from hermes.monitor.cycle import ReadCancelled
 from hermes.monitor.runner import MonitorService
+from hermes.monitor.state import watch_key
 from hermes.providers.trendyol import TrendyolProvider
 from hermes.web.dashboard import collect_errors, render_errors
 from hermes.web.statistics import _percent, site_figures, render_problem_history
@@ -89,6 +90,79 @@ class IncidentTests(unittest.TestCase):
             html = render_problem_history(timedelta(hours=24))
         self.assertIn('Düzeldi · 2 tekrar', html)
         self.assertIn('href=', html)
+
+
+class ReadAlertTests(unittest.TestCase):
+    def setUp(self):
+        self.data = TempData()
+        self.diagnostics = Diagnostics(self.data.files.database)
+        self.addCleanup(self.data.cleanup)
+        self.addCleanup(self.diagnostics.db.close)
+        self.service = object.__new__(MonitorService)
+        self.bridge = Mock(enabled=True)
+        self.service.monitor = Mock(diagnostics=self.diagnostics, home_assistant=self.bridge)
+        self.card = watch("Philips Hue Flare 2’li paket")
+        self.key = watch_key(self.card)
+        self.started = 1800
+        start = datetime.fromtimestamp(self.started, timezone.utc)
+        patcher = patch("hermes.monitor.runner.PROCESS_STARTED_AT", start)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        for moment in (1000, 1300, 1600):
+            self.fail(moment)
+        self.identity = self.diagnostics.active()[0]["id"]
+
+    def fail(self, moment):
+        with patch("hermes.diagnostics.time.time", return_value=moment):
+            self.diagnostics.incident(self.key, "read", "TLS sertifika hatası", context={
+                "failures": [{"product_title": "", "variant": "←", "product_url": self.card.url,
+                              "reason": "TLS sertifika hatası"}],
+            })
+
+    def test_untracked_notice_is_dismissed_and_history_preserved(self):
+        known = {self.identity: None}
+        self.service._publish_incidents({}, known, False)
+        self.bridge.persistent_problem.assert_not_called()
+        self.bridge.clear_problem.assert_called_once_with(self.identity)
+        self.assertEqual(known, {})
+        self.assertEqual(self.diagnostics.active(), [])
+        history = self.diagnostics.recent()[0]
+        self.assertEqual((history["id"], history["recovery"], history["count"]),
+                         (self.identity, "Takip kapalı", 3))
+
+    def test_untracked_dismissal_retries_without_resending(self):
+        self.bridge.clear_problem.side_effect = [False, True]
+        known = {self.identity: None}
+        self.service._publish_incidents({}, known, False)
+        self.assertEqual(len(self.diagnostics.active()), 1)
+        self.service._publish_incidents({}, known, False)
+        self.assertEqual(self.diagnostics.active(), [])
+        self.assertEqual(self.bridge.clear_problem.call_count, 2)
+        self.bridge.persistent_problem.assert_not_called()
+
+    def test_active_notice_waits_for_new_failure_and_names_card_and_reason(self):
+        known = {self.identity: None}
+        cards = {self.key: self.card}
+        self.service._publish_incidents(cards, known, False)
+        self.bridge.persistent_problem.assert_not_called()
+        self.bridge.clear_problem.assert_called_once_with(self.identity)
+        self.fail(self.started)
+        self.service._publish_incidents(cards, known, False)
+        self.service._publish_incidents(cards, known, False)
+        self.bridge.persistent_problem.assert_called_once()
+        identity, message = self.bridge.persistent_problem.call_args.args
+        self.assertEqual(identity, self.identity)
+        self.assertIn("Amazon · Philips Hue Flare 2’li paket", message)
+        self.assertIn("TLS sertifika hatası", message)
+        self.assertNotIn("←", message)
+        self.service.monitor.delivery.send.assert_not_called()
+
+    def test_first_success_keeps_old_notice_closed(self):
+        known = {self.identity: None}
+        self.diagnostics.recover(self.key, "Okuma tamamlandı")
+        self.service._publish_incidents({self.key: self.card}, known, False)
+        self.bridge.persistent_problem.assert_not_called()
+        self.bridge.clear_problem.assert_called_once_with(self.identity)
 
 
 class ShutdownTests(unittest.TestCase):
