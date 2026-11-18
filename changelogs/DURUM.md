@@ -5,6 +5,8 @@ sonuç, gerçek kontrol ve yayın/kurulum bilgisi yeterlidir. Ayrıntı Git geç
 
 ## Yapılanlar
 
+- 2026-11-18 · Agent: Codex · Hermes 4.44.2: Düşüştekiler/Yükseliştekiler, son 3 ve önceki 7 günlük ortanca fiyat farkıyla yüzde sıralaması. İlgili panel testleri geçti. Canlı kurulum ve panel doğrulaması bekleniyor.
+
 - 2026-11-17 · Agent: Codex · Hermes 4.44.1 (2a41c84) canlı: pasif/kaldırılan kartların eski HA uyarısı kapatılır, kayıt geçmişte kalır. Aktif kart yeniden okunmadan önceki hata bildirime dönmez; bildirim kartı, siteyi ve nedeni gösterir. 856 test ve HA yapılandırma kontrolü geçti. 22:48 TSİ Hue Flare eski kaydı canlı açılışta kapandı; açık kayıt 1→0, HA uyarısı yok ve yeni okumalar başarılı. Günlük tam kapsamlı yedek 88283520 (05:26 TSİ, yaklaşık 17 saat); kod geri dönüşü prepare_code_rollback.sh 2e66c93.
 
 - 2026-11-13 · Agent: Codex · 4.41.20 (01914bb) canlı: yalnız Togg gece modunda 45 dk okuma uyarısı bekletilir; gece modu bitince süre sıfırdan başlar. 849 test ve HA yapılandırma kontrolü geçti. 18:58 TSİ canlı günlük gece modunu doğruladı, açık HA Togg uyarısı kapandı. Günlük tam kapsamlı yedek f21318c8 (05:00 TSİ, yaklaşık 14 saat); kod geri dönüşü prepare_code_rollback.sh d2ad812.
