@@ -1,6 +1,7 @@
 """Eight explicit intervals, migration safety, and shared panel selections."""
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
+from pathlib import Path
 import unittest
 from unittest.mock import patch
 
@@ -93,6 +94,11 @@ class FrequencyTests(unittest.TestCase):
                     "watches_0_priority": [value]})
                 self.assertEqual(prepare_watches(saved)[0].priority, value)
                 self.assertIn(f"selected>{label}</option>", settings.watch_form(saved[0], 0))
+
+    def test_supervisor_schema_accepts_the_card_sound_option(self):
+        source = (Path(__file__).resolve().parents[1] / "ha-addon/config.yaml").read_text()
+        schema = source.split("\nschema:\n", 1)[1].split("  takip_edilenler:\n", 1)[1]
+        self.assertIn('      silent: "bool?"', schema.splitlines())
 
     def test_silent_choice_survives_panel_save_and_configuration_load(self):
         form = {"watches_count": ["1"], "watches_0_name": ["Kart"], "watches_0_target_price": ["1000"],

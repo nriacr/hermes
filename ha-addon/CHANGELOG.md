@@ -1,5 +1,9 @@
 # Değişiklik günlüğü
 
+## 4.44.3
+
+- Kartın sessiz bildirim tercihi Home Assistant yapılandırma şemasına eklendi; kaydetme ve yeniden başlatma sonrası korunur.
+
 ## 4.44.2
 
 - Düşüştekiler ve Yükseliştekiler, son 3 günün ortanca fiyatını önceki 7 günle karşılaştırır. Sıralama ve kartta gösterilen değer yüzde farkıdır. Güncel fiyat aynı yönde en az %0,5 uzakta kalmalıdır.
