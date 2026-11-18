@@ -4,10 +4,13 @@ import re
 import sqlite3
 import threading
 import time
+from bisect import bisect_right
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from decimal import ROUND_DOWN, Decimal, InvalidOperation
 from html import escape
+from operator import itemgetter
+from statistics import median
 from typing import Any, Dict, List, Optional, Tuple
 
 from ..constants import (
@@ -124,10 +127,9 @@ VARIANT_SPLIT = re.compile(r"\s*[,/;]\s*")
 MAX_VARIANT_TAGS = 3
 NEW_DAYS = 3  # a watch without any price change counts as "yeni" this long after its first record
 MOVER_TITLES = {"fall": "Düşüştekiler", "rise": "Yükseliştekiler"}
-TREND_DAYS = 14  # the price trend looks at this many days
-TREND_ACTIVE_DAYS = 7  # ...and needs a price change within this many
-TREND_MIN_STEADINESS = 0.3  # fit quality (R²) below which the move is a zigzag, not a trend
-TREND_MIN_NET = 0.5  # percent today's price must differ from the window's first price
+MOVER_RECENT_DAYS = 3
+MOVER_BASELINE_DAYS = 7
+MOVER_MIN_CHANGE = Decimal("0.5")
 MOVER_COUNT = 3  # biggest falls, then biggest rises, open the watch list (one row each)
 
 
@@ -218,7 +220,7 @@ def price_parts(value: Decimal) -> str:
     return f"{format_tl(value)}<small>TL</small>"
 
 
-def percent_text(value: float) -> str:
+def percent_text(value: float | Decimal) -> str:
     return f"{abs(value):.1f}".replace(".", ",")
 
 
@@ -236,68 +238,45 @@ def change_chip(offer: Offer) -> str:
     return f"<span class='ov-chg {direction}' title='İlk kayıtlı fiyata göre ({since})'>{symbol} %{percent_text(change)}</span>"
 
 
-def price_trend(offer: Offer, now: Optional[datetime] = None) -> Optional[Tuple[float, float]]:
-    """Recent direction of the price: (weekly percent change, ranking score) or None.
-
-    The price that held at the end of each of the last TREND_DAYS days (and now) is fitted with a straight line.
-    Its slope, as a share of the mean price per week, is the trend; the fit quality (R², 0..1) tells a steady
-    move from a zigzag or a one-day campaign that came back. The score is the slope weighted by that steadiness.
-    Today's price must also differ from the window's first price in the same direction.
-    A watch whose price did not move in the last TREND_ACTIVE_DAYS days has no trend.
-    """
-    now = now or datetime.now().astimezone()
-    points = offer.points
-    if len(points) < 2 or points[-1][0] <= now - timedelta(days=TREND_ACTIVE_DAYS):
-        return None
-    samples = []
-    for day in range(TREND_DAYS, -1, -1):
+def sustained_price_change(offer: Offer, now: datetime) -> Optional[Decimal]:
+    """Compare adjacent windows of daily prices, with a check against the latest price."""
+    daily = []
+    for day in range(MOVER_BASELINE_DAYS + MOVER_RECENT_DAYS - 1, 0, -1):
         moment = now - timedelta(days=day)
-        held = [price for at, price in points if at <= moment]
-        if held:
-            samples.append((float(TREND_DAYS - day), held[-1]))
-    if len(samples) < 3:
+        index = bisect_right(offer.points, moment, key=itemgetter(0))
+        if not index:
+            return None
+        daily.append(Decimal(str(offer.points[index - 1][1])))
+    daily.append(offer.price)
+
+    baseline = median(daily[:MOVER_BASELINE_DAYS])
+    if baseline <= 0:
         return None
-    count = len(samples)
-    mean_x = sum(x for x, _ in samples) / count
-    mean_y = sum(y for _, y in samples) / count
-    sxx = sum((x - mean_x) ** 2 for x, _ in samples)
-    syy = sum((y - mean_y) ** 2 for _, y in samples)
-    if not sxx or not syy or not mean_y:
+    recent = median(daily[MOVER_BASELINE_DAYS:])
+    change = (recent - baseline) * 100 / baseline
+    latest_change = (offer.price - baseline) * 100 / baseline
+    if abs(change) < MOVER_MIN_CHANGE or abs(latest_change) < MOVER_MIN_CHANGE or change * latest_change <= 0:
         return None
-    slope = sum((x - mean_x) * (y - mean_y) for x, y in samples) / sxx
-    steadiness = slope * slope * sxx / syy
-    weekly = slope * 7 / mean_y * 100
-    net = (samples[-1][1] - samples[0][1]) / samples[0][1] * 100 if samples[0][1] else 0.0
-    # A dip that came back (or a rise that fell back) is no trend, however the days in between weigh.
-    if steadiness < TREND_MIN_STEADINESS or abs(weekly) < 0.05 or net * weekly <= 0 or abs(net) < TREND_MIN_NET:
-        return None
-    return weekly, weekly * steadiness
+    return change
 
 
-def last_change_chip(offer: Offer) -> str:
-    trend = price_trend(offer)
-    if trend is None:
-        return change_chip(offer)
-    direction, symbol = ("up", "▲") if trend[0] > 0 else ("down", "▼")
-    return f"<span class='ov-chg {direction}'>{symbol} haftada %{percent_text(trend[0])}</span>"
+def mover_change_chip(change: Decimal) -> str:
+    direction, symbol = ("up", "▲") if change > 0 else ("down", "▼")
+    title = "Son 3 günün ortanca fiyatı, önceki 7 güne göre"
+    return f"<span class='ov-chg {direction}' title='{title}'>{symbol} %{percent_text(change)}</span>"
 
 
-def mover_columns(offers: List[Offer]) -> List[Tuple[str, List[Offer]]]:
-    """Offers in a falling and in a rising trend, the strongest steady trend first."""
-    trends = [(offer, price_trend(offer)) for offer in offers]
-    falls = sorted(((o, t) for o, t in trends if t and t[0] < 0), key=lambda item: item[1][1])
-    rises = sorted(((o, t) for o, t in trends if t and t[0] > 0), key=lambda item: -item[1][1])
-    return [("fall", [o for o, _ in falls]), ("rise", [o for o, _ in rises])]
-
-
-def pick_movers(columns: List[Tuple[str, List[Offer]]], site: str = "all") -> List[List[Offer]]:
-    """The cards each column shows for a site filter; an offer appears at most once (the JS repeats this)."""
-    used, picked = set(), []
-    for _label, members in columns:
-        chosen = [o for o in members if (site == "all" or o.site == site) and id(o) not in used][:MOVER_COUNT]
-        used.update(id(o) for o in chosen)
-        picked.append(chosen)
-    return picked
+def mover_columns(offers: List[Offer]) -> List[Tuple[str, List[Tuple[Offer, Decimal]]]]:
+    """The largest percentage changes first, by direction."""
+    now = datetime.now().astimezone()
+    falls, rises = [], []
+    for offer in offers:
+        change = sustained_price_change(offer, now)
+        if change is not None:
+            (falls if change < 0 else rises).append((offer, change))
+    falls.sort(key=itemgetter(1))
+    rises.sort(key=itemgetter(1), reverse=True)
+    return [("fall", falls), ("rise", rises)]
 
 
 def average_chip(offer: Offer) -> str:
@@ -382,10 +361,11 @@ def render_deal(offer: Offer) -> str:
 
 
 def render_tile(offer: Offer, tags: Optional[List[str]] = None, index: int = 0, key: str = "", hidden: bool = False,
-                mover: str = "") -> str:
+                movement: Optional[Decimal] = None) -> str:
     """One watch card; a mover card (columns above the list) borrows the sheet of its list card instead of repeating it."""
     depo = "<span class='ov-depo'>DEPO</span>" if offer.warehouse else ""
     tag_html = f"<div class='ov-vars'>{depo}{''.join(f'<em>{escape(tag)}</em>' for tag in tags or [])}</div>" if tags or depo else ""
+    mover = ("fall" if movement < 0 else "rise") if movement is not None else ""
     classes = f"ov-tile {offer.site}{' ov-tile-depo' if offer.warehouse else ''}{' ov-mv' if mover else ''}"
     extra = (f" data-k='{key}'" if key else "") + (f" data-mv='{mover}'" if mover else "") + (" hidden" if hidden else "")
     return (
@@ -393,7 +373,7 @@ def render_tile(offer: Offer, tags: Optional[List[str]] = None, index: int = 0, 
         f"{site_avatar(offer.seller, offer.site)}"
         f"<div class='ov-tx'><h4 title='{escape(offer.title, quote=True)}'>{escape(offer.title)}</h4>{tag_html}"
         f"<div class='ov-price'>{price_parts(offer.price)}</div></div>"
-        f"<div class='ov-side'>{sparkline(offer.points)}{last_change_chip(offer) if mover else change_chip(offer)}{ago_html(offer.checked_at)}</div>"
+        f"<div class='ov-side'>{sparkline(offer.points)}{mover_change_chip(movement) if movement is not None else change_chip(offer)}{ago_html(offer.checked_at)}</div>"
         + ("" if mover else f"<div class='ov-detail' hidden>{detail_html(offer)}</div>") + "</article>"
     )
 
@@ -430,17 +410,15 @@ def render_watch_pane(offers: List[Offer]) -> str:
         return chips + "<p class='ov-empty'>Yok.</p>"
     keys = {id(offer): f"o{number}" for number, offer in enumerate(offers)}
     columns = mover_columns(offers)
-    shown = pick_movers(columns)
-    used = {id(offer) for chosen in shown for offer in chosen}
+    used = {id(offer) for _, members in columns for offer, _ in members[:MOVER_COUNT]}
     # The list opens with a row of the biggest falls and a row of the biggest rises; every candidate is kept
     # (hidden) so a site filter can pick its own without a reload. Those cards leave the list below.
     movers = ""
-    for (kind, members), chosen in zip(columns, shown, strict=False):
-        visible = {id(offer) for offer in chosen}
-        cards = "".join(render_tile(offer, None, number, keys[id(offer)], id(offer) not in visible, mover=kind)
-                        for number, offer in enumerate(members))
+    for kind, members in columns:
+        cards = "".join(render_tile(offer, None, number, keys[id(offer)], number >= MOVER_COUNT, movement=change)
+                        for number, (offer, change) in enumerate(members))
         # The heading sits in the top edge of a thin frame around its row of cards.
-        movers += (f"<fieldset class='ov-mv-box' data-mv-head='{kind}'{'' if chosen else ' hidden'}>"
+        movers += (f"<fieldset class='ov-mv-box' data-mv-head='{kind}'{'' if members else ' hidden'}>"
                    f"<legend class='ov-sec'>{MOVER_TITLES[kind]}</legend><div class='ov-tiles ov-list'>{cards}</div></fieldset>")
     singles, sections = group_offers(offers)
 

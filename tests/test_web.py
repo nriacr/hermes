@@ -609,7 +609,8 @@ class DashboardTests(DataFilesMixin, unittest.TestCase):
         self.data.write_state({name: {"url": url, "tracking_id": "", "is_warehouse": False} for name, url in urls.items()})
         now = datetime.now(timezone.utc)
         store = History.at(self.data.files.database)
-        for name, price, days in (("a", "10000", 5), ("a", "12000", 2), ("b", "16000", 5), ("c", "9000", 9), ("d", "9000", 1),
+        for name, price, days in (("a", "10000", 12), ("a", "12000", 2), ("b", "16000", 12), ("b", "14000", 2),
+                                  ("c", "9000", 9), ("d", "9000", 1),
                                   ("e", "20000", 9), ("e", "10000", 8)):
             store.record_price(name, "amazon", "Ürün", Decimal(price), now - timedelta(days=days))
         store.close()
@@ -623,33 +624,51 @@ class DashboardTests(DataFilesMixin, unittest.TestCase):
         grid = html[html.index("<div class='ov-tiles ov-list'>"):]
         self.assertTrue(grid.index("data-mv='fall'") < grid.index("aria-label='B'") < grid.index("data-mv='rise'")
                         < grid.index("aria-label='A'") < grid.index("aria-label='C'"))
-        self.assertIn("▼ haftada %", grid)
-        self.assertIn("▲ haftada %", grid)
+        self.assertIn("▼ %12,5", grid)
+        self.assertIn("▲ %20,0", grid)
+        self.assertIn("Son 3 günün ortanca fiyatı, önceki 7 güne göre", grid)
         self.assertIn(">Düşüştekiler</legend>", grid)
         self.assertNotIn("En düşük fiyatta", html)
-        # E fell 50% eight days ago and has been flat since: no recent trend, so it is not a mover.
+        # E fell 50% eight days ago: the baseline already reflects the lower price.
         movers = grid[:grid.rindex("</fieldset>")]
         self.assertNotIn("aria-label='E'", movers)
         list_tiles = [tile for tile in re.findall(r"<article class='ov-tile [^>]*>", html) if "ov-mv" not in tile]
         self.assertEqual(len([tile for tile in list_tiles if " hidden " in tile]), 2)
 
-    def test_trend_ignores_a_one_day_campaign_and_ranks_a_steady_fall(self):
-        from hermes.web import dashboard
+    def test_sustained_price_change_uses_two_windows_and_checks_current_price(self):
+        now = datetime.now().astimezone()
+        cases = (
+            ("düşüş kalıcı", [(9, 1000), (5, 900)], "-10"),
+            ("artış kalıcı", [(9, 1000), (2, 1200)], "20"),
+            ("bugün düştü", [(9, 1000), (0, 900)], None),
+            ("kampanya geri döndü", [(9, 1000), (2, 900), (0, 1000)], None),
+            ("yön tersine döndü", [(9, 1000), (2, 900), (0, 1100)], None),
+            ("yetersiz geçmiş", [(8, 1000), (2, 900)], None),
+            ("fark küçük", [(9, 1000), (2, 996)], None),
+            ("son fark küçük", [(9, 1000), (2, 900), (0, 996)], None),
+            ("tam sınır", [(9, 1000), (2, 995)], "-0.5"),
+        )
+        for label, points, expected in cases:
+            with self.subTest(label=label):
+                offer = SimpleNamespace(price=Decimal(points[-1][1]),
+                                        points=[(now - timedelta(days=days), price) for days, price in points])
+                self.assertEqual(dashboard.sustained_price_change(offer, now), Decimal(expected) if expected else None)
+
+    def test_movers_rank_by_percentage_instead_of_lira(self):
         now = datetime.now().astimezone()
 
-        def offer(points):
-            return dashboard.Offer(row={}, seller="Amazon", title="T", stock="", site="site-amazon", price=Decimal(str(points[-1][1])),
-                                   target=Decimal("1"), low=Decimal("1"), high=Decimal("1"), hit=False, warehouse=False,
-                                   checked_at="", points=[(now - timedelta(days=d), p) for d, p in points])
+        def offer(before, after):
+            return SimpleNamespace(price=Decimal(after),
+                                   points=[(now - timedelta(days=10), before), (now - timedelta(days=2), after)])
 
-        campaign = offer([(20, 10000.0), (4, 8000.0), (3, 10000.0)])
-        steady = offer([(14, 10000.0), (10, 9800.0), (7, 9600.0), (3, 9400.0), (1, 9200.0)])
-        self.assertIsNone(dashboard.price_trend(campaign, now))
-        came_back = offer([(14, 949.0), (9, 799.0), (0, 949.0)])
-        self.assertIsNone(dashboard.price_trend(came_back, now))
-        weekly, score = dashboard.price_trend(steady, now)
-        self.assertLess(weekly, 0)
-        self.assertLess(score, 0)
+        big_lira_fall = offer(10000, 9500)
+        big_percent_fall = offer(1000, 900)
+        big_lira_rise = offer(10000, 10500)
+        big_percent_rise = offer(1000, 1100)
+        self.assertEqual(dashboard.mover_columns([big_lira_fall, big_lira_rise, big_percent_rise, big_percent_fall]), [
+            ("fall", [(big_percent_fall, Decimal("-10")), (big_lira_fall, Decimal("-5"))]),
+            ("rise", [(big_percent_rise, Decimal("10")), (big_lira_rise, Decimal("5"))]),
+        ])
 
     def test_unchanged_price_says_new_only_for_three_days(self):
         self.data.write_summary({"rows": self._mover_rows()})
